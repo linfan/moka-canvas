@@ -4,12 +4,12 @@ Prerequisites and commands for building and packaging Moka Canvas on each host.
 
 ## Common prerequisites
 
-| Tool | Version | Notes |
-| --- | --- | --- |
-| Node.js | 22+ | LTS recommended |
-| npm | 10+ | Ships with Node.js |
-| Rust toolchain | stable | Includes `cargo` and `rustup` |
-| Tauri CLI | 2.x | Installed as a dev dependency (`@tauri-apps/cli`) |
+| Tool           | Version | Notes                                             |
+| -------------- | ------- | ------------------------------------------------- |
+| Node.js        | 22+     | LTS recommended                                   |
+| npm            | 10+     | Ships with Node.js                                |
+| Rust toolchain | stable  | Includes `cargo` and `rustup`                     |
+| Tauri CLI      | 2.x     | Installed as a dev dependency (`@tauri-apps/cli`) |
 
 Platform-specific requirements for native bundling (Xcode CLI tools, WebView2, WiX/NSIS) are documented by [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
@@ -48,13 +48,15 @@ Builds the frontend, compiles the `moka-server` release binary, and stages a sel
 ./moka-server --static-dir dist --port 8080
 ```
 
-### macOS app (macOS only)
+### macOS DMG (macOS only)
 
 ```sh
 make package-macos
 ```
 
-Produces `Moka Canvas.app` under `src-tauri/target/release/bundle/macos/`. Unsigned; Gatekeeper may warn on first launch.
+Produces `Moka Canvas_<version>_<arch>.dmg` (`aarch64` on Apple Silicon, `x64` on Intel) under `src-tauri/target/release/bundle/dmg/`, with the branded background and app/Applications drop slots configured via `bundle.macOS.dmg` in `src-tauri/tauri.conf.json`. Unsigned; Gatekeeper may warn on first launch.
+
+> Rebuilding deletes the previous DMG, so eject any mounted copy before running `make package-macos` again — otherwise the DMG stays mounted as a leftover volume and the Finder styling step fails with a generic `error running bundle_dmg.sh`.
 
 ### Windows installers (Windows host)
 
@@ -63,6 +65,8 @@ make package-windows
 ```
 
 Produces MSI and NSIS installers under `src-tauri/target/release/bundle/`. Requires Microsoft C++ Build Tools, WebView2, and WiX/NSIS tooling per Tauri's Windows prerequisites.
+
+The NSIS installer is built from a custom template (`src-tauri/installer/installer.nsi`, forked from the Tauri default) that provides branded welcome and finish pages plus header bitmaps from `src-tauri/installer/`; it is selected via `bundle.windows.nsis.template` in `src-tauri/tauri.conf.json`. Because the template is forked, it does not automatically pick up upstream Tauri fixes — re-diff it against the [upstream template](https://github.com/tauri-apps/tauri/blob/dev/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi) whenever the Tauri CLI is upgraded.
 
 ### Windows installer cross-compile (macOS host)
 
@@ -84,6 +88,21 @@ Caveats:
 
 - The bundled exe is unsigned; Windows SmartScreen may warn.
 - The cross-built installer has not been smoke-tested on a physical Windows machine; verify by installing once before distribution.
+
+### Updating app icons
+
+Windows uses the icon through two independent paths, both sourced from `src-tauri/icons/`:
+
+- The `.rsrc` section of the exe (explorer/shortcut icons), written by tauri-build.
+- An RGBA copy embedded at compile time by the `generate_context!()` macro (runtime window/taskbar icon).
+
+`tauri-build` does not emit `rerun-if-changed` for `icons/icon.ico`, so after replacing icons, a stale build cache can keep the old runtime icon even though the source files are new. Force the lib crate to rebuild before packaging:
+
+```sh
+touch src-tauri/src/lib.rs
+```
+
+or run `make clean` once. Afterwards, Windows may still show the old icon from its shell icon cache — refresh it on the Windows machine by unpinning the app from the taskbar, reinstalling, re-pinning, then running `ie4uinit.exe -show` (or restarting explorer.exe) to flush the icon cache.
 
 ## Clean
 

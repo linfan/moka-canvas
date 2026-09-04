@@ -26,6 +26,33 @@
     ],
     "resources": {
       "../dist": "web"
+    },
+    "macOS": {
+      "dmg": {
+        "background": "installer/dmg-background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 240,
+          "y": 215
+        },
+        "applicationFolderPosition": {
+          "x": 540,
+          "y": 215
+        }
+      }
+    },
+    "windows": {
+      "nsis": {
+        "template": "installer/installer.nsi",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/welcome.bmp",
+        "uninstallerHeaderImage": "installer/uninstall-header.bmp"
+      }
     }
   }
 }

@@ -30,7 +30,7 @@ package-web: web-build
 
 package-macos: web-build
 	@test "$$(uname -s)" = "Darwin" || (printf '%s\n' 'package-macos must run on macOS.' >&2; exit 1)
-	npm run tauri build -- --bundles app
+	npm run tauri build -- --bundles dmg
 
 package-windows: web-build
 	@case "$$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) printf '%s\n' 'package-windows must run on Windows.' >&2; exit 1;; esac
