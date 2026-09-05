@@ -421,12 +421,19 @@ h2 {
   position: relative;
 }
 
+.canvas-surface {
+  inset: 0;
+  position: absolute;
+}
+
 .editor-canvas-hint {
   color: var(--muted);
   font-size: 12px;
+  pointer-events: none;
   position: absolute;
   right: 14px;
   top: 12px;
+  z-index: 1;
 }
 
 .inspector-empty {

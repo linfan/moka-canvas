@@ -1,5 +1,6 @@
 import { projectsApi } from "../../api";
 import { redo, undo } from "./commands/execute";
+import { CanvasSurface } from "./canvas/CanvasSurface";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { useHistoryStore, isBoundary } from "./stores/historyStore";
@@ -27,6 +28,7 @@ export function EditorPage() {
   const saveStatus = useProjectStore((state) => state.saveStatus);
   const saveError = useProjectStore((state) => state.saveError);
   const activeCanvas = useActiveCanvas();
+  const liveZoom = useEditorStore((state) => state.camera?.zoom);
   const tool = useEffectiveTool();
   const resourcesPanelOpen = useEditorStore(
     (state) => state.resourcesPanelOpen,
@@ -112,6 +114,7 @@ export function EditorPage() {
       <div className="editor-body">
         {resourcesPanelOpen && <SidePanel />}
         <main className="editor-canvas" data-testid="canvas-host">
+          <CanvasSurface />
           <p className="editor-canvas-hint">
             {activeCanvas
               ? `${activeCanvas.nodes.length} nodes · ${activeCanvas.edges.length} edges`
@@ -141,7 +144,7 @@ export function EditorPage() {
           </button>
         </div>
         <span className="zoom-readout">
-          {Math.round((activeCanvas?.viewport.zoom ?? 1) * 100)}%
+          {Math.round((liveZoom ?? activeCanvas?.viewport.zoom ?? 1) * 100)}%
         </span>
         <div aria-label="Panels" className="tool-group" role="group">
           <button

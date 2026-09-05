@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { EdgeId, NodeId } from "../../../shared/domain";
+import type { EdgeId, NodeId, Viewport } from "../../../shared/domain";
 
 export type EditorTool = "select" | "pan";
 
@@ -29,6 +29,8 @@ interface EditorState {
   tool: EditorTool;
   /** Space/Ctrl-held temporary tool inversion. */
   temporaryTool: EditorTool | null;
+  /** Live camera while panning/zooming; persisted to the canvas on gesture end. */
+  camera: Viewport | null;
   selection: Selection;
   hoveredNodeId: NodeId | null;
   hoveredPort: PortRef | null;
@@ -38,6 +40,7 @@ interface EditorState {
 
   setTool: (tool: EditorTool) => void;
   setTemporaryTool: (tool: EditorTool | null) => void;
+  setCamera: (camera: Viewport) => void;
   setSelection: (selection: Selection) => void;
   selectOnly: (nodeId: NodeId) => void;
   toggleNode: (nodeId: NodeId) => void;
@@ -55,6 +58,7 @@ export const EMPTY_SELECTION: Selection = { nodeIds: [], edgeIds: [] };
 export const useEditorStore = create<EditorState>()((set) => ({
   tool: "select",
   temporaryTool: null,
+  camera: null,
   selection: EMPTY_SELECTION,
   hoveredNodeId: null,
   hoveredPort: null,
@@ -64,6 +68,7 @@ export const useEditorStore = create<EditorState>()((set) => ({
 
   setTool: (tool) => set({ tool }),
   setTemporaryTool: (tool) => set({ temporaryTool: tool }),
+  setCamera: (camera) => set({ camera }),
   setSelection: (selection) => set({ selection }),
   selectOnly: (nodeId) =>
     set({ selection: { nodeIds: [nodeId], edgeIds: [] } }),
