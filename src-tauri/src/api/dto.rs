@@ -1,5 +1,5 @@
 use crate::config::LimitsConfig;
-use crate::domain::{DocumentCommand, MokaFile, SelfCheckReport};
+use crate::domain::{DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +49,14 @@ pub struct OpenProjectResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveResponse {
+    pub revision: i32,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetChangeResponse {
+    pub entry: ResourceEntry,
     pub revision: i32,
     pub updated_at: String,
 }

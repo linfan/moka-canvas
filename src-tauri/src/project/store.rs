@@ -8,8 +8,8 @@ use crate::domain::{
 };
 use crate::project::codec::{decode_moka_file, encode_moka_file};
 use crate::project::{
-    AssetFile, ByteRange, CreateProject, OpenProject, PackageReport, ProjectError, ProjectStore,
-    SaveResult, StagedAsset,
+    AssetChange, AssetFile, ByteRange, CreateProject, OpenProject, PackageReport, ProjectError,
+    ProjectStore, SaveResult, StagedAsset,
 };
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -369,7 +369,7 @@ impl ProjectStore for FsProjectStore {
         self.persist_locked(state)
     }
 
-    async fn add_asset(&self, staged: StagedAsset) -> Result<ResourceEntry, ProjectError> {
+    async fn add_asset(&self, staged: StagedAsset) -> Result<AssetChange, ProjectError> {
         let root = {
             let guard = self.state.lock().expect("store poisoned");
             guard
@@ -438,16 +438,22 @@ impl ProjectStore for FsProjectStore {
             .category_mut(category)
             .expect("category checked above")
             .push(entry.clone());
-        if let Err(error) = self.persist_locked(state) {
-            // Roll back: remove the registry entry and the promoted file.
-            state.moka.resources.remove(&id);
-            let _ = std::fs::remove_file(root.join(&entry.path));
-            return Err(error);
+        match self.persist_locked(state) {
+            Ok(saved) => Ok(AssetChange {
+                entry,
+                revision: saved.revision,
+                updated_at: saved.updated_at,
+            }),
+            Err(error) => {
+                // Roll back: remove the registry entry and the promoted file.
+                state.moka.resources.remove(&id);
+                let _ = std::fs::remove_file(root.join(&entry.path));
+                Err(error)
+            }
         }
-        Ok(entry)
     }
 
-    async fn remove_asset(&self, id: &str) -> Result<(), ProjectError> {
+    async fn remove_asset(&self, id: &str) -> Result<SaveResult, ProjectError> {
         let mut guard = self.state.lock().expect("store poisoned");
         let state = guard
             .as_mut()
@@ -466,15 +472,14 @@ impl ProjectStore for FsProjectStore {
             .ok_or_else(|| ProjectError::domain("NOT_FOUND", "Asset not found"))?;
         let path = Self::resolve_in_root(&state.root, &entry.path)?;
         let _ = std::fs::remove_file(path);
-        self.persist_locked(state)?;
-        Ok(())
+        self.persist_locked(state)
     }
 
     async fn replace_asset_bytes(
         &self,
         id: &str,
         staged: StagedAsset,
-    ) -> Result<ResourceEntry, ProjectError> {
+    ) -> Result<AssetChange, ProjectError> {
         let mut guard = self.state.lock().expect("store poisoned");
         let state = guard
             .as_mut()
@@ -505,8 +510,12 @@ impl ProjectStore for FsProjectStore {
         entry.probe = Some(analysis.probe);
         entry.updated_at = now_iso();
         let updated = entry.clone();
-        self.persist_locked(state)?;
-        Ok(updated)
+        let saved = self.persist_locked(state)?;
+        Ok(AssetChange {
+            entry: updated,
+            revision: saved.revision,
+            updated_at: saved.updated_at,
+        })
     }
 
     async fn asset_file(

@@ -299,7 +299,9 @@ async fn asset_upload_stream_range_and_delete() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
-    let entry = body_json(response).await;
+    let change = body_json(response).await;
+    assert!(change["revision"].is_number());
+    let entry = &change["entry"];
     assert_eq!(entry["mime"], "image/png");
     assert_eq!(entry["probe"]["width"], 64);
     let asset_id = entry["id"].as_str().unwrap().to_string();
@@ -359,7 +361,9 @@ async fn asset_upload_stream_range_and_delete() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::OK);
+    let deleted = body_json(response).await;
+    assert!(deleted["revision"].is_number());
     let response = app
         .oneshot(
             Request::builder()

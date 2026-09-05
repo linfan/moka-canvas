@@ -1,11 +1,11 @@
 use super::dto::{
-    ApplyCommandsRequest, CapabilitiesResponse, CreateProjectRequest, ExportRequest,
-    ImportProjectRequest, OpenProjectRequest, OpenProjectResponse, PackageResponse,
+    ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, CreateProjectRequest,
+    ExportRequest, ImportProjectRequest, OpenProjectRequest, OpenProjectResponse, PackageResponse,
     PublicConfigResponse, SaveResponse,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
-use crate::domain::{now_iso, DocumentCommand, ResourceEntry, RunRecord};
+use crate::domain::{now_iso, DocumentCommand, RunRecord};
 use crate::project::recent::RecentProject;
 use crate::project::{ByteRange, CreateProject, OpenProject, ProjectStore, StagedAsset};
 use axum::{
@@ -261,11 +261,11 @@ async fn read_upload(
 pub async fn upload_asset(
     State(state): State<ApiState>,
     mut multipart: Multipart,
-) -> Result<(StatusCode, Json<ResourceEntry>), Problem> {
+) -> Result<(StatusCode, Json<AssetChangeResponse>), Problem> {
     let root = current_root(&state).await?;
     let max = state.config.server.max_upload_bytes;
     let upload = read_upload(&mut multipart, &root, max).await?;
-    let entry = state
+    let change = state
         .store
         .add_asset(StagedAsset {
             name: upload.name,
@@ -274,18 +274,25 @@ pub async fn upload_asset(
             category_hint: upload.category_hint,
         })
         .await?;
-    Ok((StatusCode::CREATED, Json(entry)))
+    Ok((
+        StatusCode::CREATED,
+        Json(AssetChangeResponse {
+            entry: change.entry,
+            revision: change.revision,
+            updated_at: change.updated_at,
+        }),
+    ))
 }
 
 pub async fn replace_asset(
     State(state): State<ApiState>,
     Path(id): Path<String>,
     mut multipart: Multipart,
-) -> Result<Json<ResourceEntry>, Problem> {
+) -> Result<Json<AssetChangeResponse>, Problem> {
     let root = current_root(&state).await?;
     let max = state.config.server.max_upload_bytes;
     let upload = read_upload(&mut multipart, &root, max).await?;
-    let entry = state
+    let change = state
         .store
         .replace_asset_bytes(
             &id,
@@ -297,15 +304,22 @@ pub async fn replace_asset(
             },
         )
         .await?;
-    Ok(Json(entry))
+    Ok(Json(AssetChangeResponse {
+        entry: change.entry,
+        revision: change.revision,
+        updated_at: change.updated_at,
+    }))
 }
 
 pub async fn delete_asset(
     State(state): State<ApiState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, Problem> {
-    state.store.remove_asset(&id).await?;
-    Ok(StatusCode::NO_CONTENT)
+) -> Result<Json<SaveResponse>, Problem> {
+    let saved = state.store.remove_asset(&id).await?;
+    Ok(Json(SaveResponse {
+        revision: saved.revision,
+        updated_at: saved.updated_at,
+    }))
 }
 
 fn parse_range_header(value: Option<&str>, total: u64) -> Result<Option<ByteRange>, Problem> {

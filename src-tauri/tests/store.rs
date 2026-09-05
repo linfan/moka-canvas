@@ -223,7 +223,8 @@ async fn asset_upload_registers_and_streams_back() {
             category_hint: None,
         })
         .await
-        .unwrap();
+        .unwrap()
+        .entry;
     assert_eq!(entry.mime.as_deref(), Some("image/png"));
     assert!(entry.path.starts_with("assets/images/"));
     assert!(root.join(&entry.path).is_file());
@@ -283,7 +284,8 @@ async fn removing_a_referenced_asset_is_rejected() {
             category_hint: None,
         })
         .await
-        .unwrap();
+        .unwrap()
+        .entry;
 
     let current = store.current().await.unwrap().unwrap();
     let canvas_id = current.moka.canvas[0].id.clone();
@@ -313,7 +315,8 @@ async fn self_check_reports_missing_and_changed_files() {
             category_hint: None,
         })
         .await
-        .unwrap();
+        .unwrap()
+        .entry;
 
     // Delete the file externally; reopening must surface the exact path.
     std::fs::remove_file(root.join(&entry.path)).unwrap();
@@ -350,7 +353,8 @@ async fn replace_asset_bytes_clears_missing_state() {
             category_hint: None,
         })
         .await
-        .unwrap();
+        .unwrap()
+        .entry;
     std::fs::remove_file(root.join(&entry.path)).unwrap();
 
     let staging2 = root.join("tmp").join("upload-replace2.bin");
@@ -366,7 +370,8 @@ async fn replace_asset_bytes_clears_missing_state() {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .entry;
     assert_eq!(updated.id, entry.id);
     let reopened = store.open_project(&root).await.unwrap();
     assert!(reopened.self_check.ok);

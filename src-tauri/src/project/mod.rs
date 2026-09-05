@@ -53,6 +53,15 @@ pub struct SaveResult {
     pub updated_at: String,
 }
 
+/// Result of an asset mutation; every asset change persists the document,
+/// so the caller always learns the new revision.
+#[derive(Debug)]
+pub struct AssetChange {
+    pub entry: ResourceEntry,
+    pub revision: i32,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ByteRange {
     pub start: u64,
@@ -93,13 +102,13 @@ pub trait ProjectStore: Send + Sync {
         expected_revision: i32,
         commands: Vec<crate::domain::DocumentCommand>,
     ) -> Result<SaveResult, ProjectError>;
-    async fn add_asset(&self, staged: StagedAsset) -> Result<ResourceEntry, ProjectError>;
-    async fn remove_asset(&self, id: &str) -> Result<(), ProjectError>;
+    async fn add_asset(&self, staged: StagedAsset) -> Result<AssetChange, ProjectError>;
+    async fn remove_asset(&self, id: &str) -> Result<SaveResult, ProjectError>;
     async fn replace_asset_bytes(
         &self,
         id: &str,
         staged: StagedAsset,
-    ) -> Result<ResourceEntry, ProjectError>;
+    ) -> Result<AssetChange, ProjectError>;
     async fn asset_file(
         &self,
         id: &str,
