@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capability for the local web container.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

@@ -1,3 +1,4 @@
+pub mod api;
 pub mod assets;
 pub mod config;
 pub mod domain;
@@ -6,15 +7,28 @@ pub mod server;
 
 use std::{error::Error, sync::Arc};
 
+use config::RuntimeMode;
 use server::LocalServer;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app: &mut tauri::App| -> Result<(), Box<dyn Error>> {
-            let static_dir = app.path().resource_dir()?.join("web");
+            let app_data = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&app_data)?;
+            let resource_dir = app.path().resource_dir()?;
+            let config = config::load_native_config(&app_data, &resource_dir)?;
+            config::validate_startup(&config)?;
             let server = Arc::new(tauri::async_runtime::block_on(LocalServer::start(
-                static_dir, "tauri",
+                config,
+                RuntimeMode::Native,
             ))?);
             let url = WebviewUrl::External(server.url().parse()?);
 
