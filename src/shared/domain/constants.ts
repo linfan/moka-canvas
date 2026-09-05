@@ -1,0 +1,81 @@
+export const MOKA_MAGIC = [0x4d, 0x4f, 0x4b, 0x41] as const;
+export const MOKA_FILE_VERSION = "v1" as const;
+export const CANVAS_SCHEMA_VERSION = 1;
+export const PACKAGE_FORMAT_VERSION = 1;
+
+export const ZOOM_MIN = 0.05;
+export const ZOOM_MAX = 5.0;
+export const GRID_BASE_SPACING = 48;
+export const GRID_FADE_ZOOM = 0.12;
+export const LOW_DETAIL_ZOOM = 0.35;
+
+export const COORDINATE_LIMIT = 1_000_000;
+export const MAX_TITLE_LENGTH = 200;
+export const MAX_CANVAS_NAME_LENGTH = 80;
+export const MAX_PROJECT_NAME_LENGTH = 120;
+export const MAX_TEXT_CONTENT_LENGTH = 50_000;
+export const MAX_NODES_PER_CANVAS = 5_000;
+export const MAX_EDGES_PER_CANVAS = 10_000;
+export const MAX_CANVASES_PER_PROJECT = 64;
+export const MAX_RESOURCES_PER_CATEGORY = 10_000;
+
+export const CLICK_DRAG_THRESHOLD_PX = 3;
+export const GROUP_DETACH_THRESHOLD_PX = 48;
+export const MIN_NODE_WIDTH = 200;
+export const MIN_NODE_HEIGHT = 120;
+export const DEFAULT_NODE_WIDTH = 280;
+export const DEFAULT_NODE_HEIGHT = 200;
+export const CASCADE_DROP_OFFSET = 40;
+export const FIT_VIEWPORT_USAGE = 0.6;
+export const FIT_ANIMATION_MS = 450;
+
+export const PROJECT_ASSET_CATEGORIES = [
+  "images",
+  "music",
+  "voice",
+  "texts",
+  "videos",
+] as const;
+export type AssetCategory = (typeof PROJECT_ASSET_CATEGORIES)[number];
+
+export const MOKA_FRAGMENT_MIME = "application/x-moka-canvas-fragment+json";
+export const FRAGMENT_SCHEMA_VERSION = 1;
+
+export const HISTORY_LIMIT = 50;
+
+export const PROBLEM_CODES = [
+  "GRAPH_CYCLE",
+  "PORT_TYPE_MISMATCH",
+  "CARDINALITY_VIOLATION",
+  "SELF_LOOP",
+  "PORT_NOT_FOUND",
+  "NODE_NOT_FOUND",
+  "EDGE_NOT_FOUND",
+  "CANVAS_NOT_FOUND",
+  "GROUP_INVALID",
+  "BOUNDS_INVALID",
+  "ASSET_INVALID",
+  "ASSET_MISSING",
+  "ASSET_IN_USE",
+  "PATH_ESCAPE",
+  "MOKA_MAGIC_INVALID",
+  "MOKA_BSON_INVALID",
+  "MOKA_VERSION_UNSUPPORTED",
+  "MOKA_FIELD_MISSING",
+  "MOKA_TOO_LARGE",
+  "REVISION_CONFLICT",
+  "VALIDATION_FAILED",
+  "PROJECT_NOT_OPEN",
+  "PROJECT_NOT_FOUND",
+  "CANVAS_REQUIRED",
+  "EXECUTOR_DISABLED",
+  "RUN_NOT_FOUND",
+  "RUN_NOT_CANCELLABLE",
+  "PACKAGE_INVALID",
+  "NOT_FOUND",
+  "CONFLICT",
+  "PAYLOAD_TOO_LARGE",
+  "UNSUPPORTED_MEDIA_TYPE",
+  "INTERNAL",
+] as const;
+export type ProblemCode = (typeof PROBLEM_CODES)[number];
