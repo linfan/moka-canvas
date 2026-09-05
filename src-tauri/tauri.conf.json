@@ -25,7 +25,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../dist": "web"
+      "../dist": "web",
+      "icons/moka-file.icns": "moka-file.icns",
+      "icons/moka-file.ico": "moka-file.ico"
     },
     "macOS": {
       "dmg": {

@@ -739,11 +739,9 @@ Section Install
   {{/each}}
 
   ; Create file associations
-  {{#each file_associations as |association| ~}}
-    {{#each association.ext as |ext| ~}}
-       !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$INSTDIR\${MAINBINARYNAME}.exe,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
-    {{/each}}
-  {{/each}}
+  ; .moka documents use their own icon (moka-file.ico, installed via bundle resources), not the app exe icon
+  !insertmacro APP_ASSOCIATE "moka" "MokaCanvas.moka" "Moka Canvas Document" "$INSTDIR\moka-file.ico,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
+  !insertmacro UPDATEFILEASSOC
 
   ; Register deep links
   {{#each deep_link_protocols as |protocol| ~}}
@@ -874,11 +872,8 @@ Section Uninstall
   {{/each}}
 
   ; Delete app associations
-  {{#each file_associations as |association| ~}}
-    {{#each association.ext as |ext| ~}}
-      !insertmacro APP_UNASSOCIATE "{{ext}}" "{{or association.name ext}}"
-    {{/each}}
-  {{/each}}
+  !insertmacro APP_UNASSOCIATE "moka" "MokaCanvas.moka"
+  !insertmacro UPDATEFILEASSOC
 
   ; Delete deep links
   {{#each deep_link_protocols as |protocol| ~}}

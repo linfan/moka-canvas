@@ -88,6 +88,7 @@ Caveats:
 
 - The bundled exe is unsigned; Windows SmartScreen may warn.
 - The cross-built installer has not been smoke-tested on a physical Windows machine; verify by installing once before distribution.
+- Never run `cross-package-windows` concurrently with another package task (`package-macos`, `package-web`, `web-build`). All of them rebuild `dist/`, and vite empties `dist/` at the start of a rebuild. If the bundler resolves resources while `dist/` is empty, Tauri's resource walker silently skips the directory, producing an installer without `web/` — the installed app then exits immediately on launch (the embedded HTTP server requires the `web/` resource directory). If an installed Windows build "does nothing" on double-click, check that the installer actually contains `web/` (`7zz l <setup.exe>`) and rebuild.
 
 ### Updating app icons
 
@@ -103,6 +104,14 @@ touch src-tauri/src/lib.rs
 ```
 
 or run `make clean` once. Afterwards, Windows may still show the old icon from its shell icon cache — refresh it on the Windows machine by unpinning the app from the taskbar, reinstalling, re-pinning, then running `ie4uinit.exe -show` (or restarting explorer.exe) to flush the icon cache.
+
+### `.moka` file association
+
+`*.moka` documents are registered to open with the app and use their own document icon (the previous app icon design), built as `src-tauri/icons/moka-file.icns` / `moka-file.ico` and shipped via `bundle.resources` in `src-tauri/tauri.conf.json`:
+
+- **macOS**: `src-tauri/Info.plist` (auto-merged into the bundle's Info.plist by Tauri) declares the `dev.mokacanvas.compatibility.moka` UTI and document type with `CFBundleTypeIconFile` = `moka-file`.
+- **Windows (NSIS)**: the forked `installer/installer.nsi` hardcodes `APP_ASSOCIATE`/`APP_UNASSOCIATE` for `.moka` with `DefaultIcon` = `$INSTDIR\moka-file.ico`. This replaces the upstream `{{#each file_associations}}` loop, which cannot use a separate document icon — re-apply the divergence when re-diffing against the upstream template.
+- The MSI bundle (built by `package-windows` on a Windows host) does **not** register the association; distribute the NSIS setup exe.
 
 ## Clean
 
