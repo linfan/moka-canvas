@@ -1,0 +1,800 @@
+use super::validate::{
+    bounds_valid, resource_path_valid, validate_edge_candidate, MAX_CANVASES_PER_PROJECT,
+    MAX_CANVAS_NAME_LENGTH, MAX_EDGES_PER_CANVAS, MAX_NODES_PER_CANVAS, MAX_TITLE_LENGTH, ZOOM_MAX,
+    ZOOM_MIN,
+};
+use super::{
+    CanvasDocument, DocumentCommand, GroupMembership, MokaFile, NodeData, NodeId, NodeKind,
+    PointValue, WorkflowNode,
+};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub struct CommandError {
+    pub code: &'static str,
+    #[source]
+    pub cause: anyhow::Error,
+}
+
+impl std::fmt::Display for CommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cause)
+    }
+}
+
+impl CommandError {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            cause: anyhow::anyhow!(message.into()),
+        }
+    }
+}
+
+fn canvas_of<'a>(moka: &'a MokaFile, canvas_id: &str) -> Result<&'a CanvasDocument, CommandError> {
+    moka.canvas(canvas_id)
+        .ok_or_else(|| CommandError::new("CANVAS_NOT_FOUND", "Canvas not found"))
+}
+
+fn clamp_zoom(zoom: f64) -> f64 {
+    zoom.clamp(ZOOM_MIN, ZOOM_MAX)
+}
+
+fn sync_group_node_data(canvas: &mut CanvasDocument) {
+    for node in &mut canvas.nodes {
+        if node.kind != NodeKind::Group {
+            continue;
+        }
+        let membership = canvas
+            .groups
+            .iter()
+            .find(|group| group.group_id == node.id)
+            .map(|group| group.child_node_ids.clone())
+            .unwrap_or_default();
+        if node.data.child_node_ids.as_ref() != Some(&membership) {
+            node.data.child_node_ids = Some(membership);
+        }
+    }
+}
+
+/// Applies one command to a cloned document and returns the new document
+/// plus the inverse commands that restore the previous state.
+pub fn apply_commands(
+    moka: &MokaFile,
+    commands: &[DocumentCommand],
+) -> Result<(MokaFile, Vec<DocumentCommand>), CommandError> {
+    let mut current = moka.clone();
+    let mut inverses: Vec<DocumentCommand> = Vec::new();
+    for command in commands {
+        let (next, inverse) = apply_one(&current, command)?;
+        current = next;
+        // Later inverses must run first when unwinding.
+        for item in inverse.into_iter().rev() {
+            inverses.insert(0, item);
+        }
+    }
+    Ok((current, inverses))
+}
+
+fn apply_one(
+    moka: &MokaFile,
+    command: &DocumentCommand,
+) -> Result<(MokaFile, Vec<DocumentCommand>), CommandError> {
+    match command {
+        DocumentCommand::AddNode { canvas_id, node } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            if canvas.node(&node.id).is_some() {
+                return Err(CommandError::new("CONFLICT", "Node id already exists"));
+            }
+            if canvas.nodes.len() + 1 > MAX_NODES_PER_CANVAS {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Canvas node limit reached",
+                ));
+            }
+            if !bounds_valid(&node.bounds) {
+                return Err(CommandError::new(
+                    "BOUNDS_INVALID",
+                    "Node bounds are invalid",
+                ));
+            }
+            if node.title.chars().count() > MAX_TITLE_LENGTH {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Node title is too long",
+                ));
+            }
+            let mut next = moka.clone();
+            next.canvas_mut(canvas_id)
+                .expect("canvas checked above")
+                .nodes
+                .push(node.clone());
+            Ok((
+                next,
+                vec![DocumentCommand::RemoveNodes {
+                    canvas_id: canvas_id.clone(),
+                    node_ids: vec![node.id.clone()],
+                }],
+            ))
+        }
+
+        DocumentCommand::UpdateNode {
+            canvas_id,
+            node_id,
+            patch,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let node = canvas
+                .node(node_id)
+                .ok_or_else(|| CommandError::new("NODE_NOT_FOUND", "Node not found"))?;
+            if let Some(title) = &patch.title {
+                if title.chars().count() > MAX_TITLE_LENGTH {
+                    return Err(CommandError::new(
+                        "VALIDATION_FAILED",
+                        "Node title is too long",
+                    ));
+                }
+            }
+            let mut inverse_patch = super::NodePatch::default();
+            if patch.title.is_some() {
+                inverse_patch.title = Some(node.title.clone());
+            }
+            if patch.z_index.is_some() {
+                inverse_patch.z_index = Some(node.z_index);
+            }
+            if patch.data.is_some() {
+                inverse_patch.data = Some(node.data.clone());
+            }
+            let mut next = moka.clone();
+            let target = next
+                .canvas_mut(canvas_id)
+                .expect("canvas checked above")
+                .nodes
+                .iter_mut()
+                .find(|node| &node.id == node_id)
+                .expect("node checked above");
+            if let Some(title) = &patch.title {
+                target.title = title.clone();
+            }
+            if let Some(z_index) = patch.z_index {
+                target.z_index = z_index;
+            }
+            if let Some(data) = &patch.data {
+                target.data = data.clone();
+            }
+            Ok((
+                next,
+                vec![DocumentCommand::UpdateNode {
+                    canvas_id: canvas_id.clone(),
+                    node_id: node_id.clone(),
+                    patch: inverse_patch,
+                }],
+            ))
+        }
+
+        DocumentCommand::MoveNodes {
+            canvas_id,
+            positions,
+        } => {
+            canvas_of(moka, canvas_id)?;
+            for point in positions.values() {
+                if !point.x.is_finite() || !point.y.is_finite() {
+                    return Err(CommandError::new(
+                        "BOUNDS_INVALID",
+                        "Position is not finite",
+                    ));
+                }
+            }
+            let mut previous: std::collections::BTreeMap<NodeId, PointValue> =
+                std::collections::BTreeMap::new();
+            let mut next = moka.clone();
+            let canvas_mut = next.canvas_mut(canvas_id).expect("canvas checked above");
+            for node in &mut canvas_mut.nodes {
+                if let Some(position) = positions.get(&node.id) {
+                    previous.insert(
+                        node.id.clone(),
+                        PointValue {
+                            x: node.bounds.x,
+                            y: node.bounds.y,
+                        },
+                    );
+                    node.bounds.x = position.x;
+                    node.bounds.y = position.y;
+                }
+            }
+            sync_group_node_data(canvas_mut);
+            Ok((
+                next,
+                vec![DocumentCommand::MoveNodes {
+                    canvas_id: canvas_id.clone(),
+                    positions: previous,
+                }],
+            ))
+        }
+
+        DocumentCommand::ResizeNode {
+            canvas_id,
+            node_id,
+            bounds,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let node = canvas
+                .node(node_id)
+                .ok_or_else(|| CommandError::new("NODE_NOT_FOUND", "Node not found"))?;
+            if !bounds_valid(bounds) {
+                return Err(CommandError::new("BOUNDS_INVALID", "Bounds are invalid"));
+            }
+            let previous = node.bounds;
+            let mut next = moka.clone();
+            let target = next
+                .canvas_mut(canvas_id)
+                .expect("canvas checked above")
+                .nodes
+                .iter_mut()
+                .find(|node| &node.id == node_id)
+                .expect("node checked above");
+            target.bounds = *bounds;
+            Ok((
+                next,
+                vec![DocumentCommand::ResizeNode {
+                    canvas_id: canvas_id.clone(),
+                    node_id: node_id.clone(),
+                    bounds: previous,
+                }],
+            ))
+        }
+
+        DocumentCommand::RemoveNodes {
+            canvas_id,
+            node_ids,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let mut removing: std::collections::HashSet<&str> =
+                node_ids.iter().map(|id| id.as_str()).collect();
+            for id in &removing {
+                if canvas.node(id).is_none() {
+                    return Err(CommandError::new(
+                        "NODE_NOT_FOUND",
+                        "Some nodes were not found",
+                    ));
+                }
+            }
+            let removed_edges: Vec<super::WorkflowEdge> = canvas
+                .edges
+                .iter()
+                .filter(|edge| {
+                    removing.contains(edge.source.node_id.as_str())
+                        || removing.contains(edge.target.node_id.as_str())
+                })
+                .cloned()
+                .collect();
+            let previous_groups = canvas.groups.clone();
+
+            // Groups that drop below two members dissolve with their group nodes.
+            let mut dissolved: Vec<String> = Vec::new();
+            for group in &canvas.groups {
+                if removing.contains(group.group_id.as_str()) {
+                    continue;
+                }
+                let remaining = group
+                    .child_node_ids
+                    .iter()
+                    .filter(|id| !removing.contains(id.as_str()))
+                    .count();
+                if remaining < 2 {
+                    dissolved.push(group.group_id.clone());
+                }
+            }
+            for id in &dissolved {
+                removing.insert(id.as_str());
+            }
+
+            let mut inverse: Vec<DocumentCommand> = Vec::new();
+            for node in &canvas.nodes {
+                if removing.contains(node.id.as_str()) {
+                    inverse.push(DocumentCommand::AddNode {
+                        canvas_id: canvas_id.clone(),
+                        node: node.clone(),
+                    });
+                }
+            }
+            let mut removed_edges_all = removed_edges;
+            for edge in &canvas.edges {
+                if (dissolved.contains(&edge.source.node_id)
+                    || dissolved.contains(&edge.target.node_id))
+                    && !removed_edges_all.iter().any(|e| e.id == edge.id)
+                {
+                    removed_edges_all.push(edge.clone());
+                }
+            }
+            for edge in &removed_edges_all {
+                inverse.push(DocumentCommand::AddEdge {
+                    canvas_id: canvas_id.clone(),
+                    edge: edge.clone(),
+                });
+            }
+
+            let mut next = moka.clone();
+            let canvas_mut = next.canvas_mut(canvas_id).expect("canvas checked above");
+            canvas_mut
+                .nodes
+                .retain(|node| !removing.contains(node.id.as_str()));
+            canvas_mut.edges.retain(|edge| {
+                !removing.contains(edge.source.node_id.as_str())
+                    && !removing.contains(edge.target.node_id.as_str())
+            });
+            canvas_mut.groups.retain_mut(|group| {
+                if removing.contains(group.group_id.as_str()) {
+                    return false;
+                }
+                group
+                    .child_node_ids
+                    .retain(|id| !removing.contains(id.as_str()));
+                true
+            });
+
+            for group in &previous_groups {
+                let current = canvas_mut
+                    .groups
+                    .iter()
+                    .find(|candidate| candidate.group_id == group.group_id);
+                if current.map(|g| &g.child_node_ids) != Some(&group.child_node_ids) {
+                    inverse.push(DocumentCommand::SetGroupMembership {
+                        canvas_id: canvas_id.clone(),
+                        group_id: group.group_id.clone(),
+                        child_node_ids: group.child_node_ids.clone(),
+                    });
+                }
+            }
+
+            sync_group_node_data(canvas_mut);
+            Ok((next, inverse))
+        }
+
+        DocumentCommand::AddEdge { canvas_id, edge } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            if canvas.edges.iter().any(|candidate| candidate.id == edge.id) {
+                return Err(CommandError::new("CONFLICT", "Edge id already exists"));
+            }
+            if canvas.edges.len() + 1 > MAX_EDGES_PER_CANVAS {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Canvas edge limit reached",
+                ));
+            }
+            validate_edge_candidate(canvas, &edge.source, &edge.target)
+                .map_err(|rejection| CommandError::new(rejection.code, rejection.message))?;
+            let mut next = moka.clone();
+            next.canvas_mut(canvas_id)
+                .expect("canvas checked above")
+                .edges
+                .push(edge.clone());
+            Ok((
+                next,
+                vec![DocumentCommand::RemoveEdges {
+                    canvas_id: canvas_id.clone(),
+                    edge_ids: vec![edge.id.clone()],
+                }],
+            ))
+        }
+
+        DocumentCommand::RemoveEdges {
+            canvas_id,
+            edge_ids,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let removing: std::collections::HashSet<&str> =
+                edge_ids.iter().map(|id| id.as_str()).collect();
+            let removed: Vec<super::WorkflowEdge> = canvas
+                .edges
+                .iter()
+                .filter(|edge| removing.contains(edge.id.as_str()))
+                .cloned()
+                .collect();
+            if removed.len() != removing.len() {
+                return Err(CommandError::new(
+                    "EDGE_NOT_FOUND",
+                    "Some edges were not found",
+                ));
+            }
+            let mut next = moka.clone();
+            next.canvas_mut(canvas_id)
+                .expect("canvas checked above")
+                .edges
+                .retain(|edge| !removing.contains(edge.id.as_str()));
+            Ok((
+                next,
+                removed
+                    .into_iter()
+                    .map(|edge| DocumentCommand::AddEdge {
+                        canvas_id: canvas_id.clone(),
+                        edge,
+                    })
+                    .collect(),
+            ))
+        }
+
+        DocumentCommand::SetGroupMembership {
+            canvas_id,
+            group_id,
+            child_node_ids,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let group_node = canvas
+                .node(group_id)
+                .filter(|node| node.kind == NodeKind::Group)
+                .ok_or_else(|| CommandError::new("GROUP_INVALID", "Group node not found"))?;
+            let unique: std::collections::HashSet<&str> =
+                child_node_ids.iter().map(|id| id.as_str()).collect();
+            if unique.len() != child_node_ids.len() {
+                return Err(CommandError::new("GROUP_INVALID", "Duplicate group member"));
+            }
+            if unique.contains(group_id.as_str()) {
+                return Err(CommandError::new(
+                    "GROUP_INVALID",
+                    "A group cannot contain itself",
+                ));
+            }
+            for id in child_node_ids {
+                let child = canvas
+                    .node(id)
+                    .ok_or_else(|| CommandError::new("NODE_NOT_FOUND", "Member not found"))?;
+                if child.kind == NodeKind::Group {
+                    return Err(CommandError::new(
+                        "GROUP_INVALID",
+                        "Nested groups are not supported",
+                    ));
+                }
+            }
+            let previous = canvas
+                .groups
+                .iter()
+                .find(|group| &group.group_id == group_id)
+                .map(|group| group.child_node_ids.clone())
+                .unwrap_or_default();
+
+            let mut inverse: Vec<DocumentCommand> = Vec::new();
+            let mut next = moka.clone();
+            let canvas_mut = next.canvas_mut(canvas_id).expect("canvas checked above");
+            canvas_mut
+                .groups
+                .retain(|group| &group.group_id != group_id);
+
+            if child_node_ids.len() >= 2 {
+                canvas_mut.groups.push(GroupMembership {
+                    group_id: group_id.clone(),
+                    child_node_ids: child_node_ids.clone(),
+                });
+            } else {
+                // Dissolve: drop the group node and its incident edges.
+                inverse.push(DocumentCommand::AddNode {
+                    canvas_id: canvas_id.clone(),
+                    node: group_node.clone(),
+                });
+                for edge in &canvas.edges {
+                    if edge.source.node_id == *group_id || edge.target.node_id == *group_id {
+                        inverse.push(DocumentCommand::AddEdge {
+                            canvas_id: canvas_id.clone(),
+                            edge: edge.clone(),
+                        });
+                    }
+                }
+                canvas_mut.nodes.retain(|node| &node.id != group_id);
+                canvas_mut.edges.retain(|edge| {
+                    edge.source.node_id != *group_id && edge.target.node_id != *group_id
+                });
+            }
+            inverse.push(DocumentCommand::SetGroupMembership {
+                canvas_id: canvas_id.clone(),
+                group_id: group_id.clone(),
+                child_node_ids: previous,
+            });
+
+            sync_group_node_data(canvas_mut);
+            Ok((next, inverse))
+        }
+
+        DocumentCommand::SetViewport {
+            canvas_id,
+            viewport,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            if !viewport.x.is_finite() || !viewport.y.is_finite() {
+                return Err(CommandError::new(
+                    "BOUNDS_INVALID",
+                    "Viewport is not finite",
+                ));
+            }
+            let previous = canvas.viewport;
+            let mut next = moka.clone();
+            next.canvas_mut(canvas_id)
+                .expect("canvas checked above")
+                .viewport = super::Viewport {
+                x: viewport.x,
+                y: viewport.y,
+                zoom: clamp_zoom(viewport.zoom),
+            };
+            Ok((
+                next,
+                vec![DocumentCommand::SetViewport {
+                    canvas_id: canvas_id.clone(),
+                    viewport: previous,
+                }],
+            ))
+        }
+
+        DocumentCommand::AddCanvas { canvas, index } => {
+            if moka.canvas.len() + 1 > MAX_CANVASES_PER_PROJECT {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Canvas limit reached",
+                ));
+            }
+            if moka.canvas(&canvas.id).is_some() {
+                return Err(CommandError::new("CONFLICT", "Canvas id already exists"));
+            }
+            let mut next = moka.clone();
+            let index = (*index).unwrap_or(next.canvas.len()).min(next.canvas.len());
+            next.canvas.insert(index, canvas.clone());
+            Ok((
+                next,
+                vec![DocumentCommand::RemoveCanvas {
+                    canvas_id: canvas.id.clone(),
+                }],
+            ))
+        }
+
+        DocumentCommand::RenameCanvas { canvas_id, name } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            if name.is_empty() {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Canvas name is empty",
+                ));
+            }
+            if name.chars().count() > MAX_CANVAS_NAME_LENGTH {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Canvas name is too long",
+                ));
+            }
+            let previous = canvas.name.clone();
+            let mut next = moka.clone();
+            next.canvas_mut(canvas_id)
+                .expect("canvas checked above")
+                .name = name.clone();
+            Ok((
+                next,
+                vec![DocumentCommand::RenameCanvas {
+                    canvas_id: canvas_id.clone(),
+                    name: previous,
+                }],
+            ))
+        }
+
+        DocumentCommand::ReorderCanvas { canvas_id, index } => {
+            let position = moka
+                .canvas
+                .iter()
+                .position(|canvas| &canvas.id == canvas_id)
+                .ok_or_else(|| CommandError::new("CANVAS_NOT_FOUND", "Canvas not found"))?;
+            let target = (*index).min(moka.canvas.len() - 1);
+            let mut next = moka.clone();
+            let moved = next.canvas.remove(position);
+            next.canvas.insert(target, moved);
+            Ok((
+                next,
+                vec![DocumentCommand::ReorderCanvas {
+                    canvas_id: canvas_id.clone(),
+                    index: position,
+                }],
+            ))
+        }
+
+        DocumentCommand::RemoveCanvas { canvas_id } => {
+            let position = moka
+                .canvas
+                .iter()
+                .position(|canvas| &canvas.id == canvas_id)
+                .ok_or_else(|| CommandError::new("CANVAS_NOT_FOUND", "Canvas not found"))?;
+            if moka.canvas.len() <= 1 {
+                return Err(CommandError::new(
+                    "CANVAS_REQUIRED",
+                    "The last canvas cannot be removed",
+                ));
+            }
+            let removed = moka.canvas[position].clone();
+            let mut next = moka.clone();
+            next.canvas.remove(position);
+            Ok((
+                next,
+                vec![DocumentCommand::AddCanvas {
+                    canvas: removed,
+                    index: Some(position),
+                }],
+            ))
+        }
+    }
+}
+
+/// Validates the persisted resource registry for a project about to be saved.
+pub fn registry_errors(moka: &MokaFile) -> Option<&'static str> {
+    for entry in moka.resources.all() {
+        if !resource_path_valid(&entry.path) {
+            return Some("PATH_ESCAPE");
+        }
+    }
+    None
+}
+
+pub fn default_node_data(kind: NodeKind) -> NodeData {
+    let mut data = NodeData::default();
+    match kind {
+        NodeKind::Text => data.content = Some(String::new()),
+        NodeKind::Audio => data.audio_category = Some("music".into()),
+        NodeKind::Operation => {
+            data.operation_type = Some("deterministic.text".into());
+            data.parameters = Some(serde_json::json!({}));
+            data.executor_key = Some("deterministic".into());
+            data.result_slots = Some(Vec::new());
+            data.result_node_ids = Some(Vec::new());
+        }
+        NodeKind::Group => {
+            data.color = Some("#3b82f6".into());
+            data.child_node_ids = Some(Vec::new());
+        }
+        NodeKind::Export => {
+            data.format = Some("mp4".into());
+            data.parameters = Some(serde_json::json!({}));
+        }
+        _ => {}
+    }
+    data
+}
+
+pub fn default_ports(kind: NodeKind) -> Vec<super::PortDefinition> {
+    use super::{Cardinality, DataType, PortDefinition, PortDirection};
+    let port = |id: &str,
+                direction: PortDirection,
+                data_types: Vec<DataType>,
+                label: &str,
+                required: bool,
+                cardinality: Cardinality| {
+        PortDefinition {
+            id: id.into(),
+            direction,
+            data_types,
+            required,
+            cardinality,
+            label: label.into(),
+        }
+    };
+    match kind {
+        NodeKind::Text => vec![port(
+            "out",
+            PortDirection::Output,
+            vec![DataType::Text],
+            "Text",
+            false,
+            Cardinality::One,
+        )],
+        NodeKind::Image => vec![port(
+            "out",
+            PortDirection::Output,
+            vec![DataType::Image],
+            "Image",
+            false,
+            Cardinality::One,
+        )],
+        NodeKind::Audio => vec![port(
+            "out",
+            PortDirection::Output,
+            vec![DataType::Audio],
+            "Audio",
+            false,
+            Cardinality::One,
+        )],
+        NodeKind::Video => vec![port(
+            "out",
+            PortDirection::Output,
+            vec![DataType::Video],
+            "Video",
+            false,
+            Cardinality::One,
+        )],
+        NodeKind::Operation => vec![
+            port(
+                "text",
+                PortDirection::Input,
+                vec![DataType::Text],
+                "Text",
+                false,
+                Cardinality::Many,
+            ),
+            port(
+                "images",
+                PortDirection::Input,
+                vec![DataType::Image],
+                "Images",
+                false,
+                Cardinality::Many,
+            ),
+            port(
+                "audio",
+                PortDirection::Input,
+                vec![DataType::Audio],
+                "Audio",
+                false,
+                Cardinality::One,
+            ),
+            port(
+                "video",
+                PortDirection::Input,
+                vec![DataType::Video],
+                "Video",
+                false,
+                Cardinality::One,
+            ),
+            port(
+                "out",
+                PortDirection::Output,
+                vec![
+                    DataType::Text,
+                    DataType::Image,
+                    DataType::Audio,
+                    DataType::Video,
+                ],
+                "Result",
+                false,
+                Cardinality::Many,
+            ),
+        ],
+        NodeKind::Group => vec![],
+        NodeKind::Export => vec![
+            port(
+                "video",
+                PortDirection::Input,
+                vec![DataType::Video],
+                "Video",
+                false,
+                Cardinality::One,
+            ),
+            port(
+                "audio",
+                PortDirection::Input,
+                vec![DataType::Audio],
+                "Audio",
+                false,
+                Cardinality::One,
+            ),
+            port(
+                "out",
+                PortDirection::Output,
+                vec![DataType::Artifact],
+                "Artifact",
+                false,
+                Cardinality::One,
+            ),
+        ],
+    }
+}
+
+pub fn make_node(kind: NodeKind, title: String, x: f64, y: f64) -> WorkflowNode {
+    let now = super::now_iso();
+    WorkflowNode {
+        id: super::new_id(),
+        kind,
+        title,
+        bounds: super::Rect {
+            x,
+            y,
+            width: 280.0,
+            height: 200.0,
+        },
+        z_index: 0,
+        ports: default_ports(kind),
+        data: default_node_data(kind),
+        created_at: now.clone(),
+        updated_at: now,
+    }
+}

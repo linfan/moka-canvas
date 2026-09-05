@@ -1,3 +1,7 @@
+pub mod assets;
+pub mod config;
+pub mod domain;
+pub mod project;
 pub mod server;
 
 use std::{error::Error, sync::Arc};

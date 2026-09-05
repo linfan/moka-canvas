@@ -1,0 +1,455 @@
+use std::collections::{HashMap, HashSet};
+
+use super::{
+    CanvasDocument, Cardinality, DataType, MokaFile, NodeId, PortDirection, ValidationIssue,
+    WorkflowEdge, WorkflowNode, ASSET_CATEGORIES,
+};
+
+pub const COORDINATE_LIMIT: f64 = 1_000_000.0;
+pub const MAX_TITLE_LENGTH: usize = 200;
+pub const MAX_CANVAS_NAME_LENGTH: usize = 80;
+pub const MAX_NODES_PER_CANVAS: usize = 5_000;
+pub const MAX_EDGES_PER_CANVAS: usize = 10_000;
+pub const MAX_CANVASES_PER_PROJECT: usize = 64;
+pub const ZOOM_MIN: f64 = 0.05;
+pub const ZOOM_MAX: f64 = 5.0;
+
+pub fn bounds_valid(bounds: &super::Rect) -> bool {
+    bounds.x.is_finite()
+        && bounds.y.is_finite()
+        && bounds.width.is_finite()
+        && bounds.height.is_finite()
+        && bounds.width > 0.0
+        && bounds.height > 0.0
+        && bounds.x.abs() <= COORDINATE_LIMIT
+        && bounds.y.abs() <= COORDINATE_LIMIT
+        && bounds.width <= COORDINATE_LIMIT * 2.0
+        && bounds.height <= COORDINATE_LIMIT * 2.0
+}
+
+pub fn resource_path_valid(path: &str) -> bool {
+    if path.is_empty() || path.contains('\\') || path.contains('\t') {
+        return false;
+    }
+    if path.starts_with('/') || path.as_bytes().get(1) == Some(&b':') {
+        return false;
+    }
+    path.split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+fn port_types_intersect(a: &[DataType], b: &[DataType]) -> bool {
+    a.iter().any(|t| b.contains(t))
+}
+
+#[derive(Debug)]
+pub struct EdgeRejection {
+    pub code: &'static str,
+    pub message: String,
+}
+
+pub fn validate_edge_candidate(
+    canvas: &CanvasDocument,
+    source: &super::EdgeEndpoint,
+    target: &super::EdgeEndpoint,
+) -> Result<(), EdgeRejection> {
+    let source_node = canvas.node(&source.node_id).ok_or(EdgeRejection {
+        code: "NODE_NOT_FOUND",
+        message: "Source node missing".into(),
+    })?;
+    let target_node = canvas.node(&target.node_id).ok_or(EdgeRejection {
+        code: "NODE_NOT_FOUND",
+        message: "Target node missing".into(),
+    })?;
+    let source_port = source_node.port(&source.port_id).ok_or(EdgeRejection {
+        code: "PORT_NOT_FOUND",
+        message: "Source port missing".into(),
+    })?;
+    let target_port = target_node.port(&target.port_id).ok_or(EdgeRejection {
+        code: "PORT_NOT_FOUND",
+        message: "Target port missing".into(),
+    })?;
+
+    if source_port.direction != PortDirection::Output
+        || target_port.direction != PortDirection::Input
+    {
+        return Err(EdgeRejection {
+            code: "PORT_TYPE_MISMATCH",
+            message: "Edges must run from an output port to an input port".into(),
+        });
+    }
+
+    if source.node_id == target.node_id {
+        return Err(EdgeRejection {
+            code: "SELF_LOOP",
+            message: "A node cannot connect to itself".into(),
+        });
+    }
+
+    if !port_types_intersect(&source_port.data_types, &target_port.data_types) {
+        return Err(EdgeRejection {
+            code: "PORT_TYPE_MISMATCH",
+            message: "Port types are incompatible".into(),
+        });
+    }
+
+    if target_port.cardinality == Cardinality::One
+        && canvas
+            .edges
+            .iter()
+            .any(|e| e.target.node_id == target.node_id && e.target.port_id == target.port_id)
+    {
+        return Err(EdgeRejection {
+            code: "CARDINALITY_VIOLATION",
+            message: "This input accepts a single connection; replace it explicitly".into(),
+        });
+    }
+
+    if canvas.edges.iter().any(|e| {
+        e.source.node_id == source.node_id
+            && e.source.port_id == source.port_id
+            && e.target.node_id == target.node_id
+            && e.target.port_id == target.port_id
+    }) {
+        return Err(EdgeRejection {
+            code: "CONFLICT",
+            message: "This connection already exists".into(),
+        });
+    }
+
+    if would_create_cycle(&canvas.edges, &source.node_id, &target.node_id) {
+        return Err(EdgeRejection {
+            code: "GRAPH_CYCLE",
+            message: "This connection would create a cycle".into(),
+        });
+    }
+
+    Ok(())
+}
+
+pub fn would_create_cycle(
+    edges: &[WorkflowEdge],
+    source_node: &NodeId,
+    target_node: &NodeId,
+) -> bool {
+    let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
+    for edge in edges {
+        adjacency
+            .entry(edge.source.node_id.as_str())
+            .or_default()
+            .push(edge.target.node_id.as_str());
+    }
+    adjacency
+        .entry(source_node.as_str())
+        .or_default()
+        .push(target_node.as_str());
+
+    let mut stack = vec![target_node.as_str()];
+    let mut visited: HashSet<&str> = HashSet::new();
+    while let Some(current) = stack.pop() {
+        if current == source_node.as_str() {
+            return true;
+        }
+        if !visited.insert(current) {
+            continue;
+        }
+        if let Some(next) = adjacency.get(current) {
+            stack.extend(next.iter().copied());
+        }
+    }
+    false
+}
+
+/// Deterministic graph order: topological layer, then z-index, then id.
+pub fn topological_order(canvas: &CanvasDocument) -> Vec<&WorkflowNode> {
+    let mut indegree: HashMap<&str, usize> = HashMap::new();
+    let mut outgoing: HashMap<&str, Vec<&str>> = HashMap::new();
+    for node in &canvas.nodes {
+        indegree.insert(node.id.as_str(), 0);
+    }
+    for edge in &canvas.edges {
+        if !indegree.contains_key(edge.source.node_id.as_str())
+            || !indegree.contains_key(edge.target.node_id.as_str())
+        {
+            continue;
+        }
+        *indegree.entry(edge.target.node_id.as_str()).or_insert(0) += 1;
+        outgoing
+            .entry(edge.source.node_id.as_str())
+            .or_default()
+            .push(edge.target.node_id.as_str());
+    }
+
+    let by_rank = |a: &&WorkflowNode, b: &&WorkflowNode| {
+        a.z_index.cmp(&b.z_index).then_with(|| a.id.cmp(&b.id))
+    };
+
+    let node_by_id: HashMap<&str, &WorkflowNode> = canvas
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+
+    let mut frontier: Vec<&WorkflowNode> = canvas
+        .nodes
+        .iter()
+        .filter(|node| indegree.get(node.id.as_str()).copied().unwrap_or(0) == 0)
+        .collect();
+    frontier.sort_by(by_rank);
+
+    let mut ordered = Vec::new();
+    while !frontier.is_empty() {
+        let mut next_frontier = Vec::new();
+        for node in frontier {
+            ordered.push(node);
+            if let Some(targets) = outgoing.get(node.id.as_str()) {
+                for target in targets {
+                    let remaining = indegree.get_mut(*target).map(|value| {
+                        *value -= 1;
+                        *value
+                    });
+                    if remaining == Some(0) {
+                        if let Some(target_node) = node_by_id.get(*target) {
+                            next_frontier.push(*target_node);
+                        }
+                    }
+                }
+            }
+        }
+        next_frontier.sort_by(by_rank);
+        frontier = next_frontier;
+    }
+    ordered
+}
+
+pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
+    let mut issues = Vec::new();
+    let canvas_id = Some(canvas.id.clone());
+
+    if canvas.nodes.len() > MAX_NODES_PER_CANVAS {
+        issues.push(ValidationIssue {
+            code: "VALIDATION_FAILED".into(),
+            message: format!("Canvas exceeds the node limit ({MAX_NODES_PER_CANVAS})"),
+            canvas_id: canvas_id.clone(),
+            node_id: None,
+            port_id: None,
+            edge_id: None,
+        });
+    }
+    if canvas.edges.len() > MAX_EDGES_PER_CANVAS {
+        issues.push(ValidationIssue {
+            code: "VALIDATION_FAILED".into(),
+            message: format!("Canvas exceeds the edge limit ({MAX_EDGES_PER_CANVAS})"),
+            canvas_id: canvas_id.clone(),
+            node_id: None,
+            port_id: None,
+            edge_id: None,
+        });
+    }
+
+    let mut node_ids = HashSet::new();
+    for node in &canvas.nodes {
+        if !node_ids.insert(node.id.as_str()) {
+            issues.push(ValidationIssue {
+                code: "VALIDATION_FAILED".into(),
+                message: format!("Duplicate node id {}", node.id),
+                canvas_id: canvas_id.clone(),
+                node_id: Some(node.id.clone()),
+                port_id: None,
+                edge_id: None,
+            });
+        }
+        if !bounds_valid(&node.bounds) {
+            issues.push(ValidationIssue {
+                code: "BOUNDS_INVALID".into(),
+                message: format!("Node \"{}\" has invalid bounds", node.title),
+                canvas_id: canvas_id.clone(),
+                node_id: Some(node.id.clone()),
+                port_id: None,
+                edge_id: None,
+            });
+        }
+        let mut port_ids = HashSet::new();
+        for port in &node.ports {
+            if !port_ids.insert(port.id.as_str()) {
+                issues.push(ValidationIssue {
+                    code: "VALIDATION_FAILED".into(),
+                    message: format!("Duplicate port id {} on node \"{}\"", port.id, node.title),
+                    canvas_id: canvas_id.clone(),
+                    node_id: Some(node.id.clone()),
+                    port_id: Some(port.id.clone()),
+                    edge_id: None,
+                });
+            }
+        }
+    }
+
+    let mut edge_ids = HashSet::new();
+    for (index, edge) in canvas.edges.iter().enumerate() {
+        if !edge_ids.insert(edge.id.as_str()) {
+            issues.push(ValidationIssue {
+                code: "VALIDATION_FAILED".into(),
+                message: format!("Duplicate edge id {}", edge.id),
+                canvas_id: canvas_id.clone(),
+                node_id: None,
+                port_id: None,
+                edge_id: Some(edge.id.clone()),
+            });
+        }
+        let remaining: Vec<WorkflowEdge> = canvas
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != index)
+            .map(|(_, e)| e.clone())
+            .collect();
+        let mut scoped = canvas.clone();
+        scoped.edges = remaining;
+        if let Err(rejection) = validate_edge_candidate(&scoped, &edge.source, &edge.target) {
+            issues.push(ValidationIssue {
+                code: rejection.code.into(),
+                message: rejection.message,
+                canvas_id: canvas_id.clone(),
+                node_id: Some(edge.target.node_id.clone()),
+                port_id: Some(edge.target.port_id.clone()),
+                edge_id: Some(edge.id.clone()),
+            });
+        }
+    }
+
+    let mut group_of: HashMap<&str, &str> = HashMap::new();
+    for group in &canvas.groups {
+        let group_node = canvas.node(&group.group_id);
+        if !matches!(group_node.map(|n| n.kind), Some(super::NodeKind::Group)) {
+            issues.push(ValidationIssue {
+                code: "GROUP_INVALID".into(),
+                message: "Membership references a missing or non-group node".into(),
+                canvas_id: canvas_id.clone(),
+                node_id: Some(group.group_id.clone()),
+                port_id: None,
+                edge_id: None,
+            });
+            continue;
+        }
+        let mut seen = HashSet::new();
+        for child_id in &group.child_node_ids {
+            if child_id == &group.group_id {
+                issues.push(ValidationIssue {
+                    code: "GROUP_INVALID".into(),
+                    message: "A group cannot contain itself".into(),
+                    canvas_id: canvas_id.clone(),
+                    node_id: Some(group.group_id.clone()),
+                    port_id: None,
+                    edge_id: None,
+                });
+            }
+            if !seen.insert(child_id.as_str()) {
+                issues.push(ValidationIssue {
+                    code: "GROUP_INVALID".into(),
+                    message: "Group membership contains a duplicate node".into(),
+                    canvas_id: canvas_id.clone(),
+                    node_id: Some(child_id.clone()),
+                    port_id: None,
+                    edge_id: None,
+                });
+            }
+            if !node_ids.contains(child_id.as_str()) {
+                issues.push(ValidationIssue {
+                    code: "GROUP_INVALID".into(),
+                    message: "Group membership references a missing node".into(),
+                    canvas_id: canvas_id.clone(),
+                    node_id: Some(child_id.clone()),
+                    port_id: None,
+                    edge_id: None,
+                });
+            }
+            if group_of
+                .insert(child_id.as_str(), group.group_id.as_str())
+                .is_some()
+            {
+                issues.push(ValidationIssue {
+                    code: "GROUP_INVALID".into(),
+                    message: "A node belongs to more than one group".into(),
+                    canvas_id: canvas_id.clone(),
+                    node_id: Some(child_id.clone()),
+                    port_id: None,
+                    edge_id: None,
+                });
+            }
+        }
+        if group.child_node_ids.len() < 2 {
+            issues.push(ValidationIssue {
+                code: "GROUP_INVALID".into(),
+                message: "A group requires at least two member nodes".into(),
+                canvas_id: canvas_id.clone(),
+                node_id: Some(group.group_id.clone()),
+                port_id: None,
+                edge_id: None,
+            });
+        }
+    }
+
+    issues
+}
+
+pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
+    let mut issues = Vec::new();
+    let mut canvas_ids = HashSet::new();
+    for canvas in &moka.canvas {
+        if !canvas_ids.insert(canvas.id.as_str()) {
+            issues.push(ValidationIssue {
+                code: "VALIDATION_FAILED".into(),
+                message: format!("Duplicate canvas id {}", canvas.id),
+                canvas_id: Some(canvas.id.clone()),
+                node_id: None,
+                port_id: None,
+                edge_id: None,
+            });
+        }
+        issues.extend(validate_canvas(canvas));
+    }
+
+    let mut resource_ids = HashSet::new();
+    for entry in moka.resources.all() {
+        if !resource_ids.insert(entry.id.as_str()) {
+            issues.push(ValidationIssue {
+                code: "VALIDATION_FAILED".into(),
+                message: format!("Duplicate resource id {}", entry.id),
+                canvas_id: None,
+                node_id: None,
+                port_id: None,
+                edge_id: None,
+            });
+        }
+        if !resource_path_valid(&entry.path) {
+            issues.push(ValidationIssue {
+                code: "PATH_ESCAPE".into(),
+                message: format!("Resource path escapes the project root: {}", entry.path),
+                canvas_id: None,
+                node_id: None,
+                port_id: None,
+                edge_id: None,
+            });
+        }
+    }
+
+    for (asset_id, node_ids) in moka.asset_references() {
+        if !resource_ids.contains(asset_id.as_str()) {
+            issues.push(ValidationIssue {
+                code: "ASSET_MISSING".into(),
+                message: format!("Node references unregistered asset {asset_id}"),
+                canvas_id: None,
+                node_id: node_ids.first().cloned(),
+                port_id: None,
+                edge_id: None,
+            });
+        }
+    }
+
+    // Every category key stays within the known set: unknown categories are
+    // tolerated on decode only if empty is never required — v1 rejects them
+    // so forward edits cannot smuggle data past the registry.
+    let _ = ASSET_CATEGORIES;
+
+    issues
+}

@@ -2,7 +2,7 @@
 name = "moka-canvas"
 version = "0.1.0"
 default-run = "moka-canvas"
-description = "LeaferJS browser and Tauri compatibility showcase"
+description = "Local-first visual video workflow editor"
 authors = ["Moka Canvas"]
 edition = "2021"
 rust-version = "1.77"
@@ -16,9 +16,29 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 anyhow = "1"
-axum = "0.8"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["multipart"] }
+bson = { version = "3", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-serde_json = "1"
+hex = "0.4"
+image = "0.25"
+infer = "0.19"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml = "0.9"
+sha2 = "0.10"
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["fs", "set-header"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower-http = { version = "0.6", features = ["fs", "set-header", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+zip = "2"
+
+[dev-dependencies]
+tempfile = "3"
