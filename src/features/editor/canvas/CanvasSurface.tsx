@@ -11,12 +11,15 @@ import {
   connectPorts,
   marqueeSelect,
   moveNodes,
+  pickSourceCandidates,
   relatedHighlight,
   resizeNodeTo,
+  resolveInputPick,
   selectNodeWithMembers,
 } from "../interactions/actions";
 import { useEditorStore, type ContextMenuTarget } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
+import { buildIssueIndex, buildResourceIndex } from "./mediaCards";
 
 function activeCanvas(): CanvasDocument | null {
   const { moka, activeCanvasId } = useProjectStore.getState();
@@ -37,6 +40,10 @@ function createCallbacks(host: () => HTMLElement | null): ControllerCallbacks {
   return {
     onBackgroundTap: () => {
       const editor = useEditorStore.getState();
+      if (editor.inputPick) {
+        editor.stopInputPick();
+        return;
+      }
       editor.clearSelection();
       editor.announce("Nothing selected");
     },
@@ -47,8 +54,17 @@ function createCallbacks(host: () => HTMLElement | null): ControllerCallbacks {
         .openNodeMenu({ x: client.x, y: client.y, world, connectFrom: null });
     },
     onNodePress: (nodeId, additive) => selectNodeWithMembers(nodeId, additive),
-    onNodeDoubleTap: (nodeId) =>
-      useEditorStore.getState().startRenaming(nodeId),
+    onPickNode: (nodeId) => resolveInputPick(nodeId),
+    onNodeDoubleTap: (nodeId) => {
+      const canvas = activeCanvas();
+      const node = canvas?.nodes.find((entry) => entry.id === nodeId);
+      const editor = useEditorStore.getState();
+      if (node?.kind === "text") {
+        editor.startEditingText(nodeId);
+      } else {
+        editor.startRenaming(nodeId);
+      }
+    },
     onEdgeTap: (edgeId, additive) => {
       const editor = useEditorStore.getState();
       const edgeIds = editor.selection.edgeIds;
@@ -169,6 +185,7 @@ export function CanvasSurface() {
           editor.setCamera(canvas.viewport);
         }
         const camera = editor.camera ?? canvas.viewport;
+        const { moka, selfCheck } = useProjectStore.getState();
         instance.render({
           canvasId: canvas.id,
           camera,
@@ -180,6 +197,14 @@ export function CanvasSurface() {
           related: relatedHighlight(),
           background: canvas.settings.background,
           showMinimap: canvas.settings.showMinimap,
+          resources: moka ? buildResourceIndex(moka) : new Map(),
+          issues: buildIssueIndex(selfCheck),
+          pick: editor.inputPick
+            ? {
+                ...editor.inputPick,
+                candidates: pickSourceCandidates(canvas, editor.inputPick),
+              }
+            : null,
         });
       };
 

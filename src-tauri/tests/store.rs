@@ -239,6 +239,53 @@ async fn asset_upload_registers_and_streams_back() {
     assert!(reopened.self_check.ok);
 }
 
+/// Minimal but well-formed 1s stereo 44.1kHz PCM WAVE.
+fn make_test_wav() -> Vec<u8> {
+    let byte_rate = 176_400u32;
+    let data_size = byte_rate; // exactly one second
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36u32 + data_size).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&44_100u32.to_le_bytes());
+    bytes.extend_from_slice(&byte_rate.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_size.to_le_bytes());
+    bytes.resize(bytes.len() + data_size as usize, 0);
+    bytes
+}
+
+#[tokio::test]
+async fn wav_upload_records_audio_probe_metadata() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+
+    let staging = root.join("tmp").join("upload-tone.bin");
+    std::fs::write(&staging, make_test_wav()).unwrap();
+
+    let entry = store
+        .add_asset(StagedAsset {
+            name: "tone.wav".into(),
+            tmp_path: staging,
+            declared_mime: Some("audio/wav".into()),
+            category_hint: Some("voice".into()),
+        })
+        .await
+        .unwrap()
+        .entry;
+    assert!(entry.path.starts_with("assets/voice/"));
+    let probe = entry.probe.expect("probe recorded");
+    assert_eq!(probe.sample_rate, Some(44100));
+    assert_eq!(probe.channels, Some(2));
+    assert_eq!(probe.duration_ms, Some(1000));
+}
+
 #[tokio::test]
 async fn invalid_upload_leaves_no_orphans() {
     let tmp = TempDir::new().unwrap();

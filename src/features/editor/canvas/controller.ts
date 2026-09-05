@@ -8,12 +8,14 @@ import {
   LOW_DETAIL_ZOOM,
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
+  type AssetId,
   type CanvasId,
   type EdgeId,
   type GroupMembership,
   type NodeId,
   type Point,
   type Rect as WorldRect,
+  type ResourceEntry,
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../../shared/domain";
@@ -39,6 +41,7 @@ import {
   updateNodeView,
   type NodeView,
 } from "./nodeRenderers";
+import { mediaInfoForNode, mediaSignature } from "./mediaCards";
 import { canvasTheme } from "./theme";
 
 /** Screen-pixel radius in which an input port snaps a pending connection. */
@@ -64,6 +67,8 @@ export interface ControllerCallbacks {
   /** Pointer-down selection (capture phase), before any drag begins. */
   onNodePress(nodeId: NodeId, additive: boolean): void;
   onNodeDoubleTap(nodeId: NodeId): void;
+  /** Inspector pick mode: a node tap chooses the replacement source. */
+  onPickNode(nodeId: NodeId): void;
   onEdgeTap(edgeId: EdgeId, additive: boolean): void;
   /** Committed connection from an output port to a compatible input. */
   onConnect(source: PortRef, target: PortRef): void;
@@ -106,6 +111,12 @@ export interface SceneState {
   related: { nodeIds: NodeId[]; edgeIds: EdgeId[] } | null;
   background: GridMode;
   showMinimap: boolean;
+  /** Asset registry lookup for media cards. */
+  resources: ReadonlyMap<AssetId, ResourceEntry>;
+  /** Self-check issue reason per asset id (missing/changed/empty). */
+  issues: ReadonlyMap<AssetId, "missing" | "changed" | "empty">;
+  /** Inspector input-replace pick mode; candidates are the allowed sources. */
+  pick: { nodeId: NodeId; portId: string; candidates: ReadonlySet<NodeId> } | null;
 }
 
 interface EdgeRecord {
@@ -177,6 +188,8 @@ export class LeaferEditorController {
   private size: ViewSize = { width: 0, height: 0 };
   private camera: Camera = { x: 0, y: 0, zoom: 1 };
   private canvasId: CanvasId | null = null;
+  /** True while inspector input-replace pick mode owns node taps. */
+  private pickActive = false;
   private lastBackground: GridMode = "dots";
   private lastNodes: WorkflowNode[] = [];
   private lastShowMinimap = true;
@@ -301,29 +314,41 @@ export class LeaferEditorController {
 
     const lowDetail = scene.camera.zoom < LOW_DETAIL_ZOOM;
     const relatedNodes = scene.related ? new Set(scene.related.nodeIds) : null;
+    this.pickActive = scene.pick !== null;
     const seen = new Set<NodeId>();
     for (const node of scene.nodes) {
       seen.add(node.id);
+      const pickDimmed =
+        scene.pick !== null &&
+        node.id !== scene.pick.nodeId &&
+        !scene.pick.candidates.has(node.id);
       const visual = {
         selected: scene.selection.nodeIds.includes(node.id),
         hovered: scene.hoveredNodeId === node.id,
         lowDetail,
-        dimmed: relatedNodes !== null && !relatedNodes.has(node.id),
+        dimmed:
+          pickDimmed ||
+          (relatedNodes !== null &&
+            !relatedNodes.has(node.id) &&
+            scene.pick === null),
       };
       let view = this.nodeViews.get(node.id);
+      const media = mediaInfoForNode(node, scene.resources, scene.issues);
+      const signature = mediaSignature(media);
       if (!view) {
-        view = createNodeView(node, visual);
+        view = createNodeView(node, visual, media);
         this.nodeLayer.add(view.group);
         this.nodeViews.set(node.id, view);
         this.stats.nodeCreates += 1;
       } else if (
         view.node !== node ||
+        view.media.signature !== signature ||
         view.visual.selected !== visual.selected ||
         view.visual.hovered !== visual.hovered ||
         view.visual.lowDetail !== visual.lowDetail ||
         view.visual.dimmed !== visual.dimmed
       ) {
-        updateNodeView(view, node, visual);
+        updateNodeView(view, node, visual, media);
         this.stats.nodeUpdates += 1;
       }
       view.visual = visual;
@@ -609,7 +634,7 @@ export class LeaferEditorController {
     const callbacks = this.callbacks;
     if (!callbacks) return;
     const wasSelected = this.currentSelection().nodeIds.includes(nodeId);
-    if (!wasSelected) {
+    if (!wasSelected && !this.pickActive) {
       callbacks.onNodePress(nodeId, additive);
     }
     this.setGesture({
@@ -667,6 +692,8 @@ export class LeaferEditorController {
       case "pendingNode": {
         if (distance(view, gesture.startView) <= CLICK_DRAG_THRESHOLD_PX)
           return;
+        // Pick mode is tap-only; moves stay frozen while it owns the canvas.
+        if (this.pickActive) return;
         // Promote to a drag over the full current selection.
         const selection = this.currentSelection();
         const nodeIds = selection.nodeIds.includes(gesture.nodeId)
@@ -776,6 +803,10 @@ export class LeaferEditorController {
 
     switch (gesture.kind) {
       case "pendingNode": {
+        if (this.pickActive) {
+          callbacks.onPickNode(gesture.nodeId);
+          break;
+        }
         if (
           this.detectDoubleTap(view, { kind: "node", nodeId: gesture.nodeId })
         ) {

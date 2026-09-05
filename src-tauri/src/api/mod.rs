@@ -58,6 +58,10 @@ pub fn router() -> axum::Router<ApiState> {
             put(routes::replace_asset),
         )
         .route(
+            "/api/v1/projects/current/assets/{id}/reveal",
+            post(routes::reveal_asset),
+        )
+        .route(
             "/api/v1/projects/current/export",
             post(routes::export_package),
         )

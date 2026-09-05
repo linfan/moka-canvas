@@ -1,12 +1,14 @@
 import {
   CASCADE_DROP_OFFSET,
   GROUP_DETACH_THRESHOLD_PX,
+  MAX_TEXT_CONTENT_LENGTH,
   createNode,
   findNode,
   newId,
   nowIso,
   portTypesIntersect,
   validateEdgeCandidate,
+  type AssetId,
   type CanvasDocument,
   type DocumentCommand,
   type EdgeId,
@@ -16,7 +18,7 @@ import {
   type Rect,
   type WorkflowNode,
 } from "../../../shared/domain";
-import { assetsApi } from "../../../api";
+import { assetsApi, assetUrl } from "../../../api";
 import { useAppStore } from "../stores/appStore";
 import {
   useEditorStore,
@@ -34,6 +36,7 @@ import {
   type CanvasFragment,
 } from "./clipboard";
 import { fitBounds, viewCenterWorld } from "../canvas/canvasControl";
+import { buildResourceIndex } from "../canvas/mediaCards";
 import type { ConnectionCheck } from "../canvas/controller";
 
 function toastError(message: string) {
@@ -395,6 +398,254 @@ export function kindAcceptsConnection(
   );
 }
 
+/** Removes a single edge (inspector chip disconnect). */
+export function disconnectEdge(edgeId: EdgeId) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  if (
+    execute("Disconnect", [
+      { type: "removeEdges", canvasId: canvas.id, edgeIds: [edgeId] },
+    ])
+  ) {
+    announce("Disconnected input");
+  }
+}
+
+/** Removes every edge feeding one input port. */
+export function disconnectInput(nodeId: NodeId, portId: string) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const edgeIds = canvas.edges
+    .filter(
+      (edge) => edge.target.nodeId === nodeId && edge.target.portId === portId,
+    )
+    .map((edge) => edge.id);
+  if (edgeIds.length === 0) return;
+  if (execute("Disconnect input", [{ type: "removeEdges", canvasId: canvas.id, edgeIds }])) {
+    announce("Disconnected input");
+  }
+}
+
+/**
+ * Nodes that could source the given input: every node with an output port
+ * the domain validator accepts (an occupied input is a valid replace).
+ */
+export function pickSourceCandidates(
+  canvas: CanvasDocument,
+  target: PortRef,
+): Set<NodeId> {
+  const candidates = new Set<NodeId>();
+  for (const node of canvas.nodes) {
+    if (node.id === target.nodeId || node.kind === "group") continue;
+    for (const port of node.ports) {
+      if (port.direction !== "output") continue;
+      const result = validateEdgeCandidate(
+        canvas,
+        { nodeId: node.id, portId: port.id },
+        target,
+      );
+      if (result.ok || result.code === "CARDINALITY_VIOLATION") {
+        candidates.add(node.id);
+        break;
+      }
+    }
+  }
+  return candidates;
+}
+
+/** Pick mode resolution: connect the chosen node's first valid output. */
+export function resolveInputPick(sourceNodeId: NodeId) {
+  const canvas = activeCanvas();
+  const pick = useEditorStore.getState().inputPick;
+  useEditorStore.getState().stopInputPick();
+  if (!canvas || !pick) return;
+  const sourceNode = findNode(canvas, sourceNodeId);
+  if (!sourceNode) return;
+  for (const port of sourceNode.ports) {
+    if (port.direction !== "output") continue;
+    const result = validateEdgeCandidate(
+      canvas,
+      { nodeId: sourceNodeId, portId: port.id },
+      pick,
+    );
+    if (result.ok || result.code === "CARDINALITY_VIOLATION") {
+      connectPorts({ nodeId: sourceNodeId, portId: port.id }, pick);
+      return;
+    }
+  }
+  toastError("That node has no compatible output");
+}
+
+/** Nodes across every canvas that reference the asset. */
+export function assetReferencingNodeIds(assetId: string): NodeId[] {
+  const { moka } = useProjectStore.getState();
+  if (!moka) return [];
+  const ids: NodeId[] = [];
+  for (const canvas of moka.canvas) {
+    for (const node of canvas.nodes) {
+      const data = node.data as { assetId?: string; posterAssetId?: string };
+      if (data.assetId === assetId || data.posterAssetId === assetId) {
+        ids.push(node.id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Delete flow: unreferenced assets go straight to the server; referenced
+ * ones open a confirmation that also removes the referencing nodes.
+ */
+export async function requestDeleteAsset(assetId: string) {
+  const nodeIds = assetReferencingNodeIds(assetId);
+  if (nodeIds.length > 0) {
+    useEditorStore.getState().openAssetDeletePrompt({ assetId, nodeIds });
+    return;
+  }
+  await removeAssetNow(assetId);
+}
+
+async function removeAssetNow(assetId: string) {
+  try {
+    // The server rejects deletes while its copy still references the asset;
+    // pending edits (like the just-removed nodes) must land first.
+    await useProjectStore.getState().flush();
+    if (useProjectStore.getState().pending.length > 0) {
+      toastError("Changes are still saving — try again in a moment");
+      return;
+    }
+    const result = await assetsApi.remove(assetId);
+    useProjectStore.getState().removeAssetEntry(assetId, result);
+    announce("Asset removed");
+  } catch (error) {
+    toastError(error instanceof Error ? error.message : "Delete failed");
+  }
+}
+
+/** Confirmed delete: drop the referencing nodes (edges cascade), then the file. */
+export async function confirmDeleteAsset() {
+  const prompt = useEditorStore.getState().assetDeletePrompt;
+  useEditorStore.getState().closeAssetDeletePrompt();
+  if (!prompt) return;
+  const { moka } = useProjectStore.getState();
+  if (!moka) return;
+  const commands: DocumentCommand[] = [];
+  for (const canvas of moka.canvas) {
+    const here = canvas.nodes.filter((node) => prompt.nodeIds.includes(node.id));
+    if (here.length > 0) {
+      commands.push({
+        type: "removeNodes",
+        canvasId: canvas.id,
+        nodeIds: here.map((node) => node.id),
+      });
+    }
+  }
+  if (commands.length > 0 && !execute("Remove referencing nodes", commands)) {
+    return;
+  }
+  useEditorStore.getState().setSelection({ nodeIds: [], edgeIds: [] });
+  await removeAssetNow(prompt.assetId);
+}
+
+/** Creates a source node for a registered asset at a world position. */
+export async function addAssetNode(assetId: AssetId, at?: Point) {
+  const canvas = activeCanvas();
+  const { moka } = useProjectStore.getState();
+  if (!canvas || !moka) return;
+  const entry = buildResourceIndex(moka).get(assetId);
+  if (!entry) return;
+  const category = entry.path.split("/")[1];
+  const anchor = at ?? viewCenterWorld() ?? { x: 0, y: 0 };
+  let kind: NodeKind;
+  if (category === "images") kind = "image";
+  else if (category === "videos") kind = "video";
+  else if (category === "music" || category === "voice") kind = "audio";
+  else kind = "text";
+  const node = createNode(kind, { x: anchor.x - 140, y: anchor.y - 40 });
+  node.title = entry.name;
+  if (kind === "audio") {
+    node.data = {
+      assetId,
+      audioCategory: category === "voice" ? "voice" : "music",
+    };
+  } else if (kind === "text") {
+    let content = "";
+    try {
+      const response = await fetch(assetUrl(assetId));
+      if (response.ok) {
+        content = (await response.text()).slice(0, MAX_TEXT_CONTENT_LENGTH);
+      }
+    } catch {
+      // Keep the empty body; the asset link still identifies the file.
+    }
+    node.data = { content, assetId };
+  } else {
+    node.data = {
+      assetId,
+      posterAssetId: entry.probe?.posterAssetId,
+    };
+  }
+  if (execute("Add asset node", [{ type: "addNode", canvasId: canvas.id, node }])) {
+    useEditorStore.getState().selectOnly(node.id);
+    announce(`Added ${entry.name}`);
+  }
+}
+
+export interface ImportFilesOptions {
+  /** World anchor for created nodes; each file cascades from it. */
+  at?: Point;
+  /** Create a source node per imported asset. */
+  addNodes?: boolean;
+  signal?: AbortSignal;
+  onFileProgress?: (index: number, fraction: number) => void;
+  /** Fires once per settled file; `error` is set when the file failed. */
+  onFileDone?: (index: number, error?: string) => void;
+}
+
+/** dataTransfer type carrying an asset id dragged from the resource panel. */
+export const ASSET_DRAG_MIME = "application/x-moka-asset";
+
+/**
+ * Uploads files one at a time (server sniffing routes each to its category
+ * directory) and folds every accepted entry into the local registry. A failed
+ * file is reported and skipped; the rest of the batch continues.
+ */
+export async function importFiles(
+  files: File[],
+  options: ImportFilesOptions = {},
+): Promise<void> {
+  for (const [index, file] of files.entries()) {
+    if (options.signal?.aborted) break;
+    try {
+      const change = await assetsApi.upload(file, {
+        signal: options.signal,
+        onUploadProgress: options.onFileProgress
+          ? (fraction) => options.onFileProgress?.(index, fraction)
+          : undefined,
+      });
+      useProjectStore.getState().integrateAssetEntry(change.entry, {
+        revision: change.revision,
+        updatedAt: change.updatedAt,
+      });
+      if (options.addNodes) {
+        const at = options.at
+          ? {
+              x: options.at.x + index * CASCADE_DROP_OFFSET,
+              y: options.at.y + index * CASCADE_DROP_OFFSET,
+            }
+          : undefined;
+        await addAssetNode(change.entry.id, at);
+      }
+      options.onFileDone?.(index);
+    } catch (error) {
+      if (options.signal?.aborted) break;
+      const message = error instanceof Error ? error.message : "Import failed";
+      toastError(`${file.name}: ${message}`);
+      options.onFileDone?.(index, message);
+    }
+  }
+}
+
 export function addNodeAt(
   world: Point,
   kind: NodeKind,
@@ -455,6 +706,23 @@ export function renameNode(nodeId: NodeId, title: string) {
       canvasId: canvas.id,
       nodeId,
       patch: { title: trimmed },
+    },
+  ]);
+}
+
+export function editTextContent(nodeId: NodeId, content: string) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const node = findNode(canvas, nodeId);
+  if (!node || node.kind !== "text") return;
+  const current = (node.data as { content?: string }).content ?? "";
+  if (content === current) return;
+  execute("Edit text", [
+    {
+      type: "updateNode",
+      canvasId: canvas.id,
+      nodeId,
+      patch: { data: { ...node.data, content } },
     },
   ]);
 }

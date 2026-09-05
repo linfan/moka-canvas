@@ -377,6 +377,25 @@ async fn asset_upload_stream_range_and_delete() {
 }
 
 #[tokio::test]
+async fn reveal_unknown_asset_is_not_found() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    create_project(&app, &temp.path().join("projects"), "Reveal").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/projects/current/assets/nope/reveal")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn export_then_import_roundtrip() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());

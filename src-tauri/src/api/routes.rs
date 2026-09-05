@@ -322,6 +322,52 @@ pub async fn delete_asset(
     }))
 }
 
+pub async fn reveal_asset(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, Problem> {
+    let asset = state.store.asset_file(&id, None).await?;
+    reveal_in_folder(&asset.path)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Opens the platform file manager with the asset selected. The path is
+/// passed as a plain argv entry — no shell is involved.
+#[cfg(target_os = "macos")]
+fn reveal_in_folder(path: &std::path::Path) -> Result<(), Problem> {
+    spawn_reveal("open", &[std::ffi::OsStr::new("-R"), path.as_os_str()])
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_in_folder(path: &std::path::Path) -> Result<(), Problem> {
+    let select = format!("/select,{}", path.display());
+    spawn_reveal("explorer", &[std::ffi::OsStr::new(&select)])
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn reveal_in_folder(path: &std::path::Path) -> Result<(), Problem> {
+    let parent = path.parent().unwrap_or(path);
+    spawn_reveal("xdg-open", &[parent.as_os_str()])
+}
+
+#[cfg(any(unix, target_os = "windows"))]
+fn spawn_reveal(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), Problem> {
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| {
+            Problem::new(
+                StatusCode::BAD_GATEWAY,
+                "REVEAL_FAILED",
+                format!("Could not open the file manager: {error}"),
+            )
+        })
+}
+
 fn parse_range_header(value: Option<&str>, total: u64) -> Result<Option<ByteRange>, Problem> {
     let Some(value) = value else {
         return Ok(None);

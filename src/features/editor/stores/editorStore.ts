@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import type { EdgeId, NodeId, Point, Viewport } from "../../../shared/domain";
+import type {
+  AssetId,
+  EdgeId,
+  NodeId,
+  Point,
+  Viewport,
+} from "../../../shared/domain";
 
 export type EditorTool = "select" | "pan";
 
@@ -97,6 +103,14 @@ interface EditorState {
   contextMenu: ContextMenuState | null;
   nodeMenu: NodeMenuState | null;
   renaming: { nodeId: NodeId } | null;
+  /** Text-node body editing (textarea overlay). */
+  textEditing: { nodeId: NodeId } | null;
+  /** Inspector "replace input" pick mode: choosing a new source node. */
+  inputPick: { nodeId: NodeId; portId: string } | null;
+  /** Confirmation for deleting an asset still referenced by nodes. */
+  assetDeletePrompt: { assetId: AssetId; nodeIds: NodeId[] } | null;
+  /** Full-preview dialog for an asset (image/video). */
+  previewAssetId: AssetId | null;
   /** Screen-reader announcement fed to the editor's live region. */
   announcement: string;
 
@@ -119,6 +133,14 @@ interface EditorState {
   closeNodeMenu: () => void;
   startRenaming: (nodeId: NodeId) => void;
   stopRenaming: () => void;
+  startEditingText: (nodeId: NodeId) => void;
+  stopEditingText: () => void;
+  startInputPick: (target: { nodeId: NodeId; portId: string }) => void;
+  stopInputPick: () => void;
+  openAssetDeletePrompt: (prompt: { assetId: AssetId; nodeIds: NodeId[] }) => void;
+  closeAssetDeletePrompt: () => void;
+  openPreview: (assetId: AssetId) => void;
+  closePreview: () => void;
   announce: (message: string) => void;
 }
 
@@ -138,6 +160,10 @@ export const useEditorStore = create<EditorState>()((set) => ({
   contextMenu: null,
   nodeMenu: null,
   renaming: null,
+  textEditing: null,
+  inputPick: null,
+  assetDeletePrompt: null,
+  previewAssetId: null,
   announcement: "",
 
   setTool: (tool) => set({ tool }),
@@ -168,6 +194,14 @@ export const useEditorStore = create<EditorState>()((set) => ({
   closeNodeMenu: () => set({ nodeMenu: null }),
   startRenaming: (nodeId) => set({ renaming: { nodeId } }),
   stopRenaming: () => set({ renaming: null }),
+  startEditingText: (nodeId) => set({ textEditing: { nodeId } }),
+  stopEditingText: () => set({ textEditing: null }),
+  startInputPick: (target) => set({ inputPick: target }),
+  stopInputPick: () => set({ inputPick: null }),
+  openAssetDeletePrompt: (prompt) => set({ assetDeletePrompt: prompt }),
+  closeAssetDeletePrompt: () => set({ assetDeletePrompt: null }),
+  openPreview: (assetId) => set({ previewAssetId: assetId }),
+  closePreview: () => set({ previewAssetId: null }),
   announce: (message) => set({ announcement: message }),
 }));
 

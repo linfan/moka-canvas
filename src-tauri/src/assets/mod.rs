@@ -3,6 +3,8 @@ use crate::project::ProjectError;
 use sha2::Digest;
 use std::path::{Path, PathBuf};
 
+pub mod probe;
+
 /// Maps a sniffed MIME type to its asset category directory.
 pub fn category_for_mime(mime: &str) -> Option<&'static str> {
     if mime.starts_with("image/") {
@@ -32,8 +34,9 @@ pub struct StagedAnalysis {
 }
 
 /// Sniffs the MIME type from bytes, hashes the file, and probes cheap
-/// metadata (image dimensions). Audio/video duration is left to later
-/// bounded derivative jobs.
+/// metadata: image dimensions, and duration/sample details for WAV, MP3,
+/// and MP4-family media. Probing is best-effort — malformed media still
+/// imports, just without the missing fields.
 pub fn analyze_staged(path: &Path) -> Result<StagedAnalysis, ProjectError> {
     let bytes = std::fs::read(path)?;
     if bytes.is_empty() {
@@ -72,6 +75,16 @@ pub fn analyze_staged(path: &Path) -> Result<StagedAnalysis, ProjectError> {
                     probe.height = Some(height as i32);
                 }
             }
+        }
+    } else if mime.starts_with("audio/") || mime.starts_with("video/") {
+        let media = probe::probe_media(&mime, &bytes);
+        probe.duration_ms = media.duration_ms;
+        probe.sample_rate = media.sample_rate;
+        probe.channels = media.channels;
+        probe.codec_summary = media.codec_summary;
+        if probe.width.is_none() {
+            probe.width = media.width;
+            probe.height = media.height;
         }
     }
 

@@ -3,6 +3,7 @@ import { recentApi, type RecentProject } from "../../../api";
 import type { SelfCheckReport } from "../../../shared/domain";
 import { useAppStore } from "../stores/appStore";
 import { useProjectStore } from "../stores/projectStore";
+import { MissingAssetsDialog } from "./MissingAssetsDialog";
 import { ProjectDialog, type DialogMode } from "./ProjectDialog";
 
 export function LauncherPage() {
@@ -10,6 +11,7 @@ export function LauncherPage() {
   const phase = useAppStore((state) => state.phase);
   const [recents, setRecents] = useState<RecentProject[] | null>(null);
   const [dialog, setDialog] = useState<DialogMode | null>(null);
+  const [pendingCheck, setPendingCheck] = useState<SelfCheckReport | null>(null);
 
   const refreshRecents = useCallback(() => {
     recentApi
@@ -21,15 +23,18 @@ export function LauncherPage() {
   useEffect(refreshRecents, [refreshRecents]);
 
   const enterProject = useCallback((selfCheck: SelfCheckReport) => {
-    useAppStore.getState().setPhase("editing");
-    if (!selfCheck.ok) {
-      useAppStore
-        .getState()
-        .pushToast(
-          "error",
-          `${selfCheck.issues.length} referenced asset(s) are missing or changed`,
-        );
+    if (selfCheck.ok) {
+      useAppStore.getState().setPhase("editing");
+    } else {
+      // Hold in "opening" until the user chooses how to proceed.
+      setPendingCheck(selfCheck);
     }
+  }, []);
+
+  const cancelOpen = useCallback(() => {
+    setPendingCheck(null);
+    useProjectStore.getState().close();
+    useAppStore.getState().setPhase("launcher");
   }, []);
 
   const openRecent = useCallback(
@@ -62,7 +67,7 @@ export function LauncherPage() {
     [refreshRecents],
   );
 
-  const busy = phase === "opening";
+  const busy = phase === "opening" && pendingCheck === null;
 
   return (
     <div className="launcher">
@@ -139,6 +144,17 @@ export function LauncherPage() {
           nativePickers={mode === "tauri"}
           onClose={() => setDialog(null)}
           onDone={enterProject}
+        />
+      )}
+
+      {pendingCheck && (
+        <MissingAssetsDialog
+          onCancel={cancelOpen}
+          onOpenAnyway={() => {
+            setPendingCheck(null);
+            useAppStore.getState().setPhase("editing");
+          }}
+          report={pendingCheck}
         />
       )}
     </div>

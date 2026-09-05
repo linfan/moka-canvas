@@ -1,8 +1,13 @@
 import { projectsApi } from "../../api";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
-import { zoomTo } from "./canvas/canvasControl";
-import { fitViewAction } from "./interactions/actions";
+import { clientToWorld, zoomTo } from "./canvas/canvasControl";
+import {
+  ASSET_DRAG_MIME,
+  addAssetNode,
+  fitViewAction,
+  importFiles,
+} from "./interactions/actions";
 import { useEditorKeyboard } from "./interactions/keyboard";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
@@ -13,7 +18,10 @@ import { ContextMenu } from "./panels/ContextMenu";
 import { InspectorPanel } from "./panels/InspectorPanel";
 import { NodeMenu } from "./panels/NodeMenu";
 import { SidePanel } from "./panels/SidePanel";
+import { AssetDeleteDialog } from "./components/AssetDeleteDialog";
+import { AssetPreviewDialog } from "./components/AssetPreviewDialog";
 import { RenameOverlay } from "./components/RenameOverlay";
+import { TextEditOverlay } from "./components/TextEditOverlay";
 
 const SAVE_LABEL: Record<string, string> = {
   saved: "Saved",
@@ -126,9 +134,36 @@ export function EditorPage() {
 
       <div className="editor-body">
         {resourcesPanelOpen && <SidePanel />}
-        <main className="editor-canvas" data-testid="canvas-host">
+        <main
+          className="editor-canvas"
+          data-testid="canvas-host"
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const world = clientToWorld({
+              x: event.clientX,
+              y: event.clientY,
+            });
+            const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME);
+            if (assetId) {
+              void addAssetNode(assetId, world ?? undefined);
+              return;
+            }
+            const files = [...event.dataTransfer.files];
+            if (files.length > 0) {
+              void importFiles(files, {
+                at: world ?? undefined,
+                addNodes: true,
+              });
+            }
+          }}
+        >
           <CanvasSurface />
           <RenameOverlay />
+          <TextEditOverlay />
           <p className="editor-canvas-hint">
             {activeCanvas
               ? `${activeCanvas.nodes.length} nodes · ${activeCanvas.edges.length} edges`
@@ -140,6 +175,8 @@ export function EditorPage() {
 
       <ContextMenu />
       <NodeMenu />
+      <AssetDeleteDialog />
+      <AssetPreviewDialog />
 
       <footer className="editor-toolstrip">
         <div aria-label="Tool" className="tool-group" role="group">

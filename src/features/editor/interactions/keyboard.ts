@@ -34,6 +34,7 @@ export function useEditorKeyboard() {
       const editor = useEditorStore.getState();
       const project = useProjectStore.getState();
       if (!project.moka) return;
+      if (editor.assetDeletePrompt || editor.previewAssetId) return;
       if (isEditableTarget(event.target)) return;
 
       const mod = event.metaKey || event.ctrlKey;
@@ -57,6 +58,10 @@ export function useEditorKeyboard() {
           editor.closeContextMenu();
         } else if (editor.renaming) {
           editor.stopRenaming();
+        } else if (editor.textEditing) {
+          editor.stopEditingText();
+        } else if (editor.inputPick) {
+          editor.stopInputPick();
         } else if (editor.gesture.kind !== "idle") {
           cancelGesture();
         } else {
@@ -126,7 +131,14 @@ export function useEditorKeyboard() {
       if (event.key === "Enter") {
         const selection = editor.selection;
         if (selection.nodeIds.length === 1) {
-          editor.startRenaming(selection.nodeIds[0]);
+          const nodeId = selection.nodeIds[0];
+          const canvas = activeCanvas();
+          const node = canvas?.nodes.find((entry) => entry.id === nodeId);
+          if (node?.kind === "text") {
+            editor.startEditingText(nodeId);
+          } else {
+            editor.startRenaming(nodeId);
+          }
         }
         return;
       }

@@ -6,6 +6,7 @@ import {
   PORT_SPACING,
   canvasTheme,
 } from "./theme";
+import { mediaSignature, waveformPeaks, type MediaCardInfo } from "./mediaCards";
 
 export interface NodeVisualState {
   selected: boolean;
@@ -32,6 +33,12 @@ export interface NodeView {
   ports: Map<string, PortView>;
   node: WorkflowNode;
   visual: NodeVisualState;
+  media: {
+    signature: string;
+    thumb: Rect | null;
+    badge: Text | null;
+    bars: Rect[];
+  };
 }
 
 const KIND_GLYPH: Record<NodeKind, string> = {
@@ -68,6 +75,116 @@ function summarize(node: WorkflowNode): string {
   }
 }
 
+/** Card body area below the header, inset from the frame. */
+function mediaArea(bounds: { width: number; height: number }) {
+  return {
+    x: 8,
+    y: NODE_HEADER_HEIGHT + 8,
+    width: bounds.width - 16,
+    height: bounds.height - NODE_HEADER_HEIGHT - 16,
+  };
+}
+
+function layoutMedia(
+  view: NodeView,
+  bounds: { width: number; height: number },
+) {
+  const area = mediaArea(bounds);
+  if (view.media.thumb) {
+    view.media.thumb.set({
+      x: area.x,
+      y: area.y,
+      width: area.width,
+      height: area.height,
+    });
+  }
+  if (view.media.badge) {
+    view.media.badge.set({
+      x: area.x + 8,
+      y: area.y + area.height - 24,
+      width: area.width - 16,
+    });
+  }
+  const bars = view.media.bars;
+  if (bars.length > 0) {
+    const gap = 3;
+    const barWidth = Math.max(2, (area.width - gap * (bars.length - 1)) / bars.length);
+    bars.forEach((bar, index) => {
+      const peak = Number(bar.data?.peak ?? 0.5);
+      const height = Math.max(4, area.height * peak);
+      bar.set({
+        x: area.x + index * (barWidth + gap),
+        y: area.y + (area.height - height) / 2,
+        width: barWidth,
+        height,
+      });
+    });
+  }
+}
+
+function syncMedia(
+  view: NodeView,
+  node: WorkflowNode,
+  media: MediaCardInfo | null,
+) {
+  const signature = mediaSignature(media);
+  if (view.media.signature === signature) return;
+  view.media.signature = signature;
+  view.media.thumb?.remove();
+  view.media.badge?.remove();
+  for (const bar of view.media.bars) bar.remove();
+  view.media.thumb = null;
+  view.media.badge = null;
+  view.media.bars = [];
+  if (!media) return;
+
+  if (media.state === "ready" && media.url && node.kind !== "audio") {
+    view.media.thumb = new Rect({
+      cornerRadius: 8,
+      fill: { type: "image", url: media.url, mode: "cover" },
+      hittable: false,
+    });
+    view.group.add(view.media.thumb);
+  } else if (media.state === "ready" && node.kind === "audio") {
+    const accent = canvasTheme.kindAccent.audio;
+    view.media.bars = waveformPeaks(media.entry?.sha256).map((peak) => {
+      const bar = new Rect({
+        cornerRadius: 1,
+        fill: accent,
+        opacity: 0.85,
+        hittable: false,
+        data: { peak },
+      });
+      view.group.add(bar);
+      return bar;
+    });
+  } else {
+    // Missing / changed / empty: a distinct broken-media wash.
+    view.media.thumb = new Rect({
+      cornerRadius: 8,
+      fill: "#4a2430",
+      dashPattern: [4, 3],
+      stroke: "#ff8c82",
+      strokeWidth: 1,
+      hittable: false,
+    });
+    view.group.add(view.media.thumb);
+  }
+
+  if (media.label) {
+    view.media.badge = new Text({
+      text: media.state === "ready" ? media.label : `⚠ ${media.label}`,
+      fontSize: 11,
+      fill: media.state === "ready" ? canvasTheme.nodeTitle : "#ff8c82",
+      fontFamily: canvasTheme.fontFamily,
+      textOverflow: "…",
+      hittable: false,
+    });
+    view.group.add(view.media.badge);
+  }
+  layoutMedia(view, node.bounds);
+}
+
 function layoutPorts(node: WorkflowNode): Map<string, PortView> {
   const inputs = node.ports.filter((port) => port.direction === "input");
   const outputs = node.ports.filter((port) => port.direction === "output");
@@ -95,6 +212,7 @@ function layoutPorts(node: WorkflowNode): Map<string, PortView> {
 export function createNodeView(
   node: WorkflowNode,
   visual: NodeVisualState,
+  media: MediaCardInfo | null = null,
 ): NodeView {
   const accentColor = canvasTheme.kindAccent[node.kind];
   const group = new Group({
@@ -167,7 +285,9 @@ export function createNodeView(
     ports: new Map(),
     node,
     visual,
+    media: { signature: "", thumb: null, badge: null, bars: [] },
   };
+  syncMedia(view, node, media);
   syncPorts(view, node);
   applyVisual(view, visual);
   return view;
@@ -215,8 +335,12 @@ function applyVisual(view: NodeView, visual: NodeVisualState) {
     : visual.hovered
       ? canvasTheme.nodeMuted
       : canvasTheme.nodeStroke;
-  summary.visible = !visual.lowDetail;
+  const hasMedia = view.media.signature !== "";
+  summary.visible = !visual.lowDetail && !hasMedia;
   title.width = view.node.bounds.width - 52;
+  if (view.media.thumb) view.media.thumb.visible = !visual.lowDetail;
+  if (view.media.badge) view.media.badge.visible = !visual.lowDetail;
+  for (const bar of view.media.bars) bar.visible = !visual.lowDetail;
   for (const port of view.ports.values()) {
     port.dot.visible = !visual.lowDetail;
   }
@@ -228,6 +352,7 @@ export function updateNodeView(
   view: NodeView,
   node: WorkflowNode,
   visual: NodeVisualState,
+  media: MediaCardInfo | null = null,
 ): boolean {
   const portsChanged =
     view.node.bounds.width !== node.bounds.width ||
@@ -246,6 +371,8 @@ export function updateNodeView(
     height: node.bounds.height - NODE_HEADER_HEIGHT - 20,
     text: summarize(node),
   });
+  syncMedia(view, node, media);
+  layoutMedia(view, node.bounds);
   syncPorts(view, node);
   applyVisual(view, visual);
   return portsChanged || view.visual.lowDetail !== visual.lowDetail;
@@ -273,6 +400,7 @@ export function previewNodeBounds(
     width: bounds.width - 28,
     height: bounds.height - NODE_HEADER_HEIGHT - 20,
   });
+  layoutMedia(view, bounds);
   const laidOut = layoutPorts({
     ...view.node,
     bounds,
