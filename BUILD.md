@@ -34,6 +34,14 @@ make web-serve   # Build frontend, serve dist/ + API at http://127.0.0.1:8080
 make tauri-dev   # Build frontend, run the Tauri desktop app
 ```
 
+## Versioning
+
+```sh
+make set-version 1.2.3
+```
+
+Sets the version of all build outputs in one place: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the `moka-canvas` entry in `src-tauri/Cargo.lock`. Windows installer metadata and the DMG/setup filenames derive from these, so run this before packaging a release.
+
 ## Package targets
 
 ### Web (any host)
@@ -54,7 +62,7 @@ Builds the frontend, compiles the `moka-server` release binary, and stages a sel
 make package-macos
 ```
 
-Produces `Moka Canvas_<version>_<arch>.dmg` (`aarch64` on Apple Silicon, `x64` on Intel) under `src-tauri/target/release/bundle/dmg/`, with the branded background and app/Applications drop slots configured via `bundle.macOS.dmg` in `src-tauri/tauri.conf.json`. Unsigned; Gatekeeper may warn on first launch.
+Produces `Moka Canvas_<version>_<arch>.dmg` (`aarch64` on Apple Silicon, `x64` on Intel), copied into `release/` (the tauri-bundler output remains under `src-tauri/target/release/bundle/dmg/`), with the branded background and app/Applications drop slots configured via `bundle.macOS.dmg` in `src-tauri/tauri.conf.json`. Unsigned; Gatekeeper may warn on first launch.
 
 > Rebuilding deletes the previous DMG, so eject any mounted copy before running `make package-macos` again — otherwise the DMG stays mounted as a leftover volume and the Finder styling step fails with a generic `error running bundle_dmg.sh`.
 
@@ -64,7 +72,7 @@ Produces `Moka Canvas_<version>_<arch>.dmg` (`aarch64` on Apple Silicon, `x64` o
 make package-windows
 ```
 
-Produces MSI and NSIS installers under `src-tauri/target/release/bundle/`. Requires Microsoft C++ Build Tools, WebView2, and WiX/NSIS tooling per Tauri's Windows prerequisites.
+Produces MSI and NSIS installers under `src-tauri/target/release/bundle/` and copies them into `release/`. Requires Microsoft C++ Build Tools, WebView2, and WiX/NSIS tooling per Tauri's Windows prerequisites.
 
 The NSIS installer is built from a custom template (`src-tauri/installer/installer.nsi`, forked from the Tauri default) that provides branded welcome and finish pages plus header bitmaps from `src-tauri/installer/`; it is selected via `bundle.windows.nsis.template` in `src-tauri/tauri.conf.json`. Because the template is forked, it does not automatically pick up upstream Tauri fixes — re-diff it against the [upstream template](https://github.com/tauri-apps/tauri/blob/dev/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi) whenever the Tauri CLI is upgraded.
 
@@ -74,7 +82,7 @@ The NSIS installer is built from a custom template (`src-tauri/installer/install
 make cross-package-windows
 ```
 
-Cross-compiles the NSIS installer (`Moka Canvas_<version>_x64-setup.exe`) from macOS using the `x86_64-pc-windows-gnu` Rust target and mingw-w64.
+Cross-compiles the NSIS installer (`Moka Canvas_<version>_x64-setup.exe`) from macOS using the `x86_64-pc-windows-gnu` Rust target and mingw-w64, then copies it into `release/`.
 
 Host prerequisites:
 

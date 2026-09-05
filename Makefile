@@ -2,7 +2,18 @@ SHELL := /bin/sh
 CARGO_MANIFEST := src-tauri/Cargo.toml
 WINDOWS_CROSS_TARGET := x86_64-pc-windows-gnu
 
-.PHONY: install check web-build web-serve tauri-dev package-web package-macos package-windows cross-package-windows clean
+.PHONY: install check web-build web-serve tauri-dev package-web package-macos package-windows cross-package-windows set-version clean
+
+ifeq (set-version,$(firstword $(MAKECMDGOALS)))
+SET_VERSION_ARG := $(word 2,$(MAKECMDGOALS))
+ifneq ($(SET_VERSION_ARG),)
+$(eval $(SET_VERSION_ARG):;@:)
+endif
+endif
+
+set-version:
+	@test -n "$(SET_VERSION_ARG)" || (printf '%s\n' 'usage: make set-version <semver>  (e.g. make set-version 1.2.3)' >&2; exit 1)
+	node scripts/set-version.mjs $(SET_VERSION_ARG)
 
 install:
 	npm ci
@@ -31,10 +42,12 @@ package-web: web-build
 package-macos: web-build
 	@test "$$(uname -s)" = "Darwin" || (printf '%s\n' 'package-macos must run on macOS.' >&2; exit 1)
 	npm run tauri build -- --bundles dmg
+	node scripts/collect-release.mjs
 
 package-windows: web-build
 	@case "$$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) printf '%s\n' 'package-windows must run on Windows.' >&2; exit 1;; esac
 	npm run tauri build -- --bundles msi,nsis
+	node scripts/collect-release.mjs
 
 cross-package-windows: web-build
 	@test "$$(uname -s)" = "Darwin" || (printf '%s\n' 'cross-package-windows must run on macOS.' >&2; exit 1)
@@ -45,6 +58,7 @@ cross-package-windows: web-build
 	CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
 	CARGO_TARGET_X86_64_PC_WINDOWS_GNU_AR=x86_64-w64-mingw32-ar \
 	npm run tauri build -- --target $(WINDOWS_CROSS_TARGET) --bundles nsis
+	node scripts/collect-release.mjs
 
 clean:
 	rm -rf dist release src-tauri/target node_modules/.tmp
