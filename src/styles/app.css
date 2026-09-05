@@ -468,6 +468,63 @@ h2 {
   text-align: center;
 }
 
+.zoom-slider {
+  accent-color: var(--primary);
+  padding: 0;
+  width: 120px;
+}
+
+/* Floating menus + overlays */
+
+.menu {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 2px;
+  min-width: 160px;
+  padding: 6px;
+  position: fixed;
+  z-index: 60;
+}
+
+.menu button {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.menu button:hover:not(:disabled),
+.menu button:focus-visible {
+  background: var(--primary);
+  color: var(--canvas);
+  outline: none;
+}
+
+.menu-title {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin: 2px 8px 4px;
+  text-transform: uppercase;
+}
+
+.rename-overlay {
+  position: absolute;
+  z-index: 30;
+}
+
+.sr-only {
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+  clip-path: inset(50%);
+}
+
 /* Toasts */
 
 .toasts {

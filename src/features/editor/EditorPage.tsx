@@ -1,13 +1,19 @@
 import { projectsApi } from "../../api";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
+import { zoomTo } from "./canvas/canvasControl";
+import { fitViewAction } from "./interactions/actions";
+import { useEditorKeyboard } from "./interactions/keyboard";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { useHistoryStore, isBoundary } from "./stores/historyStore";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
 import { CanvasTabs } from "./panels/CanvasTabs";
+import { ContextMenu } from "./panels/ContextMenu";
 import { InspectorPanel } from "./panels/InspectorPanel";
+import { NodeMenu } from "./panels/NodeMenu";
 import { SidePanel } from "./panels/SidePanel";
+import { RenameOverlay } from "./components/RenameOverlay";
 
 const SAVE_LABEL: Record<string, string> = {
   saved: "Saved",
@@ -34,8 +40,12 @@ export function EditorPage() {
     (state) => state.resourcesPanelOpen,
   );
   const inspectorOpen = useEditorStore((state) => state.inspectorOpen);
+  const announcement = useEditorStore((state) => state.announcement);
   const canUndo = useCanUndo();
   const canRedo = useHistoryStore((state) => state.redoStack.length > 0);
+  useEditorKeyboard();
+
+  const zoom = liveZoom ?? activeCanvas?.viewport.zoom ?? 1;
 
   const closeProject = async () => {
     const project = useProjectStore.getState();
@@ -65,6 +75,9 @@ export function EditorPage() {
 
   return (
     <div className="editor">
+      <div aria-live="polite" className="sr-only" role="status">
+        {announcement}
+      </div>
       <header className="editor-topbar">
         <button
           aria-label="Back to launcher"
@@ -115,6 +128,7 @@ export function EditorPage() {
         {resourcesPanelOpen && <SidePanel />}
         <main className="editor-canvas" data-testid="canvas-host">
           <CanvasSurface />
+          <RenameOverlay />
           <p className="editor-canvas-hint">
             {activeCanvas
               ? `${activeCanvas.nodes.length} nodes · ${activeCanvas.edges.length} edges`
@@ -123,6 +137,9 @@ export function EditorPage() {
         </main>
         {inspectorOpen && <InspectorPanel />}
       </div>
+
+      <ContextMenu />
+      <NodeMenu />
 
       <footer className="editor-toolstrip">
         <div aria-label="Tool" className="tool-group" role="group">
@@ -143,9 +160,26 @@ export function EditorPage() {
             Pan
           </button>
         </div>
-        <span className="zoom-readout">
-          {Math.round((liveZoom ?? activeCanvas?.viewport.zoom ?? 1) * 100)}%
-        </span>
+        <div aria-label="Zoom" className="tool-group" role="group">
+          <button
+            aria-label="Fit view"
+            onClick={() => fitViewAction()}
+            type="button"
+          >
+            Fit
+          </button>
+          <input
+            aria-label="Zoom"
+            className="zoom-slider"
+            max={500}
+            min={5}
+            onChange={(event) => zoomTo(Number(event.target.value) / 100)}
+            step={5}
+            type="range"
+            value={Math.round(zoom * 100)}
+          />
+          <span className="zoom-readout">{Math.round(zoom * 100)}%</span>
+        </div>
         <div aria-label="Panels" className="tool-group" role="group">
           <button
             aria-pressed={resourcesPanelOpen}

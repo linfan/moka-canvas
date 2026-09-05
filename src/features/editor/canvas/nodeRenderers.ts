@@ -12,6 +12,8 @@ export interface NodeVisualState {
   hovered: boolean;
   /** Zoomed out past the detail threshold: title and accent only. */
   lowDetail: boolean;
+  /** Related-highlight is active and this node is outside the chain. */
+  dimmed: boolean;
 }
 
 export interface PortView {
@@ -218,7 +220,7 @@ function applyVisual(view: NodeView, visual: NodeVisualState) {
   for (const port of view.ports.values()) {
     port.dot.visible = !visual.lowDetail;
   }
-  group.opacity = 1;
+  group.opacity = visual.dimmed ? 0.35 : 1;
 }
 
 /** Returns true when the port layout changed and edges must be refreshed. */
@@ -253,7 +255,72 @@ export function portAnchorWorld(view: NodeView, portId: string): Point | null {
   const port = view.ports.get(portId);
   if (!port) return null;
   return {
-    x: view.node.bounds.x + port.local.x,
-    y: view.node.bounds.y + port.local.y,
+    x: (view.group.x ?? view.node.bounds.x) + port.local.x,
+    y: (view.group.y ?? view.node.bounds.y) + port.local.y,
   };
+}
+
+/** Repositions/resizes the view without touching the model reference. */
+export function previewNodeBounds(
+  view: NodeView,
+  bounds: { x: number; y: number; width: number; height: number },
+) {
+  view.group.set({ x: bounds.x, y: bounds.y });
+  view.frame.set({ width: bounds.width, height: bounds.height });
+  view.accent.set({ height: bounds.height });
+  view.title.set({ width: bounds.width - 52 });
+  view.summary.set({
+    width: bounds.width - 28,
+    height: bounds.height - NODE_HEADER_HEIGHT - 20,
+  });
+  const laidOut = layoutPorts({
+    ...view.node,
+    bounds,
+  });
+  for (const [portId, port] of view.ports) {
+    const next = laidOut.get(portId);
+    if (!next) continue;
+    port.local = next.local;
+    port.dot.set({
+      x: next.local.x - PORT_RADIUS,
+      y: next.local.y - PORT_RADIUS,
+    });
+  }
+}
+
+export type PortHighlight = "compatible" | "rejected" | "candidate" | null;
+
+/** Connect-time port affordance; null restores the default dot. */
+export function setPortHighlight(
+  view: NodeView,
+  portId: string,
+  state: PortHighlight,
+) {
+  const port = view.ports.get(portId);
+  if (!port) return;
+  if (state === "compatible") {
+    port.dot.set({
+      fill: canvasTheme.portCompatible,
+      strokeWidth: 2,
+      stroke: canvasTheme.portCompatible,
+    });
+  } else if (state === "candidate") {
+    port.dot.set({
+      fill: canvasTheme.selection,
+      strokeWidth: 2.5,
+      stroke: canvasTheme.selection,
+    });
+  } else if (state === "rejected") {
+    port.dot.set({
+      fill: canvasTheme.portRejected,
+      strokeWidth: 1.5,
+      stroke: canvasTheme.nodeFill,
+    });
+  } else {
+    port.dot.set({
+      fill: canvasTheme.port,
+      strokeWidth: 1.5,
+      stroke: canvasTheme.nodeFill,
+    });
+  }
 }

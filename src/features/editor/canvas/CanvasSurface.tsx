@@ -1,7 +1,21 @@
 import { useEffect, useRef } from "react";
 import type { CanvasDocument } from "../../../shared/domain";
-import type { ControllerCallbacks, LeaferEditorController } from "./controller";
-import { useEditorStore } from "../stores/editorStore";
+import type {
+  ControllerCallbacks,
+  HitTarget,
+  LeaferEditorController,
+} from "./controller";
+import { registerController } from "./canvasControl";
+import {
+  checkConnection,
+  connectPorts,
+  marqueeSelect,
+  moveNodes,
+  relatedHighlight,
+  resizeNodeTo,
+  selectNodeWithMembers,
+} from "../interactions/actions";
+import { useEditorStore, type ContextMenuTarget } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 
 function activeCanvas(): CanvasDocument | null {
@@ -14,60 +28,104 @@ function activeCanvas(): CanvasDocument | null {
   );
 }
 
-const callbacks: ControllerCallbacks = {
-  onBackgroundTap: () => useEditorStore.getState().clearSelection(),
-  onBackgroundDoubleTap: () => {
-    // The add-node menu arrives with the interaction package.
-  },
-  onNodeTap: (nodeId, additive) => {
-    const editor = useEditorStore.getState();
-    if (additive) editor.toggleNode(nodeId);
-    else editor.selectOnly(nodeId);
-  },
-  onNodeDoubleTap: () => {
-    // Rename/text editing arrives with the interaction package.
-  },
-  onEdgeTap: (edgeId, additive) => {
-    const editor = useEditorStore.getState();
-    const edgeIds = editor.selection.edgeIds;
-    if (additive) {
-      editor.setSelection({
-        nodeIds: editor.selection.nodeIds,
-        edgeIds: edgeIds.includes(edgeId)
-          ? edgeIds.filter((id) => id !== edgeId)
-          : [...edgeIds, edgeId],
-      });
-    } else {
-      editor.setSelection({ nodeIds: [], edgeIds: [edgeId] });
-    }
-  },
-  onPortTap: () => {
-    // Port connections arrive with the interaction package.
-  },
-  onCameraChange: (camera, phase) => {
-    useEditorStore.getState().setCamera(camera);
-    if (phase !== "end") return;
-    const canvas = activeCanvas();
-    if (!canvas) return;
-    try {
-      // Viewport persistence bypasses history: camera moves are not undoable.
-      useProjectStore
+/** Controller callbacks bound to the host element for screen→client offsets. */
+function createCallbacks(host: () => HTMLElement | null): ControllerCallbacks {
+  const toClient = (screen: { x: number; y: number }) => {
+    const rect = host()?.getBoundingClientRect();
+    return { x: screen.x + (rect?.left ?? 0), y: screen.y + (rect?.top ?? 0) };
+  };
+  return {
+    onBackgroundTap: () => {
+      const editor = useEditorStore.getState();
+      editor.clearSelection();
+      editor.announce("Nothing selected");
+    },
+    onBackgroundDoubleTap: (world, screen) => {
+      const client = toClient(screen);
+      useEditorStore
         .getState()
-        .applyLocal([
-          { type: "setViewport", canvasId: canvas.id, viewport: camera },
-        ]);
-    } catch {
-      // A save conflict freezes autosave; keep the local camera.
-    }
-  },
-  onContextMenu: () => {
-    // Context menus arrive with the interaction package.
-  },
-  wantPan: () => {
-    const editor = useEditorStore.getState();
-    return (editor.temporaryTool ?? editor.tool) === "pan";
-  },
-};
+        .openNodeMenu({ x: client.x, y: client.y, world, connectFrom: null });
+    },
+    onNodePress: (nodeId, additive) => selectNodeWithMembers(nodeId, additive),
+    onNodeDoubleTap: (nodeId) =>
+      useEditorStore.getState().startRenaming(nodeId),
+    onEdgeTap: (edgeId, additive) => {
+      const editor = useEditorStore.getState();
+      const edgeIds = editor.selection.edgeIds;
+      if (additive) {
+        editor.setSelection({
+          nodeIds: editor.selection.nodeIds,
+          edgeIds: edgeIds.includes(edgeId)
+            ? edgeIds.filter((id) => id !== edgeId)
+            : [...edgeIds, edgeId],
+        });
+      } else {
+        editor.setSelection({ nodeIds: [], edgeIds: [edgeId] });
+      }
+    },
+    onConnect: (source, target) => connectPorts(source, target),
+    onConnectDropOnCanvas: (source, world, screen) => {
+      const client = toClient(screen);
+      useEditorStore.getState().openNodeMenu({
+        x: client.x,
+        y: client.y,
+        world,
+        connectFrom: source,
+      });
+    },
+    onMoveNodes: (positions) => moveNodes(positions),
+    onResizeNode: (nodeId, bounds) => resizeNodeTo(nodeId, bounds),
+    onMarqueeSelect: (bounds, additive) => marqueeSelect(bounds, additive),
+    onCameraChange: (camera, phase) => {
+      useEditorStore.getState().setCamera(camera);
+      if (phase !== "end") return;
+      const canvas = activeCanvas();
+      if (!canvas) return;
+      try {
+        // Viewport persistence bypasses history: camera moves are not undoable.
+        useProjectStore
+          .getState()
+          .applyLocal([
+            { type: "setViewport", canvasId: canvas.id, viewport: camera },
+          ]);
+      } catch {
+        // A save conflict freezes autosave; keep the local camera.
+      }
+    },
+    onContextMenu: (screen, target: HitTarget) => {
+      const editor = useEditorStore.getState();
+      let menuTarget: ContextMenuTarget;
+      if (target.kind === "node" || target.kind === "resize") {
+        if (!editor.selection.nodeIds.includes(target.nodeId)) {
+          selectNodeWithMembers(target.nodeId, false);
+        }
+        menuTarget = { kind: "node", nodeId: target.nodeId };
+      } else if (target.kind === "edge") {
+        editor.setSelection({ nodeIds: [], edgeIds: [target.edgeId] });
+        menuTarget = { kind: "edge", edgeId: target.edgeId };
+      } else if (target.kind === "port") {
+        menuTarget = { kind: "node", nodeId: target.nodeId };
+      } else {
+        menuTarget = { kind: "canvas", world: target.world };
+      }
+      const client = toClient(screen);
+      editor.openContextMenu({ x: client.x, y: client.y, target: menuTarget });
+    },
+    onHover: (nodeId, port) => {
+      const editor = useEditorStore.getState();
+      editor.setHoveredNode(nodeId);
+      editor.setHoveredPort(port);
+    },
+    onPointerWorld: (point) => useEditorStore.getState().setPointerWorld(point),
+    onGestureChange: (gesture) => useEditorStore.getState().setGesture(gesture),
+    checkConnection: (source, target) => checkConnection(source, target),
+    wantPan: () => {
+      const editor = useEditorStore.getState();
+      return (editor.temporaryTool ?? editor.tool) === "pan";
+    },
+    snapEnabled: () => activeCanvas()?.settings.snapToGrid ?? true,
+  };
+}
 
 /**
  * Mounts the long-lived Leafer controller and feeds it store projections.
@@ -88,13 +146,17 @@ export function CanvasSurface() {
       if (cancelled || !host) return;
       const instance = new Ctor();
       try {
-        instance.mount(host, callbacks);
+        instance.mount(
+          host,
+          createCallbacks(() => hostRef.current),
+        );
       } catch {
         // No working canvas implementation: the DOM hint overlay remains as
         // the accessible fallback.
         return;
       }
       controller = instance;
+      registerController(instance);
 
       let lastCanvasId: string | null = null;
       const push = () => {
@@ -112,8 +174,10 @@ export function CanvasSurface() {
           camera,
           nodes: canvas.nodes,
           edges: canvas.edges,
+          groups: canvas.groups,
           selection: editor.selection,
           hoveredNodeId: editor.hoveredNodeId,
+          related: relatedHighlight(),
           background: canvas.settings.background,
           showMinimap: canvas.settings.showMinimap,
         });
@@ -137,6 +201,7 @@ export function CanvasSurface() {
     return () => {
       cancelled = true;
       unsubscribe?.();
+      registerController(null);
       controller?.dispose();
     };
   }, []);

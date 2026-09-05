@@ -10,6 +10,20 @@ export interface EdgeView {
   edge: WorkflowEdge;
 }
 
+export interface EdgeVisual {
+  selected: boolean;
+  /** Part of the related chain for the hovered/selected node. */
+  highlighted: boolean;
+  /** Dashed style for the pending-connection preview. */
+  preview: boolean;
+}
+
+export const EDGE_VISUAL_DEFAULT: EdgeVisual = {
+  selected: false,
+  highlighted: false,
+  preview: false,
+};
+
 function pathData(from: Point, to: Point): string {
   const dx = Math.max(40, Math.abs(to.x - from.x) * 0.5);
   return `M ${from.x} ${from.y} C ${from.x + dx} ${from.y} ${to.x - dx} ${to.y} ${to.x} ${to.y}`;
@@ -29,7 +43,7 @@ export function createEdgeView(
   edge: WorkflowEdge,
   from: Point,
   to: Point,
-  selected: boolean,
+  visual: Partial<EdgeVisual> = {},
 ): EdgeView {
   const group = new Group({ data: { role: "edge", edgeId: edge.id } });
   const hit = new Path({
@@ -57,7 +71,7 @@ export function createEdgeView(
   group.add(line);
   group.add(arrow);
   const view: EdgeView = { group, line, hit, arrow, edge };
-  applyEdgeVisual(view, selected);
+  applyEdgeVisual(view, { ...EDGE_VISUAL_DEFAULT, ...visual });
   return view;
 }
 
@@ -66,18 +80,26 @@ export function updateEdgeView(
   edge: WorkflowEdge,
   from: Point,
   to: Point,
-  selected: boolean,
+  visual: Partial<EdgeVisual> = {},
 ) {
   view.edge = edge;
   const data = pathData(from, to);
   view.line.set({ path: data });
   view.hit.set({ path: data });
   arrowAt(to, from, view.arrow);
-  applyEdgeVisual(view, selected);
+  applyEdgeVisual(view, { ...EDGE_VISUAL_DEFAULT, ...visual });
 }
 
-function applyEdgeVisual(view: EdgeView, selected: boolean) {
-  const color = selected ? canvasTheme.edgeSelected : canvasTheme.edge;
-  view.line.set({ stroke: color, strokeWidth: selected ? 2.5 : 2 });
-  view.arrow.set({ fill: color });
+function applyEdgeVisual(view: EdgeView, visual: EdgeVisual) {
+  const color = visual.selected
+    ? canvasTheme.edgeSelected
+    : visual.highlighted
+      ? canvasTheme.edgeRelated
+      : canvasTheme.edge;
+  view.line.set({
+    stroke: color,
+    strokeWidth: visual.selected || visual.highlighted ? 2.5 : 2,
+    dashPattern: visual.preview ? [6, 4] : undefined,
+  });
+  view.arrow.set({ fill: color, visible: !visual.preview });
 }

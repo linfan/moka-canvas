@@ -1,17 +1,26 @@
-import { Group, Leafer, PointerEvent, Rect } from "leafer-ui";
+import { Group, Leafer, Line, PointerEvent, Rect } from "leafer-ui";
 import type { ILeaf, IPointerEvent } from "leafer-ui";
 import {
+  CLICK_DRAG_THRESHOLD_PX,
+  FIT_ANIMATION_MS,
+  FIT_VIEWPORT_USAGE,
+  GRID_BASE_SPACING,
   LOW_DETAIL_ZOOM,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
   type CanvasId,
   type EdgeId,
+  type GroupMembership,
   type NodeId,
   type Point,
+  type Rect as WorldRect,
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../../shared/domain";
-import type { Selection } from "../stores/editorStore";
+import type { ActiveGesture, PortRef, Selection } from "../stores/editorStore";
 import {
   centerOn,
+  clampZoom,
   panByPixels,
   screenToWorld,
   worldToScreen,
@@ -25,38 +34,76 @@ import { MinimapView } from "./minimap";
 import {
   createNodeView,
   portAnchorWorld,
+  previewNodeBounds,
+  setPortHighlight,
   updateNodeView,
   type NodeView,
 } from "./nodeRenderers";
 import { canvasTheme } from "./theme";
 
+/** Screen-pixel radius in which an input port snaps a pending connection. */
+const CONNECT_PORT_SNAP_PX = 40;
+/** Screen-pixel padding around a node body that still counts as a target. */
+const CONNECT_BODY_PADDING_PX = 32;
+/** Corner resize handle hit size in screen pixels. */
+const HANDLE_HIT_PX = 28;
+const HANDLE_VISUAL_PX = 10;
+/** Node edge/center snap distance in screen pixels. */
+const SNAP_PX = 6;
+/** Grid snap increment in world units when snapToGrid is on. */
+const SNAP_INCREMENT = GRID_BASE_SPACING / 4;
+/** Two taps within this window and pixel distance count as a double-tap. */
+const DOUBLE_TAP_MS = 400;
+const DOUBLE_TAP_PX = 6;
+
+export type ConnectionCheck = "ok" | "replace" | "invalid";
+
 export interface ControllerCallbacks {
   onBackgroundTap(world: Point): void;
-  onBackgroundDoubleTap(world: Point): void;
-  onNodeTap(nodeId: NodeId, additive: boolean): void;
+  onBackgroundDoubleTap(world: Point, screen: Point): void;
+  /** Pointer-down selection (capture phase), before any drag begins. */
+  onNodePress(nodeId: NodeId, additive: boolean): void;
   onNodeDoubleTap(nodeId: NodeId): void;
   onEdgeTap(edgeId: EdgeId, additive: boolean): void;
-  onPortTap(nodeId: NodeId, portId: string): void;
+  /** Committed connection from an output port to a compatible input. */
+  onConnect(source: PortRef, target: PortRef): void;
+  /** Connection released on blank space: open the filtered add-node menu. */
+  onConnectDropOnCanvas(source: PortRef, world: Point, screen: Point): void;
+  /** One atomic position commit at the end of a node drag. */
+  onMoveNodes(positions: Record<NodeId, Point>): void;
+  onResizeNode(nodeId: NodeId, bounds: WorldRect): void;
+  onMarqueeSelect(bounds: WorldRect, additive: boolean): void;
   /** Live camera gestures report "move"; the settled camera reports "end". */
   onCameraChange(camera: Camera, phase: "move" | "end"): void;
   onContextMenu(screen: Point, target: HitTarget): void;
+  onHover(nodeId: NodeId | null, port: PortRef | null): void;
+  onPointerWorld(point: Point | null): void;
+  /** Mirrors the gesture state machine into the editor store. */
+  onGestureChange(gesture: ActiveGesture): void;
+  /** Domain-level validation for a pending connection. */
+  checkConnection(source: PortRef, target: PortRef): ConnectionCheck;
   /** True while the pan tool (or a pan modifier) should grab drags. */
   wantPan(): boolean;
+  snapEnabled(): boolean;
 }
 
 export type HitTarget =
-  | { kind: "canvas" }
+  | { kind: "canvas"; world: Point }
   | { kind: "node"; nodeId: NodeId }
   | { kind: "edge"; edgeId: EdgeId }
-  | { kind: "port"; nodeId: NodeId; portId: string };
+  | { kind: "port"; nodeId: NodeId; portId: string }
+  | { kind: "resize"; nodeId: NodeId; corner: string };
 
 export interface SceneState {
   canvasId: CanvasId;
   camera: Camera;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  groups: GroupMembership[];
   selection: Selection;
   hoveredNodeId: NodeId | null;
+  /** Related-highlight chain; null when the highlight is inactive. */
+  related: { nodeIds: NodeId[]; edgeIds: EdgeId[] } | null;
   background: GridMode;
   showMinimap: boolean;
 }
@@ -65,8 +112,62 @@ interface EdgeRecord {
   view: EdgeView;
   from: Point;
   to: Point;
-  selected: boolean;
+  signature: string;
 }
+
+type Corner = "nw" | "ne" | "sw" | "se";
+
+type Gesture =
+  | { kind: "idle" }
+  | {
+      kind: "pendingNode";
+      startView: Point;
+      nodeId: NodeId;
+      additive: boolean;
+      wasSelected: boolean;
+    }
+  | {
+      kind: "pendingBackground";
+      startView: Point;
+      panEligible: boolean;
+      /** What the pointer actually pressed (edge or blank canvas). */
+      target: HitTarget;
+    }
+  | {
+      kind: "panning";
+      startView: Point;
+      lastView: Point;
+      startCamera: Camera;
+    }
+  | {
+      kind: "marquee";
+      startWorld: Point;
+      additive: boolean;
+      rect: Rect;
+    }
+  | {
+      kind: "draggingNodes";
+      nodeIds: NodeId[];
+      primaryId: NodeId;
+      startPositions: Map<NodeId, Point>;
+      delta: Point;
+    }
+  | {
+      kind: "resizingNode";
+      nodeId: NodeId;
+      corner: Corner;
+      startBounds: WorldRect;
+      bounds: WorldRect;
+    }
+  | {
+      kind: "connecting";
+      source: PortRef;
+      sourceWorld: Point;
+      currentWorld: Point;
+      preview: EdgeView;
+      target: { ref: PortRef; check: ConnectionCheck } | null;
+    }
+  | { kind: "minimap" };
 
 export class LeaferEditorController {
   private leafer: Leafer | null = null;
@@ -79,22 +180,25 @@ export class LeaferEditorController {
   private lastBackground: GridMode = "dots";
   private lastNodes: WorkflowNode[] = [];
   private lastShowMinimap = true;
+  private lastGroups = new Map<NodeId, NodeId[]>();
 
   private grid = new GridBackground();
   private world = new Group({ data: { role: "world" } });
   private edgeLayer = new Group({ data: { role: "edgeLayer" } });
   private nodeLayer = new Group({ data: { role: "nodeLayer" } });
-  private selectionLayer = new Group({
-    data: { role: "selectionLayer" },
-  });
+  private interactionLayer = new Group({ data: { role: "interactionLayer" } });
+  private selectionLayer = new Group({ data: { role: "selectionLayer" } });
   private minimap = new MinimapView();
 
   private nodeViews = new Map<NodeId, NodeView>();
   private edgeViews = new Map<EdgeId, EdgeRecord>();
   private selectionSignature = "";
+  private gesture: Gesture = { kind: "idle" };
+  private dragOriginView: Point | null = null;
+  private lastTap: { time: number; view: Point; key: string } | null = null;
+  private guides: Line[] = [];
+  private animation: { frame: number } | null = null;
 
-  /** View-space point of the last pan pointer sample. */
-  private pan: Point | null = null;
   private cameraEndTimer: ReturnType<typeof setTimeout> | null = null;
   private disposers: (() => void)[] = [];
 
@@ -121,25 +225,32 @@ export class LeaferEditorController {
     leafer.add(this.grid.canvas);
     this.world.add(this.edgeLayer);
     this.world.add(this.nodeLayer);
+    this.world.add(this.interactionLayer);
     this.world.add(this.selectionLayer);
     leafer.add(this.world);
     leafer.add(this.minimap.group);
 
-    leafer.on(PointerEvent.TAP, (event) => this.handleTap(event, false));
-    leafer.on(PointerEvent.DOUBLE_TAP, (event) => this.handleTap(event, true));
+    // Taps are detected by the gesture machine itself: Leafer's TAP fires
+    // before the window pointerup that ends a pending gesture, which would
+    // swallow plain clicks. DOWN/MOVE/MENU are safe to consume directly.
     leafer.on(PointerEvent.DOWN, (event) => this.handleDown(event));
     leafer.on(PointerEvent.MENU, (event) => this.handleMenu(event));
+    leafer.on(PointerEvent.MOVE, (event) => this.handleHover(event));
 
     const onPointerMove = (event: globalThis.PointerEvent) =>
       this.handleDragMove(event);
-    const onPointerUp = () => this.endPan();
+    const onPointerUp = (event: globalThis.PointerEvent) =>
+      this.handleDragEnd(event);
+    const onPointerCancel = () => this.cancelGesture();
     const onWheel = (event: WheelEvent) => this.handleWheel(event);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerCancel);
     container.addEventListener("wheel", onWheel, { passive: false });
     this.disposers.push(() => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
       container.removeEventListener("wheel", onWheel);
     });
 
@@ -157,6 +268,8 @@ export class LeaferEditorController {
     leafer.resize(this.size);
     this.grid.resize(this.size);
     this.grid.draw(this.camera, this.lastBackground);
+    this.applyCamera();
+    this.selectionSignature = "";
     if (this.lastShowMinimap) {
       this.minimap.update(
         this.lastNodes,
@@ -180,10 +293,14 @@ export class LeaferEditorController {
     this.lastBackground = scene.background;
     this.lastNodes = scene.nodes;
     this.lastShowMinimap = scene.showMinimap;
+    this.lastGroups = new Map(
+      scene.groups.map((g) => [g.groupId, g.childNodeIds]),
+    );
     this.applyCamera();
     this.grid.draw(scene.camera, scene.background);
 
     const lowDetail = scene.camera.zoom < LOW_DETAIL_ZOOM;
+    const relatedNodes = scene.related ? new Set(scene.related.nodeIds) : null;
     const seen = new Set<NodeId>();
     for (const node of scene.nodes) {
       seen.add(node.id);
@@ -191,6 +308,7 @@ export class LeaferEditorController {
         selected: scene.selection.nodeIds.includes(node.id),
         hovered: scene.hoveredNodeId === node.id,
         lowDetail,
+        dimmed: relatedNodes !== null && !relatedNodes.has(node.id),
       };
       let view = this.nodeViews.get(node.id);
       if (!view) {
@@ -202,7 +320,8 @@ export class LeaferEditorController {
         view.node !== node ||
         view.visual.selected !== visual.selected ||
         view.visual.hovered !== visual.hovered ||
-        view.visual.lowDetail !== visual.lowDetail
+        view.visual.lowDetail !== visual.lowDetail ||
+        view.visual.dimmed !== visual.dimmed
       ) {
         updateNodeView(view, node, visual);
         this.stats.nodeUpdates += 1;
@@ -217,7 +336,10 @@ export class LeaferEditorController {
       }
     }
 
-    this.reconcileEdges(scene);
+    this.reconcileEdges(
+      scene,
+      scene.related ? new Set(scene.related.edgeIds) : null,
+    );
     this.reconcileSelection(scene);
 
     this.minimap.group.visible = scene.showMinimap;
@@ -248,8 +370,51 @@ export class LeaferEditorController {
     return screenToWorld(this.camera, this.size, point);
   }
 
+  viewCenterWorld(): Point {
+    return { x: this.camera.x, y: this.camera.y };
+  }
+
+  zoomByAtCenter(factor: number) {
+    this.zoomToAtCenter(this.camera.zoom * factor);
+  }
+
+  zoomToAtCenter(zoom: number) {
+    const next = clampZoom(zoom);
+    if (next === this.camera.zoom) return;
+    this.emitCamera(
+      zoomAtPoint(
+        this.camera,
+        this.size,
+        { x: this.size.width / 2, y: this.size.height / 2 },
+        next / this.camera.zoom,
+      ),
+      "end",
+    );
+  }
+
+  /** Animated fit-to-bounds with ease-out, ~60% viewport usage. */
+  fitBoundsAnimated(bounds: WorldRect) {
+    const zoom = clampZoom(
+      Math.min(
+        (this.size.width * FIT_VIEWPORT_USAGE) / Math.max(1, bounds.width),
+        (this.size.height * FIT_VIEWPORT_USAGE) / Math.max(1, bounds.height),
+      ),
+    );
+    const target = centerOn({ ...this.camera, zoom }, bounds);
+    this.animateCamera(target);
+  }
+
+  /** Ends any active gesture, clearing previews without committing. */
+  cancelGesture() {
+    if (this.gesture.kind === "idle") return;
+    const gesture = this.gesture;
+    this.teardownGesture(gesture);
+    this.setGesture({ kind: "idle" });
+  }
+
   dispose() {
-    this.endPan();
+    this.cancelGesture();
+    if (this.animation) cancelAnimationFrame(this.animation.frame);
     if (this.cameraEndTimer) clearTimeout(this.cameraEndTimer);
     this.observer?.disconnect();
     for (const dispose of this.disposers) dispose();
@@ -269,6 +434,8 @@ export class LeaferEditorController {
     for (const record of this.edgeViews.values()) record.view.group.destroy();
     this.edgeViews.clear();
     this.selectionLayer.removeAll();
+    this.interactionLayer.removeAll();
+    this.guides = [];
     this.selectionSignature = "";
   }
 
@@ -281,13 +448,50 @@ export class LeaferEditorController {
     });
   }
 
+  private animateCamera(target: Camera) {
+    if (this.animation) cancelAnimationFrame(this.animation.frame);
+    const from = this.camera;
+    const started = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - started) / FIT_ANIMATION_MS);
+      const eased = 1 - Math.pow(1 - t, 3);
+      this.emitCamera(
+        {
+          x: from.x + (target.x - from.x) * eased,
+          y: from.y + (target.y - from.y) * eased,
+          zoom: from.zoom + (target.zoom - from.zoom) * eased,
+        },
+        t >= 1 ? "end" : "move",
+      );
+      if (t < 1) {
+        this.animation = { frame: requestAnimationFrame(step) };
+      } else {
+        this.animation = null;
+      }
+    };
+    this.animation = { frame: requestAnimationFrame(step) };
+  }
+
   private hitTarget(event: IPointerEvent): HitTarget {
+    const world = screenToWorld(this.camera, this.size, {
+      x: event.x,
+      y: event.y,
+    });
     let leaf = event.target as ILeaf | undefined;
     while (leaf && leaf !== this.leafer && leaf !== this.world) {
       const data = leaf.data as
-        | { role?: string; nodeId?: string; portId?: string; edgeId?: string }
+        | {
+            role?: string;
+            nodeId?: string;
+            portId?: string;
+            edgeId?: string;
+            corner?: string;
+          }
         | undefined;
-      if (data?.role === "minimap") return { kind: "canvas" };
+      if (data?.role === "minimap") return { kind: "canvas", world };
+      if (data?.role === "resizeHandle" && data.nodeId && data.corner) {
+        return { kind: "resize", nodeId: data.nodeId, corner: data.corner };
+      }
       if (data?.role === "port" && data.nodeId && data.portId) {
         return { kind: "port", nodeId: data.nodeId, portId: data.portId };
       }
@@ -299,7 +503,7 @@ export class LeaferEditorController {
       }
       leaf = leaf.parent as ILeaf | undefined;
     }
-    return { kind: "canvas" };
+    return { kind: "canvas", world };
   }
 
   private isMinimapHit(event: IPointerEvent): boolean {
@@ -312,46 +516,132 @@ export class LeaferEditorController {
     return false;
   }
 
-  private handleTap(event: IPointerEvent, double: boolean) {
+  private handleDoubleTapKey(target: HitTarget): string {
+    switch (target.kind) {
+      case "node":
+        return `node:${target.nodeId}`;
+      case "edge":
+        return `edge:${target.edgeId}`;
+      default:
+        return "canvas";
+    }
+  }
+
+  /** True when this tap follows an identical-target tap within the window. */
+  private detectDoubleTap(view: Point, target: HitTarget): boolean {
+    const key = this.handleDoubleTapKey(target);
+    const previous = this.lastTap;
+    this.lastTap = { time: performance.now(), view, key };
+    return (
+      previous !== null &&
+      previous.key === key &&
+      performance.now() - previous.time <= DOUBLE_TAP_MS &&
+      distance(previous.view, view) <= DOUBLE_TAP_PX
+    );
+  }
+
+  private handleDown(event: IPointerEvent) {
     const callbacks = this.callbacks;
-    if (!callbacks || this.pan) return;
-    const screen = { x: event.x, y: event.y };
-    const world = screenToWorld(this.camera, this.size, screen);
+    if (!callbacks || this.gesture.kind !== "idle") return;
+    // Right button is handled by MENU (context menu), never starts a gesture.
+    if (event.right) return;
+    const view = { x: event.x, y: event.y };
 
     if (this.isMinimapHit(event)) {
-      const center = this.minimap.toWorld(screen);
-      callbacks.onCameraChange(
-        { ...this.camera, x: center.x, y: center.y },
-        "end",
-      );
+      const center = this.minimap.toWorld(view);
+      this.emitCamera({ ...this.camera, x: center.x, y: center.y }, "move");
+      this.setGesture({ kind: "minimap" });
       return;
     }
 
     const target = this.hitTarget(event);
     const additive = Boolean(event.shiftKey || event.metaKey || event.ctrlKey);
-    if (target.kind === "port") {
-      callbacks.onPortTap(target.nodeId, target.portId);
-    } else if (target.kind === "node") {
-      if (double) callbacks.onNodeDoubleTap(target.nodeId);
-      else callbacks.onNodeTap(target.nodeId, additive);
-    } else if (target.kind === "edge") {
-      if (!double) callbacks.onEdgeTap(target.edgeId, additive);
-    } else if (double) {
-      callbacks.onBackgroundDoubleTap(world);
-    } else {
-      callbacks.onBackgroundTap(world);
+
+    if (event.middle) {
+      this.startPanning(view);
+      return;
+    }
+
+    switch (target.kind) {
+      case "resize": {
+        const nodeView = this.nodeViews.get(target.nodeId);
+        if (!nodeView) return;
+        this.setGesture({
+          kind: "resizingNode",
+          nodeId: target.nodeId,
+          corner: target.corner as Corner,
+          startBounds: { ...nodeView.node.bounds },
+          bounds: { ...nodeView.node.bounds },
+        });
+        return;
+      }
+      case "port": {
+        const nodeView = this.nodeViews.get(target.nodeId);
+        const port = nodeView?.node.ports.find((p) => p.id === target.portId);
+        if (!nodeView || !port) return;
+        if (port.direction === "output") {
+          this.startConnecting(
+            { nodeId: target.nodeId, portId: target.portId },
+            nodeView,
+          );
+          return;
+        }
+        // Input ports behave like node body presses (selection only).
+        this.pressNode(target.nodeId, additive, view);
+        return;
+      }
+      case "node": {
+        this.pressNode(target.nodeId, additive, view);
+        return;
+      }
+      default: {
+        this.setGesture({
+          kind: "pendingBackground",
+          startView: view,
+          panEligible: callbacks.wantPan(),
+          target,
+        });
+      }
     }
   }
 
-  private handleDown(event: IPointerEvent) {
+  private pressNode(nodeId: NodeId, additive: boolean, view: Point) {
     const callbacks = this.callbacks;
     if (!callbacks) return;
+    const wasSelected = this.currentSelection().nodeIds.includes(nodeId);
+    if (!wasSelected) {
+      callbacks.onNodePress(nodeId, additive);
+    }
+    this.setGesture({
+      kind: "pendingNode",
+      startView: view,
+      nodeId,
+      additive,
+      wasSelected,
+    });
+  }
+
+  private currentSelection(): Selection {
+    const nodeIds: NodeId[] = [];
+    for (const [nodeId, view] of this.nodeViews) {
+      if (view.visual.selected) nodeIds.push(nodeId);
+    }
+    return { nodeIds, edgeIds: [] };
+  }
+
+  private handleHover(event: IPointerEvent) {
+    const callbacks = this.callbacks;
+    if (!callbacks || this.gesture.kind !== "idle") return;
     const target = this.hitTarget(event);
-    const panRequested =
-      event.middle || (target.kind === "canvas" && callbacks.wantPan());
-    if (panRequested) {
-      this.pan = { x: event.x, y: event.y };
-      if (this.container) this.container.style.cursor = "grabbing";
+    if (target.kind === "node" || target.kind === "resize") {
+      callbacks.onHover(target.nodeId, null);
+    } else if (target.kind === "port") {
+      callbacks.onHover(target.nodeId, {
+        nodeId: target.nodeId,
+        portId: target.portId,
+      });
+    } else {
+      callbacks.onHover(null, null);
     }
   }
 
@@ -364,19 +654,309 @@ export class LeaferEditorController {
   }
 
   private handleDragMove(event: globalThis.PointerEvent) {
-    if (!this.pan) return;
-    const point = this.viewPointOf(event);
-    const dx = point.x - this.pan.x;
-    const dy = point.y - this.pan.y;
-    this.pan = point;
-    this.emitCamera(panByPixels(this.camera, dx, dy), "move");
+    if (event.isPrimary === false) return;
+    const callbacks = this.callbacks;
+    if (!callbacks) return;
+    const view = this.viewPointOf(event);
+    const world = screenToWorld(this.camera, this.size, view);
+    callbacks.onPointerWorld(world);
+    const gesture = this.gesture;
+    if (gesture.kind === "idle") return;
+
+    switch (gesture.kind) {
+      case "pendingNode": {
+        if (distance(view, gesture.startView) <= CLICK_DRAG_THRESHOLD_PX)
+          return;
+        // Promote to a drag over the full current selection.
+        const selection = this.currentSelection();
+        const nodeIds = selection.nodeIds.includes(gesture.nodeId)
+          ? this.expandWithMembers(selection.nodeIds)
+          : this.expandWithMembers([gesture.nodeId]);
+        const startPositions = new Map<NodeId, Point>();
+        for (const nodeId of nodeIds) {
+          const nodeView = this.nodeViews.get(nodeId);
+          if (nodeView) {
+            startPositions.set(nodeId, {
+              x: nodeView.node.bounds.x,
+              y: nodeView.node.bounds.y,
+            });
+          }
+        }
+        this.dragOriginView = gesture.startView;
+        this.setGesture({
+          kind: "draggingNodes",
+          nodeIds: [...startPositions.keys()],
+          primaryId: gesture.nodeId,
+          startPositions,
+          delta: { x: 0, y: 0 },
+        });
+        return;
+      }
+      case "pendingBackground": {
+        if (distance(view, gesture.startView) <= CLICK_DRAG_THRESHOLD_PX)
+          return;
+        if (gesture.panEligible) {
+          this.startPanning(gesture.startView);
+        } else {
+          const rect = new Rect({
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            fill: canvasTheme.marqueeFill,
+            stroke: canvasTheme.marquee,
+            strokeWidth: 1 / this.camera.zoom,
+            dashPattern: [5 / this.camera.zoom, 4 / this.camera.zoom],
+            hittable: false,
+          });
+          this.interactionLayer.add(rect);
+          this.setGesture({
+            kind: "marquee",
+            startWorld: screenToWorld(
+              this.camera,
+              this.size,
+              gesture.startView,
+            ),
+            additive: Boolean(event.shiftKey || event.metaKey || event.ctrlKey),
+            rect,
+          });
+        }
+        this.handleDragMove(event);
+        return;
+      }
+      case "panning": {
+        const dx = view.x - gesture.lastView.x;
+        const dy = view.y - gesture.lastView.y;
+        gesture.lastView = view;
+        this.emitCamera(panByPixels(this.camera, dx, dy), "move");
+        return;
+      }
+      case "minimap": {
+        const center = this.minimap.toWorld(view);
+        this.emitCamera({ ...this.camera, x: center.x, y: center.y }, "move");
+        return;
+      }
+      case "marquee": {
+        const x = Math.min(gesture.startWorld.x, world.x);
+        const y = Math.min(gesture.startWorld.y, world.y);
+        gesture.rect.set({
+          x,
+          y,
+          width: Math.abs(world.x - gesture.startWorld.x),
+          height: Math.abs(world.y - gesture.startWorld.y),
+        });
+        this.mirrorGesture(gesture, world);
+        return;
+      }
+      case "draggingNodes": {
+        this.updateNodeDrag(gesture, view);
+        return;
+      }
+      case "resizingNode": {
+        this.updateResize(gesture, world, event.shiftKey);
+        return;
+      }
+      case "connecting": {
+        gesture.currentWorld = world;
+        this.updateConnection(gesture);
+        return;
+      }
+    }
   }
 
-  private endPan() {
-    if (!this.pan) return;
-    this.pan = null;
-    if (this.container) this.container.style.cursor = "";
-    this.emitCamera(this.camera, "end");
+  private handleDragEnd(event: globalThis.PointerEvent) {
+    if (event.isPrimary === false) return;
+    const callbacks = this.callbacks;
+    if (!callbacks) return;
+    const gesture = this.gesture;
+    if (gesture.kind === "idle") return;
+    const view = this.viewPointOf(event);
+    const world = screenToWorld(this.camera, this.size, view);
+    const additive = Boolean(event.shiftKey || event.metaKey || event.ctrlKey);
+
+    switch (gesture.kind) {
+      case "pendingNode": {
+        if (
+          this.detectDoubleTap(view, { kind: "node", nodeId: gesture.nodeId })
+        ) {
+          callbacks.onNodeDoubleTap(gesture.nodeId);
+        } else if (gesture.wasSelected) {
+          // Click without drag on an already-selected node: collapse the kept
+          // multi-selection, or toggle it back off in additive mode.
+          callbacks.onNodePress(gesture.nodeId, gesture.additive);
+        }
+        break;
+      }
+      case "pendingBackground": {
+        if (gesture.target.kind === "edge") {
+          this.detectDoubleTap(view, gesture.target);
+          callbacks.onEdgeTap(gesture.target.edgeId, additive);
+        } else {
+          if (this.detectDoubleTap(view, { kind: "canvas", world })) {
+            callbacks.onBackgroundDoubleTap(world, view);
+          } else {
+            callbacks.onBackgroundTap(world);
+          }
+        }
+        break;
+      }
+      case "panning":
+      case "minimap": {
+        this.emitCamera(this.camera, "end");
+        break;
+      }
+      case "marquee": {
+        const bounds: WorldRect = {
+          x: Math.min(gesture.startWorld.x, world.x),
+          y: Math.min(gesture.startWorld.y, world.y),
+          width: Math.abs(world.x - gesture.startWorld.x),
+          height: Math.abs(world.y - gesture.startWorld.y),
+        };
+        callbacks.onMarqueeSelect(bounds, gesture.additive);
+        break;
+      }
+      case "draggingNodes": {
+        if (gesture.delta.x !== 0 || gesture.delta.y !== 0) {
+          const positions: Record<NodeId, Point> = {};
+          for (const [nodeId, start] of gesture.startPositions) {
+            positions[nodeId] = {
+              x: start.x + gesture.delta.x,
+              y: start.y + gesture.delta.y,
+            };
+          }
+          callbacks.onMoveNodes(positions);
+        }
+        break;
+      }
+      case "resizingNode": {
+        const start = gesture.startBounds;
+        const end = gesture.bounds;
+        if (
+          start.x !== end.x ||
+          start.y !== end.y ||
+          start.width !== end.width ||
+          start.height !== end.height
+        ) {
+          callbacks.onResizeNode(gesture.nodeId, end);
+        }
+        break;
+      }
+      case "connecting": {
+        if (gesture.target && gesture.target.check !== "invalid") {
+          callbacks.onConnect(gesture.source, gesture.target.ref);
+        } else if (!gesture.target) {
+          callbacks.onConnectDropOnCanvas(gesture.source, world, view);
+        }
+        break;
+      }
+    }
+    this.teardownGesture(gesture);
+    this.setGesture({ kind: "idle" });
+  }
+
+  /** Removes preview artifacts of a finished or cancelled gesture. */
+  private teardownGesture(gesture: Gesture) {
+    switch (gesture.kind) {
+      case "marquee":
+        gesture.rect.remove();
+        break;
+      case "draggingNodes":
+        this.clearGuides();
+        this.dragOriginView = null;
+        break;
+      case "resizingNode": {
+        const view = this.nodeViews.get(gesture.nodeId);
+        if (view) previewNodeBounds(view, view.node.bounds);
+        break;
+      }
+      case "connecting":
+        gesture.preview.group.destroy();
+        this.clearPortHighlights();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private setGesture(next: Gesture) {
+    this.gesture = next;
+    if (this.container) {
+      this.container.style.cursor =
+        next.kind === "panning" || next.kind === "minimap" ? "grabbing" : "";
+    }
+    this.mirrorGesture(next, null);
+  }
+
+  /** Mirrors the plan-shaped gesture into the editor store. */
+  private mirrorGesture(gesture: Gesture, world: Point | null) {
+    const callbacks = this.callbacks;
+    if (!callbacks) return;
+    switch (gesture.kind) {
+      case "idle":
+        callbacks.onGestureChange({ kind: "idle" });
+        break;
+      case "panning":
+        callbacks.onGestureChange({
+          kind: "panning",
+          pointerId: 1,
+          startClient: gesture.startView,
+          startViewport: gesture.startCamera,
+        });
+        break;
+      case "marquee":
+        callbacks.onGestureChange({
+          kind: "marquee",
+          pointerId: 1,
+          startWorld: gesture.startWorld,
+          currentWorld: world ?? gesture.startWorld,
+          additive: gesture.additive,
+        });
+        break;
+      case "draggingNodes":
+        callbacks.onGestureChange({
+          kind: "draggingNodes",
+          pointerId: 1,
+          nodeIds: gesture.nodeIds,
+          startPositions: Object.fromEntries(gesture.startPositions),
+          currentDelta: gesture.delta,
+          snap: callbacks.snapEnabled(),
+        });
+        break;
+      case "resizingNode":
+        callbacks.onGestureChange({
+          kind: "resizingNode",
+          pointerId: 1,
+          nodeId: gesture.nodeId,
+          handle: gesture.corner,
+          startBounds: gesture.startBounds,
+        });
+        break;
+      case "connecting":
+        callbacks.onGestureChange({
+          kind: "connecting",
+          pointerId: 1,
+          source: gesture.source,
+          currentWorld: world ?? gesture.currentWorld,
+          compatibleTargets: this.compatibleInputPorts(gesture.source),
+        });
+        break;
+      case "minimap":
+        callbacks.onGestureChange({ kind: "draggingMinimap", pointerId: 1 });
+        break;
+      default:
+        break;
+    }
+  }
+
+  // --- pan / zoom --------------------------------------------------------
+
+  private startPanning(view: Point) {
+    this.setGesture({
+      kind: "panning",
+      startView: view,
+      lastView: view,
+      startCamera: this.camera,
+    });
   }
 
   private handleWheel(event: WheelEvent) {
@@ -401,16 +981,349 @@ export class LeaferEditorController {
   }
 
   private handleMenu(event: IPointerEvent) {
-    this.callbacks?.onContextMenu(
-      { x: event.x, y: event.y },
-      this.hitTarget(event),
-    );
+    const target = this.hitTarget(event);
+    this.callbacks?.onContextMenu({ x: event.x, y: event.y }, target);
   }
 
   private emitCamera(camera: Camera, phase: "move" | "end") {
+    if (this.animation && phase === "move") {
+      cancelAnimationFrame(this.animation.frame);
+      this.animation = null;
+    }
     this.camera = camera;
     this.callbacks?.onCameraChange(camera, phase);
   }
+
+  // --- node drag + snap --------------------------------------------------
+
+  private expandWithMembers(nodeIds: NodeId[]): NodeId[] {
+    const result = new Set<NodeId>();
+    for (const nodeId of nodeIds) {
+      result.add(nodeId);
+      const membership = this.lastGroups.get(nodeId);
+      if (membership) {
+        for (const member of membership) result.add(member);
+      }
+    }
+    return [...result];
+  }
+
+  private updateNodeDrag(
+    gesture: Extract<Gesture, { kind: "draggingNodes" }>,
+    view: Point,
+  ) {
+    const origin = this.dragOriginView;
+    if (!origin) return;
+    let delta = {
+      x: (view.x - origin.x) / this.camera.zoom,
+      y: (view.y - origin.y) / this.camera.zoom,
+    };
+
+    const primaryStart = gesture.startPositions.get(gesture.primaryId);
+    if (primaryStart && this.callbacks?.snapEnabled()) {
+      const snapped = {
+        x:
+          Math.round((primaryStart.x + delta.x) / SNAP_INCREMENT) *
+          SNAP_INCREMENT,
+        y:
+          Math.round((primaryStart.y + delta.y) / SNAP_INCREMENT) *
+          SNAP_INCREMENT,
+      };
+      delta = { x: snapped.x - primaryStart.x, y: snapped.y - primaryStart.y };
+    }
+
+    this.clearGuides();
+    if (primaryStart) {
+      const primaryView = this.nodeViews.get(gesture.primaryId);
+      if (primaryView) {
+        const moved = {
+          x: primaryStart.x + delta.x,
+          y: primaryStart.y + delta.y,
+          width: primaryView.node.bounds.width,
+          height: primaryView.node.bounds.height,
+        };
+        const snap = this.findSnap(moved, new Set(gesture.nodeIds));
+        delta = { x: delta.x + snap.dx, y: delta.y + snap.dy };
+      }
+    }
+
+    gesture.delta = delta;
+    for (const [nodeId, start] of gesture.startPositions) {
+      const nodeView = this.nodeViews.get(nodeId);
+      nodeView?.group.set({ x: start.x + delta.x, y: start.y + delta.y });
+    }
+    this.refreshEdgesTouching(new Set(gesture.nodeIds));
+    this.mirrorGesture(gesture, null);
+  }
+
+  private findSnap(
+    moved: WorldRect,
+    dragged: Set<NodeId>,
+  ): { dx: number; dy: number } {
+    const threshold = SNAP_PX / this.camera.zoom;
+    const sourcesX = [
+      moved.x,
+      moved.x + moved.width / 2,
+      moved.x + moved.width,
+    ];
+    const sourcesY = [
+      moved.y,
+      moved.y + moved.height / 2,
+      moved.y + moved.height,
+    ];
+    let bestX: { d: number; at: number } | null = null;
+    let bestY: { d: number; at: number } | null = null;
+    for (const [nodeId, view] of this.nodeViews) {
+      if (dragged.has(nodeId)) continue;
+      const b = view.node.bounds;
+      const targetsX = [b.x, b.x + b.width / 2, b.x + b.width];
+      const targetsY = [b.y, b.y + b.height / 2, b.y + b.height];
+      for (const sx of sourcesX) {
+        for (const tx of targetsX) {
+          const d = tx - sx;
+          if (
+            Math.abs(d) <= threshold &&
+            (!bestX || Math.abs(d) < Math.abs(bestX.d))
+          ) {
+            bestX = { d, at: tx };
+          }
+        }
+      }
+      for (const sy of sourcesY) {
+        for (const ty of targetsY) {
+          const d = ty - sy;
+          if (
+            Math.abs(d) <= threshold &&
+            (!bestY || Math.abs(d) < Math.abs(bestY.d))
+          ) {
+            bestY = { d, at: ty };
+          }
+        }
+      }
+    }
+    if (bestX) this.drawGuide("v", bestX.at, moved);
+    if (bestY) this.drawGuide("h", bestY.at, moved);
+    return { dx: bestX?.d ?? 0, dy: bestY?.d ?? 0 };
+  }
+
+  private drawGuide(axis: "h" | "v", at: number, near: WorldRect) {
+    const span = 2000;
+    const line = new Line({
+      points:
+        axis === "v"
+          ? [at, near.y - span / 2, at, near.y + span]
+          : [near.x - span / 2, at, near.x + span, at],
+      stroke: canvasTheme.snapGuide,
+      strokeWidth: 1 / this.camera.zoom,
+      dashPattern: [4 / this.camera.zoom, 4 / this.camera.zoom],
+      hittable: false,
+    });
+    this.interactionLayer.add(line);
+    this.guides.push(line);
+  }
+
+  private clearGuides() {
+    for (const line of this.guides) line.remove();
+    this.guides = [];
+  }
+
+  // --- resize ------------------------------------------------------------
+
+  private updateResize(
+    gesture: Extract<Gesture, { kind: "resizingNode" }>,
+    world: Point,
+    freeResize: boolean,
+  ) {
+    const start = gesture.startBounds;
+    const anchor = {
+      x: gesture.corner.includes("w") ? start.x + start.width : start.x,
+      y: gesture.corner.includes("n") ? start.y + start.height : start.y,
+    };
+    let width = Math.abs(world.x - anchor.x);
+    let height = Math.abs(world.y - anchor.y);
+    const view = this.nodeViews.get(gesture.nodeId);
+    const keepAspect =
+      !freeResize &&
+      (view?.node.kind === "image" || view?.node.kind === "video");
+    if (keepAspect) {
+      const aspect = start.width / Math.max(1, start.height);
+      if (width / Math.max(1, height) > aspect) width = height * aspect;
+      else height = width / aspect;
+    }
+    width = Math.max(MIN_NODE_WIDTH, width);
+    height = Math.max(MIN_NODE_HEIGHT, height);
+    const x = gesture.corner.includes("w") ? anchor.x - width : anchor.x;
+    const y = gesture.corner.includes("n") ? anchor.y - height : anchor.y;
+    gesture.bounds = { x, y, width, height };
+    if (view) {
+      previewNodeBounds(view, gesture.bounds);
+      this.refreshEdgesTouching(new Set([gesture.nodeId]));
+    }
+    this.mirrorGesture(gesture, null);
+  }
+
+  // --- connecting --------------------------------------------------------
+
+  private startConnecting(source: PortRef, nodeView: NodeView) {
+    const sourceWorld = portAnchorWorld(nodeView, source.portId);
+    if (!sourceWorld) return;
+    const preview = createEdgeView(
+      { id: "__connection_preview__", source, target: source, createdAt: "" },
+      sourceWorld,
+      sourceWorld,
+      { preview: true },
+    );
+    preview.hit.visible = false;
+    this.interactionLayer.add(preview.group);
+    this.setGesture({
+      kind: "connecting",
+      source,
+      sourceWorld,
+      currentWorld: sourceWorld,
+      preview,
+      target: null,
+    });
+    this.highlightCompatiblePorts(source);
+  }
+
+  private compatibleInputPorts(source: PortRef): PortRef[] {
+    const sourceView = this.nodeViews.get(source.nodeId);
+    const sourcePort = sourceView?.node.ports.find(
+      (p) => p.id === source.portId,
+    );
+    if (!sourceView || !sourcePort) return [];
+    const result: PortRef[] = [];
+    for (const [nodeId, view] of this.nodeViews) {
+      if (nodeId === source.nodeId) continue;
+      for (const port of view.node.ports) {
+        if (port.direction !== "input") continue;
+        if (port.dataTypes.some((t) => sourcePort.dataTypes.includes(t))) {
+          result.push({ nodeId, portId: port.id });
+        }
+      }
+    }
+    return result;
+  }
+
+  private highlightCompatiblePorts(source: PortRef) {
+    const compatible = new Set(
+      this.compatibleInputPorts(source).map(
+        (ref) => `${ref.nodeId}:${ref.portId}`,
+      ),
+    );
+    for (const [nodeId, view] of this.nodeViews) {
+      if (nodeId === source.nodeId) continue;
+      for (const [portId, port] of view.ports) {
+        if (port.direction !== "input") continue;
+        setPortHighlight(
+          view,
+          portId,
+          compatible.has(`${nodeId}:${portId}`) ? "compatible" : "rejected",
+        );
+      }
+    }
+  }
+
+  private clearPortHighlights() {
+    for (const view of this.nodeViews.values()) {
+      for (const portId of view.ports.keys()) {
+        setPortHighlight(view, portId, null);
+      }
+    }
+  }
+
+  /** Zoom-scaled target tiers: port anchor → node body → outer padding. */
+  private connectionTargetAt(
+    world: Point,
+    gesture: Extract<Gesture, { kind: "connecting" }>,
+  ): { ref: PortRef; check: ConnectionCheck } | null {
+    const callbacks = this.callbacks;
+    if (!callbacks) return null;
+    const compatible = this.compatibleInputPorts(gesture.source);
+    const portSnap = CONNECT_PORT_SNAP_PX / this.camera.zoom;
+    const bodyPad = CONNECT_BODY_PADDING_PX / this.camera.zoom;
+
+    let best: { ref: PortRef; dist: number } | null = null;
+    for (const ref of compatible) {
+      const view = this.nodeViews.get(ref.nodeId);
+      if (!view) continue;
+      const anchor = portAnchorWorld(view, ref.portId);
+      if (!anchor) continue;
+      const dist = Math.hypot(anchor.x - world.x, anchor.y - world.y);
+      if (dist <= portSnap && (!best || dist < best.dist)) {
+        best = { ref, dist };
+      }
+    }
+    if (best) {
+      return {
+        ref: best.ref,
+        check: callbacks.checkConnection(gesture.source, best.ref),
+      };
+    }
+
+    for (const tier of [0, bodyPad]) {
+      for (const ref of compatible) {
+        const view = this.nodeViews.get(ref.nodeId);
+        if (!view) continue;
+        const b = {
+          x: view.group.x ?? view.node.bounds.x,
+          y: view.group.y ?? view.node.bounds.y,
+          width: view.node.bounds.width,
+          height: view.node.bounds.height,
+        };
+        if (
+          world.x >= b.x - tier &&
+          world.x <= b.x + b.width + tier &&
+          world.y >= b.y - tier &&
+          world.y <= b.y + b.height + tier
+        ) {
+          return { ref, check: callbacks.checkConnection(gesture.source, ref) };
+        }
+      }
+    }
+    return null;
+  }
+
+  private updateConnection(gesture: Extract<Gesture, { kind: "connecting" }>) {
+    const previous = gesture.target?.ref;
+    const target = this.connectionTargetAt(gesture.currentWorld, gesture);
+    if (
+      previous?.nodeId !== target?.ref.nodeId ||
+      previous?.portId !== target?.ref.portId
+    ) {
+      if (previous) {
+        const view = this.nodeViews.get(previous.nodeId);
+        if (view) setPortHighlight(view, previous.portId, "compatible");
+      }
+      if (target) {
+        const view = this.nodeViews.get(target.ref.nodeId);
+        if (view) {
+          setPortHighlight(
+            view,
+            target.ref.portId,
+            target.check === "invalid" ? "rejected" : "candidate",
+          );
+        }
+      }
+    }
+    gesture.target = target;
+    const end = target
+      ? (portAnchorWorld(
+          this.nodeViews.get(target.ref.nodeId)!,
+          target.ref.portId,
+        ) ?? gesture.currentWorld)
+      : gesture.currentWorld;
+    updateEdgeView(
+      gesture.preview,
+      gesture.preview.edge,
+      gesture.sourceWorld,
+      end,
+      { preview: true },
+    );
+    this.mirrorGesture(gesture, gesture.currentWorld);
+  }
+
+  // --- edges + selection reconciliation ----------------------------------
 
   private anchorOf(endpoint: { nodeId: NodeId; portId: string }): Point | null {
     const view = this.nodeViews.get(endpoint.nodeId);
@@ -421,7 +1334,24 @@ export class LeaferEditorController {
     return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   }
 
-  private reconcileEdges(scene: SceneState) {
+  private refreshEdgesTouching(nodeIds: Set<NodeId>) {
+    for (const record of this.edgeViews.values()) {
+      const edge = record.view.edge;
+      if (!nodeIds.has(edge.source.nodeId) && !nodeIds.has(edge.target.nodeId))
+        continue;
+      const from = this.anchorOf(edge.source);
+      const to = this.anchorOf(edge.target);
+      if (!from || !to) continue;
+      updateEdgeView(record.view, edge, from, to, {
+        selected: record.signature.includes("sel"),
+        highlighted: record.signature.includes("hl"),
+      });
+      record.from = from;
+      record.to = to;
+    }
+  }
+
+  private reconcileEdges(scene: SceneState, related: Set<EdgeId> | null) {
     const seen = new Set<EdgeId>();
     for (const edge of scene.edges) {
       const from = this.anchorOf(edge.source);
@@ -429,23 +1359,25 @@ export class LeaferEditorController {
       if (!from || !to) continue;
       seen.add(edge.id);
       const selected = scene.selection.edgeIds.includes(edge.id);
+      const highlighted = related?.has(edge.id) ?? false;
+      const signature = `${selected ? "sel" : ""}${highlighted ? "hl" : ""}`;
       const record = this.edgeViews.get(edge.id);
       if (!record) {
-        const view = createEdgeView(edge, from, to, selected);
+        const view = createEdgeView(edge, from, to, { selected, highlighted });
         this.edgeLayer.add(view.group);
-        this.edgeViews.set(edge.id, { view, from, to, selected });
+        this.edgeViews.set(edge.id, { view, from, to, signature });
       } else if (
         record.view.edge !== edge ||
         record.from.x !== from.x ||
         record.from.y !== from.y ||
         record.to.x !== to.x ||
         record.to.y !== to.y ||
-        record.selected !== selected
+        record.signature !== signature
       ) {
-        updateEdgeView(record.view, edge, from, to, selected);
+        updateEdgeView(record.view, edge, from, to, { selected, highlighted });
         record.from = from;
         record.to = to;
-        record.selected = selected;
+        record.signature = signature;
       }
     }
     for (const [edgeId, record] of this.edgeViews) {
@@ -457,39 +1389,80 @@ export class LeaferEditorController {
   }
 
   private reconcileSelection(scene: SceneState) {
-    const parts: string[] = [scene.camera.zoom.toFixed(4)];
-    const selected: WorkflowNode[] = [];
+    const zoom = scene.camera.zoom;
+    const parts: string[] = [zoom.toFixed(4)];
+    const selected: { node: WorkflowNode; x: number; y: number }[] = [];
     for (const nodeId of scene.selection.nodeIds) {
       const view = this.nodeViews.get(nodeId);
       if (!view) continue;
       const b = view.node.bounds;
-      parts.push(`${nodeId}:${b.x},${b.y},${b.width},${b.height}`);
-      selected.push(view.node);
+      // Follow the live preview position while a drag/resize is in flight.
+      const x = view.group.x ?? b.x;
+      const y = view.group.y ?? b.y;
+      parts.push(`${nodeId}:${x},${y},${b.width},${b.height}`);
+      selected.push({ node: view.node, x, y });
     }
     const signature = parts.join("|");
     if (signature === this.selectionSignature) return;
     this.selectionSignature = signature;
     this.selectionLayer.removeAll();
-    const strokeWidth = 2 / scene.camera.zoom;
-    for (const node of selected) {
+    const strokeWidth = 2 / zoom;
+    const handleHit = HANDLE_HIT_PX / zoom;
+    const handleVisual = HANDLE_VISUAL_PX / zoom;
+    for (const { node, x, y } of selected) {
       this.selectionLayer.add(
         new Rect({
-          x: node.bounds.x - 5,
-          y: node.bounds.y - 5,
+          x: x - 5,
+          y: y - 5,
           width: node.bounds.width + 10,
           height: node.bounds.height + 10,
           cornerRadius: 14,
           fill: "#00000000",
           stroke: canvasTheme.selection,
           strokeWidth,
-          dashPattern: [6 / scene.camera.zoom, 4 / scene.camera.zoom],
+          dashPattern: [6 / zoom, 4 / zoom],
           hittable: false,
         }),
       );
+      const corners: { corner: Corner; cx: number; cy: number }[] = [
+        { corner: "nw", cx: x, cy: y },
+        { corner: "ne", cx: x + node.bounds.width, cy: y },
+        { corner: "sw", cx: x, cy: y + node.bounds.height },
+        { corner: "se", cx: x + node.bounds.width, cy: y + node.bounds.height },
+      ];
+      for (const { corner, cx, cy } of corners) {
+        this.selectionLayer.add(
+          new Rect({
+            x: cx - handleHit / 2,
+            y: cy - handleHit / 2,
+            width: handleHit,
+            height: handleHit,
+            fill: "#00000000",
+            data: { role: "resizeHandle", nodeId: node.id, corner },
+          }),
+        );
+        this.selectionLayer.add(
+          new Rect({
+            x: cx - handleVisual / 2,
+            y: cy - handleVisual / 2,
+            width: handleVisual,
+            height: handleVisual,
+            cornerRadius: 2 / zoom,
+            fill: canvasTheme.selection,
+            stroke: canvasTheme.background,
+            strokeWidth: 1 / zoom,
+            hittable: false,
+          }),
+        );
+      }
     }
   }
 }
 
 function minimapAccent(node: WorkflowNode): string {
   return canvasTheme.kindAccent[node.kind] ?? canvasTheme.nodeMuted;
+}
+
+function distance(a: Point, b: Point): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }

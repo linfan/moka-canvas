@@ -9,7 +9,13 @@ export const canvasTheme = {
   selection: "#6d8cff",
   edge: "#7d90bd",
   edgeSelected: "#6d8cff",
+  edgeRelated: "#61e4dc",
   port: "#9fb1d4",
+  portCompatible: "#7ee2a8",
+  portRejected: "#ff8c82",
+  marquee: "#6d8cff",
+  marqueeFill: "#6d8cff14",
+  snapGuide: "#ffcd6a",
   kindAccent: {
     text: "#61e4dc",
     image: "#6d8cff",
