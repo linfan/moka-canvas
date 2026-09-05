@@ -1,20 +1,28 @@
-import { Navigate, Route, Routes } from "react-router-dom";
-import { AppShell } from "./app/AppShell";
-import { OverviewPage } from "./pages/OverviewPage";
-import { PlaygroundPage } from "./pages/PlaygroundPage";
-import { ShowcasePage } from "./pages/ShowcasePage";
-import { TokensPage } from "./pages/TokensPage";
+import { useEffect } from "react";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import {
+  BootErrorScreen,
+  BootScreen,
+} from "./features/editor/components/BootScreen";
+import { Toasts } from "./features/editor/components/Toasts";
+import { EditorPage } from "./features/editor/EditorPage";
+import { LauncherPage } from "./features/editor/launcher/LauncherPage";
+import { useAppStore } from "./features/editor/stores/appStore";
 
 export default function App() {
+  const phase = useAppStore((state) => state.phase);
+
+  useEffect(() => {
+    void useAppStore.getState().boot();
+  }, []);
+
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<OverviewPage />} />
-        <Route path="showcase" element={<ShowcasePage />} />
-        <Route path="playground" element={<PlaygroundPage />} />
-        <Route path="tokens" element={<TokensPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <ErrorBoundary>
+      {phase === "booting" && <BootScreen />}
+      {phase === "error" && <BootErrorScreen />}
+      {(phase === "launcher" || phase === "opening") && <LauncherPage />}
+      {phase === "editing" && <EditorPage />}
+      <Toasts />
+    </ErrorBoundary>
   );
 }

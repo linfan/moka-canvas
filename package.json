@@ -17,11 +17,11 @@
     "@leafer-in/arrow": "^1.9.0",
     "@leafer-in/view": "^1.9.0",
     "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
     "bson": "^7.3.2",
     "leafer-ui": "^1.9.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "react-router-dom": "^7.8.2",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
