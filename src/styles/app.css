@@ -11,12 +11,12 @@ body {
 button {
   background: var(--surface-raised);
   border: 1px solid var(--stroke);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   color: var(--ink);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
-  padding: 7px 12px;
+  padding: 7px 14px;
   transition: 120ms ease;
 }
 
@@ -32,17 +32,17 @@ button:disabled {
 button.is-active {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--canvas);
+  color: var(--on-primary);
 }
 
 input {
   background: var(--canvas);
   border: 1px solid var(--stroke);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   color: var(--ink);
   font: inherit;
   font-size: 13px;
-  padding: 8px 10px;
+  padding: 8px 14px;
   width: 100%;
 }
 
@@ -66,9 +66,9 @@ h2 {
 
 .brand-mark {
   align-items: center;
-  background: linear-gradient(135deg, var(--primary), var(--cyan));
-  border-radius: 9px;
-  color: var(--canvas);
+  background: linear-gradient(135deg, #ff9ecb, #b78bff 52%, #7ee2a8);
+  border-radius: 50%;
+  color: var(--on-primary);
   display: inline-flex;
   font-size: 14px;
   font-weight: 700;
@@ -176,19 +176,19 @@ h2 {
 .launcher-actions button:first-child {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--canvas);
+  color: var(--on-primary);
   font-weight: 600;
 }
 
 .launcher-busy {
-  color: var(--cyan);
+  color: var(--yellow);
 }
 
 /* Dialogs */
 
 .dialog-backdrop {
   align-items: center;
-  background: rgb(3 7 20 / 66%);
+  background: rgb(0 0 0 / 62%);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -247,7 +247,7 @@ h2 {
 .dialog-actions button.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--canvas);
+  color: var(--on-primary);
   font-weight: 600;
 }
 
@@ -284,7 +284,8 @@ h2 {
 
 .editor-topbar {
   align-items: center;
-  background: rgb(11 16 32 / 88%);
+  backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--surface-glass);
   border-bottom: 1px solid var(--stroke);
   display: flex;
   gap: 10px;
@@ -368,12 +369,12 @@ h2 {
 }
 
 .save-status-saving {
-  color: var(--cyan);
+  color: var(--yellow);
 }
 
 .save-status-conflicted,
 .save-status-error {
-  background: rgb(255 118 118 / 14%);
+  background: rgb(255 138 128 / 14%);
   color: var(--danger);
 }
 
@@ -537,9 +538,7 @@ h2 {
 }
 
 .editor-canvas {
-  background:
-    radial-gradient(circle at 50% 40%, rgb(38 62 123 / 18%), transparent 34rem),
-    var(--canvas);
+  background: var(--canvas);
   flex: 1;
   min-width: 0;
   position: relative;
@@ -760,12 +759,13 @@ button.danger {
 
 button.danger:hover:not(:disabled) {
   background: var(--danger);
-  color: var(--canvas);
+  color: var(--on-primary);
 }
 
 .editor-toolstrip {
   align-items: center;
-  background: rgb(11 16 32 / 88%);
+  backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--surface-glass);
   border-top: 1px solid var(--stroke);
   display: flex;
   gap: 14px;
@@ -817,7 +817,7 @@ button.danger:hover:not(:disabled) {
 .menu button:hover:not(:disabled),
 .menu button:focus-visible {
   background: var(--primary);
-  color: var(--canvas);
+  color: var(--on-primary);
   outline: none;
 }
 
@@ -874,7 +874,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .toast-success {
-  border-color: var(--cyan);
+  border-color: var(--success);
 }
 
 .toast-error {

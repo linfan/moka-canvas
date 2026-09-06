@@ -162,9 +162,9 @@ function syncMedia(
     // Missing / changed / empty: a distinct broken-media wash.
     view.media.thumb = new Rect({
       cornerRadius: 8,
-      fill: "#4a2430",
+      fill: "#2a1e21",
       dashPattern: [4, 3],
-      stroke: "#ff8c82",
+      stroke: "#ff8a80",
       strokeWidth: 1,
       hittable: false,
     });
@@ -175,7 +175,7 @@ function syncMedia(
     view.media.badge = new Text({
       text: media.state === "ready" ? media.label : `⚠ ${media.label}`,
       fontSize: 11,
-      fill: media.state === "ready" ? canvasTheme.nodeTitle : "#ff8c82",
+      fill: media.state === "ready" ? canvasTheme.nodeTitle : "#ff8a80",
       fontFamily: canvasTheme.fontFamily,
       textOverflow: "…",
       hittable: false,
@@ -229,12 +229,12 @@ export function createNodeView(
     fill: canvasTheme.nodeFill,
     stroke: canvasTheme.nodeStroke,
     strokeWidth: 1,
-    shadow: { x: 0, y: 8, blur: 20, color: "#05081766" },
+    shadow: { x: 0, y: 8, blur: 20, color: "#00000066" },
     data: { role: "body", nodeId: node.id },
   });
   if (node.kind === "group") {
     frame.set({
-      fill: "#9fb1d40d",
+      fill: "#ffffff08",
       dashPattern: [6, 4],
     });
   }
