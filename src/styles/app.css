@@ -274,6 +274,15 @@ h2 {
   white-space: nowrap;
 }
 
+.missing-asset-list li button {
+  justify-self: start;
+}
+
+.missing-asset-restored strong,
+.missing-asset-restored span {
+  color: var(--success);
+}
+
 /* Editor shell */
 
 .editor {

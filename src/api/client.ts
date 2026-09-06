@@ -62,12 +62,16 @@ async function request<T>(
     response = await fetch(path, {
       method,
       signal: options.signal,
+      // FormData sets its own multipart boundary header.
       headers:
-        options.body !== undefined
+        options.body !== undefined && !options.formData
           ? { "Content-Type": "application/json" }
           : undefined,
-      body:
-        options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: options.formData
+        ? options.formData
+        : options.body !== undefined
+          ? JSON.stringify(options.body)
+          : undefined,
     });
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;

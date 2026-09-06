@@ -51,6 +51,8 @@ interface ProjectState {
   applyLocal: (commands: DocumentCommand[]) => DocumentCommand[];
   flush: () => Promise<void>;
   integrateSaveResult: (result: SaveResult) => void;
+  /** Replaces the open-time self-check report (e.g. after a located replacement). */
+  setSelfCheck: (report: SelfCheckReport) => void;
   /** Folds a server-side asset upload/replace into the local registry. */
   integrateAssetEntry: (entry: ResourceEntry, result: SaveResult) => void;
   /** Folds a server-side asset removal into the local registry. */
@@ -207,6 +209,10 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
           // Transient failures retry on the next change; keep the batch queued.
         }
       }
+    },
+
+    setSelfCheck(report) {
+      set({ selfCheck: report });
     },
 
     integrateSaveResult(result) {

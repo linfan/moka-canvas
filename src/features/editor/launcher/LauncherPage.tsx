@@ -154,6 +154,7 @@ export function LauncherPage() {
             setPendingCheck(null);
             useAppStore.getState().setPhase("editing");
           }}
+          onReportChange={setPendingCheck}
           report={pendingCheck}
         />
       )}

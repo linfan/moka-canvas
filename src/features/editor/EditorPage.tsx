@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { isApiError, projectsApi } from "../../api";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
@@ -22,6 +22,11 @@ import { NodeMenu } from "./panels/NodeMenu";
 import { SidePanel } from "./panels/SidePanel";
 import { AssetDeleteDialog } from "./components/AssetDeleteDialog";
 import { AssetPreviewDialog } from "./components/AssetPreviewDialog";
+import {
+  UnsavedWorkDialog,
+  type CloseAction,
+} from "./components/UnsavedWorkDialog";
+import { ExportBlockedDialog } from "./components/ExportBlockedDialog";
 import { RenameOverlay } from "./components/RenameOverlay";
 import { TextEditOverlay } from "./components/TextEditOverlay";
 
@@ -73,12 +78,71 @@ export function EditorPage() {
 
   const zoom = liveZoom ?? activeCanvas?.viewport.zoom ?? 1;
 
-  const closeProject = async () => {
-    const project = useProjectStore.getState();
-    await project.flush();
-    project.close();
+  const [exportBlock, setExportBlock] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [closeGuardOpen, setCloseGuardOpen] = useState(false);
+  const [closeBusy, setCloseBusy] = useState<CloseAction | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const pendingCount = useProjectStore((state) => state.pending.length);
+
+  const finishClose = () => {
+    useProjectStore.getState().close();
     useRunStore.getState().reset();
     useAppStore.getState().setPhase("launcher");
+  };
+
+  const requestClose = () => {
+    const project = useProjectStore.getState();
+    const guarded =
+      project.pending.length > 0 ||
+      project.saveStatus === "saving" ||
+      project.saveStatus === "conflicted";
+    if (!guarded) {
+      finishClose();
+      return;
+    }
+    setCloseError(null);
+    setCloseGuardOpen(true);
+  };
+
+  const closeWith = async (action: CloseAction) => {
+    if (action === "discard") {
+      setCloseGuardOpen(false);
+      finishClose();
+      return;
+    }
+    setCloseBusy(action);
+    setCloseError(null);
+    const project = useProjectStore.getState();
+    // A conflict blocks flushing; export then preserves the last saved revision.
+    if (project.saveStatus !== "conflicted") {
+      await project.flush();
+      const after = useProjectStore.getState();
+      if (after.pending.length > 0 || after.saveStatus === "conflicted") {
+        setCloseBusy(null);
+        setCloseError(
+          after.saveStatus === "conflicted"
+            ? "Saving is blocked by a revision conflict — reload the project or discard your changes."
+            : (after.saveError ??
+                "Saving failed — try again or discard your changes."),
+        );
+        return;
+      }
+    }
+    if (action === "export") {
+      try {
+        await projectsApi.exportPackage({});
+      } catch (error) {
+        setCloseBusy(null);
+        setCloseError(
+          error instanceof Error ? error.message : "Export failed",
+        );
+        return;
+      }
+    }
+    setCloseBusy(null);
+    setCloseGuardOpen(false);
+    finishClose();
   };
 
   const startRun = async () => {
@@ -104,22 +168,35 @@ export function EditorPage() {
     }
   };
 
-  const exportPackage = async () => {
+  const exportPackage = async (allowIncomplete = false) => {
+    setExportBusy(allowIncomplete);
     try {
-      const report = await projectsApi.exportPackage({});
+      const report = await projectsApi.exportPackage(
+        allowIncomplete ? { allowIncomplete: true } : {},
+      );
+      setExportBlock(null);
       useAppStore
         .getState()
         .pushToast(
           "success",
-          `Exported ${report.entries} files to ${report.destination}`,
+          report.incomplete
+            ? `Exported ${report.entries} files (flagged incomplete) to ${report.destination}`
+            : `Exported ${report.entries} files to ${report.destination}`,
         );
     } catch (error) {
-      useAppStore
-        .getState()
-        .pushToast(
-          "error",
-          error instanceof Error ? error.message : "Export failed",
-        );
+      if (!allowIncomplete && isApiError(error, "ASSET_MISSING")) {
+        setExportBlock(error.message);
+      } else {
+        setExportBlock(null);
+        useAppStore
+          .getState()
+          .pushToast(
+            "error",
+            error instanceof Error ? error.message : "Export failed",
+          );
+      }
+    } finally {
+      setExportBusy(false);
     }
   };
 
@@ -132,7 +209,7 @@ export function EditorPage() {
         <button
           aria-label="Back to launcher"
           className="editor-back"
-          onClick={() => void closeProject()}
+          onClick={requestClose}
           type="button"
         >
           ←
@@ -234,6 +311,24 @@ export function EditorPage() {
       <NodeMenu />
       <AssetDeleteDialog />
       <AssetPreviewDialog />
+      {exportBlock !== null && (
+        <ExportBlockedDialog
+          busy={exportBusy}
+          message={exportBlock}
+          onCancel={() => setExportBlock(null)}
+          onExportAnyway={() => void exportPackage(true)}
+        />
+      )}
+      {closeGuardOpen && (
+        <UnsavedWorkDialog
+          busy={closeBusy}
+          error={closeError}
+          onAction={(action) => void closeWith(action)}
+          onCancel={() => setCloseGuardOpen(false)}
+          pendingCount={pendingCount}
+          saveStatus={saveStatus}
+        />
+      )}
 
       <footer className="editor-toolstrip">
         <div aria-label="Tool" className="tool-group" role="group">
