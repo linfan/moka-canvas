@@ -4,6 +4,7 @@ pub mod config;
 pub mod domain;
 pub mod project;
 pub mod server;
+pub mod workflow;
 
 use std::{error::Error, sync::Arc};
 

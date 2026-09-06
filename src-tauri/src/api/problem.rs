@@ -53,7 +53,8 @@ pub fn status_for_code(code: &str) -> StatusCode {
         | "REVISION_CONFLICT"
         | "ASSET_IN_USE"
         | "CONFLICT"
-        | "RUN_NOT_CANCELLABLE" => StatusCode::CONFLICT,
+        | "RUN_NOT_CANCELLABLE"
+        | "RUN_NOT_RETRYABLE" => StatusCode::CONFLICT,
         "PAYLOAD_TOO_LARGE" | "MOKA_TOO_LARGE" => StatusCode::PAYLOAD_TOO_LARGE,
         "UNSUPPORTED_MEDIA_TYPE" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         "PATH_ESCAPE" => StatusCode::BAD_REQUEST,

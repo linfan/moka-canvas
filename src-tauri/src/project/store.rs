@@ -3,7 +3,7 @@ use crate::config::AppConfig;
 use crate::domain::commands::{apply_commands, registry_errors};
 use crate::domain::{
     new_id, now_iso, CanvasDocument, DocumentCommand, MokaFile, ProjectMetadata, ResourceEntry,
-    ResourceRegistry, RunRecord, SelfCheckIssue, SelfCheckNodeRef, SelfCheckReason,
+    ResourceRegistry, RunRecord, RunStatus, SelfCheckIssue, SelfCheckNodeRef, SelfCheckReason,
     SelfCheckReport, MOKA_FILE_VERSION,
 };
 use crate::project::codec::{decode_moka_file, encode_moka_file};
@@ -62,6 +62,74 @@ impl FsProjectStore {
                     let _ = std::fs::remove_file(&path);
                 }
             }
+        }
+    }
+
+    fn runs_dir(root: &Path) -> PathBuf {
+        root.join("history").join("runs")
+    }
+
+    /// Run ids are uuids; anything else can never resolve to a record file.
+    fn run_path(root: &Path, id: &str) -> Result<PathBuf, ProjectError> {
+        if id.is_empty()
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return Err(ProjectError::domain("RUN_NOT_FOUND", "Run not found"));
+        }
+        Ok(Self::runs_dir(root).join(format!("{id}.json")))
+    }
+
+    fn write_run(root: &Path, run: &RunRecord) -> Result<(), ProjectError> {
+        let dir = Self::runs_dir(root);
+        std::fs::create_dir_all(&dir)?;
+        let bytes = serde_json::to_vec_pretty(run)
+            .map_err(|error| ProjectError::domain("INTERNAL", error.to_string()))?;
+        let tmp = dir.join(format!(".{}.{}.tmp", run.id, uuid::Uuid::now_v7()));
+        std::fs::write(&tmp, &bytes)?;
+        {
+            let file = std::fs::File::open(&tmp)?;
+            file.sync_all()?;
+        }
+        std::fs::rename(&tmp, Self::run_path(root, &run.id)?)?;
+        if let Ok(dir_handle) = std::fs::File::open(&dir) {
+            let _ = dir_handle.sync_all();
+        }
+        Ok(())
+    }
+
+    /// Runs left queued/running by a dead process are failed on open — they
+    /// can never resume, and the record must not claim otherwise.
+    fn sweep_interrupted_runs(root: &Path) {
+        let dir = Self::runs_dir(root);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(mut run) = serde_json::from_str::<RunRecord>(&raw) else {
+                continue;
+            };
+            if !matches!(run.status, RunStatus::Queued | RunStatus::Running) {
+                continue;
+            }
+            run.status = RunStatus::Failed;
+            run.error = Some("The app stopped while this run was in progress".to_string());
+            for step in &mut run.steps {
+                if matches!(step.status, RunStatus::Queued | RunStatus::Running) {
+                    step.status = RunStatus::Failed;
+                    step.error = Some("Interrupted before completion".to_string());
+                }
+            }
+            run.updated_at = now_iso();
+            let _ = Self::write_run(root, &run);
         }
     }
 
@@ -315,6 +383,7 @@ impl ProjectStore for FsProjectStore {
         };
         let (moka, stamp) = self.load_from_disk(&root)?;
         Self::clean_tmp(&root);
+        Self::sweep_interrupted_runs(&root);
         let report = Self::self_check(&root, &moka);
         let revision = moka.metadata.revision;
         {
@@ -610,6 +679,51 @@ impl ProjectStore for FsProjectStore {
         }
         runs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(runs)
+    }
+
+    async fn create_run(&self, run: RunRecord) -> Result<RunRecord, ProjectError> {
+        let root = {
+            let guard = self.state.lock().expect("store poisoned");
+            guard
+                .as_ref()
+                .map(|state| state.root.clone())
+                .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?
+        };
+        Self::write_run(&root, &run)?;
+        Ok(run)
+    }
+
+    async fn get_run(&self, id: &str) -> Result<RunRecord, ProjectError> {
+        let root = {
+            let guard = self.state.lock().expect("store poisoned");
+            guard
+                .as_ref()
+                .map(|state| state.root.clone())
+                .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?
+        };
+        let path = Self::run_path(&root, id)?;
+        let raw = std::fs::read_to_string(&path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ProjectError::domain("RUN_NOT_FOUND", "Run not found")
+            } else {
+                ProjectError::Io(error)
+            }
+        })?;
+        serde_json::from_str(&raw).map_err(|error| {
+            ProjectError::domain("INTERNAL", format!("Run record is corrupt: {error}"))
+        })
+    }
+
+    async fn update_run(&self, run: RunRecord) -> Result<RunRecord, ProjectError> {
+        let root = {
+            let guard = self.state.lock().expect("store poisoned");
+            guard
+                .as_ref()
+                .map(|state| state.root.clone())
+                .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?
+        };
+        Self::write_run(&root, &run)?;
+        Ok(run)
     }
 }
 

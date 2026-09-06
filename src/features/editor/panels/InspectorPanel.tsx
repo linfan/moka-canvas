@@ -3,6 +3,9 @@ import type {
   AssetId,
   CanvasDocument,
   ResourceEntry,
+  ResultSlot,
+  RunRecord,
+  RunStatus,
   WorkflowEdge,
   WorkflowNode,
 } from "../../../shared/domain";
@@ -10,6 +13,10 @@ import { assetsApi, assetUrl } from "../../../api";
 import { useAppStore } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
+import {
+  useLatestRunForNode,
+  useRunStore,
+} from "../stores/runStore";
 import {
   buildIssueIndex,
   buildResourceIndex,
@@ -279,6 +286,139 @@ function InputChip({
   );
 }
 
+const RUN_STATUS_LABEL: Record<RunStatus, string> = {
+  queued: "Queued",
+  running: "Running",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+function formatTime(iso?: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString();
+}
+
+/** Run controls, latest run state, and result slots for the selected node. */
+function RunSection({
+  canvas,
+  node,
+}: {
+  canvas: CanvasDocument;
+  node: WorkflowNode;
+}) {
+  const run = useLatestRunForNode(node.id);
+  const starting = useRunStore((state) => state.starting);
+  const issues = useRunStore((state) => state.lastIssues);
+  const step = run?.steps.find((entry) => entry.nodeId === node.id);
+  const slots =
+    (node.data as { resultSlots?: ResultSlot[] }).resultSlots ?? [];
+  const relevantIssues = issues.filter(
+    (issue) => !issue.nodeId || issue.nodeId === node.id,
+  );
+  const active = run && (run.status === "queued" || run.status === "running");
+  const retryable = run && (run.status === "failed" || run.status === "cancelled");
+
+  const start = async () => {
+    try {
+      await useRunStore.getState().start(canvas.id, [node.id]);
+    } catch {
+      // Issues surface below via lastIssues; transport errors toast globally.
+    }
+  };
+
+  const retry = async (record: RunRecord) => {
+    try {
+      await useRunStore.getState().retry(record.id);
+    } catch (error) {
+      useAppStore
+        .getState()
+        .pushToast(
+          "error",
+          error instanceof Error ? error.message : "Retry failed",
+        );
+    }
+  };
+
+  return (
+    <section className="inspector-section">
+      <h3>Run</h3>
+      {node.kind === "operation" && (
+        <div className="inspector-actions">
+          <button disabled={starting} onClick={() => void start()} type="button">
+            {starting ? "Starting…" : "▶ Run this node"}
+          </button>
+          {active && run && (
+            <button
+              className="danger"
+              onClick={() => void useRunStore.getState().cancel(run.id)}
+              type="button"
+            >
+              Cancel
+            </button>
+          )}
+          {retryable && run && (
+            <button onClick={() => void retry(run)} type="button">
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      {relevantIssues.length > 0 && (
+        <ul className="inspector-issues" role="alert">
+          {relevantIssues.map((issue, index) => (
+            <li key={`${issue.code}-${index}`}>
+              <strong>{issue.code}</strong> {issue.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      {run && step && (
+        <>
+          <div className="inspector-row">
+            <span>Status</span>
+            <span className={`run-chip run-chip-${step.status}`}>
+              {RUN_STATUS_LABEL[step.status]}
+              {run.cancelRequested && active ? " · cancelling" : ""}
+            </span>
+          </div>
+          <Row label="Started" value={formatTime(step.startedAt ?? run.createdAt)} />
+          <Row label="Finished" value={formatTime(step.finishedAt)} />
+          {step.error && <p className="inspector-run-error">{step.error}</p>}
+          {!step.error && run.error && !active && (
+            <p className="inspector-run-error">{run.error}</p>
+          )}
+          {step.outputText && (
+            <p className="inspector-run-output">{step.outputText}</p>
+          )}
+        </>
+      )}
+      {slots.length > 0 && (
+        <>
+          <h3>Results</h3>
+          {slots.map((slot) => (
+            <div className="inspector-row" key={slot.id}>
+              <span>{slot.isPrimary ? "Primary" : slot.id}</span>
+              <span className={`run-chip run-chip-${slot.status}`}>
+                {slot.status}
+              </span>
+            </div>
+          ))}
+          {slots.find((slot) => slot.status === "failed")?.error && (
+            <p className="inspector-run-error">
+              {slots.find((slot) => slot.status === "failed")?.error}
+            </p>
+          )}
+        </>
+      )}
+      {!run && node.kind === "operation" && relevantIssues.length === 0 && (
+        <p className="inspector-empty">No runs yet</p>
+      )}
+    </section>
+  );
+}
+
 function NodeInspector({
   canvas,
   node,
@@ -310,6 +450,7 @@ function NodeInspector({
       )}
       <MediaAssetSection node={node} />
       <InputChips canvas={canvas} node={node} />
+      <RunSection canvas={canvas} node={node} />
     </>
   );
 }

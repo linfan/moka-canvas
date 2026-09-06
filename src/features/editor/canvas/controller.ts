@@ -16,6 +16,7 @@ import {
   type Point,
   type Rect as WorldRect,
   type ResourceEntry,
+  type RunStatus,
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../../shared/domain";
@@ -117,6 +118,8 @@ export interface SceneState {
   issues: ReadonlyMap<AssetId, "missing" | "changed" | "empty">;
   /** Inspector input-replace pick mode; candidates are the allowed sources. */
   pick: { nodeId: NodeId; portId: string; candidates: ReadonlySet<NodeId> } | null;
+  /** Latest run step status per node id; absent when no run covers the node. */
+  runStatus: ReadonlyMap<NodeId, RunStatus>;
 }
 
 interface EdgeRecord {
@@ -331,6 +334,7 @@ export class LeaferEditorController {
           (relatedNodes !== null &&
             !relatedNodes.has(node.id) &&
             scene.pick === null),
+        runStatus: scene.runStatus.get(node.id) ?? null,
       };
       let view = this.nodeViews.get(node.id);
       const media = mediaInfoForNode(node, scene.resources, scene.issues);
@@ -346,7 +350,8 @@ export class LeaferEditorController {
         view.visual.selected !== visual.selected ||
         view.visual.hovered !== visual.hovered ||
         view.visual.lowDetail !== visual.lowDetail ||
-        view.visual.dimmed !== visual.dimmed
+        view.visual.dimmed !== visual.dimmed ||
+        view.visual.runStatus !== visual.runStatus
       ) {
         updateNodeView(view, node, visual, media);
         this.stats.nodeUpdates += 1;

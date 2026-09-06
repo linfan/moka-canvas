@@ -13,6 +13,14 @@ export const canvasTheme = {
   port: "#9a9aa4",
   portCompatible: "#7ee2a8",
   portRejected: "#ff8a80",
+  /** Node card status dot per run step status. */
+  runStatus: {
+    queued: "#f2ce7a",
+    running: "#f2ce7a",
+    succeeded: "#7ee2a8",
+    failed: "#ff8a80",
+    cancelled: "#9a9aa4",
+  } as Record<string, string>,
   marquee: "#f5f5f7",
   marqueeFill: "#ffffff14",
   snapGuide: "#f2ce7a",

@@ -1,7 +1,7 @@
 use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, CreateProjectRequest,
     ExportRequest, ImportProjectRequest, OpenProjectRequest, OpenProjectResponse, PackageResponse,
-    PublicConfigResponse, SaveResponse,
+    PublicConfigResponse, SaveResponse, StartRunRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
@@ -633,4 +633,61 @@ pub async fn import_project(
 pub async fn list_runs(State(state): State<ApiState>) -> Result<Json<Vec<RunRecord>>, Problem> {
     let runs = state.store.list_runs().await?;
     Ok(Json(runs))
+}
+
+fn start_run_problem(error: crate::workflow::runner::StartRunError) -> Problem {
+    use crate::workflow::runner::StartRunError;
+    match error {
+        StartRunError::Validation(issues) => Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "RUN_VALIDATION_FAILED",
+            "The requested run is not valid",
+        )
+        .with_details(serde_json::json!({ "issues": issues })),
+        StartRunError::Store(error) => Problem::from(error),
+    }
+}
+
+pub async fn start_run(
+    State(state): State<ApiState>,
+    json: Result<Json<StartRunRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<RunRecord>), Problem> {
+    let Json(request) = json_or_problem(json)?;
+    if request.canvas_id.trim().is_empty() || request.node_ids.is_empty() {
+        return Err(Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+            "A canvas id and at least one node id are required",
+        ));
+    }
+    let run = state
+        .runs
+        .start(&request.canvas_id, request.node_ids, None)
+        .await
+        .map_err(start_run_problem)?;
+    Ok((StatusCode::CREATED, Json(run)))
+}
+
+pub async fn get_run(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<RunRecord>, Problem> {
+    let run = state.store.get_run(&id).await?;
+    Ok(Json(run))
+}
+
+pub async fn cancel_run(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<RunRecord>, Problem> {
+    let run = state.runs.cancel(&id).await?;
+    Ok(Json(run))
+}
+
+pub async fn retry_run(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<RunRecord>), Problem> {
+    let run = state.runs.retry(&id).await.map_err(start_run_problem)?;
+    Ok((StatusCode::CREATED, Json(run)))
 }

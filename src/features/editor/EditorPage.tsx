@@ -1,4 +1,5 @@
-import { projectsApi } from "../../api";
+import { useEffect } from "react";
+import { isApiError, projectsApi } from "../../api";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
 import { clientToWorld, zoomTo } from "./canvas/canvasControl";
@@ -13,6 +14,7 @@ import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { useHistoryStore, isBoundary } from "./stores/historyStore";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
+import { useRunStore } from "./stores/runStore";
 import { CanvasTabs } from "./panels/CanvasTabs";
 import { ContextMenu } from "./panels/ContextMenu";
 import { InspectorPanel } from "./panels/InspectorPanel";
@@ -51,7 +53,23 @@ export function EditorPage() {
   const announcement = useEditorStore((state) => state.announcement);
   const canUndo = useCanUndo();
   const canRedo = useHistoryStore((state) => state.redoStack.length > 0);
+  const starting = useRunStore((state) => state.starting);
+  const runActive = useRunStore((state) =>
+    state.runs.some(
+      (run) => run.status === "queued" || run.status === "running",
+    ),
+  );
+  const runnableIds = useEditorStore((state) => state.selection.nodeIds).filter(
+    (id) =>
+      activeCanvas?.nodes.some(
+        (node) => node.id === id && node.kind === "operation",
+      ) ?? false,
+  );
   useEditorKeyboard();
+
+  useEffect(() => {
+    void useRunStore.getState().load();
+  }, []);
 
   const zoom = liveZoom ?? activeCanvas?.viewport.zoom ?? 1;
 
@@ -59,7 +77,31 @@ export function EditorPage() {
     const project = useProjectStore.getState();
     await project.flush();
     project.close();
+    useRunStore.getState().reset();
     useAppStore.getState().setPhase("launcher");
+  };
+
+  const startRun = async () => {
+    if (!activeCanvas || runnableIds.length === 0) return;
+    try {
+      await useRunStore.getState().start(activeCanvas.id, runnableIds);
+    } catch (error) {
+      const app = useAppStore.getState();
+      if (isApiError(error, "RUN_VALIDATION_FAILED")) {
+        const count = useRunStore.getState().lastIssues.length;
+        app.pushToast(
+          "error",
+          count > 0
+            ? `Run blocked by ${count} issue${count === 1 ? "" : "s"} — see inspector`
+            : error.message,
+        );
+      } else {
+        app.pushToast(
+          "error",
+          error instanceof Error ? error.message : "Run failed to start",
+        );
+      }
+    }
   };
 
   const exportPackage = async () => {
@@ -126,6 +168,21 @@ export function EditorPage() {
           type="button"
         >
           ↷
+        </button>
+        <button
+          className="run-button"
+          disabled={
+            runnableIds.length === 0 || starting || runActive
+          }
+          onClick={() => void startRun()}
+          title={
+            runnableIds.length === 0
+              ? "Select an operation node to run"
+              : `Run ${runnableIds.length} operation${runnableIds.length === 1 ? "" : "s"}`
+          }
+          type="button"
+        >
+          {starting ? "Starting…" : runActive ? "Running…" : "▶ Run"}
         </button>
         <button onClick={() => void exportPackage()} type="button">
           Export

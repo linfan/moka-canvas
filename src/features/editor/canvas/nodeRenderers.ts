@@ -1,5 +1,10 @@
 import { Ellipse, Group, Rect, Text } from "leafer-ui";
-import type { NodeKind, Point, WorkflowNode } from "../../../shared/domain";
+import type {
+  NodeKind,
+  Point,
+  RunStatus,
+  WorkflowNode,
+} from "../../../shared/domain";
 import {
   NODE_HEADER_HEIGHT,
   PORT_RADIUS,
@@ -15,6 +20,8 @@ export interface NodeVisualState {
   lowDetail: boolean;
   /** Related-highlight is active and this node is outside the chain. */
   dimmed: boolean;
+  /** Latest run step status for this node, if any. */
+  runStatus: RunStatus | null;
 }
 
 export interface PortView {
@@ -33,6 +40,8 @@ export interface NodeView {
   ports: Map<string, PortView>;
   node: WorkflowNode;
   visual: NodeVisualState;
+  /** Run-status dot in the header corner; null while no run covers the node. */
+  statusDot: Ellipse | null;
   media: {
     signature: string;
     thumb: Rect | null;
@@ -285,6 +294,7 @@ export function createNodeView(
     ports: new Map(),
     node,
     visual,
+    statusDot: null,
     media: { signature: "", thumb: null, badge: null, bars: [] },
   };
   syncMedia(view, node, media);
@@ -327,6 +337,31 @@ function syncPorts(view: NodeView, node: WorkflowNode) {
   }
 }
 
+function syncStatusDot(view: NodeView, status: RunStatus | null) {
+  if (!status) {
+    if (view.statusDot) {
+      view.statusDot.remove();
+      view.statusDot = null;
+    }
+    return;
+  }
+  if (!view.statusDot) {
+    view.statusDot = new Ellipse({
+      width: 9,
+      height: 9,
+      stroke: canvasTheme.nodeFill,
+      strokeWidth: 1.5,
+      hittable: false,
+    });
+    view.group.add(view.statusDot);
+  }
+  view.statusDot.set({
+    x: view.node.bounds.width - 21,
+    y: (NODE_HEADER_HEIGHT - 9) / 2,
+    fill: canvasTheme.runStatus[status] ?? canvasTheme.nodeMuted,
+  });
+}
+
 function applyVisual(view: NodeView, visual: NodeVisualState) {
   const { frame, title, summary, group } = view;
   frame.strokeWidth = visual.selected ? 2 : visual.hovered ? 1.5 : 1;
@@ -344,6 +379,8 @@ function applyVisual(view: NodeView, visual: NodeVisualState) {
   for (const port of view.ports.values()) {
     port.dot.visible = !visual.lowDetail;
   }
+  syncStatusDot(view, visual.runStatus);
+  if (view.statusDot) view.statusDot.visible = !visual.lowDetail;
   group.opacity = visual.dimmed ? 0.35 : 1;
 }
 
@@ -396,6 +433,7 @@ export function previewNodeBounds(
   view.frame.set({ width: bounds.width, height: bounds.height });
   view.accent.set({ height: bounds.height });
   view.title.set({ width: bounds.width - 52 });
+  view.statusDot?.set({ x: bounds.width - 21 });
   view.summary.set({
     width: bounds.width - 28,
     height: bounds.height - NODE_HEADER_HEIGHT - 20,

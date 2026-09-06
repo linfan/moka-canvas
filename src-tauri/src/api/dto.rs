@@ -30,6 +30,13 @@ pub struct ApplyCommandsRequest {
     pub commands: Vec<DocumentCommand>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartRunRequest {
+    pub canvas_id: String,
+    pub node_ids: Vec<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportRequest {
