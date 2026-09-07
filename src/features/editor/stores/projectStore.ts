@@ -61,6 +61,11 @@ interface ProjectState {
 
 const FLUSH_DEBOUNCE_MS = 400;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+// A flush in flight shares its promise: concurrent callers (the autosave
+// debounce racing an explicit save) must not send the same batch twice —
+// the duplicate would arrive with a stale expected revision and surface a
+// spurious conflict after the first request already saved it.
+let flushInFlight: Promise<void> | null = null;
 
 function activeCanvasOf(moka: MokaFile, activeCanvasId: CanvasId | null) {
   return (
@@ -91,6 +96,8 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
     hydrate(opened) {
       if (flushTimer) clearTimeout(flushTimer);
       flushTimer = null;
+      // A flush from the previously open project must not be awaited here.
+      flushInFlight = null;
       set({
         root: opened.root,
         moka: opened.moka,
@@ -131,6 +138,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
     close() {
       if (flushTimer) clearTimeout(flushTimer);
       flushTimer = null;
+      flushInFlight = null;
       set({
         root: null,
         moka: null,
@@ -172,43 +180,52 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
     async flush() {
       const { moka, pending, saveStatus } = get();
       if (!moka || pending.length === 0 || saveStatus === "conflicted") return;
+      if (flushInFlight) return flushInFlight;
       const batch = pending;
       set({ saveStatus: "saving", saveError: null });
-      try {
-        const result = await projectsApi.applyCommands(
-          moka.metadata.revision,
-          batch,
-        );
-        set((state) => {
-          const remaining = state.pending.slice(batch.length);
-          return {
-            saveStatus: "saved",
-            pending: remaining,
-            moka: state.moka
-              ? {
-                  ...state.moka,
-                  metadata: {
-                    ...state.moka.metadata,
-                    revision: result.revision,
-                    updatedAt: result.updatedAt,
-                  },
-                }
-              : null,
-          };
-        });
-        if (get().pending.length > 0) scheduleFlush();
-      } catch (error) {
-        if (isApiError(error, "REVISION_CONFLICT")) {
-          // Stop autosave; the user chooses reload or export-local-copy.
-          set({ saveStatus: "conflicted" });
-        } else {
-          set({
-            saveStatus: "error",
-            saveError: error instanceof Error ? error.message : "Saving failed",
+      const attempt = (async () => {
+        try {
+          const result = await projectsApi.applyCommands(
+            moka.metadata.revision,
+            batch,
+          );
+          set((state) => {
+            const remaining = state.pending.slice(batch.length);
+            return {
+              saveStatus: "saved",
+              pending: remaining,
+              moka: state.moka
+                ? {
+                    ...state.moka,
+                    metadata: {
+                      ...state.moka.metadata,
+                      revision: result.revision,
+                      updatedAt: result.updatedAt,
+                    },
+                  }
+                : null,
+            };
           });
-          // Transient failures retry on the next change; keep the batch queued.
+          if (get().pending.length > 0) scheduleFlush();
+        } catch (error) {
+          if (isApiError(error, "REVISION_CONFLICT")) {
+            // Stop autosave; the user chooses reload or export-local-copy.
+            set({ saveStatus: "conflicted" });
+          } else {
+            set({
+              saveStatus: "error",
+              saveError:
+                error instanceof Error ? error.message : "Saving failed",
+            });
+            // Transient failures retry on the next change; keep the batch queued.
+          }
         }
-      }
+      })();
+      const tracked = attempt.finally(() => {
+        if (flushInFlight === tracked) flushInFlight = null;
+      });
+      flushInFlight = tracked;
+      return flushInFlight;
     },
 
     setSelfCheck(report) {

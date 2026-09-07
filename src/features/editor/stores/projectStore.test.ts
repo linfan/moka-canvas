@@ -87,6 +87,34 @@ describe("command pipeline", () => {
     expect(state.moka?.metadata.revision).toBe(4);
   });
 
+  it("shares one in-flight flush so concurrent saves cannot double-send", async () => {
+    hydrate();
+    const canvasId = goldenNodeIds().canvasMain;
+    let resolveSave: (value: Response) => void = () => {};
+    fetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+
+    execute("Rename canvas", [
+      { type: "renameCanvas", canvasId, name: "Storyboard" },
+    ]);
+    // The autosave debounce and an explicit save race here; both callers
+    // must resolve from a single request, never a duplicate second POST.
+    const first = useProjectStore.getState().flush();
+    const second = useProjectStore.getState().flush();
+    resolveSave(
+      jsonResponse(200, { revision: 4, updatedAt: "2026-01-01T00:00:02.000Z" }),
+    );
+    await Promise.all([first, second]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useProjectStore.getState().saveStatus).toBe("saved");
+    expect(useProjectStore.getState().pending).toHaveLength(0);
+  });
+
   it("freezes autosave on a revision conflict and rejects further edits", async () => {
     hydrate();
     const canvasId = goldenNodeIds().canvasMain;

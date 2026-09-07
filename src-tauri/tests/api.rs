@@ -481,3 +481,64 @@ async fn malformed_json_is_a_problem() {
     let problem = body_json(response).await;
     assert_eq!(problem["code"], "VALIDATION_FAILED");
 }
+
+#[tokio::test]
+async fn readiness_reports_registry_and_config_checks() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ready")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["status"], "ready");
+    assert_eq!(body["checks"]["config"], true);
+    assert_eq!(body["checks"]["recentRegistry"], true);
+    assert_eq!(body["checks"]["projectDirectory"], true);
+}
+
+#[tokio::test]
+async fn api_responses_carry_request_ids_and_problem_codes() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .expect("x-request-id header");
+    assert_eq!(request_id.len(), 12);
+    assert!(request_id.chars().all(|c| c.is_ascii_hexdigit()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/projects/current")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.headers().get("x-request-id").unwrap().len(), 12);
+    assert_eq!(
+        response.headers().get("x-error-code").unwrap(),
+        "PROJECT_NOT_OPEN"
+    );
+}

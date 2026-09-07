@@ -86,7 +86,8 @@ impl From<std::io::Error> for Problem {
 impl IntoResponse for Problem {
     fn into_response(self) -> Response {
         let inner = *self.0;
-        (
+        let code = inner.body.code.clone();
+        let mut response = (
             inner.status,
             [(
                 header::CONTENT_TYPE,
@@ -94,7 +95,13 @@ impl IntoResponse for Problem {
             )],
             Json(inner.body),
         )
-            .into_response()
+            .into_response();
+        // Surfaced for structured request logs and API debugging; the code is
+        // an uppercase domain constant, never user input.
+        if let Ok(value) = header::HeaderValue::from_str(&code) {
+            response.headers_mut().insert("x-error-code", value);
+        }
+        response
     }
 }
 

@@ -22,6 +22,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    moka_canvas::telemetry::init();
     let args = Args::parse();
     let mut config = load_config_file(&args.config)?;
     if let Some(static_dir) = args.static_dir {

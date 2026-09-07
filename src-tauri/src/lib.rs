@@ -4,6 +4,7 @@ pub mod config;
 pub mod domain;
 pub mod project;
 pub mod server;
+pub mod telemetry;
 pub mod workflow;
 
 use std::{error::Error, sync::Arc};
@@ -13,6 +14,7 @@ use server::LocalServer;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 pub fn run() {
+    telemetry::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
