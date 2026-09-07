@@ -64,10 +64,12 @@ export function buildIssueIndex(
 function labelFor(entry: ResourceEntry): string {
   const probe = entry.probe;
   const parts: string[] = [];
-  if (probe?.width && probe.height) parts.push(`${probe.width}×${probe.height}`);
+  if (probe?.width && probe.height)
+    parts.push(`${probe.width}×${probe.height}`);
   const duration = formatDuration(probe?.durationMs);
   if (duration) parts.push(duration);
-  if (probe?.sampleRate) parts.push(`${Math.round(probe.sampleRate / 100) / 10} kHz`);
+  if (probe?.sampleRate)
+    parts.push(`${Math.round(probe.sampleRate / 100) / 10} kHz`);
   if (parts.length === 0) parts.push(formatBytes(entry.bytes) || entry.name);
   return parts.join(" · ");
 }
@@ -117,7 +119,10 @@ export function mediaInfoForNode(
  * Deterministic pseudo-waveform (0..1 peaks) derived from the asset hash —
  * a stand-in for a true sampled waveform until derivative jobs land.
  */
-export function waveformPeaks(sha256: string | undefined, count = 28): number[] {
+export function waveformPeaks(
+  sha256: string | undefined,
+  count = 28,
+): number[] {
   const peaks: number[] = [];
   for (let i = 0; i < count; i++) {
     const ch = sha256?.charCodeAt((i * 2) % Math.max(sha256.length, 1)) ?? 0;

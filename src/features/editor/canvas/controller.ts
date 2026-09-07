@@ -117,7 +117,11 @@ export interface SceneState {
   /** Self-check issue reason per asset id (missing/changed/empty). */
   issues: ReadonlyMap<AssetId, "missing" | "changed" | "empty">;
   /** Inspector input-replace pick mode; candidates are the allowed sources. */
-  pick: { nodeId: NodeId; portId: string; candidates: ReadonlySet<NodeId> } | null;
+  pick: {
+    nodeId: NodeId;
+    portId: string;
+    candidates: ReadonlySet<NodeId>;
+  } | null;
   /** Latest run step status per node id; absent when no run covers the node. */
   runStatus: ReadonlyMap<NodeId, RunStatus>;
 }

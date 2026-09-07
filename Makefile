@@ -2,7 +2,7 @@ SHELL := /bin/sh
 CARGO_MANIFEST := src-tauri/Cargo.toml
 WINDOWS_CROSS_TARGET := x86_64-pc-windows-gnu
 
-.PHONY: install check web-build web-serve tauri-dev package-web package-macos package-windows cross-package-windows set-version clean
+.PHONY: install check test web-build web-serve tauri-dev package-web package-macos package-windows cross-package-windows set-version clean
 
 ifeq (set-version,$(firstword $(MAKECMDGOALS)))
 SET_VERSION_ARG := $(word 2,$(MAKECMDGOALS))
@@ -22,8 +22,13 @@ check: web-build
 	npm run format:check
 	npm run lint
 	npm run typecheck
+	npm test
 	cargo fmt --manifest-path $(CARGO_MANIFEST) -- --check
 	cargo clippy --manifest-path $(CARGO_MANIFEST) --all-targets -- -D warnings
+	cargo test --manifest-path $(CARGO_MANIFEST)
+
+test:
+	npm test
 	cargo test --manifest-path $(CARGO_MANIFEST)
 
 web-build:

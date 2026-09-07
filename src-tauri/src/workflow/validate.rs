@@ -5,8 +5,8 @@
 use super::{ExecutionRequest, ValueProvenance, WorkflowExecutor, WorkflowValue};
 use crate::domain::validate::topological_order;
 use crate::domain::{
-    CanvasDocument, CanvasId, DataType, MokaFile, NodeId, NodeKind, ValidationIssue,
-    WorkflowEdge, WorkflowNode,
+    CanvasDocument, CanvasId, DataType, MokaFile, NodeId, NodeKind, ValidationIssue, WorkflowEdge,
+    WorkflowNode,
 };
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -185,7 +185,11 @@ pub async fn validate_run(
     issues.extend(crate::domain::validate::validate_canvas(&scoped));
 
     let mut edges: Vec<WorkflowEdge> = scoped.edges.clone();
-    edges.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+    edges.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
     let snapshot = build_snapshot(canvas_id, &scoped, edges);
 
     for node_id in &snapshot.order {
@@ -193,7 +197,12 @@ pub async fn validate_run(
         match node.kind {
             NodeKind::Operation => {
                 validate_operation(
-                    node, &snapshot, executors, enabled_executors, canvas_id, &mut issues,
+                    node,
+                    &snapshot,
+                    executors,
+                    enabled_executors,
+                    canvas_id,
+                    &mut issues,
                 )
                 .await;
             }
@@ -257,7 +266,11 @@ fn scoped_canvas(canvas: &CanvasDocument, closure: &HashSet<NodeId>) -> CanvasDo
     scoped
 }
 
-fn build_snapshot(canvas_id: &str, scoped: &CanvasDocument, edges: Vec<WorkflowEdge>) -> RunSnapshot {
+fn build_snapshot(
+    canvas_id: &str,
+    scoped: &CanvasDocument,
+    edges: Vec<WorkflowEdge>,
+) -> RunSnapshot {
     let order: Vec<NodeId> = topological_order(scoped)
         .into_iter()
         .map(|node| node.id.clone())
@@ -303,9 +316,7 @@ async fn validate_operation(
     if !enabled_executors.contains(&executor_key) {
         issues.push(issue(
             "EXECUTOR_DISABLED",
-            format!(
-                "Executor \"{executor_key}\" is disabled in the startup configuration"
-            ),
+            format!("Executor \"{executor_key}\" is disabled in the startup configuration"),
             canvas_id,
             Some(node.id.clone()),
             None,
@@ -331,7 +342,11 @@ async fn validate_operation(
         run_id: String::new(),
         node_id: node.id.clone(),
         operation_type,
-        parameters: node.data.parameters.clone().unwrap_or(serde_json::Value::Null),
+        parameters: node
+            .data
+            .parameters
+            .clone()
+            .unwrap_or(serde_json::Value::Null),
         inputs: snapshot.resolved_inputs(&node.id),
     };
     if let Err(error) = executor.validate(&request).await {
@@ -355,7 +370,11 @@ fn validate_media_node(
     let Some(asset_id) = node.data.asset_id.clone() else {
         issues.push(issue(
             "ASSET_MISSING",
-            format!("{} node \"{}\" has no asset bound", kind_label(node.kind), node.title),
+            format!(
+                "{} node \"{}\" has no asset bound",
+                kind_label(node.kind),
+                node.title
+            ),
             canvas_id,
             Some(node.id.clone()),
             None,

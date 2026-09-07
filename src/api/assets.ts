@@ -50,10 +50,9 @@ export const assetsApi = {
 
   /** Opens the asset file in the OS file manager. */
   reveal(id: AssetId): Promise<void> {
-    return http.request<void>(
-      `/api/v1/projects/current/assets/${id}/reveal`,
-      { method: "POST" },
-    );
+    return http.request<void>(`/api/v1/projects/current/assets/${id}/reveal`, {
+      method: "POST",
+    });
   },
 };
 

@@ -125,9 +125,13 @@ pub trait ProjectStore: Send + Sync {
         target_root: &Path,
     ) -> Result<OpenProject, ProjectError>;
     async fn list_runs(&self) -> Result<Vec<crate::domain::RunRecord>, ProjectError>;
-    async fn create_run(&self, run: crate::domain::RunRecord)
-        -> Result<crate::domain::RunRecord, ProjectError>;
+    async fn create_run(
+        &self,
+        run: crate::domain::RunRecord,
+    ) -> Result<crate::domain::RunRecord, ProjectError>;
     async fn get_run(&self, id: &str) -> Result<crate::domain::RunRecord, ProjectError>;
-    async fn update_run(&self, run: crate::domain::RunRecord)
-        -> Result<crate::domain::RunRecord, ProjectError>;
+    async fn update_run(
+        &self,
+        run: crate::domain::RunRecord,
+    ) -> Result<crate::domain::RunRecord, ProjectError>;
 }

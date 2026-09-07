@@ -73,7 +73,9 @@ fn probe_wav(bytes: &[u8]) -> MediaFields {
     // Chunks are word-aligned; sizes above the remaining buffer end the walk.
     while offset + 8 <= bytes.len() {
         let id = &bytes[offset..offset + 4];
-        let Some(size) = le_u32(bytes, offset + 4) else { break };
+        let Some(size) = le_u32(bytes, offset + 4) else {
+            break;
+        };
         let body = offset + 8;
         if id == b"fmt " && body + 16 <= bytes.len() {
             fields.channels = le_u16(bytes, body + 2).map(|v| v as i32);
@@ -183,8 +185,12 @@ fn probe_mp4(bytes: &[u8]) -> MediaFields {
     while let Some((mut at, end, depth)) = stack.pop() {
         while at + 8 <= end && visited < 512 {
             visited += 1;
-            let Some(size32) = be_u32(bytes, at) else { break };
-            let Some(kind) = fourcc(bytes, at + 4) else { break };
+            let Some(size32) = be_u32(bytes, at) else {
+                break;
+            };
+            let Some(kind) = fourcc(bytes, at + 4) else {
+                break;
+            };
             let (size, header) = if size32 == 1 {
                 match be_u64(bytes, at + 8) {
                     Some(ext) => (ext, 16usize),

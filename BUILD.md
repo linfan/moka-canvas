@@ -25,7 +25,7 @@ make install   # npm ci
 make check
 ```
 
-Runs the frontend build, Prettier/ESLint/TypeScript checks, then `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo test` for the Rust server.
+Runs the frontend build, Prettier/ESLint/TypeScript checks and the Vitest suite, then `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo test` for the Rust server. `make test` runs only the two test suites (Vitest and `cargo test`).
 
 ## Local run
 

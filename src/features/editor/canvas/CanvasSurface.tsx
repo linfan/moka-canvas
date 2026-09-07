@@ -1,9 +1,5 @@
 import { useEffect, useRef } from "react";
-import type {
-  CanvasDocument,
-  NodeId,
-  RunStatus,
-} from "../../../shared/domain";
+import type { CanvasDocument, NodeId, RunStatus } from "../../../shared/domain";
 import type {
   ControllerCallbacks,
   HitTarget,

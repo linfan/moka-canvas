@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import App from "../../App";
 import {
   buildGoldenMokaFile,
@@ -124,7 +131,11 @@ function missingImageCheck(): SelfCheckReport {
         expectedPath: "assets/images/lake-00000000.png",
         reason: "missing",
         referencingNodes: [
-          { canvasId: ids.canvasMain, nodeId: ids.image, title: "Reference image" },
+          {
+            canvasId: ids.canvasMain,
+            nodeId: ids.image,
+            title: "Reference image",
+          },
         ],
       },
     ],
@@ -200,7 +211,9 @@ describe("missing-asset recovery", () => {
     expect(useProjectStore.getState().selfCheck?.ok).toBe(true);
     expect(dialog.textContent).toContain("Restored");
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Open project" }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Open project" }),
+    );
     expect(useAppStore.getState().phase).toBe("editing");
     // The restored asset is no longer flagged broken in the resource panel.
     const row = screen.getByText("lake.png").closest(".resource-row");
@@ -322,9 +335,7 @@ describe("unsaved-work guard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Back to launcher" }));
     await screen.findByRole("alertdialog");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Discard and close" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
     expect(useAppStore.getState().phase).toBe("launcher");
     expect(useProjectStore.getState().moka).toBeNull();
     expect(

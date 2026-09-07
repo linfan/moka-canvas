@@ -31,12 +31,15 @@ Tauri bundles the built `dist/` directory as a resource, starts the same Axum se
 
 ```sh
 make check
+make test
 make package-web
 make package-macos
 make package-windows
 make cross-package-windows
 make clean
 ```
+
+`make check` is the full baseline gate: formatting, lint, typecheck, the production web build, the frontend Vitest suite, Rustfmt, Clippy with warnings denied, and the backend `cargo test` suite. `make test` runs just the two test suites (Vitest and `cargo test`) without the lint/format/build gates.
 
 `package-web` stages the built site and a native `moka-server` binary under `release/`. Native app packaging is intentionally host-native: build macOS artifacts on macOS and Windows installers on Windows. Release signing and macOS notarization require organization-specific credentials and are not part of this baseline.
 

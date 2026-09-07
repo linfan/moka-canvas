@@ -82,10 +82,7 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/runs",
             get(routes::list_runs).post(routes::start_run),
         )
-        .route(
-            "/api/v1/projects/current/runs/{id}",
-            get(routes::get_run),
-        )
+        .route("/api/v1/projects/current/runs/{id}", get(routes::get_run))
         .route(
             "/api/v1/projects/current/runs/{id}/cancel",
             post(routes::cancel_run),

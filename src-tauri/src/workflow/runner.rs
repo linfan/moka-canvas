@@ -5,9 +5,7 @@
 //! during steps.
 
 use super::validate::{validate_run, RunSnapshot};
-use super::{
-    ExecutionRequest, ProgressReporter, ValueProvenance, WorkflowExecutor, WorkflowValue,
-};
+use super::{ExecutionRequest, ProgressReporter, ValueProvenance, WorkflowExecutor, WorkflowValue};
 use crate::domain::{
     new_id, now_iso, AssetId, DocumentCommand, NodeId, NodeKind, NodePatch, PortDirection,
     ResultSlot, ResultSlotStatus, RunId, RunRecord, RunStatus, RunStepRecord, ValidationIssue,
@@ -95,7 +93,10 @@ impl RunManager {
             if let Some(node) = snapshot.nodes.get(node_id) {
                 parameters.insert(
                     node.id.clone(),
-                    node.data.parameters.clone().unwrap_or(serde_json::Value::Null),
+                    node.data
+                        .parameters
+                        .clone()
+                        .unwrap_or(serde_json::Value::Null),
                 );
             }
         }
@@ -365,10 +366,16 @@ impl RunManager {
             run_id: run.id.clone(),
             node_id: node.id.clone(),
             operation_type,
-            parameters: node.data.parameters.clone().unwrap_or(serde_json::Value::Null),
+            parameters: node
+                .data
+                .parameters
+                .clone()
+                .unwrap_or(serde_json::Value::Null),
             inputs,
         };
-        let output = executor.execute(request, ProgressReporter::default()).await?;
+        let output = executor
+            .execute(request, ProgressReporter::default())
+            .await?;
         let text = output.text;
         let value = text.clone().map(|text| WorkflowValue::Text {
             text,
@@ -441,10 +448,7 @@ impl RunManager {
                 Ok(_) => return,
                 Err(error) if error.code() == "REVISION_CONFLICT" && attempt < 4 => continue,
                 Err(error) => {
-                    tracing::warn!(
-                        "run: result promotion failed for node {}: {error}",
-                        node.id
-                    );
+                    tracing::warn!("run: result promotion failed for node {}: {error}", node.id);
                     return;
                 }
             }

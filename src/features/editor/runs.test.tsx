@@ -32,7 +32,11 @@ const CONFIG = {
     maxPackageBytes: 536870912,
     maxPackageEntries: 20000,
   },
-  capabilities: { mode: "web", executors: ["deterministic"], assetCategories: [] },
+  capabilities: {
+    mode: "web",
+    executors: ["deterministic"],
+    assetCategories: [],
+  },
 };
 
 function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
@@ -75,11 +79,7 @@ const api: MockApi = {
   calls: [],
 };
 
-function route(
-  url: string,
-  method: string,
-  body: unknown,
-): Response {
+function route(url: string, method: string, body: unknown): Response {
   const json = (payload: unknown, status = 200) =>
     new Response(JSON.stringify(payload), {
       status,
@@ -201,9 +201,9 @@ describe("runStore", () => {
       body: makeRun({ status: "succeeded" }),
       status: 201,
     });
-    const run = await useRunStore.getState().start(ids.canvasMain, [
-      ids.operation,
-    ]);
+    const run = await useRunStore
+      .getState()
+      .start(ids.canvasMain, [ids.operation]);
     expect(run.status).toBe("succeeded");
     expect(useRunStore.getState().runs[0]?.id).toBe("run-1");
     const startCall = api.calls.find(
@@ -251,9 +251,7 @@ describe("runStore", () => {
     await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
     expect(useRunStore.getState().runs[0]?.status).toBe("queued");
 
-    api.runs = [
-      withStepStatus(makeRun({ status: "succeeded" }), "succeeded"),
-    ];
+    api.runs = [withStepStatus(makeRun({ status: "succeeded" }), "succeeded")];
     await act(async () => {
       await useRunStore.getState().load();
     });
@@ -261,7 +259,8 @@ describe("runStore", () => {
     // Terminal transition reloaded the project and announced completion.
     expect(
       api.calls.some(
-        (call) => call.url === "/api/v1/projects/current" && call.method === "GET",
+        (call) =>
+          call.url === "/api/v1/projects/current" && call.method === "GET",
       ),
     ).toBe(true);
     expect(
@@ -283,9 +282,7 @@ describe("runStore", () => {
     api.startResponse = () => ({ body: makeRun(), status: 201 });
     await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
     api.calls = [];
-    api.runs = [
-      withStepStatus(makeRun({ status: "succeeded" }), "succeeded"),
-    ];
+    api.runs = [withStepStatus(makeRun({ status: "succeeded" }), "succeeded")];
     await act(async () => {
       await useRunStore.getState().load();
     });

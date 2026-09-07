@@ -11,7 +11,9 @@ export function LauncherPage() {
   const phase = useAppStore((state) => state.phase);
   const [recents, setRecents] = useState<RecentProject[] | null>(null);
   const [dialog, setDialog] = useState<DialogMode | null>(null);
-  const [pendingCheck, setPendingCheck] = useState<SelfCheckReport | null>(null);
+  const [pendingCheck, setPendingCheck] = useState<SelfCheckReport | null>(
+    null,
+  );
 
   const refreshRecents = useCallback(() => {
     recentApi

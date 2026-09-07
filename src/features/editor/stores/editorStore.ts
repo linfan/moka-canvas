@@ -137,7 +137,10 @@ interface EditorState {
   stopEditingText: () => void;
   startInputPick: (target: { nodeId: NodeId; portId: string }) => void;
   stopInputPick: () => void;
-  openAssetDeletePrompt: (prompt: { assetId: AssetId; nodeIds: NodeId[] }) => void;
+  openAssetDeletePrompt: (prompt: {
+    assetId: AssetId;
+    nodeIds: NodeId[];
+  }) => void;
   closeAssetDeletePrompt: () => void;
   openPreview: (assetId: AssetId) => void;
   closePreview: () => void;

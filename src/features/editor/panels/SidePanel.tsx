@@ -118,9 +118,7 @@ function ResourcesSection() {
     if (files.length === 0) return;
     const controller = new AbortController();
     abortRef.current = controller;
-    setJobs(
-      files.map((file) => ({ file, progress: 0, status: "uploading" })),
-    );
+    setJobs(files.map((file) => ({ file, progress: 0, status: "uploading" })));
     await importFiles(files, {
       addNodes,
       signal: controller.signal,

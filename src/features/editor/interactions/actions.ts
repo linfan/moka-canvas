@@ -421,7 +421,11 @@ export function disconnectInput(nodeId: NodeId, portId: string) {
     )
     .map((edge) => edge.id);
   if (edgeIds.length === 0) return;
-  if (execute("Disconnect input", [{ type: "removeEdges", canvasId: canvas.id, edgeIds }])) {
+  if (
+    execute("Disconnect input", [
+      { type: "removeEdges", canvasId: canvas.id, edgeIds },
+    ])
+  ) {
     announce("Disconnected input");
   }
 }
@@ -531,7 +535,9 @@ export async function confirmDeleteAsset() {
   if (!moka) return;
   const commands: DocumentCommand[] = [];
   for (const canvas of moka.canvas) {
-    const here = canvas.nodes.filter((node) => prompt.nodeIds.includes(node.id));
+    const here = canvas.nodes.filter((node) =>
+      prompt.nodeIds.includes(node.id),
+    );
     if (here.length > 0) {
       commands.push({
         type: "removeNodes",
@@ -585,7 +591,9 @@ export async function addAssetNode(assetId: AssetId, at?: Point) {
       posterAssetId: entry.probe?.posterAssetId,
     };
   }
-  if (execute("Add asset node", [{ type: "addNode", canvasId: canvas.id, node }])) {
+  if (
+    execute("Add asset node", [{ type: "addNode", canvasId: canvas.id, node }])
+  ) {
     useEditorStore.getState().selectOnly(node.id);
     announce(`Added ${entry.name}`);
   }

@@ -75,7 +75,8 @@ export const useRunStore = create<RunState>()((set, get) => {
     set((state) => ({
       runs: fresh,
       selectedRunId:
-        state.selectedRunId && fresh.some((run) => run.id === state.selectedRunId)
+        state.selectedRunId &&
+        fresh.some((run) => run.id === state.selectedRunId)
           ? state.selectedRunId
           : (fresh[0]?.id ?? null),
     }));

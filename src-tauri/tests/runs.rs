@@ -190,7 +190,11 @@ async fn build_text_flow(app: &axum::Router, canvas_id: &str, op_params: Value) 
     .await;
 }
 
-async fn start_run(app: &axum::Router, canvas_id: &str, node_ids: Value) -> axum::http::Response<Body> {
+async fn start_run(
+    app: &axum::Router,
+    canvas_id: &str,
+    node_ids: Value,
+) -> axum::http::Response<Body> {
     app.clone()
         .oneshot(json_request(
             "POST",
@@ -233,7 +237,10 @@ async fn valid_run_succeeds_and_survives_a_restart() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
     let created = create_project(&app, &temp.path().join("projects"), "Runs").await;
-    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap().to_string();
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let root = created["root"].as_str().unwrap().to_string();
     build_text_flow(&app, &canvas_id, json!({})).await;
 
@@ -295,7 +302,11 @@ async fn valid_run_succeeds_and_survives_a_restart() {
     let reopened_app = test_app(temp.path());
     let response = reopened_app
         .clone()
-        .oneshot(json_request("POST", "/api/v1/projects/open", json!({ "path": root })))
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/open",
+            json!({ "path": root }),
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -317,7 +328,10 @@ async fn invalid_runs_are_rejected_with_all_issues() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
     let created = create_project(&app, &temp.path().join("projects"), "Invalid").await;
-    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap().to_string();
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     apply(
         &app,
         json!([
@@ -380,7 +394,10 @@ async fn unknown_parameters_are_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
     let created = create_project(&app, &temp.path().join("projects"), "Params").await;
-    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap().to_string();
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     build_text_flow(&app, &canvas_id, json!({ "bogus": true })).await;
 
     let response = start_run(&app, &canvas_id, json!(["n-op"])).await;
@@ -402,7 +419,10 @@ async fn disabled_executor_blocks_the_run() {
     config.workflow.enabled_executors = Vec::new();
     let app = test_app_with(config);
     let created = create_project(&app, &temp.path().join("projects"), "Disabled").await;
-    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap().to_string();
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     build_text_flow(&app, &canvas_id, json!({})).await;
 
     let response = start_run(&app, &canvas_id, json!(["n-op"])).await;
@@ -422,7 +442,10 @@ async fn missing_asset_blocks_the_run() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
     let created = create_project(&app, &temp.path().join("projects"), "Unready").await;
-    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap().to_string();
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let root = created["root"].as_str().unwrap().to_string();
 
     let png = make_test_png();
@@ -488,12 +511,18 @@ async fn cancel_stops_a_running_run() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
     let created = create_project(&app, &temp.path().join("projects"), "Cancel").await;
-    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap().to_string();
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     build_text_flow(&app, &canvas_id, json!({ "delayMs": 8000 })).await;
 
     let response = start_run(&app, &canvas_id, json!(["n-op"])).await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let run_id = body_json(response).await["id"].as_str().unwrap().to_string();
+    let run_id = body_json(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Wait until the op step is actually executing.
     let mut saw_running = false;
@@ -566,12 +595,18 @@ async fn failed_run_retries_as_a_new_linked_run() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
     let created = create_project(&app, &temp.path().join("projects"), "Retry").await;
-    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap().to_string();
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     build_text_flow(&app, &canvas_id, json!({ "failWith": "boom" })).await;
 
     let response = start_run(&app, &canvas_id, json!(["n-op"])).await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let failed_id = body_json(response).await["id"].as_str().unwrap().to_string();
+    let failed_id = body_json(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let failed = wait_for_terminal(&app, &failed_id).await;
     assert_eq!(failed["status"], "failed");
     assert!(failed["error"].as_str().unwrap().contains("boom"));
@@ -693,7 +728,11 @@ async fn interrupted_runs_are_failed_on_open() {
     // Reopening sweeps the orphan into a failed record.
     let response = app
         .clone()
-        .oneshot(json_request("POST", "/api/v1/projects/open", json!({ "path": root })))
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/open",
+            json!({ "path": root }),
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);

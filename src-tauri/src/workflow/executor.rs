@@ -79,12 +79,12 @@ fn parse_text_params(
                             params.separator = separator.to_string();
                         }
                         Some(_) => issues.push(param_issue(
-                            format!("\"separator\" must be at most {MAX_SEPARATOR_CHARS} characters"),
+                            format!(
+                                "\"separator\" must be at most {MAX_SEPARATOR_CHARS} characters"
+                            ),
                             node_id,
                         )),
-                        None => {
-                            issues.push(param_issue("\"separator\" must be a string", node_id))
-                        }
+                        None => issues.push(param_issue("\"separator\" must be a string", node_id)),
                     },
                     "delayMs" => match value.as_f64() {
                         Some(delay)
@@ -107,7 +107,9 @@ fn parse_text_params(
                             params.fail_with = Some(message.clone());
                         }
                         serde_json::Value::String(_) => issues.push(param_issue(
-                            format!("\"failWith\" must be at most {MAX_FAIL_WITH_CHARS} characters"),
+                            format!(
+                                "\"failWith\" must be at most {MAX_FAIL_WITH_CHARS} characters"
+                            ),
                             node_id,
                         )),
                         _ => issues.push(param_issue("\"failWith\" must be a string", node_id)),

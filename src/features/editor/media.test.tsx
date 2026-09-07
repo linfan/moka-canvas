@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import App from "../../App";
 import {
   buildGoldenMokaFile,
@@ -106,7 +112,11 @@ describe("mediaCards", () => {
           expectedPath: "assets/images/lake-00000000.png",
           reason: "missing",
           referencingNodes: [
-            { canvasId: ids.canvasMain, nodeId: ids.image, title: "Reference image" },
+            {
+              canvasId: ids.canvasMain,
+              nodeId: ids.image,
+              title: "Reference image",
+            },
           ],
         },
       ],
@@ -125,11 +135,7 @@ describe("mediaCards", () => {
     const ids = goldenNodeIds();
     const moka = hydrate();
     const node = moka.canvas[0].nodes.find((n) => n.id === ids.image)!;
-    const media = mediaInfoForNode(
-      node,
-      buildResourceIndex(moka),
-      new Map(),
-    );
+    const media = mediaInfoForNode(node, buildResourceIndex(moka), new Map());
     expect(media?.state).toBe("ready");
     expect(media?.label).toBe("64×64");
     expect(media?.url).toContain(ids.assetImage);
@@ -303,9 +309,9 @@ describe("addAssetNode", () => {
     const canvas = activeCanvasOf(useProjectStore.getState().moka!);
     const node = canvas.nodes.find((n) => n.title === "line.wav");
     expect(node?.kind).toBe("audio");
-    expect(
-      (node?.data as { audioCategory?: string }).audioCategory,
-    ).toBe("voice");
+    expect((node?.data as { audioCategory?: string }).audioCategory).toBe(
+      "voice",
+    );
   });
 });
 
@@ -336,7 +342,10 @@ describe("editor shell integration", () => {
       if (url.includes("/assets/") && init?.method === "DELETE") {
         return json({ revision: 5, updatedAt: "2026-01-01T00:00:03.000Z" });
       }
-      if (url === "/api/v1/projects/current/assets" && init?.method === "POST") {
+      if (
+        url === "/api/v1/projects/current/assets" &&
+        init?.method === "POST"
+      ) {
         return json({
           entry: {
             id: "dropped-asset",
@@ -355,7 +364,9 @@ describe("editor shell integration", () => {
     };
   }
 
-  async function openGolden(selfCheck: SelfCheckReport = { ok: true, issues: [] }) {
+  async function openGolden(
+    selfCheck: SelfCheckReport = { ok: true, issues: [] },
+  ) {
     fetchMock.mockImplementation((input, init) =>
       Promise.resolve(route(selfCheck)(String(input), init as RequestInit)),
     );
@@ -381,9 +392,7 @@ describe("editor shell integration", () => {
     expect(inspector.textContent).toContain("64×64");
     expect(inspector.textContent).toContain("assets/images/lake-00000000.png");
     expect(inspector.textContent).toContain("2.0 KB");
-    expect(
-      screen.getByRole("button", { name: "Reveal" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reveal" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Download" })).toBeTruthy();
   });
 

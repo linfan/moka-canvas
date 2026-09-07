@@ -11,7 +11,11 @@ import {
   PORT_SPACING,
   canvasTheme,
 } from "./theme";
-import { mediaSignature, waveformPeaks, type MediaCardInfo } from "./mediaCards";
+import {
+  mediaSignature,
+  waveformPeaks,
+  type MediaCardInfo,
+} from "./mediaCards";
 
 export interface NodeVisualState {
   selected: boolean;
@@ -117,7 +121,10 @@ function layoutMedia(
   const bars = view.media.bars;
   if (bars.length > 0) {
     const gap = 3;
-    const barWidth = Math.max(2, (area.width - gap * (bars.length - 1)) / bars.length);
+    const barWidth = Math.max(
+      2,
+      (area.width - gap * (bars.length - 1)) / bars.length,
+    );
     bars.forEach((bar, index) => {
       const peak = Number(bar.data?.peak ?? 0.5);
       const height = Math.max(4, area.height * peak);

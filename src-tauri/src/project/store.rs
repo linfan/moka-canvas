@@ -71,11 +71,7 @@ impl FsProjectStore {
 
     /// Run ids are uuids; anything else can never resolve to a record file.
     fn run_path(root: &Path, id: &str) -> Result<PathBuf, ProjectError> {
-        if id.is_empty()
-            || !id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-')
-        {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err(ProjectError::domain("RUN_NOT_FOUND", "Run not found"));
         }
         Ok(Self::runs_dir(root).join(format!("{id}.json")))

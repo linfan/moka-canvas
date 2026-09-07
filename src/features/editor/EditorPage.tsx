@@ -134,9 +134,7 @@ export function EditorPage() {
         await projectsApi.exportPackage({});
       } catch (error) {
         setCloseBusy(null);
-        setCloseError(
-          error instanceof Error ? error.message : "Export failed",
-        );
+        setCloseError(error instanceof Error ? error.message : "Export failed");
         return;
       }
     }
@@ -248,9 +246,7 @@ export function EditorPage() {
         </button>
         <button
           className="run-button"
-          disabled={
-            runnableIds.length === 0 || starting || runActive
-          }
+          disabled={runnableIds.length === 0 || starting || runActive}
           onClick={() => void startRun()}
           title={
             runnableIds.length === 0
