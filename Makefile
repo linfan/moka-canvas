@@ -2,7 +2,7 @@ SHELL := /bin/sh
 CARGO_MANIFEST := src-tauri/Cargo.toml
 WINDOWS_CROSS_TARGET := x86_64-pc-windows-gnu
 
-.PHONY: install check test web-build web-serve tauri-dev package-web package-macos package-windows cross-package-windows set-version clean
+.PHONY: install check check-boundaries test web-build web-serve tauri-dev package-web package-macos package-windows cross-package-windows set-version clean
 
 ifeq (set-version,$(firstword $(MAKECMDGOALS)))
 SET_VERSION_ARG := $(word 2,$(MAKECMDGOALS))
@@ -18,7 +18,7 @@ set-version:
 install:
 	npm ci
 
-check: web-build
+check: web-build check-boundaries
 	npm run format:check
 	npm run lint
 	npm run typecheck
@@ -26,6 +26,18 @@ check: web-build
 	cargo fmt --manifest-path $(CARGO_MANIFEST) -- --check
 	cargo clippy --manifest-path $(CARGO_MANIFEST) --all-targets -- -D warnings
 	cargo test --manifest-path $(CARGO_MANIFEST)
+
+# Boundaries that are cheaper to state as a grep than as a test. Each one
+# fails the build with the reason, not with a bare non-zero exit.
+check-boundaries:
+	@! grep -rn "MetadataStore" src-tauri/src/project src-tauri/src/assets src-tauri/src/workflow || \
+		(printf '%s\n' 'project content must not reach into the metadata layer' >&2; exit 1)
+	@! grep -rn "recent_registry_path\|recentRegistryPath" src-tauri/src src-tauri/tests src-tauri/resources config src || \
+		(printf '%s\n' 'the superseded recent-project registry must stay removed' >&2; exit 1)
+	@! grep -rn "sqlx\|sea-query\|sea_orm" src-tauri/Cargo.toml src-tauri/src || \
+		(printf '%s\n' 'no database dependency while the file backend is the only one' >&2; exit 1)
+	@! grep -rn "json.tmp" src-tauri/src || \
+		(printf '%s\n' 'documents must go through the single atomic-write implementation' >&2; exit 1)
 
 test:
 	npm test
