@@ -159,6 +159,15 @@ pub fn json_or_problem<T>(
     result: Result<Json<T>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<T>, Problem> {
     result.map_err(|rejection| {
+        // A body that never arrived in full is not a malformed one, and the
+        // remedy differs: send less, rather than send it differently.
+        if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            return Problem::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "PAYLOAD_TOO_LARGE",
+                "Request body is too large",
+            );
+        }
         Problem::new(
             rejection.status(),
             "VALIDATION_FAILED",

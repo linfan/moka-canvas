@@ -112,4 +112,43 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/runs/{id}/retry",
             post(routes::retry_run),
         )
+        .merge(provider_router())
+}
+
+/// Provider configuration carries a credential in the request body, and a
+/// channel document is small by nature, so these routes get a far tighter
+/// ceiling than asset uploads. The limit is applied last for a request, so it
+/// replaces the one the server router sets rather than adding to it.
+fn provider_router() -> axum::Router<ApiState> {
+    use axum::extract::DefaultBodyLimit;
+    use axum::routing::{delete, get, patch, post, put};
+
+    const MAX_PROVIDER_BODY_BYTES: usize = 1024 * 1024;
+
+    axum::Router::new()
+        .route("/api/v1/providers", get(routes::list_providers))
+        .route("/api/v1/providers/channels", put(routes::upsert_channel))
+        .route(
+            "/api/v1/providers/channels/{id}",
+            delete(routes::delete_channel),
+        )
+        .route(
+            "/api/v1/providers/channels/{id}/key",
+            post(routes::set_channel_key),
+        )
+        .route(
+            "/api/v1/providers/channels/{id}/models",
+            get(routes::fetch_channel_models),
+        )
+        .route(
+            "/api/v1/providers/channels/{id}/probe",
+            post(routes::probe_channel),
+        )
+        .route("/api/v1/providers/defaults", patch(routes::patch_defaults))
+        .route(
+            "/api/v1/providers/preferences",
+            patch(routes::patch_preferences),
+        )
+        .route("/api/v1/providers/import", post(routes::import_channel))
+        .route_layer(DefaultBodyLimit::max(MAX_PROVIDER_BODY_BYTES))
 }

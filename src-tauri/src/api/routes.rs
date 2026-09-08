@@ -1,16 +1,18 @@
 use super::dto::{
-    ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, CreateProjectRequest,
-    ExportRequest, ImportProjectRequest, OpenProjectRequest, OpenProjectResponse, PackageResponse,
-    PublicConfigResponse, SaveResponse, StartRunRequest,
+    ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, ChannelKeyRequest,
+    CreateProjectRequest, DefaultsPatch, ExportRequest, ImportChannelRequest, ImportProjectRequest,
+    ModelListResponse, OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch,
+    PublicConfigResponse, RevisionQuery, SaveResponse, StartRunRequest, UpsertChannelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
 use crate::domain::{now_iso, DocumentCommand, RunRecord};
+use crate::generate::providers::{ChannelImport, ProbeReport, ProvidersView};
 use crate::metadata::RecentProject;
 use crate::project::{ByteRange, CreateProject, OpenProject, ProjectStore, StagedAsset};
 use axum::{
     body::Body,
-    extract::{rejection::JsonRejection, FromRequest, Multipart, Path, Request, State},
+    extract::{rejection::JsonRejection, FromRequest, Multipart, Path, Query, Request, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::Response,
     Json,
@@ -706,4 +708,151 @@ pub async fn retry_run(
 ) -> Result<(StatusCode, Json<RunRecord>), Problem> {
     let run = state.runs.retry(&id).await.map_err(start_run_problem)?;
     Ok((StatusCode::CREATED, Json(run)))
+}
+
+/// Every provider write answers with the whole redacted view. The client is
+/// holding a revision it has to keep current anyway, so handing back the
+/// state it just caused costs one read and saves it a reconciliation.
+async fn providers_view(state: &ApiState) -> Result<Json<ProvidersView>, Problem> {
+    Ok(Json(state.providers.view().await?))
+}
+
+pub async fn list_providers(State(state): State<ApiState>) -> Result<Json<ProvidersView>, Problem> {
+    providers_view(&state).await
+}
+
+pub async fn upsert_channel(
+    State(state): State<ApiState>,
+    json: Result<Json<UpsertChannelRequest>, JsonRejection>,
+) -> Result<Json<ProvidersView>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let record = state.providers.upsert_channel(request.channel).await?;
+    // Second, so a credential is never stored against a channel that was
+    // refused. Blank counts as absent: the field arrives empty on every edit
+    // that did not touch it, and treating that as a removal would destroy a
+    // working key as a side effect of renaming a channel.
+    let api_key = request
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty());
+    if let Some(api_key) = api_key {
+        state.providers.set_key(&record.id, Some(api_key)).await?;
+    }
+    providers_view(&state).await
+}
+
+pub async fn delete_channel(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    Query(revision): Query<RevisionQuery>,
+) -> Result<Json<ProvidersView>, Problem> {
+    state
+        .providers
+        .delete_channel(&id, revision.revision)
+        .await?;
+    providers_view(&state).await
+}
+
+pub async fn set_channel_key(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    json: Result<Json<ChannelKeyRequest>, JsonRejection>,
+) -> Result<Json<ProvidersView>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    state
+        .providers
+        .set_key(&id, request.api_key.as_deref())
+        .await?;
+    providers_view(&state).await
+}
+
+pub async fn patch_defaults(
+    State(state): State<ApiState>,
+    json: Result<Json<DefaultsPatch>, JsonRejection>,
+) -> Result<Json<ProvidersView>, Problem> {
+    let Json(patch) = json_or_problem(json)?;
+    let mut defaults = state.providers.snapshot().await?.defaults;
+    if let Some(text) = patch.text {
+        defaults.text = text;
+    }
+    if let Some(image) = patch.image {
+        defaults.image = image;
+    }
+    if let Some(audio) = patch.audio {
+        defaults.audio = audio;
+    }
+    if let Some(video) = patch.video {
+        defaults.video = video;
+    }
+    state
+        .providers
+        .set_defaults(&defaults, patch.expected_revision)
+        .await?;
+    providers_view(&state).await
+}
+
+pub async fn patch_preferences(
+    State(state): State<ApiState>,
+    json: Result<Json<PreferencesPatch>, JsonRejection>,
+) -> Result<Json<ProvidersView>, Problem> {
+    let Json(patch) = json_or_problem(json)?;
+    let mut preferences = state.providers.snapshot().await?.preferences;
+    if let Some(system_prompt) = patch.system_prompt {
+        preferences.system_prompt = system_prompt;
+    }
+    if let Some(reasoning_effort) = patch.reasoning_effort {
+        preferences.reasoning_effort = reasoning_effort;
+    }
+    if let Some(image) = patch.image {
+        preferences.image = image;
+    }
+    if let Some(video) = patch.video {
+        preferences.video = video;
+    }
+    if let Some(audio) = patch.audio {
+        preferences.audio = audio;
+    }
+    state
+        .providers
+        .set_preferences(&preferences, patch.expected_revision)
+        .await?;
+    providers_view(&state).await
+}
+
+/// Lists what a channel offers without storing it. The capability is a guess
+/// for the form to start from; saving the channel is what makes it a decision.
+pub async fn fetch_channel_models(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<ModelListResponse>, Problem> {
+    let models = state.providers.fetch_models(&id).await?;
+    Ok(Json(ModelListResponse { models }))
+}
+
+/// Answers inside a successful response even when the channel is broken,
+/// because the point of a probe is to show which one failed and why.
+pub async fn probe_channel(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProbeReport>, Problem> {
+    Ok(Json(state.providers.probe(&id).await?))
+}
+
+pub async fn import_channel(
+    State(state): State<ApiState>,
+    json: Result<Json<ImportChannelRequest>, JsonRejection>,
+) -> Result<Json<ProvidersView>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    state
+        .providers
+        .import_channel(ChannelImport {
+            base_url: request.base_url,
+            api_key: request.api_key,
+            name: request.name,
+            protocol: request.protocol,
+            expected_revision: request.expected_revision,
+        })
+        .await?;
+    providers_view(&state).await
 }

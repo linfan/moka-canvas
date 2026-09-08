@@ -59,6 +59,10 @@ const IMAGE_HINTS: &[&str] = &[
     "midjourney",
 ];
 
+/// Hosts that speak the Gemini protocol. Anything else is taken to speak the
+/// OpenAI one, which is what most gateways and proxies imitate.
+const GEMINI_HOST_HINTS: &[&str] = &["googleapis.com", "generativelanguage"];
+
 /// What may be disclosed about a channel's credential. Never the credential.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -172,6 +176,29 @@ impl ProbeReport {
     }
 }
 
+/// One model a channel says it offers, before anybody has decided what it is
+/// for. The capability is a guess from the identifier, so it is optional: the
+/// settings screen confirms or replaces it, and a wrong guess that looked
+/// authoritative would be worse than an empty box.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCandidate {
+    pub id: String,
+    pub capability: Option<Capability>,
+}
+
+/// What a quick import is handed: an address, and optionally the credential
+/// and display name that belong to it. The identifier and the protocol are
+/// derived from the address unless the caller says otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChannelImport {
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub name: Option<String>,
+    pub protocol: Option<Protocol>,
+    pub expected_revision: Option<u64>,
+}
+
 /// Reads and writes provider configuration through the metadata store.
 pub struct ProviderRepo {
     metadata: Arc<dyn MetadataStore>,
@@ -180,6 +207,15 @@ pub struct ProviderRepo {
 impl ProviderRepo {
     pub fn new(metadata: Arc<dyn MetadataStore>) -> Self {
         Self { metadata }
+    }
+
+    /// The stored configuration, with no credential material in it at all.
+    ///
+    /// A partial edit needs the values it is merging into; reaching for
+    /// [`ProviderRepo::view`] to get them would also ask what may be
+    /// disclosed about every stored credential.
+    pub async fn snapshot(&self) -> Result<ProviderSnapshot, ProviderError> {
+        Ok(self.metadata.provider_snapshot().await?)
     }
 
     pub async fn view(&self) -> Result<ProvidersView, ProviderError> {
@@ -240,6 +276,40 @@ impl ProviderRepo {
         Ok(self.metadata.upsert_channel(&draft).await?)
     }
 
+    /// Creates or replaces a channel from an address alone.
+    ///
+    /// The identifier and the display name come from the host, and so does the
+    /// protocol unless the caller named one. Importing the same address twice
+    /// updates the channel rather than adding a second copy of it, which is
+    /// what makes the shortcut safe to offer next to the full editor.
+    pub async fn import_channel(
+        &self,
+        import: ChannelImport,
+    ) -> Result<ChannelRecord, ProviderError> {
+        let base_url = normalize_base_url(&import.base_url)?;
+        let host = host_of(&base_url)?;
+        let draft = ChannelDraft {
+            id: identifier_from_host(&host),
+            name: import
+                .name
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| host.clone()),
+            base_url,
+            protocol: import.protocol.unwrap_or_else(|| guess_protocol(&host)),
+            enabled: true,
+            models: Vec::new(),
+            expected_revision: import.expected_revision,
+        };
+        let record = self.upsert_channel(draft).await?;
+        // Stored after the channel exists, so a credential is never left
+        // pointing at configuration that was refused.
+        if let Some(api_key) = import.api_key.as_deref() {
+            self.set_key(&record.id, Some(api_key)).await?;
+        }
+        Ok(record)
+    }
+
     /// Removes a channel and its credential, refusing while the channel is
     /// still somebody's default. Deleting it anyway would leave a default
     /// that resolves to nothing and a generation button that fails opaquely.
@@ -286,14 +356,16 @@ impl ProviderRepo {
         channel_id: &str,
         key: Option<&str>,
     ) -> Result<ApiKeyView, ProviderError> {
+        // Checked before either branch. A credential must not outlive the
+        // configuration it belongs to, which nothing would ever collect, and
+        // a clear aimed at a mistyped identifier would otherwise report
+        // success while leaving the real one in place.
+        self.channel(channel_id).await?;
         let key = key.map(str::trim).filter(|key| !key.is_empty());
         let Some(key) = key else {
             self.metadata.delete_secret(channel_id).await?;
             return Ok(ApiKeyView::unset());
         };
-        // Refusing an unknown channel keeps a credential from outliving the
-        // configuration it belongs to, which nothing would ever collect.
-        self.channel(channel_id).await?;
         let secret = self.metadata.put_secret(channel_id, key).await?;
         Ok(ApiKeyView::disclosed(Some(secret)))
     }
@@ -359,6 +431,27 @@ impl ProviderRepo {
             .ok_or_else(|| ProviderError::KeyMissing {
                 channel: channel_id.to_string(),
             })
+    }
+
+    /// Asks a channel what it currently offers and changes nothing.
+    ///
+    /// The answer is a set of suggestions to pre-fill a form, not the new
+    /// stored list: deciding what each model is for is the user's next step,
+    /// and a read that wrote would have committed the guess.
+    pub async fn fetch_models(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<ModelCandidate>, ProviderError> {
+        let channel = self.channel(channel_id).await?;
+        let api_key = self.credential(channel_id).await?;
+        let fetched = adapters::list_models(channel.protocol, &channel.base_url, &api_key).await?;
+        Ok(fetched
+            .into_iter()
+            .map(|id| ModelCandidate {
+                capability: guess_capability(&id),
+                id,
+            })
+            .collect())
     }
 
     /// Asks a provider what it currently offers and stores the answer.
@@ -548,6 +641,44 @@ pub fn normalize_base_url(value: &str) -> Result<String, ProviderError> {
         ));
     }
     Ok(trimmed.to_string())
+}
+
+/// The host of an address that has already been normalised.
+fn host_of(base_url: &str) -> Result<String, ProviderError> {
+    url::Url::parse(base_url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string))
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| ProviderError::invalid("base URL must name a host"))
+}
+
+/// Turns a host into a channel identifier, so `api.example.com` becomes
+/// `api-example-com`. Anything not alphanumeric collapses into a single dash,
+/// which is what keeps the result free of the reference separator and of
+/// whitespace without a second validation pass.
+fn identifier_from_host(host: &str) -> String {
+    let mut identifier = String::with_capacity(host.len());
+    for character in host.to_ascii_lowercase().chars() {
+        if character.is_ascii_alphanumeric() {
+            identifier.push(character);
+        } else if !identifier.is_empty() && !identifier.ends_with('-') {
+            identifier.push('-');
+        }
+    }
+    identifier
+        .chars()
+        .take(MAX_IDENTIFIER_LEN)
+        .collect::<String>()
+        .trim_end_matches('-')
+        .to_string()
+}
+
+fn guess_protocol(host: &str) -> Protocol {
+    if GEMINI_HOST_HINTS.iter().any(|hint| host.contains(hint)) {
+        Protocol::Gemini
+    } else {
+        Protocol::Openai
+    }
 }
 
 fn validate_identifier(kind: &str, value: &str) -> Result<(), ProviderError> {
@@ -891,6 +1022,39 @@ mod tests {
         let error = normalize_base_url("https://user:sk-live-value@api.test/v1").unwrap_err();
         assert_eq!(error.code(), "VALIDATION_FAILED");
         assert!(!error.to_string().contains("sk-live-value"));
+    }
+
+    /// A derived identifier lands in model references, so it has to stay on
+    /// the right side of the separator whatever the host looked like.
+    #[test]
+    fn a_derived_channel_identifier_stays_separable() {
+        assert_eq!(identifier_from_host("API.Example.COM"), "api-example-com");
+        assert_eq!(
+            identifier_from_host("127.0.0.1"),
+            "127-0-0-1",
+            "a local gateway is a normal thing to point a channel at"
+        );
+        assert_eq!(identifier_from_host(".example."), "example");
+        assert_eq!(identifier_from_host("..."), "");
+        assert!(!identifier_from_host(&"a".repeat(400)).contains(REFERENCE_SEPARATOR));
+        assert_eq!(
+            identifier_from_host(&"a".repeat(400)).chars().count(),
+            MAX_IDENTIFIER_LEN
+        );
+    }
+
+    #[test]
+    fn a_protocol_is_recognised_from_the_host() {
+        assert_eq!(
+            guess_protocol("generativelanguage.googleapis.com"),
+            Protocol::Gemini
+        );
+        assert_eq!(guess_protocol("api.openai.com"), Protocol::Openai);
+        assert_eq!(
+            guess_protocol("gateway.internal"),
+            Protocol::Openai,
+            "anything unrecognised is assumed to imitate the common shape"
+        );
     }
 
     #[test]

@@ -180,7 +180,9 @@ async fn ready(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 /// Emits one structured event per API request with a request id, duration,
-/// status, and error code. Request bodies are never logged.
+/// status, and error code. Request bodies are never logged, and neither are
+/// headers, so a provider credential has no path into the log that a
+/// redaction pass would have to catch.
 async fn log_api_request(req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
     if !path.starts_with("/api/") {
