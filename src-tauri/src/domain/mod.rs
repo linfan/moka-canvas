@@ -230,9 +230,10 @@ pub enum DataType {
 
 /// The generation modality a provider model serves. Narrower than
 /// [`DataType`], which also covers port payloads that are never generated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Capability {
+    #[default]
     Text,
     Image,
     Audio,
@@ -248,6 +249,43 @@ impl Capability {
             Capability::Video => "video",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum GenerationMode {
+    #[default]
+    Generate,
+    Edit,
+    Extend,
+    Question,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum GenerationInputMode {
+    #[default]
+    Upstream,
+    Manual,
+    Mentions,
+}
+
+/// What a node asks a provider to make; mirrors the TypeScript
+/// `GenerationSpec` field for field, including key order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GenerationSpec {
+    pub capability: Capability,
+    pub mode: GenerationMode,
+    /// `channelId::modelId`; empty means fall back to the provider defaults.
+    pub model: String,
+    pub prompt: String,
+    pub input_mode: GenerationInputMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_node_ids: Option<Vec<NodeId>>,
+    pub updated_at: IsoTimestamp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,6 +311,122 @@ pub struct PortDefinition {
     pub required: bool,
     pub cardinality: Cardinality,
     pub label: String,
+}
+
+fn port(
+    id: &str,
+    direction: PortDirection,
+    data_types: Vec<DataType>,
+    label: &str,
+    cardinality: Cardinality,
+) -> PortDefinition {
+    PortDefinition {
+        id: id.to_string(),
+        direction,
+        data_types,
+        required: false,
+        cardinality,
+        label: label.to_string(),
+    }
+}
+
+fn input(
+    id: &str,
+    data_types: Vec<DataType>,
+    label: &str,
+    cardinality: Cardinality,
+) -> PortDefinition {
+    port(id, PortDirection::Input, data_types, label, cardinality)
+}
+
+fn output(id: &str, data_types: Vec<DataType>, label: &str) -> PortDefinition {
+    port(
+        id,
+        PortDirection::Output,
+        data_types,
+        label,
+        Cardinality::One,
+    )
+}
+
+/// The one port table both languages share by convention; must stay in
+/// lockstep with `NODE_PORTS` in `src/shared/domain/constants.ts`.
+pub fn derive_ports(kind: NodeKind) -> Vec<PortDefinition> {
+    match kind {
+        NodeKind::Text => vec![
+            input("prompt", vec![DataType::Text], "Prompt", Cardinality::Many),
+            input("images", vec![DataType::Image], "Images", Cardinality::Many),
+            input("audio", vec![DataType::Audio], "Audio", Cardinality::One),
+            input("video", vec![DataType::Video], "Video", Cardinality::One),
+            output("out", vec![DataType::Text], "Text"),
+        ],
+        NodeKind::Image => vec![
+            input("prompt", vec![DataType::Text], "Prompt", Cardinality::Many),
+            input("images", vec![DataType::Image], "Images", Cardinality::Many),
+            input("mask", vec![DataType::Image], "Mask", Cardinality::One),
+            output("out", vec![DataType::Image], "Image"),
+        ],
+        NodeKind::Audio => vec![
+            input("prompt", vec![DataType::Text], "Prompt", Cardinality::Many),
+            output("out", vec![DataType::Audio], "Audio"),
+        ],
+        NodeKind::Video => vec![
+            input("prompt", vec![DataType::Text], "Prompt", Cardinality::Many),
+            input("images", vec![DataType::Image], "Images", Cardinality::Many),
+            input(
+                "firstFrame",
+                vec![DataType::Image],
+                "First frame",
+                Cardinality::One,
+            ),
+            input(
+                "lastFrame",
+                vec![DataType::Image],
+                "Last frame",
+                Cardinality::One,
+            ),
+            input("videos", vec![DataType::Video], "Videos", Cardinality::Many),
+            input("audios", vec![DataType::Audio], "Audios", Cardinality::Many),
+            output("out", vec![DataType::Video], "Video"),
+        ],
+        NodeKind::Operation => vec![
+            input("text", vec![DataType::Text], "Text", Cardinality::Many),
+            input("images", vec![DataType::Image], "Images", Cardinality::Many),
+            input("audio", vec![DataType::Audio], "Audio", Cardinality::One),
+            input("video", vec![DataType::Video], "Video", Cardinality::One),
+            port(
+                "out",
+                PortDirection::Output,
+                vec![
+                    DataType::Text,
+                    DataType::Image,
+                    DataType::Audio,
+                    DataType::Video,
+                ],
+                "Result",
+                Cardinality::Many,
+            ),
+        ],
+        NodeKind::Group => Vec::new(),
+        NodeKind::Export => vec![
+            input("video", vec![DataType::Video], "Video", Cardinality::One),
+            input("audio", vec![DataType::Audio], "Audio", Cardinality::One),
+            output("out", vec![DataType::Artifact], "Artifact"),
+        ],
+    }
+}
+
+/// Ports are derived data: the table wins for every port it knows, and
+/// stored ports the table does not list are kept verbatim after it.
+pub fn reconcile_ports(kind: NodeKind, stored: &[PortDefinition]) -> Vec<PortDefinition> {
+    let mut derived = derive_ports(kind);
+    let extras: Vec<PortDefinition> = stored
+        .iter()
+        .filter(|port| !derived.iter().any(|known| known.id == port.id))
+        .cloned()
+        .collect();
+    derived.extend(extras);
+    derived
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,6 +468,8 @@ pub struct NodeData {
     pub poster_asset_id: Option<AssetId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<GenerationSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -399,7 +555,7 @@ impl CanvasDocument {
         Self {
             id,
             name,
-            schema_version: 1,
+            schema_version: CANVAS_SCHEMA_VERSION,
             viewport: Viewport {
                 x: 0.0,
                 y: 0.0,
@@ -422,6 +578,7 @@ pub struct MokaFile {
 }
 
 pub const MOKA_FILE_VERSION: &str = "v1";
+pub const CANVAS_SCHEMA_VERSION: i32 = 2;
 pub const PACKAGE_MANIFEST_VERSION: u32 = 1;
 
 impl MokaFile {

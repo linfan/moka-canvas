@@ -1,4 +1,4 @@
-import type { AssetCategory } from "./constants";
+import type { AssetCategory, Capability } from "./constants";
 
 export type ProjectId = string;
 export type CanvasId = string;
@@ -120,6 +120,26 @@ export interface ResultSlot {
   isPrimary: boolean;
 }
 
+export type GenerationMode = "generate" | "edit" | "extend" | "question";
+
+export type GenerationInputMode = "upstream" | "manual" | "mentions";
+
+/**
+ * What a node asks a provider to make. Absent on nodes created before the
+ * generation features and on nodes the user never configured.
+ */
+export interface GenerationSpec {
+  capability: Capability;
+  mode: GenerationMode;
+  /** "channelId::modelId"; empty means fall back to the provider defaults. */
+  model: string;
+  prompt: string;
+  inputMode: GenerationInputMode;
+  params: Record<string, unknown>;
+  referenceNodeIds: NodeId[];
+  updatedAt: IsoTimestamp;
+}
+
 export interface TextNodeStyle {
   fontSize?: number;
   align?: "left" | "center" | "right";
@@ -130,6 +150,7 @@ export interface TextNodeData {
   style?: TextNodeStyle;
   assetId?: AssetId;
   resultSlots?: ResultSlot[];
+  generation?: GenerationSpec;
 }
 
 export interface MediaNodeData {
@@ -138,6 +159,7 @@ export interface MediaNodeData {
   audioCategory?: "music" | "voice";
   resultSlots?: ResultSlot[];
   metadata?: Record<string, unknown>;
+  generation?: GenerationSpec;
 }
 
 export interface OperationNodeData {

@@ -37,7 +37,7 @@
     {
       "id": "00000000-0000-7000-8000-000000000002",
       "name": "Canvas 1",
-      "schemaVersion": 1,
+      "schemaVersion": 2,
       "viewport": {
         "x": 120.5,
         "y": -40.25,
@@ -56,6 +56,46 @@
           },
           "zIndex": 0,
           "ports": [
+            {
+              "id": "prompt",
+              "direction": "input",
+              "dataTypes": [
+                "text"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Prompt"
+            },
+            {
+              "id": "images",
+              "direction": "input",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Images"
+            },
+            {
+              "id": "audio",
+              "direction": "input",
+              "dataTypes": [
+                "audio"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Audio"
+            },
+            {
+              "id": "video",
+              "direction": "input",
+              "dataTypes": [
+                "video"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Video"
+            },
             {
               "id": "out",
               "direction": "output",
@@ -85,6 +125,36 @@
           },
           "zIndex": 1,
           "ports": [
+            {
+              "id": "prompt",
+              "direction": "input",
+              "dataTypes": [
+                "text"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Prompt"
+            },
+            {
+              "id": "images",
+              "direction": "input",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Images"
+            },
+            {
+              "id": "mask",
+              "direction": "input",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Mask"
+            },
             {
               "id": "out",
               "direction": "output",
@@ -120,7 +190,7 @@
               "dataTypes": [
                 "text"
               ],
-              "required": true,
+              "required": false,
               "cardinality": "many",
               "label": "Text"
             },
@@ -133,6 +203,26 @@
               "required": false,
               "cardinality": "many",
               "label": "Images"
+            },
+            {
+              "id": "audio",
+              "direction": "input",
+              "dataTypes": [
+                "audio"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Audio"
+            },
+            {
+              "id": "video",
+              "direction": "input",
+              "dataTypes": [
+                "video"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Video"
             },
             {
               "id": "out",
@@ -249,7 +339,7 @@
     {
       "id": "00000000-0000-7000-8000-000000000003",
       "name": "Canvas 2",
-      "schemaVersion": 1,
+      "schemaVersion": 2,
       "viewport": {
         "x": 0,
         "y": 0,

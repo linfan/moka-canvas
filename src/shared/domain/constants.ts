@@ -1,6 +1,8 @@
+import type { DataType, NodeKind, PortDefinition } from "./types";
+
 export const MOKA_MAGIC = [0x4d, 0x4f, 0x4b, 0x41] as const;
 export const MOKA_FILE_VERSION = "v1" as const;
-export const CANVAS_SCHEMA_VERSION = 1;
+export const CANVAS_SCHEMA_VERSION = 2;
 export const PACKAGE_FORMAT_VERSION = 1;
 
 export const ZOOM_MIN = 0.05;
@@ -14,6 +16,8 @@ export const MAX_TITLE_LENGTH = 200;
 export const MAX_CANVAS_NAME_LENGTH = 80;
 export const MAX_PROJECT_NAME_LENGTH = 120;
 export const MAX_TEXT_CONTENT_LENGTH = 50_000;
+export const MAX_PROMPT_LENGTH = 20_000;
+export const MAX_RESULT_SLOTS = 16;
 export const MAX_NODES_PER_CANVAS = 5_000;
 export const MAX_EDGES_PER_CANVAS = 10_000;
 export const MAX_CANVASES_PER_PROJECT = 64;
@@ -57,6 +61,72 @@ export const MAX_IMAGES_PER_RUN = 10;
 export const MAX_VIDEO_SECONDS = 600;
 export const MIN_AUDIO_SPEED = 0.25;
 export const MAX_AUDIO_SPEED = 4;
+
+export function port(
+  id: string,
+  direction: "input" | "output",
+  dataTypes: DataType[],
+  label: string,
+  options?: { required?: boolean; cardinality?: "one" | "many" },
+): PortDefinition {
+  return {
+    id,
+    direction,
+    dataTypes,
+    required: options?.required ?? false,
+    cardinality: options?.cardinality ?? "one",
+    label,
+  };
+}
+
+/**
+ * The one port table both languages share by convention: codecs correct
+ * decoded nodes against it, so a stored document never drifts from the
+ * ports its kind offers.
+ */
+export const NODE_PORTS: Record<NodeKind, PortDefinition[]> = {
+  text: [
+    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
+    port("images", "input", ["image"], "Images", { cardinality: "many" }),
+    port("audio", "input", ["audio"], "Audio"),
+    port("video", "input", ["video"], "Video"),
+    port("out", "output", ["text"], "Text"),
+  ],
+  image: [
+    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
+    port("images", "input", ["image"], "Images", { cardinality: "many" }),
+    port("mask", "input", ["image"], "Mask"),
+    port("out", "output", ["image"], "Image"),
+  ],
+  audio: [
+    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
+    port("out", "output", ["audio"], "Audio"),
+  ],
+  video: [
+    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
+    port("images", "input", ["image"], "Images", { cardinality: "many" }),
+    port("firstFrame", "input", ["image"], "First frame"),
+    port("lastFrame", "input", ["image"], "Last frame"),
+    port("videos", "input", ["video"], "Videos", { cardinality: "many" }),
+    port("audios", "input", ["audio"], "Audios", { cardinality: "many" }),
+    port("out", "output", ["video"], "Video"),
+  ],
+  operation: [
+    port("text", "input", ["text"], "Text", { cardinality: "many" }),
+    port("images", "input", ["image"], "Images", { cardinality: "many" }),
+    port("audio", "input", ["audio"], "Audio"),
+    port("video", "input", ["video"], "Video"),
+    port("out", "output", ["text", "image", "audio", "video"], "Result", {
+      cardinality: "many",
+    }),
+  ],
+  group: [],
+  export: [
+    port("video", "input", ["video"], "Video"),
+    port("audio", "input", ["audio"], "Audio"),
+    port("out", "output", ["artifact"], "Artifact"),
+  ],
+};
 
 export const MOKA_FRAGMENT_MIME = "application/x-moka-canvas-fragment+json";
 export const FRAGMENT_SCHEMA_VERSION = 1;

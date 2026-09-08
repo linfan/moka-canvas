@@ -4,10 +4,12 @@ import {
   DEFAULT_NODE_HEIGHT,
   DEFAULT_NODE_WIDTH,
   MOKA_FILE_VERSION,
+  NODE_PORTS,
 } from "./constants";
+import type { Capability } from "./constants";
 import type {
   CanvasDocument,
-  DataType,
+  GenerationSpec,
   MokaFile,
   NodeKind,
   PortDefinition,
@@ -48,44 +50,25 @@ export function createProject(name: string): MokaFile {
   };
 }
 
-export function port(
-  id: string,
-  direction: "input" | "output",
-  dataTypes: DataType[],
-  label: string,
-  options?: { required?: boolean; cardinality?: "one" | "many" },
-): PortDefinition {
-  return {
-    id,
-    direction,
-    dataTypes,
-    required: options?.required ?? false,
-    cardinality: options?.cardinality ?? "one",
-    label,
-  };
+export function derivePorts(kind: NodeKind): PortDefinition[] {
+  return NODE_PORTS[kind].map((p) => ({ ...p, dataTypes: [...p.dataTypes] }));
 }
 
-const NODE_PORTS: Record<NodeKind, PortDefinition[]> = {
-  text: [port("out", "output", ["text"], "Text")],
-  image: [port("out", "output", ["image"], "Image")],
-  audio: [port("out", "output", ["audio"], "Audio")],
-  video: [port("out", "output", ["video"], "Video")],
-  operation: [
-    port("text", "input", ["text"], "Text", { cardinality: "many" }),
-    port("images", "input", ["image"], "Images", { cardinality: "many" }),
-    port("audio", "input", ["audio"], "Audio"),
-    port("video", "input", ["video"], "Video"),
-    port("out", "output", ["text", "image", "audio", "video"], "Result", {
-      cardinality: "many",
-    }),
-  ],
-  group: [],
-  export: [
-    port("video", "input", ["video"], "Video"),
-    port("audio", "input", ["audio"], "Audio"),
-    port("out", "output", ["artifact"], "Artifact"),
-  ],
-};
+/**
+ * Ports are derived data: the table wins for every port it knows, and
+ * stored ports the table does not list are kept verbatim after it.
+ */
+export function reconcilePorts(
+  kind: NodeKind,
+  stored: PortDefinition[],
+): PortDefinition[] {
+  const derived = derivePorts(kind);
+  const known = new Set(derived.map((p) => p.id));
+  const extras = stored
+    .filter((p) => !known.has(p.id))
+    .map((p) => ({ ...p, dataTypes: [...p.dataTypes] }));
+  return [...derived, ...extras];
+}
 
 const NODE_TITLES: Record<NodeKind, string> = {
   text: "Text",
@@ -121,12 +104,43 @@ export function defaultDataForKind(kind: NodeKind): WorkflowNode["data"] {
   }
 }
 
+export function generationCapabilityFor(kind: NodeKind): Capability | null {
+  return kind === "operation" || kind === "group" || kind === "export"
+    ? null
+    : kind;
+}
+
+export function defaultGenerationSpec(kind: NodeKind): GenerationSpec | null {
+  const capability = generationCapabilityFor(kind);
+  if (!capability) return null;
+  return {
+    capability,
+    mode: "generate",
+    model: "",
+    prompt: "",
+    inputMode: "upstream",
+    params: {},
+    referenceNodeIds: [],
+    updatedAt: nowIso(),
+  };
+}
+
 export function createNode(
   kind: NodeKind,
   at: { x: number; y: number },
-  options?: { title?: string; width?: number; height?: number },
+  options?: {
+    title?: string;
+    width?: number;
+    height?: number;
+    generate?: boolean;
+  },
 ): WorkflowNode {
   const now = nowIso();
+  const data = defaultDataForKind(kind);
+  if (options?.generate) {
+    const spec = defaultGenerationSpec(kind);
+    if (spec) (data as { generation?: GenerationSpec }).generation = spec;
+  }
   return {
     id: newId(),
     kind,
@@ -138,8 +152,8 @@ export function createNode(
       height: options?.height ?? DEFAULT_NODE_HEIGHT,
     },
     zIndex: 0,
-    ports: NODE_PORTS[kind].map((p) => ({ ...p, dataTypes: [...p.dataTypes] })),
-    data: defaultDataForKind(kind),
+    ports: derivePorts(kind),
+    data,
     createdAt: now,
     updatedAt: now,
   };

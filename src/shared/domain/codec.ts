@@ -1,9 +1,11 @@
 import { Double, Long, deserialize, serialize } from "bson";
 import {
+  CANVAS_SCHEMA_VERSION,
   MOKA_FILE_VERSION,
   MOKA_MAGIC,
   PROJECT_ASSET_CATEGORIES,
 } from "./constants";
+import { reconcilePorts } from "./factories";
 import type {
   CanvasDocument,
   GroupMembership,
@@ -92,6 +94,7 @@ function encodeNodeData(kind: string, data: NodeData): Record<string, unknown> {
       put("content");
       put("style");
       put("assetId");
+      put("generation");
       break;
     case "image":
     case "audio":
@@ -99,6 +102,7 @@ function encodeNodeData(kind: string, data: NodeData): Record<string, unknown> {
       put("assetId");
       put("posterAssetId");
       put("audioCategory");
+      put("generation");
       break;
     case "operation":
       put("operationType");
@@ -452,10 +456,24 @@ function decodeEdge(value: unknown): WorkflowEdge {
   };
 }
 
+function migrateCanvas(canvas: CanvasDocument): CanvasDocument {
+  if (canvas.schemaVersion > CANVAS_SCHEMA_VERSION) {
+    throw new MokaCodecError(
+      "MOKA_VERSION_UNSUPPORTED",
+      `canvas.moka schema version ${canvas.schemaVersion} is not supported (expected ${CANVAS_SCHEMA_VERSION} or earlier)`,
+    );
+  }
+  for (const node of canvas.nodes) {
+    node.ports = reconcilePorts(node.kind, node.ports);
+  }
+  canvas.schemaVersion = CANVAS_SCHEMA_VERSION;
+  return canvas;
+}
+
 function decodeCanvas(value: unknown): CanvasDocument {
   const doc = asRecord(value, "canvas[]");
   const settings = asRecord(doc.settings, "canvas[].settings");
-  return {
+  return migrateCanvas({
     id: asString(doc.id, "canvas[].id"),
     name: asString(doc.name, "canvas[].name"),
     schemaVersion: Math.trunc(
@@ -480,7 +498,7 @@ function decodeCanvas(value: unknown): CanvasDocument {
       showMinimap: Boolean(settings.showMinimap),
       snapToGrid: Boolean(settings.snapToGrid),
     },
-  };
+  });
 }
 
 export function decodeMokaFile(bytes: Uint8Array): MokaFile {

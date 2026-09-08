@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildGoldenMokaFile } from "./fixtures";
+import { CANVAS_SCHEMA_VERSION } from "./constants";
+import {
+  buildGenerationMokaFile,
+  buildGoldenMokaFile,
+  buildLegacyV1MokaFile,
+} from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 
 const FIXTURE_DIR = join(
@@ -11,6 +16,7 @@ const FIXTURE_DIR = join(
 );
 const GOLDEN_JSON = join(FIXTURE_DIR, "minimal.moka.json");
 const GOLDEN_BINARY = join(FIXTURE_DIR, "minimal.canvas.moka");
+const LEGACY_BINARY = join(FIXTURE_DIR, "v1-legacy.moka");
 
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
@@ -93,6 +99,70 @@ describe("moka codec", () => {
     } catch (error) {
       expect((error as MokaCodecError).code).toBe("MOKA_VERSION_UNSUPPORTED");
     }
+  });
+
+  it("migrates a v1 canvas onto the v2 port table", () => {
+    const decoded = decodeMokaFile(encodeMokaFile(buildLegacyV1MokaFile()));
+    const canvas = decoded.canvas[0];
+    expect(canvas.schemaVersion).toBe(CANVAS_SCHEMA_VERSION);
+    expect(canvas.nodes[0].ports.map((p) => p.id)).toEqual([
+      "prompt",
+      "images",
+      "audio",
+      "video",
+      "out",
+      "legacyNote",
+    ]);
+    expect(canvas.nodes[1].ports.map((p) => p.id)).toEqual([
+      "prompt",
+      "images",
+      "mask",
+      "out",
+    ]);
+    expect(canvas.nodes[0].ports.at(-1)?.label).toBe("Legacy note");
+  });
+
+  it("keeps migration idempotent and byte-canonical", () => {
+    const once = encodeMokaFile(
+      decodeMokaFile(encodeMokaFile(buildLegacyV1MokaFile())),
+    );
+    const twice = encodeMokaFile(decodeMokaFile(once));
+    expect(Buffer.from(twice).equals(Buffer.from(once))).toBe(true);
+    expect(normalize(decodeMokaFile(twice))).toEqual(
+      normalize(decodeMokaFile(once)),
+    );
+  });
+
+  it("reads the committed v1 legacy fixture", () => {
+    const legacy = encodeMokaFile(buildLegacyV1MokaFile());
+    if (process.env.UPDATE_FIXTURES === "1" || !existsSync(LEGACY_BINARY)) {
+      mkdirSync(FIXTURE_DIR, { recursive: true });
+      writeFileSync(LEGACY_BINARY, legacy);
+    }
+    expect(
+      Buffer.from(readFileSync(LEGACY_BINARY)).equals(Buffer.from(legacy)),
+    ).toBe(true);
+    expect(
+      normalize(decodeMokaFile(new Uint8Array(readFileSync(LEGACY_BINARY)))),
+    ).toEqual(normalize(decodeMokaFile(legacy)));
+  });
+
+  it("rejects a canvas schema from the future", () => {
+    const golden = buildGoldenMokaFile();
+    golden.canvas[0].schemaVersion = CANVAS_SCHEMA_VERSION + 1;
+    const encoded = encodeMokaFile(golden);
+    try {
+      decodeMokaFile(encoded);
+      expect.unreachable();
+    } catch (error) {
+      expect((error as MokaCodecError).code).toBe("MOKA_VERSION_UNSUPPORTED");
+    }
+  });
+
+  it("round-trips generation specs", () => {
+    const golden = buildGenerationMokaFile();
+    const decoded = decodeMokaFile(encodeMokaFile(golden));
+    expect(normalize(decoded)).toEqual(normalize(golden));
   });
 
   it("rejects a resource path that escapes the project root", () => {
