@@ -61,6 +61,51 @@ npm run test:e2e  # Playwright critical path against the built app
    association opens it with the document icon (not the app icon).
 5. `.moka` uninstall removes the association (NSIS `APP_UNASSOCIATE`).
 
+## Metadata store (all platforms)
+
+Configuration, recent projects, provider channels, and encrypted credentials
+live in the platform application-data directory, never in the program tree. See
+[security.md](security.md) and [deployment.md](deployment.md).
+
+1. Record the path from `GET /api/health` (`metadata.root`). It is
+   reported with the home directory replaced by a literal `$HOME`;
+   expand it and confirm it is the OS application-data location for
+   that platform, not the install directory.
+2. Confirm no metadata file landed in the program tree: nothing named
+   `meta.json`, `recent-projects.json`, `providers.json`,
+   `secrets.json`, or `master.key` under the repository `data/`,
+   the served `dist/`, or the executable's own directory.
+3. Once provider credentials can be entered through the UI: store a
+   real API key, then search for it three ways and find nothing —
+   `grep -r "sk-"` over the metadata directory, `strings` over every
+   file in it, and the captured HTTP responses and server log for
+   that session. Only a fingerprint and a masked form may appear.
+   Until that screen ships, the automated equivalent is
+   `cargo test --test metadata_file`.
+4. Confirm `secrets.json` is mode `0600` and the metadata directory
+   `0700` (macOS and Linux).
+5. Confirm `/api/health` reports `secretStorage` and that the value
+   fits the runtime: `keyring` for a desktop build with a usable
+   keychain, `file` when the master key came from
+   `<metadata.dir>/master.key`, `env` for a server started with
+   `MOKA_METADATA_KEY`, and `unset` while no credential has ever
+   been stored.
+6. Hard-kill the process (`kill -9`, or Force Quit / Task Manager),
+   then relaunch: `tmp/` is empty, no document is reported
+   `corrupt`, channels and the recent-project list are intact, and
+   the directory lock was released (no "in use by another process"
+   error).
+7. Copy the whole metadata directory to another user account or
+   another machine and start the app there: channels, defaults,
+   preferences, and the prompt library are all present. Stored API
+   keys are **not** expected to work unless the master key travelled
+   with them — that is the documented behaviour, not a defect.
+8. Before installing an **older** build over a newer one, back up the
+   metadata directory by copying it whole. A directory written by a
+   newer schema version refuses to open and does not downgrade
+   itself; the backup is the only way back. Record that the backup
+   was taken.
+
 ## Performance smoke (reference machine)
 
 1. Open the 200-node/300-edge stress project; pan, zoom, and drag stay

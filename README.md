@@ -27,6 +27,16 @@ make tauri-dev
 
 Tauri bundles the built `dist/` directory as a resource, starts the same Axum server on an ephemeral loopback port, and points its WebView to that URL.
 
+## Configuration and data
+
+Application-level state — provider channels, encrypted API keys, defaults and preferences, the recent-project list, and the prompt library — lives in one directory under the platform application-data location, never inside the program tree. Startup rejects a directory that resolves next to the executable, inside the served assets, or inside the working directory.
+
+Three environment variables override the resolved values: `MOKA_METADATA_DIR` (location), `MOKA_METADATA_STORE` (only `file` is accepted), and `MOKA_METADATA_KEY` (the server-mode master key, base64 of 32 bytes). The directory must be on a local disk and must be used by one process at a time; a second process pointing at it fails to start and names the pid holding the lock.
+
+`GET /api/health` reports the store kind, the redacted root, the schema version, the secret-storage tier, and per-document state. `GET /api/ready` answers 503 until the assets are present, a write probe against the metadata directory succeeds, and any open project directory still exists.
+
+See [docs/security.md](docs/security.md) for how credentials are protected and what that protection does not cover, and [docs/deployment.md](docs/deployment.md) for running the standalone server.
+
 ## Quality and packaging
 
 ```sh
