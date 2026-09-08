@@ -5,13 +5,10 @@ import type {
   RunStatus,
   WorkflowNode,
 } from "../../../shared/domain";
+import { NODE_HEADER_HEIGHT, PORT_RADIUS, canvasTheme } from "./theme";
+import { layoutPorts, type PortView } from "./portLayout";
 import {
-  NODE_HEADER_HEIGHT,
-  PORT_RADIUS,
-  PORT_SPACING,
-  canvasTheme,
-} from "./theme";
-import {
+  generationSummary,
   mediaSignature,
   waveformPeaks,
   type MediaCardInfo,
@@ -26,13 +23,6 @@ export interface NodeVisualState {
   dimmed: boolean;
   /** Latest run step status for this node, if any. */
   runStatus: RunStatus | null;
-}
-
-export interface PortView {
-  direction: "input" | "output";
-  dot: Ellipse;
-  /** Local anchor point inside the node group. */
-  local: Point;
 }
 
 export interface NodeView {
@@ -69,12 +59,14 @@ function summarize(node: WorkflowNode): string {
   switch (node.kind) {
     case "text": {
       const content = typeof data.content === "string" ? data.content : "";
-      return content.trim() ? content.slice(0, 120) : "Double-click to edit";
+      if (content.trim()) return content.slice(0, 120);
+      return generationSummary(node) || "Double-click to edit";
     }
     case "image":
     case "audio":
     case "video":
-      return data.assetId ? "Asset linked" : "No asset yet";
+      if (data.assetId) return "Asset linked";
+      return generationSummary(node) || "No asset yet";
     case "operation":
       return String(data.operationType ?? "operation");
     case "group": {
@@ -199,30 +191,6 @@ function syncMedia(
     view.group.add(view.media.badge);
   }
   layoutMedia(view, node.bounds);
-}
-
-function layoutPorts(node: WorkflowNode): Map<string, PortView> {
-  const inputs = node.ports.filter((port) => port.direction === "input");
-  const outputs = node.ports.filter((port) => port.direction === "output");
-  const ports = new Map<string, PortView>();
-  inputs.forEach((port, index) => {
-    ports.set(port.id, {
-      direction: "input",
-      dot: null as unknown as Ellipse,
-      local: { x: 0, y: NODE_HEADER_HEIGHT + 16 + index * PORT_SPACING },
-    });
-  });
-  outputs.forEach((port, index) => {
-    ports.set(port.id, {
-      direction: "output",
-      dot: null as unknown as Ellipse,
-      local: {
-        x: node.bounds.width,
-        y: NODE_HEADER_HEIGHT + 16 + index * PORT_SPACING,
-      },
-    });
-  });
-  return ports;
 }
 
 export function createNodeView(

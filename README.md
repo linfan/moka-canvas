@@ -33,6 +33,8 @@ Application-level state — provider channels, encrypted API keys, defaults and 
 
 Three environment variables override the resolved values: `MOKA_METADATA_DIR` (location), `MOKA_METADATA_STORE` (only `file` is accepted), and `MOKA_METADATA_KEY` (the server-mode master key, base64 of 32 bytes). The directory must be on a local disk and must be used by one process at a time; a second process pointing at it fails to start and names the pid holding the lock.
 
+Each project document carries its own canvas schema stamp. A document written by an older schema is migrated forward when it opens — every node's ports are reconciled against the current port table — while a document stamped with a newer schema is refused as an unsupported version instead of being partially read. Documents are never rewritten downwards, so read [docs/release-checklist.md](docs/release-checklist.md) before installing an older build over a newer one.
+
 `GET /api/health` reports the store kind, the redacted root, the schema version, the secret-storage tier, and per-document state. `GET /api/ready` answers 503 until the assets are present, a write probe against the metadata directory succeeds, and any open project directory still exists.
 
 Provider channels, default models, and generation preferences are edited in the settings dialog, opened from the **Settings** button on both the launcher and the editor. A channel carries its base URL, protocol, and a per-capability model list; connectivity tests and provider model listing run from the channel row and the channel editor. API keys are written to the local server once and never sent back: the dialog shows only the masked form, and leaving the key field blank keeps whatever is stored.

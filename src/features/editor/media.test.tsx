@@ -9,14 +9,21 @@ import {
 } from "@testing-library/react";
 import App from "../../App";
 import {
+  buildGenerationMokaFile,
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
-import type { MokaFile, SelfCheckReport } from "../../shared/domain";
+import type {
+  MediaNodeData,
+  MokaFile,
+  NodeData,
+  SelfCheckReport,
+} from "../../shared/domain";
 import {
   mediaInfoForNode,
   buildIssueIndex,
   buildResourceIndex,
+  generationSummary,
   waveformPeaks,
 } from "./canvas/mediaCards";
 import { undo } from "./commands/execute";
@@ -146,6 +153,34 @@ describe("mediaCards", () => {
     const b = waveformPeaks("deadbeef");
     expect(a).toEqual(b);
     expect(a.every((peak) => peak >= 0.25 && peak <= 1)).toBe(true);
+  });
+
+  it("collapses a generation spec into one card line", () => {
+    const nodes = buildGenerationMokaFile().canvas[0].nodes;
+    const image = nodes.find((node) => node.kind === "image")!;
+    expect(generationSummary(image)).toBe("painter · Paint @ref as a poster.");
+    const text = nodes.find((node) => node.kind === "text")!;
+    expect(generationSummary(text)).toBe(
+      "Default model · Write a logline about a lantern over a lake.",
+    );
+  });
+
+  it("keeps only the prompt's first line and falls back to the alias", () => {
+    const nodes = buildGenerationMokaFile().canvas[0].nodes;
+    const image = nodes.find((node) => node.kind === "image")!;
+    const spec = (image.data as MediaNodeData).generation!;
+    const withPrompt = (prompt: string) =>
+      generationSummary({
+        ...image,
+        data: { ...image.data, generation: { ...spec, prompt } } as NodeData,
+      });
+    expect(withPrompt("First line\nsecond line")).toBe("painter · First line");
+    expect(withPrompt("   ")).toBe("painter");
+  });
+
+  it("says nothing for nodes without a generation spec", () => {
+    const nodes = buildGoldenMokaFile().canvas[0].nodes;
+    expect(nodes.every((node) => generationSummary(node) === "")).toBe(true);
   });
 });
 

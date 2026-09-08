@@ -113,6 +113,13 @@ live in the platform application-data directory, never in the program tree. See
    newer schema version refuses to open and does not downgrade
    itself; the backup is the only way back. Record that the backup
    was taken.
+9. Project documents follow the same rule, so copy any open project
+   directory too before rolling back. A `.moka` stamped with a canvas
+   schema newer than the running build is reported as an unsupported
+   version and is never rewritten downwards. Within a schema stamp the
+   build does accept, optional fields it does not know — per-node
+   generation settings, for instance — are ignored on read instead of
+   rejecting the document.
 
 ## Performance smoke (reference machine)
 

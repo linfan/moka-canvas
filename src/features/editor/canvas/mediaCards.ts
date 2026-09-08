@@ -1,5 +1,6 @@
 import type {
   AssetId,
+  GenerationSpec,
   MokaFile,
   ResourceEntry,
   SelfCheckReport,
@@ -72,6 +73,31 @@ function labelFor(entry: ResourceEntry): string {
     parts.push(`${Math.round(probe.sampleRate / 100) / 10} kHz`);
   if (parts.length === 0) parts.push(formatBytes(entry.bytes) || entry.name);
   return parts.join(" · ");
+}
+
+const MENTION_PATTERN = /@\[node:[^\]]+\]/g;
+const MENTION_STAND_IN = "@ref";
+
+/** The model half of a "channelId::modelId" reference, or the default label. */
+function modelAlias(model: string): string {
+  const separator = model.lastIndexOf("::");
+  const alias = (separator >= 0 ? model.slice(separator + 2) : model).trim();
+  return alias || "Default model";
+}
+
+/**
+ * Collapsed card line for a node's generation spec: model alias, then the
+ * prompt's first line with mentions shortened. Empty when the node carries no
+ * spec, so callers keep their own fallback copy.
+ */
+export function generationSummary(node: WorkflowNode): string {
+  const spec = (node.data as { generation?: GenerationSpec }).generation;
+  if (!spec) return "";
+  const alias = modelAlias(spec.model);
+  const lead = (spec.prompt.split("\n", 1)[0] ?? "")
+    .replace(MENTION_PATTERN, MENTION_STAND_IN)
+    .trim();
+  return lead ? `${alias} · ${lead}` : alias;
 }
 
 /** Change signature for a node's media card; compared by renderer and scene differ. */
