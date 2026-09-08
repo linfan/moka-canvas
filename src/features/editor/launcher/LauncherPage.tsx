@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { recentApi, type RecentProject } from "../../../api";
 import type { SelfCheckReport } from "../../../shared/domain";
+import { useProviderStore } from "../../settings/providerStore";
 import { useAppStore } from "../stores/appStore";
 import { useProjectStore } from "../stores/projectStore";
 import { MissingAssetsDialog } from "./MissingAssetsDialog";
@@ -135,6 +136,13 @@ export function LauncherPage() {
           type="button"
         >
           Import package
+        </button>
+        <button
+          disabled={busy}
+          onClick={() => useProviderStore.getState().openSettings()}
+          type="button"
+        >
+          Settings
         </button>
       </div>
 

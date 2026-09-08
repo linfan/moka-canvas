@@ -38,6 +38,26 @@ export const PROJECT_ASSET_CATEGORIES = [
 ] as const;
 export type AssetCategory = (typeof PROJECT_ASSET_CATEGORIES)[number];
 
+export const MODEL_CAPABILITIES = ["text", "image", "audio", "video"] as const;
+export type Capability = (typeof MODEL_CAPABILITIES)[number];
+
+export const CAPABILITY_LABELS: Record<Capability, string> = {
+  text: "Text",
+  image: "Image",
+  audio: "Audio",
+  video: "Video",
+};
+
+export const PROVIDER_PROTOCOLS = ["openai", "gemini", "custom"] as const;
+export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
+
+export const MAX_CHANNEL_ID_LENGTH = 96;
+export const MAX_CHANNEL_NAME_LENGTH = 120;
+export const MAX_IMAGES_PER_RUN = 10;
+export const MAX_VIDEO_SECONDS = 600;
+export const MIN_AUDIO_SPEED = 0.25;
+export const MAX_AUDIO_SPEED = 4;
+
 export const MOKA_FRAGMENT_MIME = "application/x-moka-canvas-fragment+json";
 export const FRAGMENT_SCHEMA_VERSION = 1;
 

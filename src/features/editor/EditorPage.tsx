@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { isApiError, projectsApi } from "../../api";
+import { useProviderStore } from "../settings/providerStore";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
 import { clientToWorld, zoomTo } from "./canvas/canvasControl";
@@ -256,6 +257,12 @@ export function EditorPage() {
           type="button"
         >
           {starting ? "Starting…" : runActive ? "Running…" : "▶ Run"}
+        </button>
+        <button
+          onClick={() => useProviderStore.getState().openSettings()}
+          type="button"
+        >
+          Settings
         </button>
         <button onClick={() => void exportPackage()} type="button">
           Export

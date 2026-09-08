@@ -40,7 +40,7 @@ export function isApiError(error: unknown, code?: string): error is ApiError {
 }
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   formData?: FormData;
   signal?: AbortSignal;

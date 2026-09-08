@@ -35,7 +35,9 @@ button.is-active {
   color: var(--on-primary);
 }
 
-input {
+input,
+select,
+textarea {
   background: var(--canvas);
   border: 1px solid var(--stroke);
   border-radius: 999px;
@@ -46,9 +48,23 @@ input {
   width: 100%;
 }
 
-input:focus-visible {
+textarea {
+  border-radius: var(--radius-sm);
+  line-height: 1.45;
+  resize: vertical;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   border-color: var(--primary);
   outline: none;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
 }
 
 h1,
@@ -249,6 +265,191 @@ h2 {
   border-color: var(--primary);
   color: var(--on-primary);
   font-weight: 600;
+}
+
+/* Settings */
+
+.settings {
+  gap: 14px;
+  max-width: 720px;
+}
+
+.settings-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.settings-head h2 {
+  margin-bottom: 0;
+}
+
+.settings-close {
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--muted);
+  flex: none;
+  font-size: 16px;
+  height: 28px;
+  line-height: 1;
+  padding: 0;
+  width: 28px;
+}
+
+.settings-close:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-body {
+  display: grid;
+  gap: 14px;
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+}
+
+/* A form taller than the panel must not push its own Save out of reach. */
+.settings-body .dialog-actions {
+  background: var(--surface);
+  bottom: 0;
+  padding-top: 10px;
+  position: sticky;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-heading {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.settings-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 0;
+}
+
+.settings-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-columns {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.settings-inline {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+}
+
+.settings-check {
+  accent-color: var(--primary);
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.settings-check input {
+  accent-color: var(--primary);
+  flex: none;
+  padding: 0;
+  width: auto;
+}
+
+.channel-list,
+.model-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.channel {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.channel.is-off {
+  opacity: 0.6;
+}
+
+.channel-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.channel-tag {
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 1px 8px;
+}
+
+.channel-detail {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-probe {
+  color: var(--success);
+  font-size: 12px;
+  margin-bottom: 0;
+}
+
+.channel-probe.is-failed {
+  color: var(--coral);
+}
+
+.model-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns:
+    minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr)
+    auto auto;
+}
+
+.candidate-id {
+  font-size: 12px;
+  grid-column: span 3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .missing-asset-list {
