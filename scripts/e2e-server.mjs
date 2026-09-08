@@ -1,12 +1,11 @@
 // Boots the local server for Playwright against a throwaway config:
-// a temp recent-projects registry and the built dist/ site. The server's
+// a temp metadata directory and the built dist/ site. The server's
 // log is written to a file so test output stays readable; its path is
 // printed here and the tail is dumped on unexpected exit.
 import { spawn } from "node:child_process";
 import {
   createWriteStream,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   writeFileSync,
@@ -27,7 +26,6 @@ if (!existsSync(join(dist, "index.html"))) {
 }
 
 const home = mkdtempSync(join(tmpdir(), "moka-e2e-"));
-mkdirSync(join(home, "data"), { recursive: true });
 const configPath = join(home, "config.yaml");
 writeFileSync(
   configPath,
@@ -37,8 +35,11 @@ server:
   staticDir: ${JSON.stringify(dist)}
   maxUploadBytes: 2147483648
 projects:
-  recentRegistryPath: ${JSON.stringify(join(home, "data", "recent-projects.json"))}
   maxMokaFileBytes: 33554432
+metadata:
+  store: "file"
+  dir: ${JSON.stringify(join(home, "metadata"))}
+  maxDocumentBytes: 33554432
 workflow:
   enabledExecutors: ["deterministic"]
 public:
