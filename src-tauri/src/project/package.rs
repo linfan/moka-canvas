@@ -1,6 +1,8 @@
 use crate::config::LimitsConfig;
 use crate::domain::{now_iso, ASSET_CATEGORIES};
 use crate::domain::{MokaFile, PACKAGE_MANIFEST_VERSION};
+use crate::metadata::crypto;
+use crate::metadata::docs;
 use crate::project::store::normalize_relative;
 use crate::project::{PackageReport, ProjectError};
 use serde::{Deserialize, Serialize};
@@ -32,14 +34,37 @@ pub struct PackageManifest {
 const MANIFEST_NAME: &str = "moka-package.json";
 const OS_JUNK: [&str; 3] = [".DS_Store", "Thumbs.db", "desktop.ini"];
 
+/// Application-level metadata documents that sit at the project root only.
+/// Matching the whole relative path keeps an asset that happens to share a
+/// name — a project may well contain its own `meta.json` — in the package.
+const METADATA_DOCUMENTS: [&str; 4] = [
+    docs::META_DOC,
+    docs::RECENT_DOC,
+    docs::PROVIDERS_DOC,
+    docs::PROMPT_SOURCES_DOC,
+];
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = sha2::Sha256::new();
     hasher.update(bytes);
     hex::encode(hasher.finalize())
 }
 
+/// Credential material, at any depth: nothing in a project tree has a
+/// legitimate reason to carry these names.
+fn is_metadata(relative: &str) -> bool {
+    let name = relative.rsplit('/').next().unwrap_or(relative);
+    if name == docs::SECRETS_DOC || name == crypto::MASTER_KEY_FILE || name.contains(".corrupt.") {
+        return true;
+    }
+    METADATA_DOCUMENTS.contains(&relative)
+}
+
 fn is_excluded(relative: &str) -> bool {
     if relative.starts_with("tmp/") || relative == "tmp" {
+        return true;
+    }
+    if is_metadata(relative) {
         return true;
     }
     relative
@@ -136,12 +161,20 @@ pub fn export_project(
         project_id: moka.metadata.id.clone(),
         project_name: moka.metadata.name.clone(),
         incomplete: !missing.is_empty(),
-        exclusions: vec![
-            "tmp/**".into(),
-            ".DS_Store".into(),
-            "Thumbs.db".into(),
-            "desktop.ini".into(),
-        ],
+        exclusions: [
+            vec!["tmp/**".into()],
+            METADATA_DOCUMENTS
+                .iter()
+                .map(|document| document.to_string())
+                .collect(),
+            vec![
+                format!("**/{}", docs::SECRETS_DOC),
+                format!("**/{}", crypto::MASTER_KEY_FILE),
+                "**/*.corrupt.*".into(),
+            ],
+            OS_JUNK.iter().map(|name| name.to_string()).collect(),
+        ]
+        .concat(),
         entries,
     };
 
@@ -336,4 +369,52 @@ pub fn import_project(
 
 pub fn asset_categories() -> &'static [&'static str] {
     &ASSET_CATEGORIES
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn application_metadata_is_never_collected() {
+        for relative in [
+            "meta.json",
+            "recent-projects.json",
+            "providers.json",
+            "prompts/sources.json",
+            "secrets.json",
+            "master.key",
+            "assets/secrets.json",
+            "nested/master.key",
+            "recent-projects.corrupt.20260101T000000Z.json",
+        ] {
+            assert!(is_excluded(relative), "{relative} must not be packaged");
+        }
+    }
+
+    #[test]
+    fn an_asset_sharing_a_metadata_name_still_ships() {
+        // Only the credential documents are excluded at any depth; the rest are
+        // matched on the whole relative path so project content is untouched.
+        for relative in [
+            "assets/meta.json",
+            "assets/providers.json",
+            "notes/sources.json",
+        ] {
+            assert!(!is_excluded(relative), "{relative} is project content");
+        }
+    }
+
+    #[test]
+    fn scratch_and_os_junk_are_never_collected() {
+        for relative in [
+            "tmp/partial",
+            "tmp",
+            ".DS_Store",
+            "assets/.DS_Store",
+            "Thumbs.db",
+        ] {
+            assert!(is_excluded(relative), "{relative} must not be packaged");
+        }
+    }
 }
