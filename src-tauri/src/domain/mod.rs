@@ -217,6 +217,20 @@ pub enum NodeKind {
     Export,
 }
 
+impl NodeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NodeKind::Text => "text",
+            NodeKind::Image => "image",
+            NodeKind::Audio => "audio",
+            NodeKind::Video => "video",
+            NodeKind::Operation => "operation",
+            NodeKind::Group => "group",
+            NodeKind::Export => "export",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DataType {
@@ -248,6 +262,18 @@ impl Capability {
             Capability::Audio => "audio",
             Capability::Video => "video",
         }
+    }
+}
+
+/// The modality a node generates in, or `None` for the kinds that never
+/// carry a generation spec.
+pub fn generation_capability_for(kind: NodeKind) -> Option<Capability> {
+    match kind {
+        NodeKind::Text => Some(Capability::Text),
+        NodeKind::Image => Some(Capability::Image),
+        NodeKind::Audio => Some(Capability::Audio),
+        NodeKind::Video => Some(Capability::Video),
+        NodeKind::Operation | NodeKind::Group | NodeKind::Export => None,
     }
 }
 

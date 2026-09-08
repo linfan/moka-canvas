@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{
-    CanvasDocument, Cardinality, DataType, MokaFile, NodeId, PortDirection, ValidationIssue,
-    WorkflowEdge, WorkflowNode, ASSET_CATEGORIES,
+    generation_capability_for, CanvasDocument, Capability, Cardinality, DataType, MokaFile, NodeId,
+    NodeKind, PortDirection, ValidationIssue, WorkflowEdge, WorkflowNode, ASSET_CATEGORIES,
 };
 
 pub const COORDINATE_LIMIT: f64 = 1_000_000.0;
@@ -11,6 +11,8 @@ pub const MAX_CANVAS_NAME_LENGTH: usize = 80;
 pub const MAX_NODES_PER_CANVAS: usize = 5_000;
 pub const MAX_EDGES_PER_CANVAS: usize = 10_000;
 pub const MAX_CANVASES_PER_PROJECT: usize = 64;
+pub const MAX_PROMPT_LENGTH: usize = 20_000;
+pub const MAX_RESULT_SLOTS: usize = 16;
 pub const ZOOM_MIN: f64 = 0.05;
 pub const ZOOM_MAX: f64 = 5.0;
 
@@ -36,6 +38,53 @@ pub fn resource_path_valid(path: &str) -> bool {
     }
     path.split('/')
         .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+const MENTION_PREFIX: &str = "@[node:";
+
+/// Node ids referenced by `@[node:<id>]` mentions inside a prompt.
+pub fn mention_node_ids(prompt: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = prompt;
+    while let Some(start) = rest.find(MENTION_PREFIX) {
+        rest = &rest[start + MENTION_PREFIX.len()..];
+        let Some(end) = rest.find(']') else { break };
+        if end > 0 {
+            ids.push(rest[..end].to_string());
+        }
+        rest = &rest[end + 1..];
+    }
+    ids
+}
+
+/// True when `model` carries both sides of a `channelId::modelId` reference.
+pub fn model_reference_shaped(model: &str) -> bool {
+    match model.find("::") {
+        Some(separator) => {
+            let channel = model[..separator].chars().count();
+            let model_id = model[separator + 2..].chars().count();
+            channel > 0 && model_id > 0
+        }
+        None => false,
+    }
+}
+
+/// Parameters each capability accepts; mirrors `GENERATION_PARAM_KEYS` in
+/// `src/shared/domain/constants.ts`.
+pub fn generation_param_keys(capability: Capability) -> &'static [&'static str] {
+    match capability {
+        Capability::Text => &["temperature", "maxTokens", "reasoningEffort"],
+        Capability::Image => &["size", "quality", "background", "count"],
+        Capability::Audio => &["voice", "format", "speed", "instructions", "music"],
+        Capability::Video => &[
+            "seconds",
+            "resolution",
+            "ratio",
+            "generateAudio",
+            "watermark",
+            "mode",
+        ],
+    }
 }
 
 fn port_types_intersect(a: &[DataType], b: &[DataType]) -> bool {
@@ -222,6 +271,109 @@ pub fn topological_order(canvas: &CanvasDocument) -> Vec<&WorkflowNode> {
     ordered
 }
 
+fn generation_issues(
+    canvas: &CanvasDocument,
+    node: &WorkflowNode,
+    node_ids: &HashSet<&str>,
+) -> Vec<ValidationIssue> {
+    let mut issues = Vec::new();
+    let issue = |code: &'static str, message: String| ValidationIssue {
+        code: code.into(),
+        message,
+        canvas_id: Some(canvas.id.clone()),
+        node_id: Some(node.id.clone()),
+        port_id: None,
+        edge_id: None,
+    };
+
+    let slots = node.data.result_slots.as_deref().unwrap_or(&[]);
+    if slots.len() > MAX_RESULT_SLOTS {
+        issues.push(issue(
+            "RESULT_SLOT_LIMIT",
+            format!(
+                "Node \"{}\" exceeds the result slot limit ({MAX_RESULT_SLOTS})",
+                node.title
+            ),
+        ));
+    }
+
+    let Some(spec) = node.data.generation.as_ref() else {
+        return issues;
+    };
+
+    if generation_capability_for(node.kind) != Some(spec.capability) {
+        issues.push(issue(
+            "GENERATION_CAPABILITY_MISMATCH",
+            format!(
+                "Generation capability \"{}\" does not match node kind \"{}\"",
+                spec.capability.as_str(),
+                node.kind.as_str()
+            ),
+        ));
+    }
+    if !spec.model.is_empty() && !model_reference_shaped(&spec.model) {
+        issues.push(issue(
+            "GENERATION_MODEL_MISSING",
+            format!(
+                "Generation model \"{}\" is not a channelId::modelId reference",
+                spec.model
+            ),
+        ));
+    }
+    if spec.prompt.chars().count() > MAX_PROMPT_LENGTH {
+        issues.push(issue(
+            "VALIDATION_FAILED",
+            format!("Generation prompt exceeds the {MAX_PROMPT_LENGTH} character limit"),
+        ));
+    }
+
+    let references = spec.reference_node_ids.as_deref().unwrap_or(&[]);
+    let has_prompt_edge = canvas
+        .edges
+        .iter()
+        .any(|edge| edge.target.node_id == node.id && edge.target.port_id == "prompt");
+    if spec.prompt.trim().is_empty() && !has_prompt_edge && references.is_empty() {
+        issues.push(issue(
+            "GENERATION_PROMPT_EMPTY",
+            format!(
+                "Node \"{}\" has no prompt, no upstream prompt connection, and no references",
+                node.title
+            ),
+        ));
+    }
+
+    for mentioned in mention_node_ids(&spec.prompt) {
+        if mentioned == node.id {
+            issues.push(issue(
+                "MENTION_SELF_REFERENCE",
+                "Prompt mentions its own node".into(),
+            ));
+        } else if !node_ids.contains(mentioned.as_str()) {
+            issues.push(issue(
+                "MENTION_NODE_NOT_FOUND",
+                format!("Prompt mentions missing node {mentioned}"),
+            ));
+        }
+    }
+
+    if let Some(params) = spec.params.as_ref().and_then(|value| value.as_object()) {
+        let allowed = generation_param_keys(spec.capability);
+        for key in params.keys() {
+            if !allowed.contains(&key.as_str()) {
+                issues.push(issue(
+                    "VALIDATION_FAILED",
+                    format!(
+                        "Unknown parameter \"{key}\" for {} generation",
+                        spec.capability.as_str()
+                    ),
+                ));
+            }
+        }
+    }
+
+    issues
+}
+
 pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     let canvas_id = Some(canvas.id.clone());
@@ -284,6 +436,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
         }
     }
 
+    for node in &canvas.nodes {
+        issues.extend(generation_issues(canvas, node, &node_ids));
+    }
+
     let mut edge_ids = HashSet::new();
     for (index, edge) in canvas.edges.iter().enumerate() {
         if !edge_ids.insert(edge.id.as_str()) {
@@ -320,7 +476,7 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
     let mut group_of: HashMap<&str, &str> = HashMap::new();
     for group in &canvas.groups {
         let group_node = canvas.node(&group.group_id);
-        if !matches!(group_node.map(|n| n.kind), Some(super::NodeKind::Group)) {
+        if !matches!(group_node.map(|n| n.kind), Some(NodeKind::Group)) {
             issues.push(ValidationIssue {
                 code: "GROUP_INVALID".into(),
                 message: "Membership references a missing or non-group node".into(),

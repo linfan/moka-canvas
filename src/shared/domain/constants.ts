@@ -131,6 +131,24 @@ export const NODE_PORTS: Record<NodeKind, PortDefinition[]> = {
 export const MOKA_FRAGMENT_MIME = "application/x-moka-canvas-fragment+json";
 export const FRAGMENT_SCHEMA_VERSION = 1;
 
+/**
+ * The node-level parameter keys each capability accepts; same names and
+ * meanings as the global provider preferences. Unknown keys are rejected.
+ */
+export const GENERATION_PARAM_KEYS: Record<Capability, readonly string[]> = {
+  text: ["temperature", "maxTokens", "reasoningEffort"],
+  image: ["size", "quality", "background", "count"],
+  audio: ["voice", "format", "speed", "instructions", "music"],
+  video: [
+    "seconds",
+    "resolution",
+    "ratio",
+    "generateAudio",
+    "watermark",
+    "mode",
+  ],
+};
+
 export const HISTORY_LIMIT = 50;
 
 export const PROBLEM_CODES = [
@@ -176,6 +194,12 @@ export const PROBLEM_CODES = [
   "PROVIDER_BAD_REQUEST",
   "PROVIDER_TIMEOUT",
   "MODEL_CAPABILITY_MISMATCH",
+  "GENERATION_CAPABILITY_MISMATCH",
+  "GENERATION_MODEL_MISSING",
+  "GENERATION_PROMPT_EMPTY",
+  "MENTION_NODE_NOT_FOUND",
+  "MENTION_SELF_REFERENCE",
+  "RESULT_SLOT_LIMIT",
   "NOT_FOUND",
   "CONFLICT",
   "PAYLOAD_TOO_LARGE",

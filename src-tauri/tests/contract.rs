@@ -1,5 +1,11 @@
-use moka_canvas::domain::validate::{resource_path_valid, topological_order, validate_moka_file};
-use moka_canvas::domain::MokaFile;
+use moka_canvas::domain::validate::{
+    mention_node_ids, model_reference_shaped, resource_path_valid, topological_order,
+    validate_canvas, validate_moka_file, MAX_PROMPT_LENGTH, MAX_RESULT_SLOTS,
+};
+use moka_canvas::domain::{
+    CanvasDocument, Capability, EdgeEndpoint, GenerationInputMode, GenerationMode, GenerationSpec,
+    MokaFile, ResultSlot, ResultSlotStatus, WorkflowEdge, WorkflowNode,
+};
 use moka_canvas::project::codec::{decode_moka_file, encode_moka_file, CodecError};
 use std::path::PathBuf;
 
@@ -97,4 +103,192 @@ fn resource_path_rules() {
     assert!(!resource_path_valid("assets//a.png"));
     assert!(!resource_path_valid("assets/./a.png"));
     assert!(!resource_path_valid("C:/a.png"));
+}
+
+const TEXT_NODE: &str = "00000000-0000-7000-8000-00000000000a";
+const IMAGE_NODE: &str = "00000000-0000-7000-8000-00000000000b";
+const OPERATION_NODE: &str = "00000000-0000-7000-8000-00000000000c";
+
+fn golden_canvas() -> CanvasDocument {
+    golden_from_json().canvas.into_iter().next().unwrap()
+}
+
+fn node_mut<'a>(canvas: &'a mut CanvasDocument, id: &str) -> &'a mut WorkflowNode {
+    canvas
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == id)
+        .unwrap_or_else(|| panic!("golden canvas has no node {id}"))
+}
+
+fn generation(capability: Capability, prompt: &str) -> GenerationSpec {
+    GenerationSpec {
+        capability,
+        mode: GenerationMode::Generate,
+        model: String::new(),
+        prompt: prompt.into(),
+        input_mode: GenerationInputMode::Upstream,
+        params: Some(serde_json::json!({})),
+        reference_node_ids: Some(Vec::new()),
+        updated_at: "2026-01-01T00:00:00.000Z".into(),
+    }
+}
+
+fn flagged(canvas: &CanvasDocument, node_id: &str, code: &str) -> bool {
+    validate_canvas(canvas)
+        .iter()
+        .any(|issue| issue.code == code && issue.node_id.as_deref() == Some(node_id))
+}
+
+fn has_code(canvas: &CanvasDocument, code: &str) -> bool {
+    validate_canvas(canvas)
+        .iter()
+        .any(|issue| issue.code == code)
+}
+
+fn messages(canvas: &CanvasDocument, code: &str) -> Vec<String> {
+    validate_canvas(canvas)
+        .iter()
+        .filter(|issue| issue.code == code)
+        .map(|issue| issue.message.clone())
+        .collect()
+}
+
+#[test]
+fn golden_canvas_stays_clean_without_generation_specs() {
+    assert!(validate_canvas(&golden_canvas()).is_empty());
+}
+
+#[test]
+fn flags_a_spec_that_disagrees_with_its_node() {
+    let mut canvas = golden_canvas();
+    let mut broken = generation(Capability::Image, "Redraw @[node:missing] in ink");
+    broken.model = "painter".into();
+    node_mut(&mut canvas, TEXT_NODE).data.generation = Some(broken);
+
+    assert!(flagged(
+        &canvas,
+        TEXT_NODE,
+        "GENERATION_CAPABILITY_MISMATCH"
+    ));
+    assert!(flagged(&canvas, TEXT_NODE, "GENERATION_MODEL_MISSING"));
+    assert!(flagged(&canvas, TEXT_NODE, "MENTION_NODE_NOT_FOUND"));
+}
+
+#[test]
+fn structural_nodes_cannot_carry_a_spec() {
+    let mut canvas = golden_canvas();
+    node_mut(&mut canvas, OPERATION_NODE).data.generation =
+        Some(generation(Capability::Text, "Summarise the board"));
+    assert!(flagged(
+        &canvas,
+        OPERATION_NODE,
+        "GENERATION_CAPABILITY_MISMATCH"
+    ));
+}
+
+#[test]
+fn flags_a_prompt_that_mentions_its_own_node() {
+    let mut canvas = golden_canvas();
+    node_mut(&mut canvas, TEXT_NODE).data.generation = Some(generation(
+        Capability::Text,
+        &format!("Rewrite @[node:{TEXT_NODE}]"),
+    ));
+    assert!(flagged(&canvas, TEXT_NODE, "MENTION_SELF_REFERENCE"));
+}
+
+#[test]
+fn empty_prompt_needs_upstream_or_references() {
+    let mut canvas = golden_canvas();
+    node_mut(&mut canvas, TEXT_NODE).data.generation = Some(generation(Capability::Text, "   "));
+    node_mut(&mut canvas, IMAGE_NODE).data.generation = Some(generation(Capability::Image, ""));
+    assert!(flagged(&canvas, TEXT_NODE, "GENERATION_PROMPT_EMPTY"));
+    assert!(flagged(&canvas, IMAGE_NODE, "GENERATION_PROMPT_EMPTY"));
+
+    canvas.edges.push(WorkflowEdge {
+        id: "00000000-0000-7000-8000-000000000021".into(),
+        source: EdgeEndpoint {
+            node_id: TEXT_NODE.into(),
+            port_id: "out".into(),
+        },
+        target: EdgeEndpoint {
+            node_id: IMAGE_NODE.into(),
+            port_id: "prompt".into(),
+        },
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+    });
+
+    assert!(!flagged(&canvas, IMAGE_NODE, "GENERATION_PROMPT_EMPTY"));
+    assert!(!has_code(&canvas, "PORT_TYPE_MISMATCH"));
+    assert!(flagged(&canvas, TEXT_NODE, "GENERATION_PROMPT_EMPTY"));
+}
+
+#[test]
+fn references_alone_satisfy_an_empty_prompt() {
+    let mut canvas = golden_canvas();
+    let mut spec = generation(Capability::Image, "");
+    spec.input_mode = GenerationInputMode::Manual;
+    spec.reference_node_ids = Some(vec![TEXT_NODE.into()]);
+    node_mut(&mut canvas, IMAGE_NODE).data.generation = Some(spec);
+    assert!(!flagged(&canvas, IMAGE_NODE, "GENERATION_PROMPT_EMPTY"));
+}
+
+#[test]
+fn rejects_unknown_generation_params() {
+    let mut canvas = golden_canvas();
+    let mut spec = generation(Capability::Image, "A poster of the lake");
+    spec.params = Some(serde_json::json!({ "size": "1:1", "brush": "wet" }));
+    node_mut(&mut canvas, IMAGE_NODE).data.generation = Some(spec);
+
+    assert_eq!(
+        messages(&canvas, "VALIDATION_FAILED"),
+        ["Unknown parameter \"brush\" for image generation"]
+    );
+}
+
+#[test]
+fn rejects_an_overlong_prompt() {
+    let mut canvas = golden_canvas();
+    let long = "a".repeat(MAX_PROMPT_LENGTH + 1);
+    node_mut(&mut canvas, TEXT_NODE).data.generation = Some(generation(Capability::Text, &long));
+
+    assert_eq!(
+        messages(&canvas, "VALIDATION_FAILED"),
+        [format!(
+            "Generation prompt exceeds the {MAX_PROMPT_LENGTH} character limit"
+        )]
+    );
+}
+
+#[test]
+fn enforces_the_result_slot_limit() {
+    let mut canvas = golden_canvas();
+    node_mut(&mut canvas, OPERATION_NODE).data.result_slots = Some(
+        (0..MAX_RESULT_SLOTS + 1)
+            .map(|index| ResultSlot {
+                id: format!("slot-{index}"),
+                status: ResultSlotStatus::Empty,
+                asset_id: None,
+                text: None,
+                error: None,
+                is_primary: index == 0,
+            })
+            .collect(),
+    );
+    assert!(flagged(&canvas, OPERATION_NODE, "RESULT_SLOT_LIMIT"));
+}
+
+#[test]
+fn mention_and_model_shapes() {
+    assert_eq!(
+        mention_node_ids("Paint @[node:a] beside @[node:b]"),
+        vec!["a", "b"]
+    );
+    assert!(mention_node_ids("no mentions here").is_empty());
+    assert!(mention_node_ids("@[node:] and @[node").is_empty());
+
+    assert!(model_reference_shaped("main::painter"));
+    assert!(!model_reference_shaped("::painter"));
+    assert!(!model_reference_shaped("main::"));
+    assert!(!model_reference_shaped("painter"));
 }

@@ -1,12 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { applyCommands, CommandError } from "./commands";
+import {
+  MAX_PROMPT_LENGTH,
+  MAX_RESULT_SLOTS,
+  type Capability,
+} from "./constants";
 import { buildGoldenMokaFile, goldenNodeIds } from "./fixtures";
 import { createCanvas, createNode } from "./factories";
 import { newId } from "./ids";
-import type { DocumentCommand, MokaFile } from "./types";
+import type {
+  CanvasDocument,
+  DocumentCommand,
+  GenerationSpec,
+  MokaFile,
+  ResultSlot,
+  WorkflowNode,
+} from "./types";
 import {
+  mentionNodeIds,
+  modelReferenceShaped,
   topologicalOrder,
   validateBounds,
+  validateCanvas,
   validateEdgeCandidate,
   validateMokaFile,
   validateResourcePath,
@@ -145,6 +160,162 @@ describe("graph validation", () => {
     moka.resources.images = [];
     const issues = validateMokaFile(moka);
     expect(issues.some((i) => i.code === "ASSET_MISSING")).toBe(true);
+  });
+});
+
+describe("generation validation", () => {
+  const ids = goldenNodeIds();
+
+  function goldenCanvas(): CanvasDocument {
+    return buildGoldenMokaFile().canvas[0];
+  }
+
+  function nodeOf(canvas: CanvasDocument, id: string): WorkflowNode {
+    const node = canvas.nodes.find((candidate) => candidate.id === id);
+    if (!node) throw new Error(`golden canvas has no node ${id}`);
+    return node;
+  }
+
+  function spec(capability: Capability, prompt: string): GenerationSpec {
+    return {
+      capability,
+      mode: "generate",
+      model: "",
+      prompt,
+      inputMode: "upstream",
+      params: {},
+      referenceNodeIds: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+  }
+
+  function patchData(node: WorkflowNode, patch: Record<string, unknown>) {
+    Object.assign(node.data as Record<string, unknown>, patch);
+  }
+
+  function flagged(canvas: CanvasDocument, nodeId: string, code: string) {
+    return validateCanvas(canvas).some(
+      (issue) => issue.code === code && issue.nodeId === nodeId,
+    );
+  }
+
+  function messages(canvas: CanvasDocument, code: string): string[] {
+    return validateCanvas(canvas)
+      .filter((issue) => issue.code === code)
+      .map((issue) => issue.message);
+  }
+
+  it("accepts a canvas whose nodes carry no spec", () => {
+    expect(validateCanvas(goldenCanvas())).toEqual([]);
+  });
+
+  it("flags a spec that disagrees with its node", () => {
+    const canvas = goldenCanvas();
+    const broken = spec("image", "Redraw @[node:missing] in ink");
+    broken.model = "painter";
+    patchData(nodeOf(canvas, ids.text), { generation: broken });
+
+    expect(flagged(canvas, ids.text, "GENERATION_CAPABILITY_MISMATCH")).toBe(
+      true,
+    );
+    expect(flagged(canvas, ids.text, "GENERATION_MODEL_MISSING")).toBe(true);
+    expect(flagged(canvas, ids.text, "MENTION_NODE_NOT_FOUND")).toBe(true);
+  });
+
+  it("refuses specs on structural nodes", () => {
+    const canvas = goldenCanvas();
+    patchData(nodeOf(canvas, ids.operation), {
+      generation: spec("text", "Summarise the board"),
+    });
+    expect(
+      flagged(canvas, ids.operation, "GENERATION_CAPABILITY_MISMATCH"),
+    ).toBe(true);
+  });
+
+  it("flags a prompt that mentions its own node", () => {
+    const canvas = goldenCanvas();
+    patchData(nodeOf(canvas, ids.text), {
+      generation: spec("text", `Rewrite @[node:${ids.text}]`),
+    });
+    expect(flagged(canvas, ids.text, "MENTION_SELF_REFERENCE")).toBe(true);
+  });
+
+  it("needs an upstream prompt or references when the prompt is empty", () => {
+    const canvas = goldenCanvas();
+    patchData(nodeOf(canvas, ids.text), { generation: spec("text", "   ") });
+    patchData(nodeOf(canvas, ids.image), { generation: spec("image", "") });
+    expect(flagged(canvas, ids.text, "GENERATION_PROMPT_EMPTY")).toBe(true);
+    expect(flagged(canvas, ids.image, "GENERATION_PROMPT_EMPTY")).toBe(true);
+
+    canvas.edges.push({
+      id: newId(),
+      source: { nodeId: ids.text, portId: "out" },
+      target: { nodeId: ids.image, portId: "prompt" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(flagged(canvas, ids.image, "GENERATION_PROMPT_EMPTY")).toBe(false);
+    expect(
+      validateCanvas(canvas).some((i) => i.code === "PORT_TYPE_MISMATCH"),
+    ).toBe(false);
+    expect(flagged(canvas, ids.text, "GENERATION_PROMPT_EMPTY")).toBe(true);
+  });
+
+  it("accepts an empty prompt that lists references", () => {
+    const canvas = goldenCanvas();
+    const manual = spec("image", "");
+    manual.inputMode = "manual";
+    manual.referenceNodeIds = [ids.text];
+    patchData(nodeOf(canvas, ids.image), { generation: manual });
+    expect(flagged(canvas, ids.image, "GENERATION_PROMPT_EMPTY")).toBe(false);
+  });
+
+  it("rejects parameters outside the capability whitelist", () => {
+    const canvas = goldenCanvas();
+    const withParams = spec("image", "A poster of the lake");
+    withParams.params = { size: "1:1", brush: "wet" };
+    patchData(nodeOf(canvas, ids.image), { generation: withParams });
+    expect(messages(canvas, "VALIDATION_FAILED")).toEqual([
+      'Unknown parameter "brush" for image generation',
+    ]);
+  });
+
+  it("rejects an overlong prompt", () => {
+    const canvas = goldenCanvas();
+    patchData(nodeOf(canvas, ids.text), {
+      generation: spec("text", "a".repeat(MAX_PROMPT_LENGTH + 1)),
+    });
+    expect(messages(canvas, "VALIDATION_FAILED")).toEqual([
+      `Generation prompt exceeds the ${MAX_PROMPT_LENGTH} character limit`,
+    ]);
+  });
+
+  it("enforces the result slot limit", () => {
+    const canvas = goldenCanvas();
+    const slots: ResultSlot[] = Array.from(
+      { length: MAX_RESULT_SLOTS + 1 },
+      (_, index) => ({
+        id: `slot-${index}`,
+        status: "empty" as const,
+        isPrimary: index === 0,
+      }),
+    );
+    patchData(nodeOf(canvas, ids.operation), { resultSlots: slots });
+    expect(flagged(canvas, ids.operation, "RESULT_SLOT_LIMIT")).toBe(true);
+  });
+
+  it("scans mentions and model references", () => {
+    expect(mentionNodeIds("Paint @[node:a] beside @[node:b]")).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(mentionNodeIds("no mentions here")).toEqual([]);
+    expect(mentionNodeIds("@[node:] and @[node")).toEqual([]);
+
+    expect(modelReferenceShaped("main::painter")).toBe(true);
+    expect(modelReferenceShaped("::painter")).toBe(false);
+    expect(modelReferenceShaped("main::")).toBe(false);
+    expect(modelReferenceShaped("painter")).toBe(false);
   });
 });
 

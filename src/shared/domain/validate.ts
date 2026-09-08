@@ -1,19 +1,24 @@
 import {
   COORDINATE_LIMIT,
+  GENERATION_PARAM_KEYS,
   MAX_EDGES_PER_CANVAS,
   MAX_NODES_PER_CANVAS,
+  MAX_PROMPT_LENGTH,
+  MAX_RESULT_SLOTS,
   PROJECT_ASSET_CATEGORIES,
 } from "./constants";
 import type {
   CanvasDocument,
   DataType,
   EdgeEndpoint,
+  GenerationSpec,
   MokaFile,
   NodeId,
   PortDefinition,
   ProjectRelativePath,
   Rect,
   ResourceEntry,
+  ResultSlot,
   ValidationIssue,
   WorkflowEdge,
   WorkflowNode,
@@ -274,6 +279,104 @@ export function findResource(
   return allResources(moka).find((r) => r.id === assetId);
 }
 
+export function mentionNodeIds(prompt: string): string[] {
+  const ids: string[] = [];
+  const pattern = /@\[node:([^\]]+)\]/g;
+  for (
+    let match = pattern.exec(prompt);
+    match !== null;
+    match = pattern.exec(prompt)
+  ) {
+    ids.push(match[1]);
+  }
+  return ids;
+}
+
+export function modelReferenceShaped(model: string): boolean {
+  const separator = model.indexOf("::");
+  return separator > 0 && separator + 2 < model.length;
+}
+
+function generationIssues(
+  canvas: CanvasDocument,
+  node: WorkflowNode,
+  nodeIds: Set<NodeId>,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const at = (code: string, message: string) => {
+    issues.push({ code, message, canvasId: canvas.id, nodeId: node.id });
+  };
+
+  const data = node.data as {
+    generation?: GenerationSpec;
+    resultSlots?: ResultSlot[];
+  };
+  if ((data.resultSlots?.length ?? 0) > MAX_RESULT_SLOTS) {
+    at(
+      "RESULT_SLOT_LIMIT",
+      `Node "${node.title}" exceeds the result slot limit (${MAX_RESULT_SLOTS})`,
+    );
+  }
+
+  const spec = data.generation;
+  if (!spec) return issues;
+
+  if (spec.capability !== node.kind) {
+    at(
+      "GENERATION_CAPABILITY_MISMATCH",
+      `Generation capability "${spec.capability}" does not match node kind "${node.kind}"`,
+    );
+  }
+  if (spec.model !== "" && !modelReferenceShaped(spec.model)) {
+    at(
+      "GENERATION_MODEL_MISSING",
+      `Generation model "${spec.model}" is not a channelId::modelId reference`,
+    );
+  }
+  if (spec.prompt.length > MAX_PROMPT_LENGTH) {
+    at(
+      "VALIDATION_FAILED",
+      `Generation prompt exceeds the ${MAX_PROMPT_LENGTH} character limit`,
+    );
+  }
+
+  const hasPromptEdge = canvas.edges.some(
+    (edge) => edge.target.nodeId === node.id && edge.target.portId === "prompt",
+  );
+  if (
+    spec.prompt.trim() === "" &&
+    !hasPromptEdge &&
+    spec.referenceNodeIds.length === 0
+  ) {
+    at(
+      "GENERATION_PROMPT_EMPTY",
+      `Node "${node.title}" has no prompt, no upstream prompt connection, and no references`,
+    );
+  }
+
+  for (const id of mentionNodeIds(spec.prompt)) {
+    if (id === node.id) {
+      at("MENTION_SELF_REFERENCE", "Prompt mentions its own node");
+    } else if (!nodeIds.has(id)) {
+      at("MENTION_NODE_NOT_FOUND", `Prompt mentions missing node ${id}`);
+    }
+  }
+
+  const allowed = GENERATION_PARAM_KEYS[spec.capability];
+  if (allowed) {
+    for (const key of Object.keys(spec.params)) {
+      if (!allowed.includes(key)) {
+        at(
+          "VALIDATION_FAILED",
+          `Unknown parameter "${key}" for ${spec.capability} generation`,
+        );
+      }
+    }
+  }
+
+  return issues;
+}
+
 export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const canvasId = canvas.id;
@@ -325,6 +428,10 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
       }
       portIds.add(port.id);
     }
+  }
+
+  for (const node of canvas.nodes) {
+    issues.push(...generationIssues(canvas, node, nodeIds));
   }
 
   const edgeIds = new Set<string>();
