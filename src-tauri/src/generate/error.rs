@@ -50,6 +50,25 @@ pub enum ProviderError {
     #[error("the channel rejected the request: {0}")]
     Rejected(String),
 
+    /// A successful answer with nothing in it. Reported instead of handing
+    /// back an empty result, because "no output" is a provider failure the
+    /// caller can retry elsewhere rather than a legitimate blank page.
+    #[error("the channel returned no usable output: {0}")]
+    NoOutput(String),
+
+    /// The caller walked away mid-generation.
+    #[error("the generation was cancelled")]
+    Cancelled,
+
+    /// Nothing is registered under this handle: it never existed, or the
+    /// process that was tracking it has gone.
+    #[error("no generation task {task} is being tracked")]
+    TaskMissing { task: String },
+
+    /// The upstream job is too old to poll any more.
+    #[error("generation task {task} expired before it was collected")]
+    TaskExpired { task: String },
+
     #[error("{0}")]
     NotFound(String),
 
@@ -84,6 +103,10 @@ impl ProviderError {
             Self::Timeout(_) => "PROVIDER_TIMEOUT",
             Self::Unreachable(_) => "PROVIDER_UNAVAILABLE",
             Self::Rejected(_) => "PROVIDER_BAD_REQUEST",
+            Self::NoOutput(_) => "PROVIDER_NO_OUTPUT",
+            Self::Cancelled => "GENERATION_CANCELLED",
+            Self::TaskMissing { .. } => "TASK_NOT_FOUND",
+            Self::TaskExpired { .. } => "TASK_EXPIRED",
             Self::NotFound(_) => "NOT_FOUND",
             Self::Invalid(_) => "VALIDATION_FAILED",
         }
@@ -122,6 +145,49 @@ impl ProviderError {
                 "actual": found,
             })),
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_outcomes() -> Vec<ProviderError> {
+        vec![
+            ProviderError::NoOutput("the answer carried no text and no media".into()),
+            ProviderError::Cancelled,
+            ProviderError::TaskMissing {
+                task: "task-1".into(),
+            },
+            ProviderError::TaskExpired {
+                task: "task-1".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn each_run_outcome_has_its_own_code() {
+        let codes: Vec<&str> = run_outcomes().iter().map(ProviderError::code).collect();
+        assert_eq!(
+            codes,
+            [
+                "PROVIDER_NO_OUTPUT",
+                "GENERATION_CANCELLED",
+                "TASK_NOT_FOUND",
+                "TASK_EXPIRED"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_outcome_is_never_something_waiting_fixes() {
+        // An empty answer, a caller that left, and a handle that is gone all
+        // fail again verbatim; only a busy or unreachable channel is worth a
+        // backoff.
+        for error in run_outcomes() {
+            assert!(!error.retryable(), "{error} must not be retried");
+            assert!(error.details().is_none());
         }
     }
 }

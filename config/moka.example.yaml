@@ -13,6 +13,24 @@ metadata:
   maxDocumentBytes: 33554432
 workflow:
   enabledExecutors: ["deterministic"]
+generate:
+  # How long one provider request may take, per capability. Video is a job:
+  # the first budget covers creating it, the second covers a single poll.
+  textTimeoutSeconds: 120
+  imageTimeoutSeconds: 300
+  audioTimeoutSeconds: 120
+  videoTaskTimeoutSeconds: 60
+  videoPollTimeoutSeconds: 30
+  # Attempts for a failure that waiting can fix, counting the first. The wait
+  # doubles from retryBaseMs, and a Retry-After from the provider wins.
+  maxAttempts: 3
+  retryBaseMs: 1000
+  # Ceilings for reference media sent along with a request.
+  maxImageInputBytes: 20971520
+  maxMediaInputBytes: 209715200
+  # A generation answer can carry a base64 image, so this sits far above the
+  # ceiling a model list gets.
+  maxResponseBytes: 67108864
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

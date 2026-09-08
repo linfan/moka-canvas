@@ -50,6 +50,82 @@ pub struct WorkflowConfig {
     pub enabled_executors: Vec<String>,
 }
 
+/// Budgets for talking to a provider. Every value bounds how long to wait or
+/// how much to accept; none of them change what is asked for.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateConfig {
+    #[serde(default = "default_text_timeout_seconds")]
+    pub text_timeout_seconds: u64,
+    #[serde(default = "default_image_timeout_seconds")]
+    pub image_timeout_seconds: u64,
+    #[serde(default = "default_audio_timeout_seconds")]
+    pub audio_timeout_seconds: u64,
+    /// Starting an upstream video job, which answers with a handle at once.
+    #[serde(default = "default_video_task_timeout_seconds")]
+    pub video_task_timeout_seconds: u64,
+    /// One poll of an upstream video job.
+    #[serde(default = "default_video_poll_timeout_seconds")]
+    pub video_poll_timeout_seconds: u64,
+    /// Attempts for a failure waiting can fix, counting the first.
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u32,
+    /// First backoff wait; doubled each attempt, and a `Retry-After` wins.
+    #[serde(default = "default_retry_base_ms")]
+    pub retry_base_ms: u64,
+    #[serde(default = "default_max_image_input_bytes")]
+    pub max_image_input_bytes: u64,
+    #[serde(default = "default_max_media_input_bytes")]
+    pub max_media_input_bytes: u64,
+    /// A generation answer can carry a base64 image, so the ceiling here is
+    /// far above the one a model list gets.
+    #[serde(default = "default_max_response_bytes")]
+    pub max_response_bytes: u64,
+}
+
+impl Default for GenerateConfig {
+    fn default() -> Self {
+        Self {
+            text_timeout_seconds: default_text_timeout_seconds(),
+            image_timeout_seconds: default_image_timeout_seconds(),
+            audio_timeout_seconds: default_audio_timeout_seconds(),
+            video_task_timeout_seconds: default_video_task_timeout_seconds(),
+            video_poll_timeout_seconds: default_video_poll_timeout_seconds(),
+            max_attempts: default_max_attempts(),
+            retry_base_ms: default_retry_base_ms(),
+            max_image_input_bytes: default_max_image_input_bytes(),
+            max_media_input_bytes: default_max_media_input_bytes(),
+            max_response_bytes: default_max_response_bytes(),
+        }
+    }
+}
+
+impl GenerateConfig {
+    /// How long one request of this capability may take. Video is task-based,
+    /// so its budget belongs to the two task calls rather than to `generate`.
+    pub fn timeout_for(&self, capability: crate::domain::Capability) -> std::time::Duration {
+        let secs = match capability {
+            crate::domain::Capability::Text => self.text_timeout_seconds,
+            crate::domain::Capability::Image => self.image_timeout_seconds,
+            crate::domain::Capability::Audio => self.audio_timeout_seconds,
+            crate::domain::Capability::Video => self.video_task_timeout_seconds,
+        };
+        std::time::Duration::from_secs(secs)
+    }
+
+    /// The input ceiling for an asset of this kind.
+    pub fn input_cap_for(&self, capability: crate::domain::Capability) -> u64 {
+        match capability {
+            crate::domain::Capability::Image | crate::domain::Capability::Text => {
+                self.max_image_input_bytes
+            }
+            crate::domain::Capability::Audio | crate::domain::Capability::Video => {
+                self.max_media_input_bytes
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicConfig {
@@ -125,6 +201,36 @@ fn default_max_package_bytes() -> u64 {
 fn default_max_package_entries() -> usize {
     50_000
 }
+fn default_text_timeout_seconds() -> u64 {
+    120
+}
+fn default_image_timeout_seconds() -> u64 {
+    300
+}
+fn default_audio_timeout_seconds() -> u64 {
+    120
+}
+fn default_video_task_timeout_seconds() -> u64 {
+    60
+}
+fn default_video_poll_timeout_seconds() -> u64 {
+    30
+}
+fn default_max_attempts() -> u32 {
+    3
+}
+fn default_retry_base_ms() -> u64 {
+    1_000
+}
+fn default_max_image_input_bytes() -> u64 {
+    20 * 1024 * 1024
+}
+fn default_max_media_input_bytes() -> u64 {
+    200 * 1024 * 1024
+}
+fn default_max_response_bytes() -> u64 {
+    64 * 1024 * 1024
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +242,8 @@ pub struct AppConfig {
     pub metadata: MetadataConfig,
     #[serde(default)]
     pub workflow: WorkflowConfig,
+    #[serde(default)]
+    pub generate: GenerateConfig,
     pub public: PublicConfig,
     #[serde(default)]
     pub limits: LimitsConfig,
@@ -273,6 +381,7 @@ pub fn parse_test_config(root: &Path) -> AppConfig {
             max_document_bytes: default_max_document_bytes(),
         },
         workflow: WorkflowConfig::default(),
+        generate: GenerateConfig::default(),
         public: PublicConfig {
             product_name: "Moka Canvas".into(),
             max_upload_bytes: default_max_upload_bytes(),
@@ -327,6 +436,66 @@ public:
 "#;
         let config = parse_config(legacy).expect("legacy config must parse");
         assert_eq!(config.metadata, MetadataConfig::default());
+    }
+
+    #[test]
+    fn generate_section_is_optional() {
+        let legacy = r#"
+version: 1
+server:
+  bind: "127.0.0.1:3000"
+  staticDir: "./dist"
+projects:
+  maxMokaFileBytes: 33554432
+public:
+  productName: "Moka Canvas"
+"#;
+        let config = parse_config(legacy).expect("legacy config must parse");
+        assert_eq!(config.generate, GenerateConfig::default());
+        assert_eq!(config.generate.text_timeout_seconds, 120);
+        assert_eq!(config.generate.image_timeout_seconds, 300);
+        assert_eq!(config.generate.video_poll_timeout_seconds, 30);
+        assert_eq!(config.generate.max_attempts, 3);
+    }
+
+    #[test]
+    fn one_generate_key_does_not_disturb_the_others() {
+        let tuned = r#"
+version: 1
+server:
+  bind: "127.0.0.1:3000"
+  staticDir: "./dist"
+projects:
+  maxMokaFileBytes: 33554432
+public:
+  productName: "Moka Canvas"
+generate:
+  imageTimeoutSeconds: 60
+  maxAttempts: 1
+"#;
+        let config = parse_config(tuned).expect("tuned config must parse");
+        assert_eq!(config.generate.image_timeout_seconds, 60);
+        assert_eq!(config.generate.max_attempts, 1);
+        assert_eq!(
+            config.generate.text_timeout_seconds,
+            default_text_timeout_seconds()
+        );
+        assert_eq!(
+            config.generate.max_response_bytes,
+            default_max_response_bytes()
+        );
+    }
+
+    #[test]
+    fn budgets_are_picked_per_capability() {
+        use crate::domain::Capability;
+        let config = GenerateConfig::default();
+        assert_eq!(config.timeout_for(Capability::Text).as_secs(), 120);
+        assert_eq!(config.timeout_for(Capability::Image).as_secs(), 300);
+        assert_eq!(config.timeout_for(Capability::Audio).as_secs(), 120);
+        assert_eq!(config.timeout_for(Capability::Video).as_secs(), 60);
+        assert_eq!(config.input_cap_for(Capability::Image), 20 * 1024 * 1024);
+        assert_eq!(config.input_cap_for(Capability::Video), 200 * 1024 * 1024);
     }
 
     #[test]

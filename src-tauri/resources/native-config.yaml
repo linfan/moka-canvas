@@ -11,6 +11,17 @@ metadata:
   maxDocumentBytes: 33554432
 workflow:
   enabledExecutors: ["deterministic"]
+generate:
+  textTimeoutSeconds: 120
+  imageTimeoutSeconds: 300
+  audioTimeoutSeconds: 120
+  videoTaskTimeoutSeconds: 60
+  videoPollTimeoutSeconds: 30
+  maxAttempts: 3
+  retryBaseMs: 1000
+  maxImageInputBytes: 20971520
+  maxMediaInputBytes: 209715200
+  maxResponseBytes: 67108864
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

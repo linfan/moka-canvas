@@ -46,9 +46,8 @@ impl Problem {
 
 pub fn status_for_code(code: &str) -> StatusCode {
     match code {
-        "NOT_FOUND" | "PROJECT_NOT_FOUND" | "RUN_NOT_FOUND" | "ASSET_MISSING" => {
-            StatusCode::NOT_FOUND
-        }
+        "NOT_FOUND" | "PROJECT_NOT_FOUND" | "RUN_NOT_FOUND" | "ASSET_MISSING"
+        | "TASK_NOT_FOUND" => StatusCode::NOT_FOUND,
         "PROJECT_NOT_OPEN"
         | "REVISION_CONFLICT"
         | "METADATA_CONFLICT"
@@ -56,6 +55,9 @@ pub fn status_for_code(code: &str) -> StatusCode {
         | "CONFLICT"
         | "RUN_NOT_CANCELLABLE"
         | "RUN_NOT_RETRYABLE" => StatusCode::CONFLICT,
+        // The job existed and is gone for good; retrying the same handle
+        // cannot bring it back, which is what separates this from a 404.
+        "TASK_EXPIRED" => StatusCode::GONE,
         // The request was well formed; the local store could not serve it.
         // Retrying once the disk or the deployment is fixed can succeed.
         "METADATA_UNAVAILABLE"
@@ -70,14 +72,21 @@ pub fn status_for_code(code: &str) -> StatusCode {
         "PROVIDER_AUTH" => StatusCode::UNAUTHORIZED,
         "PROVIDER_RATE_LIMIT" => StatusCode::TOO_MANY_REQUESTS,
         "PROVIDER_BAD_REQUEST" => StatusCode::BAD_REQUEST,
-        "PROVIDER_UNAVAILABLE" => StatusCode::BAD_GATEWAY,
+        "PROVIDER_UNAVAILABLE" | "PROVIDER_NO_OUTPUT" => StatusCode::BAD_GATEWAY,
         "PROVIDER_TIMEOUT" => StatusCode::GATEWAY_TIMEOUT,
+        // Unregistered, but the established name for "the client went away
+        // mid-request"; 4xx keeps it out of the server-failure counts.
+        "GENERATION_CANCELLED" => client_closed_request(),
         "PAYLOAD_TOO_LARGE" | "MOKA_TOO_LARGE" => StatusCode::PAYLOAD_TOO_LARGE,
         "UNSUPPORTED_MEDIA_TYPE" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         "PATH_ESCAPE" => StatusCode::BAD_REQUEST,
         "INTERNAL" => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     }
+}
+
+fn client_closed_request() -> StatusCode {
+    StatusCode::from_u16(499).expect("499 is inside the status code range")
 }
 
 impl From<ProjectError> for Problem {
@@ -174,4 +183,26 @@ pub fn json_or_problem<T>(
             format!("Request body is not valid: {}", rejection.body_text()),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generation_codes_map_to_the_status_their_remedy_implies() {
+        assert_eq!(status_for_code("TASK_NOT_FOUND"), StatusCode::NOT_FOUND);
+        // Gone rather than not found: the handle existed and will never work
+        // again, so re-polling it is pointless.
+        assert_eq!(status_for_code("TASK_EXPIRED"), StatusCode::GONE);
+        assert_eq!(
+            status_for_code("PROVIDER_NO_OUTPUT"),
+            StatusCode::BAD_GATEWAY
+        );
+        // A 4xx, so a caller walking away mid-request is not counted as a
+        // server failure.
+        let cancelled = status_for_code("GENERATION_CANCELLED");
+        assert_eq!(cancelled.as_u16(), 499);
+        assert!(cancelled.is_client_error());
+    }
 }
