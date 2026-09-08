@@ -652,133 +652,6 @@ pub fn default_node_data(kind: NodeKind) -> NodeData {
     data
 }
 
-pub fn default_ports(kind: NodeKind) -> Vec<super::PortDefinition> {
-    use super::{Cardinality, DataType, PortDefinition, PortDirection};
-    let port = |id: &str,
-                direction: PortDirection,
-                data_types: Vec<DataType>,
-                label: &str,
-                required: bool,
-                cardinality: Cardinality| {
-        PortDefinition {
-            id: id.into(),
-            direction,
-            data_types,
-            required,
-            cardinality,
-            label: label.into(),
-        }
-    };
-    match kind {
-        NodeKind::Text => vec![port(
-            "out",
-            PortDirection::Output,
-            vec![DataType::Text],
-            "Text",
-            false,
-            Cardinality::One,
-        )],
-        NodeKind::Image => vec![port(
-            "out",
-            PortDirection::Output,
-            vec![DataType::Image],
-            "Image",
-            false,
-            Cardinality::One,
-        )],
-        NodeKind::Audio => vec![port(
-            "out",
-            PortDirection::Output,
-            vec![DataType::Audio],
-            "Audio",
-            false,
-            Cardinality::One,
-        )],
-        NodeKind::Video => vec![port(
-            "out",
-            PortDirection::Output,
-            vec![DataType::Video],
-            "Video",
-            false,
-            Cardinality::One,
-        )],
-        NodeKind::Operation => vec![
-            port(
-                "text",
-                PortDirection::Input,
-                vec![DataType::Text],
-                "Text",
-                false,
-                Cardinality::Many,
-            ),
-            port(
-                "images",
-                PortDirection::Input,
-                vec![DataType::Image],
-                "Images",
-                false,
-                Cardinality::Many,
-            ),
-            port(
-                "audio",
-                PortDirection::Input,
-                vec![DataType::Audio],
-                "Audio",
-                false,
-                Cardinality::One,
-            ),
-            port(
-                "video",
-                PortDirection::Input,
-                vec![DataType::Video],
-                "Video",
-                false,
-                Cardinality::One,
-            ),
-            port(
-                "out",
-                PortDirection::Output,
-                vec![
-                    DataType::Text,
-                    DataType::Image,
-                    DataType::Audio,
-                    DataType::Video,
-                ],
-                "Result",
-                false,
-                Cardinality::Many,
-            ),
-        ],
-        NodeKind::Group => vec![],
-        NodeKind::Export => vec![
-            port(
-                "video",
-                PortDirection::Input,
-                vec![DataType::Video],
-                "Video",
-                false,
-                Cardinality::One,
-            ),
-            port(
-                "audio",
-                PortDirection::Input,
-                vec![DataType::Audio],
-                "Audio",
-                false,
-                Cardinality::One,
-            ),
-            port(
-                "out",
-                PortDirection::Output,
-                vec![DataType::Artifact],
-                "Artifact",
-                false,
-                Cardinality::One,
-            ),
-        ],
-    }
-}
-
 pub fn make_node(kind: NodeKind, title: String, x: f64, y: f64) -> WorkflowNode {
     let now = super::now_iso();
     WorkflowNode {
@@ -792,7 +665,7 @@ pub fn make_node(kind: NodeKind, title: String, x: f64, y: f64) -> WorkflowNode 
             height: 200.0,
         },
         z_index: 0,
-        ports: default_ports(kind),
+        ports: super::derive_ports(kind),
         data: default_node_data(kind),
         created_at: now.clone(),
         updated_at: now,
