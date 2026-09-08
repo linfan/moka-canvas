@@ -4,14 +4,18 @@ import {
   MAX_TEXT_CONTENT_LENGTH,
   createNode,
   findNode,
+  generationCapabilityFor,
   newId,
   nowIso,
   portTypesIntersect,
   validateEdgeCandidate,
   type AssetId,
   type CanvasDocument,
+  type CanvasId,
   type DocumentCommand,
   type EdgeId,
+  type GenerationSpec,
+  type NodeData,
   type NodeId,
   type NodeKind,
   type Point,
@@ -731,6 +735,42 @@ export function editTextContent(nodeId: NodeId, content: string) {
       canvasId: canvas.id,
       nodeId,
       patch: { data: { ...node.data, content } },
+    },
+  ]);
+}
+
+/**
+ * Writes or clears a node's generation spec in one undoable step. Addressed by
+ * canvas id rather than the active canvas, so a background canvas can be
+ * prepared while another one is on screen.
+ *
+ * Callers commit prompt edits on blur; an unchanged spec is skipped so those
+ * commits do not add identical entries to the history stack.
+ */
+export function setNodeGeneration(
+  canvasId: CanvasId,
+  nodeId: NodeId,
+  generation: GenerationSpec | null,
+) {
+  const { moka } = useProjectStore.getState();
+  const canvas = moka?.canvas.find((entry) => entry.id === canvasId);
+  const node = canvas ? findNode(canvas, nodeId) : undefined;
+  if (!canvas || !node) return;
+  if (generation && generationCapabilityFor(node.kind) === null) return;
+
+  const data = node.data as { generation?: GenerationSpec };
+  const current = data.generation ?? null;
+  if (JSON.stringify(current) === JSON.stringify(generation)) return;
+
+  const next = { ...data } as Record<string, unknown>;
+  if (generation === null) delete next.generation;
+  else next.generation = generation;
+  execute(generation ? "Edit generation" : "Clear generation", [
+    {
+      type: "updateNode",
+      canvasId,
+      nodeId,
+      patch: { data: next as NodeData },
     },
   ]);
 }

@@ -1,19 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildGenerationMokaFile,
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../../shared/domain/fixtures";
 import {
   GROUP_DETACH_THRESHOLD_PX,
   findNode,
+  type GenerationSpec,
   type MokaFile,
 } from "../../../shared/domain";
-import { execute, undo } from "../commands/execute";
+import { execute, redo, undo } from "../commands/execute";
 import { useAppStore } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useHistoryStore } from "../stores/historyStore";
 import { useProjectStore } from "../stores/projectStore";
 import {
+  addNodeAt,
   checkConnection,
   connectPorts,
   copySelection,
@@ -25,6 +28,7 @@ import {
   renameNode,
   resizeNodeTo,
   selectNodeWithMembers,
+  setNodeGeneration,
   ungroupSelection,
 } from "./actions";
 
@@ -104,6 +108,27 @@ describe("checkConnection", () => {
       checkConnection(
         { nodeId: ids.operation, portId: "out" },
         { nodeId: ids.operation, portId: "text" },
+      ),
+    ).toBe("invalid");
+  });
+
+  it("follows the extended port table for prompt inputs", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    expect(
+      checkConnection(
+        { nodeId: ids.text, portId: "out" },
+        { nodeId: ids.image, portId: "prompt" },
+      ),
+    ).toBe("ok");
+
+    addNodeAt({ x: 900, y: 400 }, "audio", null);
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    const audio = canvas.nodes.find((node) => node.kind === "audio")!;
+    expect(
+      checkConnection(
+        { nodeId: ids.image, portId: "out" },
+        { nodeId: audio.id, portId: "prompt" },
       ),
     ).toBe("invalid");
   });
@@ -314,6 +339,28 @@ describe("copy/paste fragment round trip", () => {
     expect(selected.sort()).toEqual(clones.map((node) => node.id).sort());
   });
 
+  it("carries a generation spec across the fragment round trip", async () => {
+    hydrate(buildGenerationMokaFile());
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    const image = canvas.nodes.find((node) => node.kind === "image")!;
+    const spec = (image.data as { generation: GenerationSpec }).generation;
+
+    useEditorStore.getState().setSelection({
+      nodeIds: [image.id],
+      edgeIds: [],
+    });
+    await copySelection();
+    await pasteAt({ x: 900, y: 400 });
+
+    const after = useProjectStore.getState().moka!.canvas[0];
+    const clone = after.nodes.find(
+      (node) => node.kind === "image" && node.id !== image.id,
+    )!;
+    expect((clone.data as { generation?: GenerationSpec }).generation).toEqual(
+      spec,
+    );
+  });
+
   it("strips asset references missing from the target project", async () => {
     const ids = goldenNodeIds();
     hydrate();
@@ -362,6 +409,72 @@ describe("renameNode", () => {
     const canvas = useProjectStore.getState().moka!.canvas[0];
     expect(findNode(canvas, ids.text)?.title).toBe("Shot list");
     expect(useHistoryStore.getState().undoStack).toHaveLength(1);
+  });
+});
+
+describe("setNodeGeneration", () => {
+  function specOf(nodeId: string): GenerationSpec | undefined {
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    return (findNode(canvas, nodeId)!.data as { generation?: GenerationSpec })
+      .generation;
+  }
+
+  function hydrateSpecNode() {
+    const moka = hydrate(buildGenerationMokaFile());
+    const canvas = moka.canvas[0];
+    const image = canvas.nodes.find((node) => node.kind === "image")!;
+    return {
+      canvasId: canvas.id,
+      nodeId: image.id,
+      spec: (image.data as { generation: GenerationSpec }).generation,
+    };
+  }
+
+  it("rewrites and clears a spec through undo and redo", () => {
+    const { canvasId, nodeId, spec } = hydrateSpecNode();
+
+    setNodeGeneration(canvasId, nodeId, {
+      ...spec,
+      prompt: "Repaint at dusk.",
+    });
+    expect(specOf(nodeId)?.prompt).toBe("Repaint at dusk.");
+
+    undo();
+    expect(specOf(nodeId)).toEqual(spec);
+    redo();
+    expect(specOf(nodeId)?.prompt).toBe("Repaint at dusk.");
+
+    setNodeGeneration(canvasId, nodeId, null);
+    expect(specOf(nodeId)).toBeUndefined();
+    undo();
+    expect(specOf(nodeId)?.prompt).toBe("Repaint at dusk.");
+  });
+
+  it("records one entry per committed change, not per keystroke", () => {
+    const { canvasId, nodeId, spec } = hydrateSpecNode();
+
+    setNodeGeneration(canvasId, nodeId, { ...spec, prompt: "A lan" });
+    setNodeGeneration(canvasId, nodeId, { ...spec, prompt: "A lan" });
+    setNodeGeneration(canvasId, nodeId, { ...spec, prompt: "A lantern" });
+
+    expect(useHistoryStore.getState().undoStack).toHaveLength(2);
+  });
+
+  it("leaves structural nodes alone", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    setNodeGeneration(ids.canvasMain, ids.operation, {
+      capability: "text",
+      mode: "generate",
+      model: "",
+      prompt: "Summarise the board",
+      inputMode: "upstream",
+      params: {},
+      referenceNodeIds: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(specOf(ids.operation)).toBeUndefined();
+    expect(useHistoryStore.getState().undoStack).toHaveLength(0);
   });
 });
 

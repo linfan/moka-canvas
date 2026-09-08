@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import type { NodeKind } from "../../../shared/domain";
 import {
   addNodeAt,
@@ -8,15 +8,26 @@ import {
 import { useEditorStore } from "../stores/editorStore";
 import { useClampedMenuPosition } from "./useClampedMenuPosition";
 
-const KINDS: { kind: NodeKind; label: string }[] = [
-  { kind: "text", label: "Text" },
-  { kind: "image", label: "Image" },
-  { kind: "audio", label: "Audio" },
-  { kind: "video", label: "Video" },
-  { kind: "operation", label: "Operation" },
-  { kind: "group", label: "Group" },
-  { kind: "export", label: "Export" },
-];
+const GROUPS: { label: string; kinds: { kind: NodeKind; label: string }[] }[] =
+  [
+    {
+      label: "Generation nodes",
+      kinds: [
+        { kind: "text", label: "Text" },
+        { kind: "image", label: "Image" },
+        { kind: "audio", label: "Audio" },
+        { kind: "video", label: "Video" },
+      ],
+    },
+    {
+      label: "Structure",
+      kinds: [
+        { kind: "operation", label: "Operation" },
+        { kind: "group", label: "Group" },
+        { kind: "export", label: "Export" },
+      ],
+    },
+  ];
 
 /**
  * Quick-add menu: double-click on blank canvas, or the tail of a connection
@@ -77,23 +88,28 @@ export function NodeMenu() {
       style={{ left: pos.x, top: pos.y }}
     >
       {menu.connectFrom && <p className="menu-title">Connect to new node</p>}
-      {KINDS.map(({ kind, label }) => {
-        const disabled =
-          menu.connectFrom !== null &&
-          canvas !== null &&
-          !kindAcceptsConnection(canvas, menu.connectFrom, kind);
-        return (
-          <button
-            disabled={disabled}
-            key={kind}
-            onClick={() => pick(kind)}
-            role="menuitem"
-            type="button"
-          >
-            {label}
-          </button>
-        );
-      })}
+      {GROUPS.map((group) => (
+        <Fragment key={group.label}>
+          <p className="menu-title">{group.label}</p>
+          {group.kinds.map(({ kind, label }) => {
+            const disabled =
+              menu.connectFrom !== null &&
+              canvas !== null &&
+              !kindAcceptsConnection(canvas, menu.connectFrom, kind);
+            return (
+              <button
+                disabled={disabled}
+                key={kind}
+                onClick={() => pick(kind)}
+                role="menuitem"
+                type="button"
+              >
+                {label}
+              </button>
+            );
+          })}
+        </Fragment>
+      ))}
     </div>
   );
 }
