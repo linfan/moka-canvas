@@ -64,6 +64,14 @@ pub fn status_for_code(code: &str) -> StatusCode {
         | "CONFIG_METADATA_KEY_MISSING"
         | "CONFIG_METADATA_DIR_INVALID"
         | "CONFIG_METADATA_STORE_UNSUPPORTED" => StatusCode::SERVICE_UNAVAILABLE,
+        // The server is the gateway here, so the status mirrors what the
+        // provider's own answer meant. The code is what tells a client that
+        // the failure was upstream rather than in its request.
+        "PROVIDER_AUTH" => StatusCode::UNAUTHORIZED,
+        "PROVIDER_RATE_LIMIT" => StatusCode::TOO_MANY_REQUESTS,
+        "PROVIDER_BAD_REQUEST" => StatusCode::BAD_REQUEST,
+        "PROVIDER_UNAVAILABLE" => StatusCode::BAD_GATEWAY,
+        "PROVIDER_TIMEOUT" => StatusCode::GATEWAY_TIMEOUT,
         "PAYLOAD_TOO_LARGE" | "MOKA_TOO_LARGE" => StatusCode::PAYLOAD_TOO_LARGE,
         "UNSUPPORTED_MEDIA_TYPE" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         "PATH_ESCAPE" => StatusCode::BAD_REQUEST,

@@ -35,6 +35,21 @@ pub enum ProviderError {
         capabilities: Vec<String>,
     },
 
+    #[error("the channel rejected the stored credential: {0}")]
+    Auth(String),
+
+    #[error("the channel is rate limiting requests: {0}")]
+    RateLimited(String),
+
+    #[error("the channel did not answer in time: {0}")]
+    Timeout(String),
+
+    #[error("the channel could not serve the request: {0}")]
+    Unreachable(String),
+
+    #[error("the channel rejected the request: {0}")]
+    Rejected(String),
+
     #[error("{0}")]
     NotFound(String),
 
@@ -64,16 +79,24 @@ impl ProviderError {
             Self::NotConfigured { .. } | Self::KeyMissing { .. } => "PROVIDER_NOT_CONFIGURED",
             Self::CapabilityMismatch { .. } => "MODEL_CAPABILITY_MISMATCH",
             Self::InUse { .. } => "CONFLICT",
+            Self::Auth(_) => "PROVIDER_AUTH",
+            Self::RateLimited(_) => "PROVIDER_RATE_LIMIT",
+            Self::Timeout(_) => "PROVIDER_TIMEOUT",
+            Self::Unreachable(_) => "PROVIDER_UNAVAILABLE",
+            Self::Rejected(_) => "PROVIDER_BAD_REQUEST",
             Self::NotFound(_) => "NOT_FOUND",
             Self::Invalid(_) => "VALIDATION_FAILED",
         }
     }
 
-    /// True only for the failures rooted in storage, which the metadata layer
-    /// already classifies. A wrong model reference stays wrong on retry.
+    /// True when waiting could fix it: the storage layer's own classification,
+    /// plus a provider that is busy, slow, or unreachable. A credential the
+    /// provider rejected and a request it refused are wrong, not late, so
+    /// repeating them verbatim only repeats the failure.
     pub fn retryable(&self) -> bool {
         match self {
             Self::Storage(error) => error.retryable(),
+            Self::RateLimited(_) | Self::Timeout(_) | Self::Unreachable(_) => true,
             _ => false,
         }
     }

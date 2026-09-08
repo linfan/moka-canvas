@@ -8,6 +8,7 @@
 //! asked of it.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +18,7 @@ use crate::metadata::{
     Protocol, ProviderSnapshot, SecretInfo,
 };
 
+use super::adapters;
 use super::error::ProviderError;
 
 /// The channel created on a first run, so Settings opens on a filled-in form
@@ -128,6 +130,46 @@ pub struct ResolvedModel {
     pub capability: Capability,
     pub protocol: Protocol,
     pub base_url: String,
+}
+
+/// The outcome of a connectivity check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeReport {
+    pub ok: bool,
+    pub latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ProbeFailure>,
+}
+
+/// Why a probe failed, shaped like a problem body so the client renders it
+/// through the same path as everything else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeFailure {
+    pub code: String,
+    pub message: String,
+}
+
+impl ProbeReport {
+    fn reachable(latency_ms: u64) -> Self {
+        Self {
+            ok: true,
+            latency_ms,
+            error: None,
+        }
+    }
+
+    fn failed(latency_ms: u64, error: &ProviderError) -> Self {
+        Self {
+            ok: false,
+            latency_ms,
+            error: Some(ProbeFailure {
+                code: error.code().to_string(),
+                message: error.to_string(),
+            }),
+        }
+    }
 }
 
 /// Reads and writes provider configuration through the metadata store.
@@ -317,6 +359,45 @@ impl ProviderRepo {
             .ok_or_else(|| ProviderError::KeyMissing {
                 channel: channel_id.to_string(),
             })
+    }
+
+    /// Asks a provider what it currently offers and stores the answer.
+    ///
+    /// The stored list is the base, so the capabilities, aliases, and
+    /// disabled flags a user chose survive a refresh; identifiers the
+    /// provider no longer lists go away.
+    pub async fn refresh_models(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<ChannelModel>, ProviderError> {
+        let channel = self.channel(channel_id).await?;
+        let api_key = self.credential(channel_id).await?;
+        let fetched = adapters::list_models(channel.protocol, &channel.base_url, &api_key).await?;
+        let merged = merge_models(&channel.models, &fetched);
+        self.replace_models(channel_id, &merged, None).await?;
+        Ok(merged)
+    }
+
+    /// Answers "can this channel be used at all", without writing anything.
+    ///
+    /// A provider that says no is reported inside the body rather than as a
+    /// failed request: the point of a probe is to show which channel is
+    /// broken, and an error status would leave the client with nothing to
+    /// display next to it. Only an unknown channel fails the request.
+    pub async fn probe(&self, channel_id: &str) -> Result<ProbeReport, ProviderError> {
+        let channel = self.channel(channel_id).await?;
+        let started = Instant::now();
+        let outcome = match self.credential(channel_id).await {
+            Ok(api_key) => adapters::list_models(channel.protocol, &channel.base_url, &api_key)
+                .await
+                .map(|_| ()),
+            Err(error) => Err(error),
+        };
+        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        Ok(match outcome {
+            Ok(()) => ProbeReport::reachable(latency_ms),
+            Err(error) => ProbeReport::failed(latency_ms, &error),
+        })
     }
 
     /// Creates the starter channel on a first run.
