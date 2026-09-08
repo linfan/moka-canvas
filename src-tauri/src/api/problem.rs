@@ -96,6 +96,24 @@ impl From<crate::metadata::MetadataError> for Problem {
     }
 }
 
+impl From<crate::generate::ProviderError> for Problem {
+    fn from(error: crate::generate::ProviderError) -> Self {
+        let mut problem = Problem::new(
+            status_for_code(error.code()),
+            error.code(),
+            error.to_string(),
+        );
+        // The two branches do not overlap: the variants that carry structure
+        // are exactly the ones a retry cannot fix.
+        if let Some(details) = error.details() {
+            problem = problem.with_details(details);
+        } else if error.retryable() {
+            problem = problem.with_details(serde_json::json!({ "retryable": true }));
+        }
+        problem
+    }
+}
+
 impl From<std::io::Error> for Problem {
     fn from(error: std::io::Error) -> Self {
         Problem::new(

@@ -27,10 +27,10 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 pub use types::{
-    Channel, ChannelDraft, ChannelModel, ChannelRecord, Defaults, DocumentInfo, MetadataInfo,
-    MetadataStoreKind, Preferences, PromptItem, PromptPage, PromptQuery, PromptSource, Protocol,
-    ProviderSnapshot, RecentProject, SecretInfo, SecretStorage, MAX_PROMPT_ITEMS_PER_SOURCE,
-    MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
+    AudioPreferences, Channel, ChannelDraft, ChannelModel, ChannelRecord, Defaults, DocumentInfo,
+    ImagePreferences, MetadataInfo, MetadataStoreKind, Preferences, PromptItem, PromptPage,
+    PromptQuery, PromptSource, Protocol, ProviderSnapshot, RecentProject, SecretInfo,
+    SecretStorage, VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
 };
 
 use crate::config::{MetadataConfig, RuntimeMode};

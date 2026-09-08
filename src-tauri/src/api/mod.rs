@@ -1,4 +1,5 @@
 use crate::config::{AppConfig, RuntimeMode};
+use crate::generate::ProviderRepo;
 use crate::metadata::{self, MetadataStore};
 use crate::project::store::FsProjectStore;
 use crate::workflow::executor::DeterministicExecutor;
@@ -17,6 +18,7 @@ pub struct ApiState {
     pub config: Arc<AppConfig>,
     pub store: Arc<FsProjectStore>,
     pub metadata: Arc<dyn MetadataStore>,
+    pub providers: Arc<ProviderRepo>,
     pub runs: Arc<RunManager>,
 }
 
@@ -41,6 +43,7 @@ impl ApiState {
     ) -> Self {
         let config = Arc::new(config);
         let store = Arc::new(FsProjectStore::new(Arc::clone(&config)));
+        let providers = Arc::new(ProviderRepo::new(Arc::clone(&metadata)));
         let executors: Vec<Arc<dyn WorkflowExecutor>> =
             vec![Arc::new(DeterministicExecutor::new())];
         let runs = RunManager::new(
@@ -52,6 +55,7 @@ impl ApiState {
             mode,
             store,
             metadata,
+            providers,
             config,
             runs,
         }

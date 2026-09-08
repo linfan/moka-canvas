@@ -2,6 +2,7 @@ pub mod api;
 pub mod assets;
 pub mod config;
 pub mod domain;
+pub mod generate;
 pub mod metadata;
 pub mod project;
 pub mod server;

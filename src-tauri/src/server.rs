@@ -39,6 +39,7 @@ impl LocalServer {
         );
 
         let state = ApiState::new(config, mode, metadata_root)?;
+        seed_starter_channel(&state).await;
         let listener = TcpListener::bind(address)
             .await
             .context("failed to bind the local HTTP server")?;
@@ -79,6 +80,29 @@ impl LocalServer {
 impl Drop for LocalServer {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+/// Gives a first launch a channel to fill in instead of an empty list.
+///
+/// A failure is logged rather than fatal. The editor is usable without it —
+/// Settings creates the same channel by hand — so refusing to start over a
+/// missing starter row would trade a cosmetic gap for an app that does not
+/// open at all.
+async fn seed_starter_channel(state: &ApiState) {
+    match state.providers.seed().await {
+        Ok(true) => tracing::info!(
+            target: "moka::providers",
+            channel = crate::generate::providers::SEED_CHANNEL_ID,
+            "created the starter provider channel"
+        ),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(
+            target: "moka::providers",
+            code = error.code(),
+            error = %error,
+            "could not create the starter provider channel"
+        ),
     }
 }
 
