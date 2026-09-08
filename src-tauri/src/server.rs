@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Mutex, time::Instant};
+use std::{net::SocketAddr, path::Path, sync::Mutex, time::Instant};
 
 use anyhow::{ensure, Context, Result};
 use axum::{
@@ -26,7 +26,7 @@ pub struct LocalServer {
 }
 
 impl LocalServer {
-    pub async fn start(config: AppConfig, mode: RuntimeMode) -> Result<Self> {
+    pub async fn start(config: AppConfig, mode: RuntimeMode, metadata_root: &Path) -> Result<Self> {
         let address: SocketAddr = config
             .server
             .bind
@@ -38,7 +38,7 @@ impl LocalServer {
             config.server.static_dir.display()
         );
 
-        let state = ApiState::new(config, mode);
+        let state = ApiState::new(config, mode, metadata_root)?;
         let listener = TcpListener::bind(address)
             .await
             .context("failed to bind the local HTTP server")?;
@@ -103,31 +103,40 @@ pub fn router(state: ApiState) -> Router {
         .with_state(state)
 }
 
-async fn health() -> impl IntoResponse {
-    Json(json!({ "status": "ok" }))
+/// Liveness plus metadata diagnostics. Paths are redacted and no credential
+/// material is reported — only the storage tier that holds the master key.
+async fn health(State(state): State<ApiState>) -> impl IntoResponse {
+    let info = state.metadata.info().await;
+    // A document reset from a corrupt state is recoverable but must stay
+    // visible, so the settings page can tell the user what was lost.
+    let ok = info.documents.iter().all(|document| !document.corrupt);
+    let documents = serde_json::to_value(&info.documents).unwrap_or_default();
+    Json(json!({
+        "status": "ok",
+        "metadata": {
+            "store": serde_json::to_value(info.store).unwrap_or_default(),
+            "root": info.root.to_string_lossy(),
+            "schemaVersion": info.schema_version,
+            "secretStorage": serde_json::to_value(info.secret_storage).unwrap_or_default(),
+            "ok": ok,
+            "documents": documents,
+        },
+    }))
 }
 
 /// Readiness probe: the loaded configuration's static directory exists, the
-/// recent-project registry is writable, and the current project directory
-/// (when one is open) is still accessible. Never inspects request payloads.
+/// metadata store answers and survives the full write protocol, and the
+/// current project directory (when one is open) is still accessible. Never
+/// inspects request payloads.
 async fn ready(State(state): State<ApiState>) -> impl IntoResponse {
     let config_loaded = state.config.server.static_dir.is_dir();
-    let registry = &state.config.projects.recent_registry_path;
-    let registry_writable = registry
-        .parent()
-        .map(|dir| std::fs::create_dir_all(dir).is_ok())
-        .unwrap_or(false)
-        && std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(registry)
-            .is_ok();
+    let metadata_writable = state.metadata.probe_write().await.is_ok();
     let project_directory = match state.store.current().await {
         Ok(None) => true,
         Ok(Some(open)) => open.root.is_dir(),
         Err(_) => false,
     };
-    let ready = config_loaded && registry_writable && project_directory;
+    let ready = config_loaded && metadata_writable && project_directory;
     let status = if ready {
         StatusCode::OK
     } else {
@@ -139,7 +148,7 @@ async fn ready(State(state): State<ApiState>) -> impl IntoResponse {
             "status": if ready { "ready" } else { "unavailable" },
             "checks": {
                 "config": config_loaded,
-                "recentRegistry": registry_writable,
+                "metadata": metadata_writable,
                 "projectDirectory": project_directory,
             },
         })),
@@ -202,42 +211,94 @@ async fn runtime(State(state): State<ApiState>) -> impl IntoResponse {
 mod tests {
     use super::*;
 
+    fn test_state(root: &Path) -> ApiState {
+        let config = crate::config::parse_test_config(root);
+        let dir = config
+            .metadata
+            .dir
+            .clone()
+            .expect("the test configuration always sets a metadata directory");
+        let metadata = crate::metadata::open(&dir, &config.metadata, RuntimeMode::Web)
+            .expect("the metadata store opens inside a temporary directory");
+        ApiState::with_metadata(config, RuntimeMode::Web, metadata)
+    }
+
+    async fn body_json(response: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("the response body is readable");
+        serde_json::from_slice(&bytes).expect("the response body is JSON")
+    }
+
     #[tokio::test]
-    async fn reports_healthy() {
-        let response = health().await.into_response();
+    async fn health_reports_the_metadata_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let response = health(State(test_state(root.path()))).await.into_response();
         assert_eq!(response.status(), 200);
+        let body = body_json(response).await;
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["metadata"]["store"], "file");
+        assert_eq!(body["metadata"]["schemaVersion"], 1);
+        assert_eq!(body["metadata"]["ok"], true);
+        let names: Vec<&str> = body["metadata"]["documents"]
+            .as_array()
+            .expect("documents are listed")
+            .iter()
+            .map(|document| document["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"meta.json"), "{names:?}");
+        assert!(names.contains(&"secrets.json"), "{names:?}");
     }
 
     #[tokio::test]
     async fn reports_runtime_mode() {
-        let config =
-            crate::config::parse_test_config(std::path::Path::new("/tmp/moka-server-runtime-test"));
-        let state = ApiState::new(config, RuntimeMode::Web);
-        let response = runtime(State(state)).await.into_response();
+        let root = tempfile::tempdir().unwrap();
+        let response = runtime(State(test_state(root.path())))
+            .await
+            .into_response();
         assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
     async fn reports_ready_with_no_project_open() {
         let root = tempfile::tempdir().unwrap();
-        let state = ApiState::new(
-            crate::config::parse_test_config(root.path()),
-            RuntimeMode::Web,
-        );
-        let response = ready(State(state)).await.into_response();
+        let response = ready(State(test_state(root.path()))).await.into_response();
         assert_eq!(response.status(), 200);
+        let body = body_json(response).await;
+        assert_eq!(body["checks"]["metadata"], true);
     }
 
+    /// The write probe must fail loudly rather than let the app serve requests
+    /// whose saves are silently dropped.
+    #[cfg(unix)]
     #[tokio::test]
-    async fn reports_not_ready_when_the_registry_is_unwritable() {
+    async fn reports_not_ready_when_the_metadata_directory_is_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+
         let root = tempfile::tempdir().unwrap();
-        let mut config = crate::config::parse_test_config(root.path());
-        // A registry path whose parent is a regular file cannot be written.
-        let blocker = root.path().join("blocker");
-        std::fs::write(&blocker, b"file").unwrap();
-        config.projects.recent_registry_path = blocker.join("recent-projects.json");
-        let state = ApiState::new(config, RuntimeMode::Web);
+        let config = crate::config::parse_test_config(root.path());
+        let dir = config
+            .metadata
+            .dir
+            .clone()
+            .expect("the test configuration always sets a metadata directory");
+        let metadata = crate::metadata::open(&dir, &config.metadata, RuntimeMode::Web)
+            .expect("the metadata store opens inside a temporary directory");
+        let state = ApiState::with_metadata(config, RuntimeMode::Web, metadata);
+
+        let scratch = dir.join("tmp");
+        assert!(
+            scratch.is_dir(),
+            "opening the store creates the scratch area"
+        );
+        std::fs::set_permissions(&scratch, std::fs::Permissions::from_mode(0o500)).unwrap();
+
         let response = ready(State(state)).await.into_response();
         assert_eq!(response.status(), 503);
+        let body = body_json(response).await;
+        assert_eq!(body["status"], "unavailable");
+        assert_eq!(body["checks"]["metadata"], false);
+
+        std::fs::set_permissions(&scratch, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 }

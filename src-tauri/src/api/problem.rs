@@ -51,10 +51,19 @@ pub fn status_for_code(code: &str) -> StatusCode {
         }
         "PROJECT_NOT_OPEN"
         | "REVISION_CONFLICT"
+        | "METADATA_CONFLICT"
         | "ASSET_IN_USE"
         | "CONFLICT"
         | "RUN_NOT_CANCELLABLE"
         | "RUN_NOT_RETRYABLE" => StatusCode::CONFLICT,
+        // The request was well formed; the local store could not serve it.
+        // Retrying once the disk or the deployment is fixed can succeed.
+        "METADATA_UNAVAILABLE"
+        | "METADATA_WRITE_FAILED"
+        | "METADATA_MIGRATION_FAILED"
+        | "CONFIG_METADATA_KEY_MISSING"
+        | "CONFIG_METADATA_DIR_INVALID"
+        | "CONFIG_METADATA_STORE_UNSUPPORTED" => StatusCode::SERVICE_UNAVAILABLE,
         "PAYLOAD_TOO_LARGE" | "MOKA_TOO_LARGE" => StatusCode::PAYLOAD_TOO_LARGE,
         "UNSUPPORTED_MEDIA_TYPE" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         "PATH_ESCAPE" => StatusCode::BAD_REQUEST,
@@ -70,6 +79,20 @@ impl From<ProjectError> for Problem {
             error.code(),
             error.to_string(),
         )
+    }
+}
+
+impl From<crate::metadata::MetadataError> for Problem {
+    fn from(error: crate::metadata::MetadataError) -> Self {
+        let mut problem = Problem::new(
+            status_for_code(error.code()),
+            error.code(),
+            error.to_string(),
+        );
+        if error.retryable() {
+            problem = problem.with_details(serde_json::json!({ "retryable": true }));
+        }
+        problem
     }
 }
 

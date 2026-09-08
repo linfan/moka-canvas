@@ -11,7 +11,12 @@ fn test_app(root: &Path) -> axum::Router {
 }
 
 fn test_app_with(config: AppConfig) -> axum::Router {
-    let state = ApiState::new(config, RuntimeMode::Web);
+    let root = config
+        .metadata
+        .dir
+        .clone()
+        .expect("the test configuration sets a metadata directory");
+    let state = ApiState::new(config, RuntimeMode::Web, &root).expect("the metadata store opens");
     moka_canvas::server::router(state)
 }
 
@@ -298,7 +303,9 @@ async fn valid_run_succeeds_and_survives_a_restart() {
     );
     assert_eq!(slots[0]["isPrimary"], true);
 
-    // A brand-new server over the same project sees the finished run.
+    // A brand-new server over the same project sees the finished run. The
+    // metadata directory is locked per process, so the restart has to be real.
+    drop(app);
     let reopened_app = test_app(temp.path());
     let response = reopened_app
         .clone()

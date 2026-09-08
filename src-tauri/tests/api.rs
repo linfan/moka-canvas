@@ -1,15 +1,22 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
 use moka_canvas::api::ApiState;
-use moka_canvas::config::{parse_test_config, RuntimeMode};
+use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
 use serde_json::{json, Value};
 use std::path::Path;
 use tower::ServiceExt;
 
 fn test_app(root: &Path) -> axum::Router {
-    let config = parse_test_config(root);
-    let state = ApiState::new(config, RuntimeMode::Web);
-    moka_canvas::server::router(state)
+    moka_canvas::server::router(open_state(parse_test_config(root)))
+}
+
+fn open_state(config: AppConfig) -> ApiState {
+    let root = config
+        .metadata
+        .dir
+        .clone()
+        .expect("the test configuration sets a metadata directory");
+    ApiState::new(config, RuntimeMode::Web, &root).expect("the metadata store opens")
 }
 
 async fn body_json(response: axum::http::Response<Body>) -> Value {
@@ -113,7 +120,7 @@ async fn config_is_sanitized() {
     assert!(body["capabilities"]["assetCategories"].is_array());
     assert!(body["limits"]["maxNodesPerCanvas"].is_number());
     // Server internals and filesystem paths must never leak.
-    assert!(!raw.contains("recentRegistryPath"));
+    assert!(!raw.contains("maxDocumentBytes"));
     assert!(!raw.contains("staticDir"));
     assert!(!raw.contains("bind"));
     assert!(!raw.contains(temp.path().to_string_lossy().as_ref()));
@@ -483,7 +490,7 @@ async fn malformed_json_is_a_problem() {
 }
 
 #[tokio::test]
-async fn readiness_reports_registry_and_config_checks() {
+async fn readiness_reports_metadata_and_config_checks() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
     let response = app
@@ -500,7 +507,7 @@ async fn readiness_reports_registry_and_config_checks() {
     let body = body_json(response).await;
     assert_eq!(body["status"], "ready");
     assert_eq!(body["checks"]["config"], true);
-    assert_eq!(body["checks"]["recentRegistry"], true);
+    assert_eq!(body["checks"]["metadata"], true);
     assert_eq!(body["checks"]["projectDirectory"], true);
 }
 

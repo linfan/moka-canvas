@@ -14,9 +14,33 @@ pub struct ServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectsConfig {
-    pub recent_registry_path: PathBuf,
     #[serde(default = "default_max_moka_file_bytes")]
     pub max_moka_file_bytes: u64,
+}
+
+/// Application-level metadata: recent projects, provider channels, encrypted
+/// credentials, global preferences, and the prompt library cache. None of it
+/// belongs to a project, so none of it travels inside a project directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataConfig {
+    #[serde(default = "default_metadata_store")]
+    pub store: String,
+    /// Empty means "resolve per platform"; see `metadata::paths::resolve_dir`.
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
+    #[serde(default = "default_max_document_bytes")]
+    pub max_document_bytes: u64,
+}
+
+impl Default for MetadataConfig {
+    fn default() -> Self {
+        Self {
+            store: default_metadata_store(),
+            dir: None,
+            max_document_bytes: default_max_document_bytes(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +93,12 @@ fn default_max_upload_bytes() -> u64 {
 fn default_max_moka_file_bytes() -> u64 {
     33_554_432
 }
+fn default_metadata_store() -> String {
+    "file".to_string()
+}
+fn default_max_document_bytes() -> u64 {
+    33_554_432
+}
 fn default_enabled_executors() -> Vec<String> {
     vec!["deterministic".to_string()]
 }
@@ -103,6 +133,8 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub projects: ProjectsConfig,
     #[serde(default)]
+    pub metadata: MetadataConfig,
+    #[serde(default)]
     pub workflow: WorkflowConfig,
     pub public: PublicConfig,
     #[serde(default)]
@@ -127,8 +159,12 @@ pub enum ConfigError {
     UnsupportedVersion(u32),
     #[error("static directory does not exist: {0}")]
     StaticDirMissing(String),
-    #[error("recent registry parent directory cannot be created: {0}")]
-    RegistryDir(String),
+    #[error("metadata directory is not usable: {0}")]
+    MetadataDirInvalid(String),
+    #[error("unsupported metadata store: {0}")]
+    MetadataStoreUnsupported(String),
+    #[error("metadata master key is unavailable: {0}")]
+    MetadataKeyMissing(String),
 }
 
 impl ConfigError {
@@ -138,7 +174,9 @@ impl ConfigError {
             Self::InvalidYaml(_) => "CONFIG_INVALID",
             Self::UnsupportedVersion(_) => "CONFIG_VERSION_UNSUPPORTED",
             Self::StaticDirMissing(_) => "CONFIG_STATIC_DIR_MISSING",
-            Self::RegistryDir(_) => "CONFIG_REGISTRY_DIR",
+            Self::MetadataDirInvalid(_) => "CONFIG_METADATA_DIR_INVALID",
+            Self::MetadataStoreUnsupported(_) => "CONFIG_METADATA_STORE_UNSUPPORTED",
+            Self::MetadataKeyMissing(_) => "CONFIG_METADATA_KEY_MISSING",
         }
     }
 }
@@ -164,7 +202,7 @@ impl RuntimeMode {
 pub fn load_config_file(path: &Path) -> Result<AppConfig, ConfigError> {
     let raw = std::fs::read_to_string(path)
         .map_err(|error| ConfigError::Unreadable(format!("{}: {error}", path.display())))?;
-    parse_config(&raw, None)
+    parse_config(&raw)
 }
 
 /// Loads the compiled-in YAML for the desktop app. Placeholders resolve
@@ -177,44 +215,42 @@ pub fn load_native_config(
     let raw = NATIVE_CONFIG_YAML
         .replace("${appData}", &app_data_dir.to_string_lossy())
         .replace("${resourceDir}", &resource_dir.to_string_lossy());
-    parse_config(&raw, None)
+    parse_config(&raw)
 }
 
-fn parse_config(raw: &str, base: Option<&Path>) -> Result<AppConfig, ConfigError> {
-    let mut config: AppConfig =
+fn parse_config(raw: &str) -> Result<AppConfig, ConfigError> {
+    let config: AppConfig =
         serde_yaml::from_str(raw).map_err(|error| ConfigError::InvalidYaml(error.to_string()))?;
     if config.version != 1 {
         return Err(ConfigError::UnsupportedVersion(config.version));
-    }
-    if let Some(base) = base {
-        if config.server.static_dir.is_relative() {
-            config.server.static_dir = base.join(&config.server.static_dir);
-        }
-        if config.projects.recent_registry_path.is_relative() {
-            config.projects.recent_registry_path = base.join(&config.projects.recent_registry_path);
-        }
     }
     Ok(config)
 }
 
 /// Startup-time environment validation: the static directory must exist and
-/// the recent registry parent must be creatable and writable.
-pub fn validate_startup(config: &AppConfig) -> Result<(), ConfigError> {
+/// the metadata backend must be reachable at a safe location.
+///
+/// Returns the resolved metadata root so the caller can open the store
+/// without resolving the location a second time.
+pub fn validate_startup(
+    config: &AppConfig,
+    mode: RuntimeMode,
+    app_data: Option<&Path>,
+) -> Result<PathBuf, ConfigError> {
     if !config.server.static_dir.is_dir() {
         return Err(ConfigError::StaticDirMissing(
             config.server.static_dir.display().to_string(),
         ));
     }
-    let registry = &config.projects.recent_registry_path;
-    if let Some(parent) = registry.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| ConfigError::RegistryDir(format!("{}: {error}", parent.display())))?;
-        let probe = parent.join(".moka-write-probe");
-        std::fs::write(&probe, b"")
-            .and_then(|_| std::fs::remove_file(&probe))
-            .map_err(|error| ConfigError::RegistryDir(format!("{}: {error}", parent.display())))?;
+    let store = crate::metadata::paths::resolve_store(&config.metadata);
+    if store != crate::metadata::FILE_STORE {
+        return Err(ConfigError::MetadataStoreUnsupported(format!(
+            "{store:?} is not implemented; set metadata.store to {:?}",
+            crate::metadata::FILE_STORE
+        )));
     }
-    Ok(())
+    let dir = crate::metadata::paths::resolve_dir(&config.metadata, mode, app_data)?;
+    crate::metadata::paths::ensure_isolated(&dir, &config.server.static_dir)
 }
 
 /// Builds a configuration rooted inside the given directory, for tests.
@@ -229,8 +265,12 @@ pub fn parse_test_config(root: &Path) -> AppConfig {
             max_upload_bytes: default_max_upload_bytes(),
         },
         projects: ProjectsConfig {
-            recent_registry_path: root.join("data/recent-projects.json"),
             max_moka_file_bytes: default_max_moka_file_bytes(),
+        },
+        metadata: MetadataConfig {
+            store: default_metadata_store(),
+            dir: Some(root.join("metadata")),
+            max_document_bytes: default_max_document_bytes(),
         },
         workflow: WorkflowConfig::default(),
         public: PublicConfig {
@@ -249,7 +289,7 @@ mod tests {
     #[test]
     fn parses_the_example_config() {
         let raw = include_str!("../../config/moka.example.yaml");
-        let config = parse_config(raw, None).expect("example config must parse");
+        let config = parse_config(raw).expect("example config must parse");
         assert_eq!(config.server.bind, "127.0.0.1:3000");
         assert_eq!(config.public.product_name, "Moka Canvas");
         assert!(config
@@ -264,8 +304,8 @@ mod tests {
         let resource = Path::new("/tmp/moka-resources");
         let config = load_native_config(app_data, resource).expect("native config must parse");
         assert_eq!(
-            config.projects.recent_registry_path,
-            PathBuf::from("/tmp/moka-app-data/recent-projects.json")
+            config.metadata.dir,
+            Some(PathBuf::from("/tmp/moka-app-data/metadata"))
         );
         assert_eq!(
             config.server.static_dir,
@@ -274,24 +314,68 @@ mod tests {
     }
 
     #[test]
+    fn metadata_section_is_optional() {
+        let legacy = r#"
+version: 1
+server:
+  bind: "127.0.0.1:3000"
+  staticDir: "./dist"
+projects:
+  maxMokaFileBytes: 33554432
+public:
+  productName: "Moka Canvas"
+"#;
+        let config = parse_config(legacy).expect("legacy config must parse");
+        assert_eq!(config.metadata, MetadataConfig::default());
+    }
+
+    #[test]
     fn rejects_an_unsupported_version() {
         let raw =
             include_str!("../../config/moka.example.yaml").replace("version: 1", "version: 9");
-        let error = parse_config(&raw, None).unwrap_err();
+        let error = parse_config(&raw).unwrap_err();
         assert!(matches!(error, ConfigError::UnsupportedVersion(9)));
     }
 
     #[test]
     fn rejects_invalid_yaml() {
-        let error = parse_config("version: [", None).unwrap_err();
+        let error = parse_config("version: [").unwrap_err();
         assert!(matches!(error, ConfigError::InvalidYaml(_)));
     }
 
     #[test]
     fn startup_validation_requires_the_static_dir() {
-        let mut config = parse_test_config(Path::new("/tmp/moka-never-created"));
+        let root = tempfile::tempdir().unwrap();
+        let mut config = parse_test_config(root.path());
         config.server.static_dir = PathBuf::from("/tmp/moka-definitely-missing-dir");
-        let error = validate_startup(&config).unwrap_err();
+        let error = validate_startup(&config, RuntimeMode::Web, None).unwrap_err();
         assert!(matches!(error, ConfigError::StaticDirMissing(_)));
+    }
+
+    #[test]
+    fn startup_validation_rejects_an_unimplemented_store() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = parse_test_config(root.path());
+        config.metadata.store = "postgres".to_string();
+        let error = validate_startup(&config, RuntimeMode::Web, None).unwrap_err();
+        assert_eq!(error.code(), "CONFIG_METADATA_STORE_UNSUPPORTED");
+    }
+
+    #[test]
+    fn startup_validation_rejects_a_directory_inside_the_program_tree() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = parse_test_config(root.path());
+        config.metadata.dir = Some(config.server.static_dir.join("metadata"));
+        let error = validate_startup(&config, RuntimeMode::Web, None).unwrap_err();
+        assert_eq!(error.code(), "CONFIG_METADATA_DIR_INVALID");
+    }
+
+    #[test]
+    fn startup_validation_resolves_the_metadata_root() {
+        let root = tempfile::tempdir().unwrap();
+        let config = parse_test_config(root.path());
+        let resolved = validate_startup(&config, RuntimeMode::Web, None).expect("valid config");
+        assert!(resolved.is_absolute());
+        assert!(resolved.is_dir());
     }
 }

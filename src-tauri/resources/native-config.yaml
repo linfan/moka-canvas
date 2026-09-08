@@ -4,8 +4,11 @@ server:
   staticDir: "${resourceDir}/web"
   maxUploadBytes: 2147483648
 projects:
-  recentRegistryPath: "${appData}/recent-projects.json"
   maxMokaFileBytes: 33554432
+metadata:
+  store: "file"
+  dir: "${appData}/metadata"
+  maxDocumentBytes: 33554432
 workflow:
   enabledExecutors: ["deterministic"]
 public:

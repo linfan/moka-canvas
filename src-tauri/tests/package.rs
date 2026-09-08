@@ -8,16 +8,22 @@ use std::path::{Path, PathBuf};
 use tower::ServiceExt;
 
 fn test_app(root: &Path) -> axum::Router {
-    let config = parse_test_config(root);
-    let state = ApiState::new(config, RuntimeMode::Web);
-    moka_canvas::server::router(state)
+    moka_canvas::server::router(open_state(parse_test_config(root)))
 }
 
 fn test_app_with(root: &Path, tweak: impl FnOnce(&mut AppConfig)) -> axum::Router {
     let mut config = parse_test_config(root);
     tweak(&mut config);
-    let state = ApiState::new(config, RuntimeMode::Web);
-    moka_canvas::server::router(state)
+    moka_canvas::server::router(open_state(config))
+}
+
+fn open_state(config: AppConfig) -> ApiState {
+    let root = config
+        .metadata
+        .dir
+        .clone()
+        .expect("the test configuration sets a metadata directory");
+    ApiState::new(config, RuntimeMode::Web, &root).expect("the metadata store opens")
 }
 
 async fn body_json(response: axum::http::Response<Body>) -> Value {

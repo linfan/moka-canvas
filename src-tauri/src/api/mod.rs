@@ -1,10 +1,11 @@
 use crate::config::{AppConfig, RuntimeMode};
-use crate::project::recent::RecentRegistry;
+use crate::metadata::{self, MetadataStore};
 use crate::project::store::FsProjectStore;
 use crate::workflow::executor::DeterministicExecutor;
 use crate::workflow::runner::RunManager;
 use crate::workflow::WorkflowExecutor;
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::Arc;
 
 pub mod dto;
 pub mod problem;
@@ -15,14 +16,30 @@ pub struct ApiState {
     pub mode: RuntimeMode,
     pub config: Arc<AppConfig>,
     pub store: Arc<FsProjectStore>,
-    pub recent: Arc<Mutex<RecentRegistry>>,
+    pub metadata: Arc<dyn MetadataStore>,
     pub runs: Arc<RunManager>,
 }
 
 impl ApiState {
-    pub fn new(config: AppConfig, mode: RuntimeMode) -> Self {
+    /// Opens the metadata directory before anything can serve a request.
+    ///
+    /// `root` is the location startup validation already resolved and checked
+    /// for isolation, so the store never resolves it a second time.
+    ///
+    /// Fails when the directory is locked by another process, was written by a
+    /// newer format version, or holds credentials with no master key available
+    /// to open them.
+    pub fn new(config: AppConfig, mode: RuntimeMode, root: &Path) -> anyhow::Result<Self> {
+        let metadata = metadata::open(root, &config.metadata, mode)?;
+        Ok(Self::with_metadata(config, mode, metadata))
+    }
+
+    pub fn with_metadata(
+        config: AppConfig,
+        mode: RuntimeMode,
+        metadata: Arc<dyn MetadataStore>,
+    ) -> Self {
         let config = Arc::new(config);
-        let recent = RecentRegistry::load(&config.projects.recent_registry_path);
         let store = Arc::new(FsProjectStore::new(Arc::clone(&config)));
         let executors: Vec<Arc<dyn WorkflowExecutor>> =
             vec![Arc::new(DeterministicExecutor::new())];
@@ -34,7 +51,7 @@ impl ApiState {
         Self {
             mode,
             store,
-            recent: Arc::new(Mutex::new(recent)),
+            metadata,
             config,
             runs,
         }

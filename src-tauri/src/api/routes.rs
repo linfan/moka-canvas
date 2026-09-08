@@ -6,7 +6,7 @@ use super::dto::{
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
 use crate::domain::{now_iso, DocumentCommand, RunRecord};
-use crate::project::recent::RecentProject;
+use crate::metadata::RecentProject;
 use crate::project::{ByteRange, CreateProject, OpenProject, ProjectStore, StagedAsset};
 use axum::{
     body::Body,
@@ -40,14 +40,27 @@ fn open_response(opened: OpenProject) -> OpenProjectResponse {
     }
 }
 
-fn upsert_recent(state: &ApiState, opened: &OpenProject) {
-    let mut recent = state.recent.lock().expect("recent registry poisoned");
-    recent.upsert(RecentProject {
+/// Records an opened project in the recent list.
+///
+/// A failure here is logged rather than returned: the project is already open,
+/// and turning that into a failed request would trade a stale recent list for
+/// an unusable editor. `/api/ready` is what reports a metadata directory that
+/// has stopped accepting writes.
+async fn upsert_recent(state: &ApiState, opened: &OpenProject) {
+    let entry = RecentProject {
         id: opened.moka.metadata.id.clone(),
         name: opened.moka.metadata.name.clone(),
         path: opened.root.clone(),
         last_opened: now_iso(),
-    });
+    };
+    if let Err(error) = state.metadata.upsert_recent(&entry).await {
+        tracing::warn!(
+            target: "moka::metadata",
+            code = error.code(),
+            error = %error,
+            "could not record the project in the recent list"
+        );
+    }
 }
 
 async fn current_root(state: &ApiState) -> Result<PathBuf, Problem> {
@@ -79,15 +92,18 @@ pub async fn public_config(State(state): State<ApiState>) -> Json<PublicConfigRe
     })
 }
 
-pub async fn list_recent(State(state): State<ApiState>) -> Json<Vec<RecentProject>> {
-    let recent = state.recent.lock().expect("recent registry poisoned");
-    Json(recent.entries().to_vec())
+pub async fn list_recent(
+    State(state): State<ApiState>,
+) -> Result<Json<Vec<RecentProject>>, Problem> {
+    Ok(Json(state.metadata.list_recent().await?))
 }
 
-pub async fn remove_recent(State(state): State<ApiState>, Path(id): Path<String>) -> StatusCode {
-    let mut recent = state.recent.lock().expect("recent registry poisoned");
-    recent.remove(&id);
-    StatusCode::NO_CONTENT
+pub async fn remove_recent(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, Problem> {
+    state.metadata.remove_recent(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn create_project(
@@ -113,7 +129,7 @@ pub async fn create_project(
             },
         )
         .await?;
-    upsert_recent(&state, &opened);
+    upsert_recent(&state, &opened).await;
     Ok((StatusCode::CREATED, Json(open_response(opened))))
 }
 
@@ -133,7 +149,7 @@ pub async fn open_project(
         .store
         .open_project(FsPath::new(request.path.trim()))
         .await?;
-    upsert_recent(&state, &opened);
+    upsert_recent(&state, &opened).await;
     Ok(Json(open_response(opened)))
 }
 
@@ -539,7 +555,7 @@ async fn finish_import(
 ) -> Result<(StatusCode, Json<OpenProjectResponse>), Problem> {
     let target = import_target(directory, name, &archive_stem(archive))?;
     let opened = state.store.import_package(archive, &target).await?;
-    upsert_recent(state, &opened);
+    upsert_recent(state, &opened).await;
     Ok((StatusCode::CREATED, Json(open_response(opened))))
 }
 

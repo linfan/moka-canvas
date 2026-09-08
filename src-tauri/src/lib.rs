@@ -2,6 +2,7 @@ pub mod api;
 pub mod assets;
 pub mod config;
 pub mod domain;
+pub mod metadata;
 pub mod project;
 pub mod server;
 pub mod telemetry;
@@ -28,10 +29,12 @@ pub fn run() {
             std::fs::create_dir_all(&app_data)?;
             let resource_dir = app.path().resource_dir()?;
             let config = config::load_native_config(&app_data, &resource_dir)?;
-            config::validate_startup(&config)?;
+            let metadata_root =
+                config::validate_startup(&config, RuntimeMode::Native, Some(&app_data))?;
             let server = Arc::new(tauri::async_runtime::block_on(LocalServer::start(
                 config,
                 RuntimeMode::Native,
+                &metadata_root,
             ))?);
             let url = WebviewUrl::External(server.url().parse()?);
 

@@ -4,8 +4,13 @@ server:
   staticDir: "./dist"
   maxUploadBytes: 2147483648
 projects:
-  recentRegistryPath: "./data/recent-projects.json"
   maxMokaFileBytes: 33554432
+metadata:
+  store: "file"
+  # Omitted on purpose: the platform application-data directory is resolved at
+  # startup. A relative path here would land inside the program tree, which is
+  # rejected. Override per deployment with MOKA_METADATA_DIR.
+  maxDocumentBytes: 33554432
 workflow:
   enabledExecutors: ["deterministic"]
 public:

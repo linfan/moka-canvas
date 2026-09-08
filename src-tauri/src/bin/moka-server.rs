@@ -31,9 +31,9 @@ async fn main() -> Result<()> {
     if let Some(port) = args.port {
         config.server.bind = format!("127.0.0.1:{port}");
     }
-    validate_startup(&config)?;
+    let metadata_root = validate_startup(&config, RuntimeMode::Web, None)?;
 
-    let server = LocalServer::start(config, RuntimeMode::Web).await?;
+    let server = LocalServer::start(config, RuntimeMode::Web, &metadata_root).await?;
     println!("Moka Canvas is available at {}", server.url());
     tokio::signal::ctrl_c().await?;
     server.shutdown();

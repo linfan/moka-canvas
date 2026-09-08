@@ -15,14 +15,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+aes-gcm = "0.10"
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.22"
 bson = { version = "3", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+directories = "6"
+fs2 = "0.4"
 hex = "0.4"
 image = "0.25"
 infer = "0.19"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"

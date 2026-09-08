@@ -1,6 +1,5 @@
 pub mod codec;
 pub mod package;
-pub mod recent;
 pub mod store;
 
 use crate::domain::{MokaFile, ResourceEntry, SelfCheckReport};

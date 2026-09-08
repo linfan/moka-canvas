@@ -228,6 +228,28 @@ pub enum DataType {
     Artifact,
 }
 
+/// The generation modality a provider model serves. Narrower than
+/// [`DataType`], which also covers port payloads that are never generated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Capability {
+    Text,
+    Image,
+    Audio,
+    Video,
+}
+
+impl Capability {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Capability::Text => "text",
+            Capability::Image => "image",
+            Capability::Audio => "audio",
+            Capability::Video => "video",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PortDirection {
