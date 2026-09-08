@@ -35,6 +35,8 @@ Three environment variables override the resolved values: `MOKA_METADATA_DIR` (l
 
 `GET /api/health` reports the store kind, the redacted root, the schema version, the secret-storage tier, and per-document state. `GET /api/ready` answers 503 until the assets are present, a write probe against the metadata directory succeeds, and any open project directory still exists.
 
+Provider channels, default models, and generation preferences are edited in the settings dialog, opened from the **Settings** button on both the launcher and the editor. A channel carries its base URL, protocol, and a per-capability model list; connectivity tests and provider model listing run from the channel row and the channel editor. API keys are written to the local server once and never sent back: the dialog shows only the masked form, and leaving the key field blank keeps whatever is stored.
+
 See [docs/security.md](docs/security.md) for how credentials are protected and what that protection does not cover, and [docs/deployment.md](docs/deployment.md) for running the standalone server.
 
 ## Quality and packaging
@@ -49,7 +51,7 @@ make cross-package-windows
 make clean
 ```
 
-`make check` is the full baseline gate: formatting, lint, typecheck, the production web build, the frontend Vitest suite, Rustfmt, Clippy with warnings denied, and the backend `cargo test` suite. `make test` runs just the two test suites (Vitest and `cargo test`) without the lint/format/build gates.
+`make check` is the full baseline gate: formatting, lint, typecheck, the production web build, the frontend Vitest suite, Rustfmt, Clippy with warnings denied, and the backend `cargo test` suite. `make test` runs just the two test suites (Vitest and `cargo test`) without the lint/format/build gates. `npm run test:e2e` drives the built application in a real browser through Playwright: the launcher-to-editor critical path, missing-asset recovery, and a provider-settings round trip, each against a server started with a temporary metadata directory.
 
 `package-web` stages the built site and a native `moka-server` binary under `release/`. Native app packaging is intentionally host-native: build macOS artifacts on macOS and Windows installers on Windows. Release signing and macOS notarization require organization-specific credentials and are not part of this baseline.
 

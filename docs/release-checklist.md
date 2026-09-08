@@ -30,6 +30,12 @@ npm run test:e2e  # Playwright critical path against the built app
 7. Check the server log: one structured line per API request with request
    id, method, path, status, duration, and error code; no payloads, no
    filesystem internals beyond project paths, no secrets.
+8. Open the settings dialog from the launcher and from the editor: add a
+   channel from a provider address, edit its models and capabilities,
+   run a connectivity test, choose per-capability default models, and
+   adjust generation preferences; save, reload, and confirm everything
+   persisted. Editing the same channel in two windows at once surfaces a
+   conflict notice in the loser instead of silently overwriting.
 
 ## macOS (`make package-macos`)
 
@@ -75,12 +81,14 @@ live in the platform application-data directory, never in the program tree. See
    `meta.json`, `recent-projects.json`, `providers.json`,
    `secrets.json`, or `master.key` under the repository `data/`,
    the served `dist/`, or the executable's own directory.
-3. Once provider credentials can be entered through the UI: store a
-   real API key, then search for it three ways and find nothing —
+3. Store a real API key through the settings dialog (Channels → Edit →
+   API key), then search for it three ways and find nothing —
    `grep -r "sk-"` over the metadata directory, `strings` over every
    file in it, and the captured HTTP responses and server log for
    that session. Only a fingerprint and a masked form may appear.
-   Until that screen ships, the automated equivalent is
+   The dialog must not echo it either: reopen the channel and
+   confirm the key field is empty with the masked form as its
+   placeholder. The automated equivalent is
    `cargo test --test metadata_file`.
 4. Confirm `secrets.json` is mode `0600` and the metadata directory
    `0700` (macOS and Linux).
