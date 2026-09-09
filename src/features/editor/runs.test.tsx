@@ -10,6 +10,8 @@ import {
 } from "@testing-library/react";
 import App from "../../App";
 import {
+  batchNodeIds,
+  buildBatchMokaFile,
   buildGenerationMokaFile,
   buildGoldenMokaFile,
   generationNodeIds,
@@ -23,7 +25,8 @@ import type {
   RunRecord,
   RunStatus,
 } from "../../shared/domain";
-import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
+import { PROVIDER_EXECUTOR_KEY, findNode } from "../../shared/domain";
+import { UnsavedWorkDialog } from "./components/UnsavedWorkDialog";
 import { GENERATION_UNAVAILABLE, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
@@ -1147,5 +1150,251 @@ describe("generation UI", () => {
     expect(useEditorStore.getState().announcement).toBe(
       "Selected the node that made this asset",
     );
+  });
+});
+
+describe("reaching a generation from the menu", () => {
+  const batch = batchNodeIds();
+
+  beforeEach(() => {
+    api.executors = ["deterministic", PROVIDER_EXECUTOR_KEY];
+    api.moka = () => buildGenerationMokaFile();
+  });
+
+  /** Points the menu at a node the way the canvas does when one is clicked. */
+  function menuOn(nodeId: string) {
+    act(() => {
+      useEditorStore.getState().openContextMenu({
+        x: 40,
+        y: 40,
+        target: { kind: "node", nodeId },
+      });
+    });
+  }
+
+  function nodeData(nodeId: string) {
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    return findNode(canvas, nodeId)!.data as {
+      assetId?: string;
+      resultSlots?: { id: string; isPrimary: boolean }[];
+    };
+  }
+
+  it("offers to stop a run still going, and stops it", async () => {
+    api.runs = [
+      generationRun({
+        status: "running",
+        steps: [{ nodeId: generated.image, status: "running" }],
+      }),
+    ];
+    await openEditor();
+    menuOn(generated.image);
+
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Stop" }));
+    await settle();
+
+    expect(
+      api.calls.some((call) => call.url.endsWith("/runs/run-gen/cancel")),
+    ).toBe(true);
+    // Optimistic, so the card stops offering a control that was just used.
+    expect(useRunStore.getState().runs[0]?.cancelRequested).toBe(true);
+  });
+
+  it("offers to ask again for a run that gave up", async () => {
+    api.runs = [
+      generationRun({
+        status: "failed",
+        error: "The provider went away.",
+        steps: [
+          {
+            nodeId: generated.image,
+            status: "failed",
+            error: "The provider went away.",
+          },
+        ],
+      }),
+    ];
+    await openEditor();
+    menuOn(generated.image);
+
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Retry" }));
+    await settle();
+
+    expect(
+      api.calls.some((call) => call.url.endsWith("/runs/run-gen/retry")),
+    ).toBe(true);
+    // A choice closes the menu rather than leaving it to be asked twice.
+    expect(screen.queryByRole("menu", { name: "Context menu" })).toBeNull();
+  });
+
+  it("copies what a node asks for", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    await openEditor();
+    menuOn(generated.image);
+
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Copy prompt" }),
+    );
+    await settle();
+
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining("as a poster."),
+    );
+    expect(useEditorStore.getState().announcement).toBe("Prompt copied");
+  });
+
+  it("offers another of a batch's results from the card holding it", async () => {
+    api.moka = () => buildBatchMokaFile();
+    await openEditor();
+    menuOn(batch.second);
+
+    fireEvent.click(
+      await screen.findByRole("menuitem", {
+        name: "Show this result on Poster",
+      }),
+    );
+    await settle();
+
+    // The node that asked for the batch is what ends up showing the answer.
+    expect(nodeData(batch.poster).assetId).toBe("asset-two");
+    expect(
+      nodeData(batch.poster).resultSlots?.map((slot) => slot.isPrimary),
+    ).toEqual([false, true, false]);
+    expect(useEditorStore.getState().announcement).toBe(
+      "Showing result 2 of 3",
+    );
+  });
+
+  it("offers the results a node holds itself, by their place in the batch", async () => {
+    api.moka = () => buildBatchMokaFile();
+    await openEditor();
+    menuOn(batch.poster);
+
+    const menu = await screen.findByRole("menu", { name: "Context menu" });
+    expect(
+      [...menu.querySelectorAll("button")].map((item) => item.textContent),
+    ).toEqual(expect.arrayContaining(["Show result 2", "Show result 3"]));
+  });
+});
+
+describe("leaving with a generation going", () => {
+  beforeEach(() => {
+    api.executors = ["deterministic", PROVIDER_EXECUTOR_KEY];
+    api.moka = () => buildGenerationMokaFile();
+  });
+
+  it("says a run carries on, and stops nothing on the way out", async () => {
+    api.runs = [
+      generationRun({
+        status: "running",
+        steps: [{ nodeId: generated.image, status: "running" }],
+      }),
+    ];
+    await openEditor();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to launcher" }));
+
+    const guard = await screen.findByRole("alertdialog");
+    expect(guard.textContent).toContain("A generation is still running");
+    expect(guard.textContent).toContain("Leaving does not stop it");
+    // Nothing was unsaved, so there is no work to throw away or to package up.
+    expect(guard.textContent).not.toContain("will be lost");
+    expect(
+      screen.queryByRole("button", { name: "Discard and close" }),
+    ).toBeNull();
+    expect(useAppStore.getState().phase).toBe("editing");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await settle();
+
+    expect(useAppStore.getState().phase).toBe("launcher");
+    expect(api.calls.some((call) => call.url.includes("/cancel"))).toBe(false);
+  });
+
+  it("keeps every way out it had where there is work to lose", () => {
+    render(
+      <UnsavedWorkDialog
+        busy={null}
+        error={null}
+        inFlight={2}
+        onAction={() => {}}
+        onCancel={() => {}}
+        pendingCount={3}
+        saveStatus="saved"
+      />,
+    );
+
+    const guard = screen.getByRole("alertdialog");
+    expect(guard.textContent).toContain("3 unsaved changes will be lost");
+    expect(guard.textContent).toContain("2 generations are still running");
+    expect(screen.getByRole("button", { name: "Save and close" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Discard and close" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Export copy and close" }),
+    ).toBeTruthy();
+  });
+
+  it("says what is still running on a canvas being left", async () => {
+    api.moka = () => buildGoldenMokaFile();
+    api.runs = [makeRun({ status: "running" })];
+    await openEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas 2" }));
+    await settle();
+
+    const said = useAppStore
+      .getState()
+      .toasts.some((toast) =>
+        toast.message.includes("still running on Canvas 1"),
+      );
+    expect(said).toBe(true);
+    // The run was left alone: it belongs to the project, not to the canvas.
+    expect(api.calls.some((call) => call.url.includes("/cancel"))).toBe(false);
+  });
+});
+
+describe("a node asked twice over", () => {
+  beforeEach(() => {
+    api.executors = ["deterministic", PROVIDER_EXECUTOR_KEY];
+    api.moka = () => buildGenerationMokaFile();
+  });
+
+  it("shows both asks rather than only the one being read", async () => {
+    api.runs = [
+      generationRun({
+        id: "run-later",
+        status: "succeeded",
+        createdAt: "2026-01-01T00:00:09.000Z",
+        steps: [{ nodeId: generated.image, status: "succeeded" }],
+      }),
+      generationRun({
+        id: "run-earlier",
+        status: "failed",
+        error: "The provider went away.",
+        createdAt: "2026-01-01T00:00:05.000Z",
+        steps: [
+          {
+            nodeId: generated.image,
+            status: "failed",
+            error: "The provider went away.",
+          },
+        ],
+      }),
+    ];
+    await openEditor();
+    selectNode(generated.image);
+
+    const list = await screen.findByText("Asked in");
+    expect(list.parentElement?.textContent).toContain("Succeeded");
+    expect(list.parentElement?.textContent).toContain("Failed");
+    expect(
+      document.querySelectorAll(".inspector-run-list .run-chip"),
+    ).toHaveLength(2);
   });
 });

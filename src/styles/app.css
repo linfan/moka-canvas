@@ -253,6 +253,11 @@ h2 {
   margin-bottom: 0;
 }
 
+.dialog-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .dialog-actions {
   display: flex;
   gap: 10px;
@@ -844,6 +849,16 @@ h2 {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Several chips rather than one value, so they wrap instead of being clipped. */
+.inspector-row span.inspector-run-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  overflow: visible;
+  white-space: normal;
 }
 
 .inspector-preview {

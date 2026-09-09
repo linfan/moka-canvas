@@ -20,7 +20,7 @@ import {
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { useHistoryStore, isBoundary } from "./stores/historyStore";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
-import { useRunStore } from "./stores/runStore";
+import { useRunStore, useRunsInFlight } from "./stores/runStore";
 import { CanvasTabs } from "./panels/CanvasTabs";
 import { ContextMenu } from "./panels/ContextMenu";
 import { InspectorPanel } from "./panels/InspectorPanel";
@@ -70,11 +70,8 @@ export function EditorPage() {
   const canUndo = useCanUndo();
   const canRedo = useHistoryStore((state) => state.redoStack.length > 0);
   const starting = useRunStore((state) => state.starting);
-  const runActive = useRunStore((state) =>
-    state.runs.some(
-      (run) => run.status === "queued" || run.status === "running",
-    ),
-  );
+  const inFlight = useRunsInFlight();
+  const runActive = inFlight > 0;
   const selectedIds = useEditorStore((state) => state.selection.nodeIds);
   // The nodes a run could drive: an operation node, or one carrying a generation
   // spec. Anything else is a run the server would only refuse.
@@ -118,7 +115,8 @@ export function EditorPage() {
     const guarded =
       project.pending.length > 0 ||
       project.saveStatus === "saving" ||
-      project.saveStatus === "conflicted";
+      project.saveStatus === "conflicted" ||
+      inFlight > 0;
     if (!guarded) {
       finishClose();
       return;
@@ -356,6 +354,7 @@ export function EditorPage() {
         <UnsavedWorkDialog
           busy={closeBusy}
           error={closeError}
+          inFlight={inFlight}
           onAction={(action) => void closeWith(action)}
           onCancel={() => setCloseGuardOpen(false)}
           pendingCount={pendingCount}

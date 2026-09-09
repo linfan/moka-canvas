@@ -5,7 +5,6 @@ import type {
   GenerationSpec,
   ResourceEntry,
   ResultSlot,
-  RunRecord,
   RunStatus,
   WorkflowEdge,
   WorkflowNode,
@@ -25,10 +24,12 @@ import {
 import { useEditorStore } from "../stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
 import {
+  retryRun,
   useLatestRunForNode,
   useNodeGenerationAssets,
   useNodeRunError,
   useNodeRunProgress,
+  useNodeRuns,
   useNodeStreamText,
   useRunStore,
 } from "../stores/runStore";
@@ -40,6 +41,8 @@ import {
   mediaInfoForNode,
 } from "../canvas/mediaCards";
 import {
+  chooseResult,
+  choosableResults,
   deleteSelection,
   disconnectEdge,
   renameNode,
@@ -436,6 +439,8 @@ function RunSection({
   node: WorkflowNode;
 }) {
   const run = useLatestRunForNode(node.id);
+  const asked = useNodeRuns(node.id);
+  const choices = choosableResults(canvas, node);
   const starting = useRunStore((state) => state.starting);
   const issues = useRunStore((state) => state.lastIssues);
   const generationOn = useGenerationAvailable();
@@ -463,19 +468,6 @@ function RunSection({
     }
   };
 
-  const retry = async (record: RunRecord) => {
-    try {
-      await useRunStore.getState().retry(record.id);
-    } catch (error) {
-      useAppStore
-        .getState()
-        .pushToast(
-          "error",
-          error instanceof Error ? error.message : "Retry failed",
-        );
-    }
-  };
-
   return (
     <section className="inspector-section">
       <h3>Run</h3>
@@ -499,7 +491,7 @@ function RunSection({
             </button>
           )}
           {retryable && run && (
-            <button onClick={() => void retry(run)} type="button">
+            <button onClick={() => void retryRun(run.id)} type="button">
               Retry
             </button>
           )}
@@ -550,18 +542,53 @@ function RunSection({
           )}
         </>
       )}
+      {asked.length > 1 && (
+        <>
+          <div className="inspector-row">
+            <span>Asked in</span>
+            <span className="inspector-run-list">
+              {asked.map((entry) => (
+                <span
+                  className={`run-chip run-chip-${entry.step.status}`}
+                  key={entry.run.id}
+                >
+                  {formatTime(entry.run.createdAt)} ·{" "}
+                  {RUN_STATUS_LABEL[entry.step.status]}
+                </span>
+              ))}
+            </span>
+          </div>
+          <p className="inspector-empty">
+            Each ask went ahead. What the node shows is what the last of them to
+            land wrote.
+          </p>
+        </>
+      )}
       <LastGeneration canvas={canvas} node={node} />
       {slots.length > 0 && (
         <>
           <h3>Results</h3>
-          {slots.map((slot) => (
+          {slots.map((slot, index) => (
             <div className="inspector-row" key={slot.id}>
-              <span>{slot.isPrimary ? "Primary" : slot.id}</span>
+              <span>{slot.isPrimary ? "Shown" : `Result ${index + 1}`}</span>
               <span className={`run-chip run-chip-${slot.status}`}>
                 {slot.status}
               </span>
             </div>
           ))}
+          {choices.length > 0 && (
+            <div className="inspector-actions">
+              {choices.map((choice) => (
+                <button
+                  key={choice.slotId}
+                  onClick={() => chooseResult(node.id, choice.slotId)}
+                  type="button"
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+          )}
           {slots.find((slot) => slot.status === "failed")?.error && (
             <p className="inspector-run-error">
               {slots.find((slot) => slot.status === "failed")?.error}

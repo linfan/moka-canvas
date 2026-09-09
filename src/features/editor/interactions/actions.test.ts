@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  batchNodeIds,
+  buildBatchMokaFile,
   buildGenerationMokaFile,
   buildGoldenMokaFile,
   goldenNodeIds,
@@ -9,6 +11,7 @@ import {
   findNode,
   type GenerationSpec,
   type MokaFile,
+  type ResultSlot,
 } from "../../../shared/domain";
 import { execute, redo, undo } from "../commands/execute";
 import { useAppStore } from "../stores/appStore";
@@ -18,8 +21,11 @@ import { useProjectStore } from "../stores/projectStore";
 import {
   addNodeAt,
   checkConnection,
+  chooseResult,
+  choosableResults,
   connectPorts,
   copySelection,
+  editTextContent,
   groupSelection,
   marqueeSelect,
   moveNodes,
@@ -507,5 +513,97 @@ describe("group drag integration", () => {
     expect(useEditorStore.getState().selection.nodeIds.sort()).toEqual(
       ["grp-1", ids.image, ids.text].sort(),
     );
+  });
+});
+
+describe("chooseResult", () => {
+  const batch = batchNodeIds();
+
+  function shown(nodeId: string) {
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    return findNode(canvas, nodeId)!.data as {
+      assetId?: string;
+      resultSlots?: ResultSlot[];
+    };
+  }
+
+  it("makes one of several results the one a node shows", () => {
+    hydrate(buildBatchMokaFile());
+
+    chooseResult(batch.poster, "result-3");
+
+    expect(shown(batch.poster).assetId).toBe("asset-three");
+    expect(
+      shown(batch.poster).resultSlots?.map((slot) => slot.isPrimary),
+    ).toEqual([false, false, true]);
+    // One choice, one step back.
+    undo();
+    expect(shown(batch.poster).assetId).toBe("asset-one");
+    expect(shown(batch.poster).resultSlots?.[0]?.isPrimary).toBe(true);
+  });
+
+  it("takes a choice made on a card back to the node holding the batch", () => {
+    hydrate(buildBatchMokaFile());
+
+    chooseResult(batch.second, "result");
+
+    expect(shown(batch.poster).assetId).toBe("asset-two");
+    expect(
+      shown(batch.poster).resultSlots?.map((slot) => slot.isPrimary),
+    ).toEqual([false, true, false]);
+    // The card holds its own answer either way; the holder is what changes.
+    expect(shown(batch.second).assetId).toBe("asset-two");
+  });
+
+  it("offers what can still be chosen, and nothing past that", () => {
+    const moka = hydrate(buildBatchMokaFile());
+    const canvas = moka.canvas[0];
+    expect(
+      choosableResults(canvas, findNode(canvas, batch.poster)!).map(
+        (choice) => choice.slotId,
+      ),
+    ).toEqual(["result-2", "result-3"]);
+
+    chooseResult(batch.second, "result");
+
+    const after = useProjectStore.getState().moka!.canvas[0];
+    // A card the holder now shows has nothing left to offer.
+    expect(choosableResults(after, findNode(after, batch.second)!)).toEqual([]);
+    expect(choosableResults(after, findNode(after, batch.third)!)).toHaveLength(
+      1,
+    );
+  });
+
+  it("leaves a node with no results to choose between alone", () => {
+    const ids = goldenNodeIds();
+    const moka = hydrate();
+    const canvas = moka.canvas[0];
+
+    expect(choosableResults(canvas, findNode(canvas, ids.image)!)).toEqual([]);
+    chooseResult(ids.image, "result");
+
+    expect(useHistoryStore.getState().undoStack).toHaveLength(0);
+  });
+});
+
+describe("editTextContent", () => {
+  it("writes what a text node says and leaves what it asks for alone", () => {
+    const moka = hydrate(buildGenerationMokaFile());
+    const text = moka.canvas[0].nodes.find((node) => node.kind === "text")!;
+    const asked = (text.data as { generation: GenerationSpec }).generation
+      .prompt;
+
+    editTextContent(text.id, "Written by hand.");
+
+    const after = findNode(
+      useProjectStore.getState().moka!.canvas[0],
+      text.id,
+    )!;
+    expect((after.data as { content: string }).content).toBe(
+      "Written by hand.",
+    );
+    expect(
+      (after.data as { generation: GenerationSpec }).generation.prompt,
+    ).toBe(asked);
   });
 });

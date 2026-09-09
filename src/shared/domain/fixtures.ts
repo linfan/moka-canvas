@@ -1,6 +1,12 @@
 import { CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION } from "./constants";
 import { derivePorts } from "./factories";
-import type { MokaFile, WorkflowEdge, WorkflowNode } from "./types";
+import type {
+  MokaFile,
+  ResourceEntry,
+  ResultSlot,
+  WorkflowEdge,
+  WorkflowNode,
+} from "./types";
 
 const T0 = "2026-01-01T00:00:00.000Z";
 const T1 = "2026-01-01T00:00:01.000Z";
@@ -236,6 +242,109 @@ export function generationNodeIds() {
     text: fixtureId(120),
     image: fixtureId(121),
     edge: fixtureId(123),
+  };
+}
+
+export function batchNodeIds() {
+  return {
+    project: fixtureId(130),
+    canvas: fixtureId(131),
+    poster: fixtureId(132),
+    second: fixtureId(133),
+    third: fixtureId(134),
+  };
+}
+
+const BATCH_ASSETS = ["asset-one", "asset-two", "asset-three"];
+
+/** One answer of a batch, as the node holding it records it. */
+function batchSlot(index: number, primary: boolean): ResultSlot {
+  return {
+    id: index === 0 ? "result" : `result-${index + 1}`,
+    status: "succeeded",
+    assetId: BATCH_ASSETS[index],
+    isPrimary: primary,
+  };
+}
+
+/**
+ * A document as a generation that asked for three answers leaves it: the node
+ * that asked shows the first and lists the cards the other two went onto, each
+ * card holding its own copy of the answer it was made for.
+ */
+export function buildBatchMokaFile(): MokaFile {
+  const ids = batchNodeIds();
+
+  const poster: WorkflowNode = {
+    id: ids.poster,
+    kind: "image",
+    title: "Poster",
+    bounds: { x: 0, y: 0, width: 280, height: 220 },
+    zIndex: 0,
+    ports: derivePorts("image"),
+    data: {
+      assetId: BATCH_ASSETS[0],
+      resultSlots: [
+        batchSlot(0, true),
+        batchSlot(1, false),
+        batchSlot(2, false),
+      ],
+      resultNodeIds: [ids.second, ids.third],
+    },
+    createdAt: T0,
+    updatedAt: T1,
+  };
+
+  const card = (id: string, index: number): WorkflowNode => ({
+    id,
+    kind: "image",
+    title: `Poster ${index + 1}`,
+    bounds: { x: 320 * index, y: 0, width: 280, height: 220 },
+    zIndex: index,
+    ports: derivePorts("image"),
+    data: {
+      assetId: BATCH_ASSETS[index],
+      resultSlots: [{ ...batchSlot(index, true), id: "result" }],
+    },
+    createdAt: T0,
+    updatedAt: T1,
+  });
+
+  const images: ResourceEntry[] = BATCH_ASSETS.map((assetId, index) => ({
+    id: assetId,
+    name: `poster-${index + 1}.png`,
+    path: `assets/images/poster-${index + 1}.png`,
+    createdAt: T1,
+    updatedAt: T1,
+    provenance: {
+      runId: "run-batch",
+      operationNodeId: ids.poster,
+      createdAt: T1,
+    },
+  }));
+
+  return {
+    version: MOKA_FILE_VERSION,
+    metadata: {
+      id: ids.project,
+      name: "Batch Fixture",
+      revision: 1,
+      createdAt: T0,
+      updatedAt: T1,
+    },
+    resources: { images, music: [], voice: [], texts: [], videos: [] },
+    canvas: [
+      {
+        id: ids.canvas,
+        name: "Canvas 1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [poster, card(ids.second, 1), card(ids.third, 2)],
+        edges: [],
+        groups: [],
+        settings: { background: "dots", showMinimap: true, snapToGrid: true },
+      },
+    ],
   };
 }
 

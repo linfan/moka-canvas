@@ -28,7 +28,7 @@ function hasActiveRuns(runs: RunRecord[]): boolean {
 }
 
 /** One node's part in one run. */
-interface NodeRun {
+export interface NodeRun {
   run: RunRecord;
   step: RunStepRecord;
 }
@@ -469,6 +469,75 @@ export function useLatestRunForNode(nodeId: NodeId | null): RunRecord | null {
   return useRunStore((state) =>
     nodeId === null ? null : (runFor(state.byNode, nodeId)?.run ?? null),
   );
+}
+
+/**
+ * The run a node is read through, asked once rather than watched: for a menu
+ * built at the moment it is opened, which is not on screen long enough for a
+ * record arriving while it is open to matter.
+ */
+export function nodeRun(nodeId: NodeId): NodeRun | null {
+  const asked = useRunStore.getState().byNode.get(nodeId);
+  return asked ? current(asked) : null;
+}
+
+const NO_RUNS: NodeRun[] = [];
+
+/**
+ * Every run that asked one node, newest first.
+ *
+ * More than one is a node asked twice over, which is allowed: both runs go, and
+ * what the node ends up showing is what the last of them to land wrote. A reader
+ * that showed only the current one would hide the other, and with it the reason
+ * the node changed under somebody's hand.
+ */
+export function useNodeRuns(nodeId: NodeId): NodeRun[] {
+  return useRunStore((state) => state.byNode.get(nodeId) ?? NO_RUNS);
+}
+
+/**
+ * How many runs are still going, across the project or on one canvas.
+ *
+ * Asked at the moment of acting by a reader that has somewhere to put the answer;
+ * the hook below is for the one place that has to notice a run still going on its
+ * own, which is leaving a project.
+ */
+export function runsInFlight(canvasId?: CanvasId): number {
+  return useRunStore
+    .getState()
+    .runs.filter(
+      (run) =>
+        isActive(run.status) &&
+        (canvasId === undefined || run.canvasId === canvasId),
+    ).length;
+}
+
+/** The same count, watched. */
+export function useRunsInFlight(): number {
+  return useRunStore((state) =>
+    state.runs.reduce(
+      (count, run) => count + (isActive(run.status) ? 1 : 0),
+      0,
+    ),
+  );
+}
+
+/**
+ * Asks for a run again, saying so where a reader can see it if the ask is
+ * refused. The reasons that belong to the document land in `lastIssues` for the
+ * inspector either way; this is for the ones with nowhere else to go.
+ */
+export async function retryRun(runId: RunId) {
+  try {
+    await useRunStore.getState().retry(runId);
+  } catch (error) {
+    useAppStore
+      .getState()
+      .pushToast(
+        "error",
+        error instanceof Error ? error.message : "Retry failed",
+      );
+  }
 }
 
 /** Latest run step status for a node, preferring runs that are still active. */

@@ -6,6 +6,7 @@ import {
 } from "../../../shared/domain";
 import { execute, historyBoundary } from "../commands/execute";
 import { nextCanvasName, useProjectStore } from "../stores/projectStore";
+import { runsInFlight } from "../stores/runStore";
 import { useAppStore } from "../stores/appStore";
 
 export function CanvasTabs() {
@@ -21,8 +22,21 @@ export function CanvasTabs() {
 
   const switchTo = (canvasId: string, name: string) => {
     if (canvasId === activeCanvasId) return;
+    // A run belongs to the project rather than to the canvas on screen, so
+    // switching does not stop one; but its result lands somewhere the reader has
+    // just stopped looking, which is worth a word.
+    const going = activeCanvasId ? runsInFlight(activeCanvasId) : 0;
+    const left = moka.canvas.find((canvas) => canvas.id === activeCanvasId);
     useProjectStore.getState().switchCanvas(canvasId);
     historyBoundary(`Switch to ${name}`);
+    if (going > 0 && left) {
+      useAppStore
+        .getState()
+        .pushToast(
+          "info",
+          `${going} ${going === 1 ? "generation is" : "generations are"} still running on ${left.name}`,
+        );
+    }
   };
 
   const addCanvas = () => {

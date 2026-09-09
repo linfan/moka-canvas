@@ -1,7 +1,13 @@
 import { useEffect } from "react";
-import { findNode, generationCapabilityFor } from "../../../shared/domain";
+import {
+  findNode,
+  generationCapabilityFor,
+  type GenerationSpec,
+} from "../../../shared/domain";
 import {
   activeCanvas,
+  chooseResult,
+  choosableResults,
   copySelection,
   cutSelection,
   deleteSelection,
@@ -12,7 +18,9 @@ import {
   selectAll,
   ungroupSelection,
 } from "../interactions/actions";
+import { useAppStore } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
+import { nodeRun, retryRun, useRunStore } from "../stores/runStore";
 import { useClampedMenuPosition } from "./useClampedMenuPosition";
 
 interface Item {
@@ -22,7 +30,24 @@ interface Item {
 }
 
 /**
- * Right-click menu. Mirrors toolbar/shortcut actions only; opening it on a
+ * Puts what a node asks for on the system clipboard, to be read somewhere else.
+ *
+ * Said either way round: a clipboard the window is not allowed to write to
+ * fails quietly, and a menu that closed without a word would leave the choice
+ * looking as though it had worked.
+ */
+async function copyPrompt(prompt: string) {
+  try {
+    await navigator.clipboard.writeText(prompt);
+    useEditorStore.getState().announce("Prompt copied");
+  } catch {
+    useAppStore.getState().pushToast("error", "The clipboard is not available");
+  }
+}
+
+/**
+ * Right-click menu. Offers what the toolstrip and the inspector offer for the
+ * thing pointed at, and nothing that needs a place of its own; opening it on a
  * node or edge selects that target first (handled by the canvas callback).
  */
 export function ContextMenu() {
@@ -61,6 +86,44 @@ export function ContextMenu() {
         label: "Generate…",
         action: () => editor.openPromptPanel(targetId, true),
       });
+    }
+    // Read at the moment the menu is opened rather than watched: it is not on
+    // screen long enough for a record arriving while it is open to matter.
+    const asked = targetNode ? nodeRun(targetId) : null;
+    const going =
+      asked?.run.status === "queued" || asked?.run.status === "running";
+    if (asked && going) {
+      const runId = asked.run.id;
+      items.push({
+        label: "Stop",
+        action: () => void useRunStore.getState().cancel(runId),
+      });
+    }
+    if (
+      asked &&
+      !going &&
+      (asked.run.status === "failed" || asked.run.status === "cancelled")
+    ) {
+      const runId = asked.run.id;
+      items.push({ label: "Retry", action: () => void retryRun(runId) });
+    }
+    if (targetNode) {
+      const spec = (targetNode.data as { generation?: GenerationSpec })
+        .generation;
+      if (spec && spec.prompt.trim() !== "") {
+        items.push({
+          label: "Copy prompt",
+          action: () => void copyPrompt(spec.prompt),
+        });
+      }
+      if (canvas) {
+        for (const choice of choosableResults(canvas, targetNode)) {
+          items.push({
+            label: choice.label,
+            action: () => chooseResult(targetId, choice.slotId),
+          });
+        }
+      }
     }
     items.push(
       { label: "Rename", action: () => editor.startRenaming(targetId) },

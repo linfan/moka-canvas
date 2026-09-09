@@ -20,6 +20,7 @@ import {
   type NodeKind,
   type Point,
   type Rect,
+  type ResultSlot,
   type WorkflowNode,
 } from "../../../shared/domain";
 import { assetsApi, assetUrl } from "../../../api";
@@ -796,6 +797,141 @@ export function setNodeGeneration(
   if (commands.length === 0) return;
 
   execute(generation ? "Edit generation" : "Clear generation", commands);
+}
+
+interface HeldResults {
+  resultSlots?: ResultSlot[];
+  resultNodeIds?: NodeId[];
+}
+
+function resultsOf(node: WorkflowNode): ResultSlot[] {
+  return (node.data as HeldResults).resultSlots ?? [];
+}
+
+/** Whether a result has anything in it to be shown. */
+function answered(slot: ResultSlot): boolean {
+  return slot.status === "succeeded";
+}
+
+/**
+ * Whether two slots hold one answer: the same asset, or — where neither has one —
+ * the same words. A card made for one answer of a batch holds its own copy of it,
+ * and that is the only way back to the slot the batch kept for it.
+ */
+function sameAnswer(one: ResultSlot, other: ResultSlot): boolean {
+  if (one.assetId !== undefined || other.assetId !== undefined) {
+    return one.assetId === other.assetId;
+  }
+  return one.text !== undefined && one.text === other.text;
+}
+
+/**
+ * What one answer leaves on the node holding it, mirroring the way a run writes
+ * its result back: words are a text node's own content, and an asset is what any
+ * other kind of node points at.
+ */
+function holdAnswer(
+  data: Record<string, unknown>,
+  slot: ResultSlot,
+  kind: NodeKind,
+) {
+  if (kind === "text") {
+    if (slot.text !== undefined) data.content = slot.text;
+    return;
+  }
+  if (slot.assetId !== undefined) data.assetId = slot.assetId;
+}
+
+/** A result that could be shown as its node's own, and what to call the choice. */
+export interface ChoosableResult {
+  slotId: string;
+  label: string;
+}
+
+/**
+ * The results this node could show as its own, in the order they were made.
+ *
+ * Empty wherever there is nothing to choose: a node with one result is showing it
+ * already, a result that failed has nothing in it, and a card whose holder is
+ * gone — deleted, or never part of the document it arrived in — has nowhere to be
+ * chosen for.
+ */
+export function choosableResults(
+  canvas: CanvasDocument,
+  node: WorkflowNode,
+): ChoosableResult[] {
+  const held = resultsOf(node);
+  if (held.length > 1) {
+    return held.flatMap((slot, index) =>
+      slot.isPrimary || !answered(slot)
+        ? []
+        : [{ slotId: slot.id, label: `Show result ${index + 1}` }],
+    );
+  }
+  // One answer of a batch sits on a card of its own, and the node that asked for
+  // the batch is the one whose showing a choice of it changes.
+  const own = held[0];
+  if (!own || !answered(own)) return [];
+  const holder = findHolder(canvas, node, own);
+  if (!holder || holder.slot.isPrimary) return [];
+  return [
+    { slotId: own.id, label: `Show this result on ${holder.node.title}` },
+  ];
+}
+
+/**
+ * Makes one of a node's results the one it shows, in a single undoable step.
+ *
+ * Which node changes is not always the one asked about: a card made for one
+ * answer of a batch holds only its own copy of it, so the choice is read across
+ * to the node holding the batch, and it is that node that ends up showing the
+ * answer and saying which of its results is the primary one.
+ */
+export function chooseResult(nodeId: NodeId, slotId: string) {
+  const canvas = activeCanvas();
+  const acted = canvas ? findNode(canvas, nodeId) : undefined;
+  if (!canvas || !acted) return;
+  const asked = resultsOf(acted).find((slot) => slot.id === slotId);
+  if (!asked || !answered(asked)) return;
+
+  const holder =
+    resultsOf(acted).length > 1
+      ? { node: acted, slot: asked }
+      : findHolder(canvas, acted, asked);
+  if (!holder || holder.slot.isPrimary) return;
+
+  const data = { ...(holder.node.data as Record<string, unknown>) };
+  holdAnswer(data, holder.slot, holder.node.kind);
+  const slots = resultsOf(holder.node);
+  data.resultSlots = slots.map((slot) => ({
+    ...slot,
+    isPrimary: slot.id === holder.slot.id,
+  }));
+  execute("Show this result", [
+    {
+      type: "updateNode",
+      canvasId: canvas.id,
+      nodeId: holder.node.id,
+      patch: { data: data as NodeData },
+    },
+  ]);
+  const index = slots.findIndex((slot) => slot.id === holder.slot.id);
+  announce(`Showing result ${index + 1} of ${slots.length}`);
+}
+
+/** The node holding a batch, and the slot in it that one of its cards carries. */
+function findHolder(
+  canvas: CanvasDocument,
+  card: WorkflowNode,
+  own: ResultSlot,
+): { node: WorkflowNode; slot: ResultSlot } | null {
+  for (const holder of canvas.nodes) {
+    if (!(holder.data as HeldResults).resultNodeIds?.includes(card.id))
+      continue;
+    const match = resultsOf(holder).find((slot) => sameAnswer(slot, own));
+    if (match) return { node: holder, slot: match };
+  }
+  return null;
 }
 
 export function fitViewAction() {
