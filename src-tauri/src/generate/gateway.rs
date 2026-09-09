@@ -15,7 +15,7 @@
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value};
 
@@ -23,6 +23,7 @@ use crate::config::GenerateConfig;
 use crate::domain::Capability;
 use crate::metadata::Preferences;
 use crate::project::ProjectStore;
+use crate::telemetry::GenerationNote;
 
 use super::adapters::{for_protocol, ChannelCall};
 use super::error::ProviderError;
@@ -122,6 +123,7 @@ impl Gateway {
             .place(stamped(request, Capability::Video), cancel)
             .await?;
         let adapter = for_protocol(placement.call.protocol);
+        let started = Instant::now();
         let task = self
             .retried(
                 cancel,
@@ -137,12 +139,41 @@ impl Gateway {
                 },
                 waitable,
             )
-            .await?;
+            .await;
+        match &task {
+            // A shot that started is a call that happened. What it will answer
+            // with is a later poll's business, so nothing is counted here.
+            Ok(_) => self.logged(&placement, started.elapsed(), 0, "started"),
+            Err(error) => self.logged(&placement, started.elapsed(), 0, error.code()),
+        }
+        let task = task?;
         // Tracked before the handle is handed back: a client that polls at
         // once must not find it missing.
         self.tasks.register(task.clone());
         self.noted(&task).await;
         Ok(task)
+    }
+
+    /// What one call is worth writing down, said once it is over.
+    ///
+    /// Once per placement rather than once per attempt or once per poll: a
+    /// retry that succeeded is one call from where a reader sits, and a shot
+    /// that took a hundred looks would otherwise write a hundred lines about
+    /// itself. The note is built from the call rather than spelled out here so
+    /// that what must stay out of it stays out whichever way it is written.
+    fn logged(&self, placement: &Placement, took: Duration, bytes: u64, status: &str) {
+        let note = GenerationNote::of(&placement.call, &placement.request, took, bytes, status);
+        tracing::info!(target: "moka::generate", "{note}");
+    }
+
+    /// How many looks at a job before it is given up on.
+    ///
+    /// Read off the budgets rather than left as a constant in the caller: the
+    /// wait a deployment is willing to sit through is a number it sets, and a
+    /// progress fraction reported against a different ceiling than the one
+    /// being counted would be a lie.
+    pub fn poll_ceiling(&self) -> u32 {
+        self.budgets.poll_ceiling()
     }
 
     /// Writes a job down beside the run history.
@@ -221,7 +252,13 @@ impl Gateway {
             // provider is still making.
             Err(_) => {}
         }
-        state
+        // Applied after the handle is let go: a job that answered is done with
+        // whether or not the answer can be kept, and holding the handle would
+        // only invite a poll for something that has already been refused.
+        state.and_then(|state| match state {
+            TaskState::Succeeded(result) => kept(result, &self.budgets).map(TaskState::Succeeded),
+            other => Ok(other),
+        })
     }
 
     /// The jobs being tracked.
@@ -240,7 +277,8 @@ impl Gateway {
         let (forwarded, watching) = counting(sink);
         let streaming = watching.is_streaming();
         let adapter = for_protocol(placement.call.protocol);
-        let result = self
+        let started = Instant::now();
+        let outcome = self
             .retried(
                 cancel,
                 || async {
@@ -270,10 +308,14 @@ impl Gateway {
                 // twice, and a caller has no way to unsee the first lot.
                 |error| waitable(error) && forwarded.load(Ordering::SeqCst) == 0,
             )
-            .await?;
-        // Applied once here rather than in every adapter, so that an answer
-        // with nothing in it means the same thing whichever protocol gave it.
-        settled(normalize(result))
+            .await;
+        let took = started.elapsed();
+        let result = outcome.and_then(|result| kept(result, &self.budgets));
+        match &result {
+            Ok(answer) => self.logged(&placement, took, answer.bytes(), "ok"),
+            Err(error) => self.logged(&placement, took, 0, error.code()),
+        }
+        result
     }
 
     /// Resolves a request into one channel, one set of parameters, and the
@@ -426,6 +468,35 @@ fn settled(result: GenerateResult) -> Result<GenerateResult, ProviderError> {
         ));
     }
     Ok(result)
+}
+
+/// One answer, in the shape everything above this module expects and inside
+/// the ceilings it was told to expect.
+///
+/// Shared by a call that waited an answer out and by a job that reported one
+/// minutes later, so that the two cannot come apart in what they hand back.
+/// Checked here rather than where an answer is written down because by then
+/// the bytes are already in memory: a ceiling that only refuses to store is a
+/// ceiling that has been passed.
+fn kept(result: GenerateResult, budgets: &GenerateConfig) -> Result<GenerateResult, ProviderError> {
+    let result = normalize(result);
+    // Counted before the bytes because it is the cheaper question, and because
+    // a node can only point at so many cards whatever those cards weigh.
+    if result.items.len() > budgets.max_output_items {
+        return Err(ProviderError::TooLarge(format!(
+            "{} pieces came back where {} is the most one answer may carry",
+            result.items.len(),
+            budgets.max_output_items
+        )));
+    }
+    let bytes = result.bytes();
+    if bytes > budgets.max_output_bytes {
+        return Err(ProviderError::TooLarge(format!(
+            "{bytes} bytes came back where {} is the most one answer may carry",
+            budgets.max_output_bytes
+        )));
+    }
+    settled(result)
 }
 
 /// The capability of the call a request arrived through.
@@ -618,6 +689,108 @@ mod tests {
         })
         .expect("an answer is an answer");
         assert_eq!(answered.text.as_deref(), Some("a lantern"));
+    }
+
+    /// A piece of media of a given weight, which is all a ceiling looks at.
+    fn piece(bytes: usize) -> crate::generate::GeneratedItem {
+        crate::generate::GeneratedItem {
+            bytes: vec![0; bytes],
+            mime: "image/png".into(),
+            kind: Capability::Image,
+            width: None,
+            height: None,
+            duration_ms: None,
+        }
+    }
+
+    #[test]
+    fn an_answer_inside_both_ceilings_is_kept_in_the_shape_everything_expects() {
+        let budgets = GenerateConfig {
+            max_output_items: 2,
+            max_output_bytes: 100,
+            ..GenerateConfig::default()
+        };
+        let inside = kept(
+            GenerateResult {
+                text: Some("  a caption  ".into()),
+                items: vec![piece(40), piece(7)],
+                ..Default::default()
+            },
+            &budgets,
+        )
+        .expect("inside both ceilings");
+        assert_eq!(inside.text.as_deref(), Some("a caption"), "still trimmed");
+        assert_eq!(inside.items.len(), 2);
+
+        // A ceiling does not replace the rule that an answer has to carry
+        // something.
+        assert_eq!(
+            kept(GenerateResult::default(), &budgets)
+                .expect_err("there is nothing to store")
+                .code(),
+            "PROVIDER_NO_OUTPUT"
+        );
+    }
+
+    #[test]
+    fn an_answer_with_too_many_pieces_names_the_ceiling_it_passed() {
+        let budgets = GenerateConfig {
+            max_output_items: 2,
+            max_output_bytes: 1000,
+            ..GenerateConfig::default()
+        };
+        let error = kept(
+            GenerateResult {
+                items: vec![piece(1), piece(1), piece(1)],
+                ..Default::default()
+            },
+            &budgets,
+        )
+        .expect_err("a node cannot point at three cards");
+        assert_eq!(error.code(), "GENERATION_OUTPUT_TOO_LARGE");
+        assert!(
+            !error.retryable(),
+            "the same answer would come back the same size"
+        );
+        // Which ceiling was passed, because the remedy differs: fewer pieces
+        // or a bigger budget.
+        assert!(
+            error
+                .to_string()
+                .contains("3 pieces came back where 2 is the most"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_answer_that_weighs_too_much_is_refused_before_it_is_handed_on() {
+        let budgets = GenerateConfig {
+            max_output_items: 16,
+            max_output_bytes: 100,
+            ..GenerateConfig::default()
+        };
+        let error = kept(
+            GenerateResult {
+                items: vec![piece(60), piece(60)],
+                ..Default::default()
+            },
+            &budgets,
+        )
+        .expect_err("120 bytes where 100 is the most");
+        assert_eq!(error.code(), "GENERATION_OUTPUT_TOO_LARGE");
+        assert!(error.to_string().contains("120 bytes"), "{error}");
+
+        // Words weigh something too: a ceiling that only counted media would
+        // let a very long answer through.
+        let words = kept(
+            GenerateResult {
+                text: Some("a".repeat(101)),
+                ..Default::default()
+            },
+            &budgets,
+        )
+        .expect_err("101 bytes of text where 100 is the most");
+        assert!(words.to_string().contains("101 bytes"), "{words}");
     }
 
     #[test]

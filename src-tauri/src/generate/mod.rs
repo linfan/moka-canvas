@@ -184,6 +184,17 @@ impl GenerateResult {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty() && self.text.as_deref().unwrap_or_default().trim().is_empty()
     }
+
+    /// How much of it there is, counted the same way whoever is counting and
+    /// whoever is bounding it need it counted.
+    pub fn bytes(&self) -> u64 {
+        let text = self.text.as_deref().map(str::len).unwrap_or_default() as u64;
+        text + self
+            .items
+            .iter()
+            .map(|item| item.bytes.len() as u64)
+            .sum::<u64>()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -430,6 +441,38 @@ mod tests {
             ..Default::default()
         }
         .is_empty());
+    }
+
+    #[test]
+    fn what_an_answer_takes_up_counts_the_words_and_the_media_together() {
+        assert_eq!(GenerateResult::default().bytes(), 0);
+        assert_eq!(
+            GenerateResult {
+                text: Some("a caption".into()),
+                items: vec![
+                    GeneratedItem {
+                        bytes: vec![0; 40],
+                        mime: "image/png".into(),
+                        kind: Capability::Image,
+                        width: None,
+                        height: None,
+                        duration_ms: None,
+                    },
+                    GeneratedItem {
+                        bytes: vec![0; 7],
+                        mime: "audio/wav".into(),
+                        kind: Capability::Audio,
+                        width: None,
+                        height: None,
+                        duration_ms: Some(1000),
+                    },
+                ],
+                ..Default::default()
+            }
+            .bytes(),
+            9 + 40 + 7,
+            "a ceiling nobody counts the same way would bound the wrong thing"
+        );
     }
 
     #[test]

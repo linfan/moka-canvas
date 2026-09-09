@@ -27,11 +27,6 @@ const OPERATION_PREFIX: &str = "generate.";
 /// a queue the provider is already working through.
 const POLL_INTERVAL: Duration = Duration::from_millis(2500);
 
-/// How many looks before a job is given up on: five minutes at the interval
-/// above. Longer than a provider asks for, short enough that a job one silently
-/// dropped becomes a failure rather than a run that never ends.
-const MAX_POLLS: u32 = 120;
-
 /// The flags a run's steps answer to.
 ///
 /// One per run rather than one per step, because a run drives one step at a
@@ -171,15 +166,18 @@ async fn answered(
 /// A provider answers a shot with "still going" rather than with the result, so
 /// this is a loop with a ceiling rather than a request held open. Each look is
 /// a separate call, a hint about when to come back is obeyed when the provider
-/// gives one, and the ceiling is what turns a job one silently forgot into a
-/// failure.
+/// gives one, and the ceiling — a number the deployment set rather than one
+/// this module knows — is what turns a job one silently forgot into a failure.
 async fn waited(
     gateway: &Gateway,
     task: &str,
     cancel: &Cancel,
     progress: &ProgressReporter,
 ) -> Result<GenerateResult, ProviderError> {
-    for look in 0..MAX_POLLS {
+    // Read once rather than per look: the fraction a caller is shown has to be
+    // measured against the same ceiling the loop counts to.
+    let ceiling = gateway.poll_ceiling();
+    for look in 0..ceiling {
         let delay = match gateway.poll(task, cancel).await? {
             TaskState::Succeeded(result) => return Ok(result),
             // The job ended badly rather than this step failing to look, but
@@ -193,7 +191,7 @@ async fn waited(
                 })
             }
             TaskState::Pending { retry_after_ms } => {
-                progress.report(f64::from(look + 1) / f64::from(MAX_POLLS + 1));
+                progress.report(f64::from(look + 1) / f64::from(ceiling + 1));
                 if retry_after_ms > 0 {
                     Duration::from_millis(retry_after_ms)
                 } else {
@@ -204,7 +202,7 @@ async fn waited(
         cancel.wait(delay).await?;
     }
     Err(ProviderError::Timeout(format!(
-        "the job was still running after {MAX_POLLS} polls"
+        "the job was still running after {ceiling} looks at it"
     )))
 }
 

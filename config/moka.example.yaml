@@ -33,8 +33,23 @@ generate:
   maxImageInputBytes: 20971520
   maxMediaInputBytes: 209715200
   # A generation answer can carry a base64 image, so this sits far above the
-  # ceiling a model list gets.
-  maxResponseBytes: 67108864
+  # ceiling a model list gets, and above maxOutputBytes: an answer arrives
+  # encoded, so the reply carrying it is the larger of the two.
+  maxResponseBytes: 402653184
+  # How many runs drive at once. One past this waits, and its record says queued
+  # until a place is free.
+  maxConcurrentRuns: 2
+  # Switched on, nothing reaches a provider: the executor that would is not
+  # offered at all, so a generation node is refused before its run starts rather
+  # than failing part way through one.
+  offline: false
+  # What one answer may carry. The piece ceiling is the number of cards a node
+  # can point at, so an answer that fits is one the canvas can show.
+  maxOutputBytes: 268435456
+  maxOutputItems: 16
+  # Looks at a job a provider is still running before the step waiting on it
+  # gives up: five minutes at the interval the executor polls at.
+  videoMaxPolls: 120
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

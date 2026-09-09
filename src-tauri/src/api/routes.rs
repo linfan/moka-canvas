@@ -92,7 +92,10 @@ pub async fn public_config(State(state): State<ApiState>) -> Json<PublicConfigRe
         limits: config.limits.clone(),
         capabilities: CapabilitiesResponse {
             mode: state.mode.as_str().to_string(),
-            executors: config.workflow.enabled_executors.clone(),
+            // The list a run is validated against rather than the one that was
+            // configured, so what a client is told and what it gets cannot
+            // disagree about which executors are switched off.
+            executors: config.active_executors(),
             asset_categories: crate::project::package::asset_categories()
                 .iter()
                 .map(|category| category.to_string())

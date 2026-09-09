@@ -59,7 +59,8 @@ impl ApiState {
         let runs = RunManager::new(
             Arc::clone(&store),
             executors,
-            config.workflow.enabled_executors.clone(),
+            config.active_executors(),
+            config.generate.concurrent_runs(),
         );
         Self {
             mode,

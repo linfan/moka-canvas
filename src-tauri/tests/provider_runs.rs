@@ -9,8 +9,12 @@
 //! canvas whole, that a cancel arrives at a step already waiting on a
 //! provider, that a shot is written down the moment it is placed rather than
 //! when it answers, that a run left waiting on one asks after the same job
-//! when the project is opened again, and that a listener hears a run's words
-//! as they arrive and its ending last.
+//! when the project is opened again, that a listener hears a run's words
+//! as they arrive and its ending last, that a run asked for past the ceiling on
+//! how many drive at once waits with its own record still saying so, that a
+//! deployment which says nothing reaches a provider refuses a generation node
+//! before the run starts rather than failing inside it, and that an answer
+//! carrying more than a node can hold is refused whole and filed nowhere.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -25,7 +29,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use moka_canvas::api::ApiState;
-use moka_canvas::config::{parse_test_config, RuntimeMode};
+use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
 use moka_canvas::domain::commands::make_node;
 use moka_canvas::domain::{
     generation_capability_for, new_id, now_iso, Capability, GenerationInputMode, GenerationMode,
@@ -76,8 +80,18 @@ struct Harness {
 /// Server mode refuses to invent one, and a generation cannot be placed without
 /// a credential to send.
 fn harness() -> Harness {
+    budgeted(|_| {})
+}
+
+/// The same app with the budgets changed before anything reads them.
+///
+/// Changed rather than written to a file: what is under test is how a ceiling
+/// behaves once it is in force, and the numbers a deployment ships with have
+/// their own test where they are parsed.
+fn budgeted(tune: impl FnOnce(&mut AppConfig)) -> Harness {
     let tmp = TempDir::new().expect("a temporary directory");
-    let config = parse_test_config(tmp.path());
+    let mut config = parse_test_config(tmp.path());
+    tune(&mut config);
     let metadata = config
         .metadata
         .dir
@@ -665,13 +679,22 @@ fn job_note(root: &str, task_id: &str) -> PathBuf {
 /// Waits until a throwaway provider has been asked, so what follows happens
 /// while the step is in the middle of a call rather than before it.
 async fn until_asked(recorded: &Recorded) {
+    until_calls(recorded, 1).await;
+}
+
+/// The same, for a test that has let more than one run reach a provider and
+/// needs to know which one it is watching.
+async fn until_calls(recorded: &Recorded, calls: usize) {
     for _ in 0..200 {
-        if recorded.calls() > 0 {
+        if recorded.calls() >= calls {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
-    panic!("the provider was never asked");
+    panic!(
+        "the provider was asked {} of {calls} times",
+        recorded.calls()
+    );
 }
 
 /// Waits until a step has written down the job it is waiting on, and says which
@@ -1423,4 +1446,187 @@ async fn a_stream_for_a_run_nobody_has_heard_of_is_a_problem_rather_than_a_strea
         "nothing was opened to be listened to"
     );
     assert_eq!(body_json(response).await["code"], "RUN_NOT_FOUND");
+}
+
+/// Two runs asked for at once, one ceiling, and what the second one looks like
+/// from where a client sits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_run_past_the_ceiling_waits_with_its_own_record_still_saying_queued() {
+    let harness = budgeted(|config| config.generate.max_concurrent_runs = 1);
+    let recorded = Recorded::default();
+    let held_picture = Arc::new(Notify::new());
+    let held_words = Arc::new(Notify::new());
+    let base_url = serve(
+        hesitant(recorded.clone(), Arc::clone(&held_picture)).merge(writing(
+            recorded.clone(),
+            Arc::clone(&held_words),
+            &[SENTENCE],
+        )),
+    )
+    .await;
+    harness
+        .configure(
+            &base_url,
+            &[(PAINTER, Capability::Image), (WRITER, Capability::Text)],
+        )
+        .await;
+    let (canvas_id, _root) = harness.project("Queue").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "a paper lantern over a quiet lake", None) },
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-copy", NodeKind::Text, "Copy", &reference(WRITER),
+                "one line for the poster", None) },
+        ]))
+        .await;
+
+    let driving = harness.start(&canvas_id, json!(["n-poster"])).await;
+    until_asked(&recorded).await;
+    let waiting = harness.start(&canvas_id, json!(["n-copy"])).await;
+
+    // Waiting is something a client reads rather than something it is told:
+    // the run past the ceiling has the same record it was given at the start.
+    assert_eq!(harness.run(&driving).await["status"], "running");
+    assert_eq!(harness.run(&waiting).await["status"], "queued");
+    assert_eq!(
+        recorded.calls(),
+        1,
+        "a run that has not reached a provider has not been paid for"
+    );
+
+    held_picture.notify_one();
+    assert_eq!(harness.settled(&driving).await["status"], "succeeded");
+
+    // Its place in the queue was the permit the first run was holding, and it
+    // takes that place up on its own rather than being started again.
+    until_calls(&recorded, 2).await;
+    assert_eq!(harness.run(&waiting).await["status"], "running");
+    held_words.notify_one();
+    assert_eq!(harness.settled(&waiting).await["status"], "succeeded");
+}
+
+/// Nothing reaches a provider when the deployment says so, and a node that
+/// would need one is refused where every other reason a node cannot run is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_offline_deployment_never_offers_the_executor_that_would_reach_a_provider() {
+    let harness = budgeted(|config| config.generate.offline = true);
+    let recorded = Recorded::default();
+    let base_url = serve(answering(recorded.clone())).await;
+    harness
+        .configure(&base_url, &[(PAINTER, Capability::Image)])
+        .await;
+
+    // The list a client is told about and the list a run is checked against are
+    // the same list, so they cannot disagree about what is switched off.
+    let config = harness
+        .send_json(get_request("/api/v1/config"), StatusCode::OK)
+        .await;
+    assert_eq!(
+        config["capabilities"]["executors"],
+        json!(["deterministic"]),
+        "the one that reaches a provider is not offered"
+    );
+
+    let (canvas_id, _root) = harness.project("Offline").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "a paper lantern over a quiet lake", None) },
+        ]))
+        .await;
+
+    // Refused before a run starts rather than failing inside one: a run that
+    // cannot do the thing it was asked for is a question about the canvas, not
+    // an outcome to be reported afterwards.
+    let refused = harness
+        .send_json(
+            json_request(
+                "POST",
+                "/api/v1/projects/current/runs",
+                json!({ "canvasId": canvas_id, "nodeIds": ["n-poster"] }),
+            ),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+        .await;
+    assert_eq!(refused["code"], "RUN_VALIDATION_FAILED");
+    let issues = refused["details"]["issues"]
+        .as_array()
+        .expect("a refusal says what is wrong");
+    let codes: Vec<&str> = issues
+        .iter()
+        .map(|issue| issue["code"].as_str().expect("an issue has a code"))
+        .collect();
+    assert!(codes.contains(&"EXECUTOR_DISABLED"), "{codes:?}");
+    assert_eq!(
+        issues[0]["nodeId"],
+        json!("n-poster"),
+        "the refusal names the node it is about"
+    );
+    assert_eq!(recorded.calls(), 0, "nothing reached a provider");
+    assert!(
+        harness
+            .send_json(get_request("/api/v1/projects/current/runs"), StatusCode::OK)
+            .await
+            .as_array()
+            .expect("the run history is a list")
+            .is_empty(),
+        "a run that was refused is not a run that happened"
+    );
+}
+
+/// An answer with more in it than a node can point at is refused whole rather
+/// than trimmed: keeping the first two of three pictures would be a choice
+/// about somebody's work that nothing here is entitled to make.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_answer_with_more_pieces_than_a_node_can_hold_is_refused_and_filed_nowhere() {
+    let harness = budgeted(|config| config.generate.max_output_items = 2);
+    let recorded = Recorded::default();
+    let base_url = serve(painting(recorded.clone(), &[(8, 6), (10, 4), (12, 9)])).await;
+    harness
+        .configure(&base_url, &[(PAINTER, Capability::Image)])
+        .await;
+    let (canvas_id, root) = harness.project("Too many").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "three lanterns over a quiet lake", Some(json!({ "count": 3 }))) },
+        ]))
+        .await;
+
+    let run_id = harness.start(&canvas_id, json!(["n-poster"])).await;
+    let finished = harness.settled(&run_id).await;
+    assert_eq!(finished["status"], "failed");
+    let steps = finished["steps"].as_array().expect("a run has steps");
+    assert_eq!(steps[0]["status"], "failed");
+    assert!(
+        steps[0]["outputAssetIds"].is_null(),
+        "nothing was kept from an answer that could not be"
+    );
+    // The reason names the ceiling that was passed, because the remedy is
+    // either fewer pieces or a bigger budget and a caller has to be able to
+    // tell which.
+    let reason = steps[0]["error"].as_str().expect("a failure says why");
+    assert!(reason.contains("too large to keep"), "{reason}");
+    assert!(reason.contains("3 pieces"), "{reason}");
+
+    assert_eq!(
+        files_in(&root, "images"),
+        0,
+        "an answer that was refused left nothing on disk"
+    );
+    let images = harness.document().await["moka"]["resources"]["images"].clone();
+    assert_eq!(
+        images.as_array().expect("the registry is a list").len(),
+        0,
+        "and nothing in the project to point at"
+    );
+    assert_eq!(
+        recorded.calls(),
+        1,
+        "the ceiling is not a reason to ask twice"
+    );
 }

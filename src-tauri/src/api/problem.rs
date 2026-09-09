@@ -72,7 +72,11 @@ pub fn status_for_code(code: &str) -> StatusCode {
         "PROVIDER_AUTH" => StatusCode::UNAUTHORIZED,
         "PROVIDER_RATE_LIMIT" => StatusCode::TOO_MANY_REQUESTS,
         "PROVIDER_BAD_REQUEST" => StatusCode::BAD_REQUEST,
-        "PROVIDER_UNAVAILABLE" | "PROVIDER_NO_OUTPUT" => StatusCode::BAD_GATEWAY,
+        // An answer too big to keep is one this server refused rather than one
+        // the client asked badly for, so it reports as the gateway it is.
+        "PROVIDER_UNAVAILABLE" | "PROVIDER_NO_OUTPUT" | "GENERATION_OUTPUT_TOO_LARGE" => {
+            StatusCode::BAD_GATEWAY
+        }
         "PROVIDER_TIMEOUT" => StatusCode::GATEWAY_TIMEOUT,
         // Unregistered, but the established name for "the client went away
         // mid-request"; 4xx keeps it out of the server-failure counts.
@@ -197,6 +201,10 @@ mod tests {
         assert_eq!(status_for_code("TASK_EXPIRED"), StatusCode::GONE);
         assert_eq!(
             status_for_code("PROVIDER_NO_OUTPUT"),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            status_for_code("GENERATION_OUTPUT_TOO_LARGE"),
             StatusCode::BAD_GATEWAY
         );
         // A 4xx, so a caller walking away mid-request is not counted as a

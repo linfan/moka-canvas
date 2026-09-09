@@ -71,6 +71,10 @@ const CUSTOM_RESERVED: &str = "the custom protocol is reserved and has no implem
 pub struct ChannelCall {
     /// The provider's own model name, split out of the reference already.
     pub model_id: String,
+    /// Which of the user's channels this is, split out as well: a name is worth
+    /// writing down, and taking it back out of the reference is a thing a caller
+    /// should not have to do.
+    pub channel_id: String,
     /// The resolved `channelId::modelId`, kept so a job started here can be
     /// pointed back at the same channel.
     pub reference: String,
@@ -89,6 +93,7 @@ impl ChannelCall {
     ) -> Result<Self, ProviderError> {
         Ok(Self {
             model_id: resolved.model_id.clone(),
+            channel_id: resolved.channel_id.clone(),
             reference: resolved.reference.clone(),
             protocol: resolved.protocol,
             base_url: resolved.base_url.clone(),
@@ -104,6 +109,7 @@ impl ChannelCall {
     fn listing(protocol: Protocol, base_url: &str, api_key: &str) -> Result<Self, ProviderError> {
         Ok(Self {
             model_id: String::new(),
+            channel_id: String::new(),
             reference: String::new(),
             protocol,
             base_url: base_url.to_string(),

@@ -1,8 +1,8 @@
 //! The run manager: owns the run lifecycle (queue, drive, cancel, retry) and
-//! persists every transition through the project store. One run drives at a
-//! time; the driver is the single writer of a running record, so cancel
-//! requests arrive through an in-memory flag the driver observes between and
-//! during steps.
+//! persists every transition through the project store. A bounded number of runs
+//! drive at once, and each driver is the only writer of the record it drives, so
+//! cancel requests arrive through an in-memory flag the driver observes between
+//! and during steps.
 
 use super::events::{streamed_words, RunEvent, RunEvents};
 use super::validate::{validate_run, RunSnapshot};
@@ -28,7 +28,13 @@ pub struct RunManager {
     store: Arc<FsProjectStore>,
     executors: Vec<Arc<dyn WorkflowExecutor>>,
     enabled_executors: Vec<String>,
-    gate: tokio::sync::Mutex<()>,
+    /// How many runs drive at once, as permits rather than as a lock.
+    ///
+    /// A run past the ceiling waits here with its record still saying queued,
+    /// which is what a client reads and what the run list shows; nothing has to
+    /// be told it is waiting. The driver is still the only writer of the record
+    /// it is driving, so two runs driving are two runs, not two writers of one.
+    gate: tokio::sync::Semaphore,
     /// Serializes status transitions between the driver and cancel requests.
     transitions: tokio::sync::Mutex<()>,
     cancel_requests: Mutex<HashSet<RunId>>,
@@ -277,12 +283,13 @@ impl RunManager {
         store: Arc<FsProjectStore>,
         executors: Vec<Arc<dyn WorkflowExecutor>>,
         enabled_executors: Vec<String>,
+        concurrent_runs: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
             store,
             executors,
             enabled_executors,
-            gate: tokio::sync::Mutex::new(()),
+            gate: tokio::sync::Semaphore::new(concurrent_runs),
             transitions: tokio::sync::Mutex::new(()),
             cancel_requests: Mutex::new(HashSet::new()),
             events: RunEvents::default(),
@@ -599,7 +606,14 @@ impl RunManager {
     }
 
     async fn drive(self: Arc<Self>, run_id: RunId, snapshot: RunSnapshot) {
-        let _gate = self.gate.lock().await;
+        // Held for the whole walk rather than taken per step: what the ceiling
+        // bounds is how many runs are driving, and a step that let its permit go
+        // would hand the run's place to another one mid-flight.
+        let _permit = self
+            .gate
+            .acquire()
+            .await
+            .expect("the ceiling on runs is never closed");
         let mut run = {
             let _guard = self.transitions.lock().await;
             match self.store.get_run(&run_id).await {
@@ -1600,7 +1614,7 @@ mod tests {
             )
             .await
             .expect("the project opens");
-        RunManager::new(store, Vec::new(), Vec::new())
+        RunManager::new(store, Vec::new(), Vec::new(), 1)
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

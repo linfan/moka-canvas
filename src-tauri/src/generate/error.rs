@@ -74,6 +74,12 @@ pub enum ProviderError {
     #[error("the channel returned no usable output: {0}")]
     NoOutput(String),
 
+    /// A successful answer too big to keep. The ceiling is one the deployment
+    /// set, so this is not a provider misbehaving and asking it again would be
+    /// answered the same way: what has to change is the request or the budget.
+    #[error("the answer was too large to keep: {0}")]
+    TooLarge(String),
+
     /// The caller walked away mid-generation.
     #[error("the generation was cancelled")]
     Cancelled,
@@ -124,6 +130,7 @@ impl ProviderError {
             Self::Unreachable(_) => "PROVIDER_UNAVAILABLE",
             Self::Rejected(_) => "PROVIDER_BAD_REQUEST",
             Self::NoOutput(_) => "PROVIDER_NO_OUTPUT",
+            Self::TooLarge(_) => "GENERATION_OUTPUT_TOO_LARGE",
             Self::Cancelled => "GENERATION_CANCELLED",
             Self::TaskMissing { .. } => "TASK_NOT_FOUND",
             Self::TaskExpired { .. } => "TASK_EXPIRED",
@@ -176,6 +183,7 @@ mod tests {
     fn run_outcomes() -> Vec<ProviderError> {
         vec![
             ProviderError::NoOutput("the answer carried no text and no media".into()),
+            ProviderError::TooLarge("the answer carried 17 pieces".into()),
             ProviderError::Cancelled,
             ProviderError::TaskMissing {
                 task: "task-1".into(),
@@ -193,6 +201,7 @@ mod tests {
             codes,
             [
                 "PROVIDER_NO_OUTPUT",
+                "GENERATION_OUTPUT_TOO_LARGE",
                 "GENERATION_CANCELLED",
                 "TASK_NOT_FOUND",
                 "TASK_EXPIRED"
@@ -202,9 +211,9 @@ mod tests {
 
     #[test]
     fn a_run_outcome_is_never_something_waiting_fixes() {
-        // An empty answer, a caller that left, and a handle that is gone all
-        // fail again verbatim; only a busy or unreachable channel is worth a
-        // backoff.
+        // An empty answer, one too big to keep, a caller that left, and a
+        // handle that is gone all fail again verbatim; only a busy or
+        // unreachable channel is worth a backoff.
         for error in run_outcomes() {
             assert!(!error.retryable(), "{error} must not be retried");
             assert!(error.details().is_none());

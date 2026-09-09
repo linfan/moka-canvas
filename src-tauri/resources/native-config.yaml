@@ -21,7 +21,12 @@ generate:
   retryBaseMs: 1000
   maxImageInputBytes: 20971520
   maxMediaInputBytes: 209715200
-  maxResponseBytes: 67108864
+  maxResponseBytes: 402653184
+  maxConcurrentRuns: 2
+  offline: false
+  maxOutputBytes: 268435456
+  maxOutputItems: 16
+  videoMaxPolls: 120
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

@@ -77,10 +77,32 @@ pub struct GenerateConfig {
     pub max_image_input_bytes: u64,
     #[serde(default = "default_max_media_input_bytes")]
     pub max_media_input_bytes: u64,
-    /// A generation answer can carry a base64 image, so the ceiling here is
-    /// far above the one a model list gets.
+    /// What one reply from a provider may weigh.
+    ///
+    /// A generation answer can carry a base64 image, so the ceiling here is far
+    /// above the one a model list gets, and above the one on the answer it
+    /// carries: an answer arrives encoded, so the reply is the larger of the two.
     #[serde(default = "default_max_response_bytes")]
     pub max_response_bytes: u64,
+    /// How many runs drive at once. One past the ceiling waits with its record
+    /// still saying queued, which is what a client reads.
+    #[serde(default = "default_max_concurrent_runs")]
+    pub max_concurrent_runs: usize,
+    /// Nothing reaches a provider. The executor that would is not offered, so a
+    /// generation node is refused before a run starts rather than failing inside
+    /// one.
+    #[serde(default)]
+    pub offline: bool,
+    /// What one answer's media may add up to.
+    #[serde(default = "default_max_output_bytes")]
+    pub max_output_bytes: u64,
+    /// How many pieces one answer may carry, which is also how many cards a node
+    /// can point at.
+    #[serde(default = "default_max_output_items")]
+    pub max_output_items: usize,
+    /// Looks at an upstream job before it is given up on.
+    #[serde(default = "default_video_max_polls")]
+    pub video_max_polls: u32,
 }
 
 impl Default for GenerateConfig {
@@ -96,6 +118,11 @@ impl Default for GenerateConfig {
             max_image_input_bytes: default_max_image_input_bytes(),
             max_media_input_bytes: default_max_media_input_bytes(),
             max_response_bytes: default_max_response_bytes(),
+            max_concurrent_runs: default_max_concurrent_runs(),
+            offline: false,
+            max_output_bytes: default_max_output_bytes(),
+            max_output_items: default_max_output_items(),
+            video_max_polls: default_video_max_polls(),
         }
     }
 }
@@ -129,6 +156,23 @@ impl GenerateConfig {
                 self.max_media_input_bytes
             }
         }
+    }
+
+    /// How many runs may drive at once.
+    ///
+    /// Never none: a ceiling of zero is a queue nothing ever leaves, and a
+    /// mistyped number should not be able to ask for one.
+    pub fn concurrent_runs(&self) -> usize {
+        self.max_concurrent_runs.max(1)
+    }
+
+    /// How many looks at an upstream job before it is given up on.
+    ///
+    /// Never none, because a ceiling of zero would fail a job before asking
+    /// about it once, and a job this process placed is one a provider is already
+    /// being paid for.
+    pub fn poll_ceiling(&self) -> u32 {
+        self.video_max_polls.max(1)
     }
 }
 
@@ -234,8 +278,30 @@ fn default_max_image_input_bytes() -> u64 {
 fn default_max_media_input_bytes() -> u64 {
     200 * 1024 * 1024
 }
+/// Wide enough to carry the biggest answer one is allowed to keep.
+///
+/// An answer arrives encoded inside a reply, so the reply is the larger of the
+/// two. Deriving one from the other rather than shipping two numbers is what
+/// keeps the ceiling on an answer the one that bites: a reply ceiling below it
+/// would refuse answers that were inside it, and the number a deployment set
+/// about its answers would never be reached.
 fn default_max_response_bytes() -> u64 {
-    64 * 1024 * 1024
+    default_max_output_bytes() * 3 / 2
+}
+fn default_max_concurrent_runs() -> usize {
+    2
+}
+fn default_max_output_bytes() -> u64 {
+    256 * 1024 * 1024
+}
+/// The same number as the cards a node can point at, taken from the one place
+/// that says so: a piece past it would be filed in the project with nowhere on
+/// the canvas to show it.
+fn default_max_output_items() -> usize {
+    crate::domain::validate::MAX_RESULT_SLOTS
+}
+fn default_video_max_polls() -> u32 {
+    120
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +319,27 @@ pub struct AppConfig {
     pub public: PublicConfig,
     #[serde(default)]
     pub limits: LimitsConfig,
+}
+
+impl AppConfig {
+    /// The executors a run may use.
+    ///
+    /// Offline takes the one that reaches a provider out of the list rather than
+    /// adding a refusal of its own: a node that cannot run is refused where every
+    /// other reason a node cannot run is, and the list handed to a client is the
+    /// list a run is validated against, so the two cannot disagree about what is
+    /// switched off.
+    pub fn active_executors(&self) -> Vec<String> {
+        if !self.generate.offline {
+            return self.workflow.enabled_executors.clone();
+        }
+        self.workflow
+            .enabled_executors
+            .iter()
+            .filter(|key| key.as_str() != crate::workflow::PROVIDER_EXECUTOR_KEY)
+            .cloned()
+            .collect()
+    }
 }
 
 impl Default for WorkflowConfig {
@@ -464,6 +551,71 @@ public:
         assert_eq!(config.generate.image_timeout_seconds, 300);
         assert_eq!(config.generate.video_poll_timeout_seconds, 30);
         assert_eq!(config.generate.max_attempts, 3);
+        assert_eq!(config.generate.max_concurrent_runs, 2);
+        assert!(
+            !config.generate.offline,
+            "reaching a provider is the default"
+        );
+        assert_eq!(config.generate.max_output_bytes, 256 * 1024 * 1024);
+        assert_eq!(config.generate.video_max_polls, 120);
+    }
+
+    #[test]
+    fn an_offline_switch_takes_the_provider_out_of_the_list() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = parse_test_config(root.path());
+        assert_eq!(
+            config.active_executors(),
+            vec!["deterministic".to_string(), "provider".to_string()]
+        );
+
+        config.generate.offline = true;
+        assert_eq!(
+            config.active_executors(),
+            vec!["deterministic".to_string()],
+            "a generation node is refused at validation rather than mid-run"
+        );
+        // What was configured is left alone: switching back on restores the list
+        // rather than needing it written again.
+        assert_eq!(config.workflow.enabled_executors.len(), 2);
+    }
+
+    #[test]
+    fn a_ceiling_of_none_is_read_as_one() {
+        let budgets = GenerateConfig::default();
+        // The piece ceiling is the number of cards a node can point at, so an
+        // answer that fits is an answer the canvas can show.
+        assert_eq!(
+            budgets.max_output_items,
+            crate::domain::validate::MAX_RESULT_SLOTS
+        );
+
+        let none = GenerateConfig {
+            max_concurrent_runs: 0,
+            video_max_polls: 0,
+            ..GenerateConfig::default()
+        };
+        assert_eq!(
+            none.concurrent_runs(),
+            1,
+            "a queue nothing ever leaves is a typo"
+        );
+        assert_eq!(none.poll_ceiling(), 1, "a job is asked about at least once");
+    }
+
+    #[test]
+    fn a_reply_is_allowed_to_carry_the_biggest_answer_one_may_keep() {
+        let budgets = GenerateConfig::default();
+        // An answer arrives encoded, so the reply holding it is bigger than the
+        // answer inside it. A reply ceiling the other way round would be the one
+        // that actually bites, and the ceiling on an answer would never be
+        // reached at all.
+        assert!(
+            budgets.max_response_bytes > budgets.max_output_bytes,
+            "{} has to carry {}",
+            budgets.max_response_bytes,
+            budgets.max_output_bytes
+        );
     }
 
     #[test]
