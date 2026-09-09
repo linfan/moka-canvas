@@ -8,7 +8,8 @@ Automated coverage (run these first, they gate the release):
 
 ```sh
 make check        # build + format + lint + typecheck + vitest + cargo tests
-npm run test:e2e  # Playwright critical path against the built app
+npm run test:e2e  # Playwright: critical path, provider settings, and a
+                  # generation driven against a stand-in provider
 ```
 
 ## Web (`make package-web`)
@@ -50,6 +51,21 @@ npm run test:e2e  # Playwright critical path against the built app
    `x-error-code`, the provider's message rather than its raw body, and
    no credential anywhere in it. The automated equivalent is
    `cargo test --test generate_api`.
+10. Generate from a node rather than from the API, which is the path a
+    canvas takes. Give an image node a spec and run it: the answer
+    appears on the node, in the resource panel behind a badge naming the
+    node that made it, and under `assets/images/` with provenance
+    carrying the run, the node, the inputs that travelled, and the
+    parameters it was asked with. Search the project directory and an
+    exported package for the channel's key and find nothing, the
+    snapshot included. Ask for several at once and confirm the node
+    keeps the first while the rest become cards of their own. Revoke the
+    key and run again: the step fails with a reason and the node still
+    says what it said before. Finally import a package whose run records
+    did not travel with it and click **Run again** on one of its assets —
+    a new run starts under the snapshot's parameters rather than a retry
+    of a run this project has never heard of. The automated equivalents
+    are `cargo test --test provider_runs` and `npm run test:e2e`.
 
 ## macOS (`make package-macos`)
 

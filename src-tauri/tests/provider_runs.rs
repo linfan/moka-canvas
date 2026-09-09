@@ -14,7 +14,9 @@
 //! how many drive at once waits with its own record still saying so, that a
 //! deployment which says nothing reaches a provider refuses a generation node
 //! before the run starts rather than failing inside it, and that an answer
-//! carrying more than a node can hold is refused whole and filed nowhere.
+//! carrying more than a node can hold is refused whole and filed nowhere, and
+//! that a generation a provider refuses leaves the node saying what it said
+//! before.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -63,6 +65,10 @@ const JOB: &str = "job-at-the-provider";
 /// What the writer says, and what the painter says it drew.
 const SENTENCE: &str = "A paper lantern drifts over a quiet lake.";
 const CAPTION: &str = "a paper lantern, asleep";
+
+/// What a node said before anything was asked of a provider, which is what a
+/// generation that fails has to leave it saying.
+const KEPT: &str = "A lantern, written down before it was asked for.";
 
 /// What a provider sends for a finished shot. The header of an MP4 and nothing
 /// else, because what a filed asset is filed as is read off its bytes rather
@@ -472,6 +478,23 @@ fn answering(recorded: Recorded) -> Router {
         )
 }
 
+/// A provider that refuses everything, the way one does when a key has been
+/// revoked or a model retired: every request is answered, and none of them is
+/// answered with anything.
+fn refusing(recorded: Recorded) -> Router {
+    Router::new().fallback(move |body: Bytes| {
+        let recorded = recorded.clone();
+        async move {
+            recorded.note(&body);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": { "message": "the key no longer works" } })),
+            )
+                .into_response()
+        }
+    })
+}
+
 /// A provider that holds its answer until the test lets it go, so a cancel can
 /// be asked for while a step is still waiting on one.
 fn hesitant(recorded: Recorded, gate: Arc<Notify>) -> Router {
@@ -862,7 +885,7 @@ async fn an_answer_from_earlier_in_the_run_reaches_the_generation_below_it() {
             &[(WRITER, Capability::Text), (PAINTER, Capability::Image)],
         )
         .await;
-    let (canvas_id, _root) = harness.project("Chain").await;
+    let (canvas_id, root) = harness.project("Chain").await;
     harness
         .apply(json!([
             // An empty model is the default the user set for the capability, and
@@ -912,9 +935,11 @@ async fn an_answer_from_earlier_in_the_run_reaches_the_generation_below_it() {
     );
 
     // Both answers were filed, each under the category its kind implies.
-    let resources = harness.document().await["moka"]["resources"].clone();
-    assert_eq!(resources["texts"].as_array().expect("a registry").len(), 1);
-    let posters = resources["images"].as_array().expect("a registry");
+    let document = harness.document().await;
+    let moka = &document["moka"];
+    let texts = moka["resources"]["texts"].as_array().expect("a registry");
+    assert_eq!(texts.len(), 1);
+    let posters = moka["resources"]["images"].as_array().expect("a registry");
     assert_eq!(posters.len(), 1);
     assert_eq!(
         posters[0]["provenance"]["operationNodeId"],
@@ -925,6 +950,20 @@ async fn an_answer_from_earlier_in_the_run_reaches_the_generation_below_it() {
         posters[0]["provenance"]["inputAssetIds"].is_null(),
         "words folded into a prompt are not media that travelled"
     );
+
+    // What the node says and what the project filed are one answer arrived at
+    // twice: a reader of the canvas and a reader of the asset have to be reading
+    // the same words, so neither may be a copy that drifted.
+    let nodes = moka["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    let script = node_by_id(nodes, "n-script");
+    let filed = std::fs::read_to_string(
+        Path::new(&root).join(texts[0]["path"].as_str().expect("an asset has a path")),
+    )
+    .expect("the answer is on disk");
+    assert_eq!(script["data"]["content"], json!(filed));
+    assert_eq!(script["data"]["content"], json!(SENTENCE));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1629,4 +1668,65 @@ async fn an_answer_with_more_pieces_than_a_node_can_hold_is_refused_and_filed_no
         1,
         "the ceiling is not a reason to ask twice"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_generation_a_provider_refuses_leaves_the_node_saying_what_it_said_before() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let base_url = serve(refusing(recorded.clone())).await;
+    harness
+        .configure(&base_url, &[(WRITER, Capability::Text)])
+        .await;
+    let (canvas_id, root) = harness.project("Kept").await;
+    // The words are on the node from the start rather than written afterwards:
+    // a data patch replaces the whole object, so adding them later would cost
+    // the node the very spec the run is about to fail on.
+    let mut script = asking(
+        "n-script",
+        NodeKind::Text,
+        "Script",
+        "",
+        "Write one sentence.",
+        None,
+    );
+    script["data"]["content"] = json!(KEPT);
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": script },
+        ]))
+        .await;
+
+    let run_id = harness.start(&canvas_id, json!(["n-script"])).await;
+    let finished = harness.settled(&run_id).await;
+    assert_eq!(finished["status"], "failed");
+    let steps = finished["steps"].as_array().expect("a run has steps");
+    assert_eq!(steps[0]["status"], "failed");
+    assert!(
+        steps[0]["outputAssetIds"].is_null(),
+        "a refusal made nothing to keep"
+    );
+
+    // A run that comes back empty-handed has no answer to write, and writing
+    // nothing over what is already there would leave a user with less than they
+    // started with.
+    let document = harness.document().await;
+    let nodes = document["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    let kept = node_by_id(nodes, "n-script");
+    assert_eq!(kept["data"]["content"], json!(KEPT));
+    assert!(
+        kept["data"]["assetId"].is_null(),
+        "and it points at nothing new"
+    );
+    assert_eq!(
+        document["moka"]["resources"]["texts"]
+            .as_array()
+            .expect("a registry")
+            .len(),
+        0,
+        "a failure filed nothing"
+    );
+    assert_eq!(files_in(&root, "texts"), 0, "and wrote nothing");
 }

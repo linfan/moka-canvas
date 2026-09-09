@@ -1,86 +1,20 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import {
+  addNode,
+  backToLauncher,
+  createProject,
+  openRecent,
+  persistedNodeCount,
+  projectHome,
+} from "./helpers";
 
 // A tiny valid PNG (1x1 transparent pixel) used for asset import.
 const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   "base64",
 );
-
-function projectHome(name: string) {
-  return mkdtempSync(join(tmpdir(), `moka-e2e-${name}-`));
-}
-
-/** Open the launcher's create dialog and scaffold a new project. */
-async function createProject(page: Page, directory: string, name: string) {
-  await page.getByRole("button", { name: "New project" }).click();
-  const dialog = page.locator(".dialog");
-  await dialog.getByLabel("Folder").fill(directory);
-  await dialog.getByLabel("Project name").fill(name);
-  await dialog.getByRole("button", { name: "New project" }).click();
-  await expect(
-    page.getByRole("banner").getByText(name, { exact: true }),
-  ).toBeVisible({ timeout: 10_000 });
-}
-
-/** Double-click empty canvas and add a node of the given kind. */
-async function addNode(page: Page, kind: string) {
-  const surface = page.getByTestId("canvas-surface");
-  const menu = page.getByRole("menu", { name: "Add node" });
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const box = await surface.boundingBox();
-    expect(box).not.toBeNull();
-    await page.mouse.dblclick(
-      box!.x + box!.width * (0.55 + attempt * 0.08),
-      box!.y + box!.height * 0.5,
-    );
-    if (await menu.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await menu.getByRole("menuitem", { name: kind, exact: true }).click();
-      return;
-    }
-  }
-  throw new Error(`quick-add menu did not open for ${kind}`);
-}
-
-/** Node count of the first canvas as persisted server-side. */
-async function persistedNodeCount(page: Page): Promise<number> {
-  return page.evaluate(async () => {
-    const response = await fetch("/api/v1/projects/current");
-    const body = (await response.json()) as {
-      moka?: { canvas?: { nodes?: unknown[] }[] };
-    };
-    return (body.moka?.canvas?.[0]?.nodes ?? []).length;
-  });
-}
-
-/** Open a recent project from the launcher by its card label. */
-async function openRecent(page: Page, name: string) {
-  await page
-    .locator("button.launcher-recent")
-    .filter({ hasText: name })
-    .click();
-}
-
-/**
- * Leave the editor for the launcher. If a pending autosave raced the click,
- * the unsaved-work guard appears — resolve it by saving, like a user would.
- */
-async function backToLauncher(page: Page) {
-  await page.getByRole("button", { name: "Back to launcher" }).click();
-  const guard = page.getByRole("alertdialog", { name: "Unsaved changes" });
-  const guarded = await guard
-    .waitFor({ state: "visible", timeout: 2500 })
-    .then(() => true)
-    .catch(() => false);
-  if (guarded) {
-    await guard.getByRole("button", { name: "Save and close" }).click();
-  }
-  await expect(page.getByRole("heading", { name: "Moka Canvas" })).toBeVisible({
-    timeout: 10_000,
-  });
-}
 
 test("launcher boots, project persists across reload, and export/import roundtrips", async ({
   page,

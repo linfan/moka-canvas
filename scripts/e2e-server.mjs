@@ -3,6 +3,7 @@
 // log is written to a file so test output stays readable; its path is
 // printed here and the tail is dumped on unexpected exit.
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   createWriteStream,
   existsSync,
@@ -58,6 +59,12 @@ const log = (line) => process.stdout.write(`[e2e-server] ${line}\n`);
 log(`home: ${home}`);
 log(`server log: ${serverLog}`);
 
+// Server mode will not invent a master key, so without one a channel could
+// hold no credential and nothing could reach a provider. Generated per boot
+// and never printed: it protects a directory that is thrown away anyway.
+const metadataKey = randomBytes(32).toString("base64");
+log("metadata key: generated for this boot");
+
 const child = spawn(
   "cargo",
   [
@@ -70,7 +77,11 @@ const child = spawn(
     "--config",
     configPath,
   ],
-  { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
+  {
+    cwd: repoRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, MOKA_METADATA_KEY: metadataKey },
+  },
 );
 const logStream = createWriteStream(serverLog);
 child.stdout.pipe(logStream);
