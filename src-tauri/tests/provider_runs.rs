@@ -13,10 +13,11 @@
 //! as they arrive and its ending last, that a run asked for past the ceiling on
 //! how many drive at once waits with its own record still saying so, that a
 //! deployment which says nothing reaches a provider refuses a generation node
-//! before the run starts rather than failing inside it, and that an answer
-//! carrying more than a node can hold is refused whole and filed nowhere, and
+//! before the run starts rather than failing inside it, that an answer
+//! carrying more than a node can hold is refused whole and filed nowhere,
 //! that a generation a provider refuses leaves the node saying what it said
-//! before.
+//! before, and that an ask answered while the node is already showing something
+//! puts the answer beside it rather than over it.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -1096,6 +1097,161 @@ async fn an_ask_answered_several_times_over_fills_the_node_and_gives_the_rest_a_
         })
         .collect();
     assert_eq!(widths, vec![8, 9, 10], "three answers, three sets of bytes");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn asking_a_node_that_already_has_an_answer_puts_the_next_one_beside_it() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    // One picture an ask, so the three asks below are three answers of their own
+    // rather than one answer three times over.
+    let base_url = serve(painting(recorded.clone(), &[(8, 6)])).await;
+    harness
+        .configure(&base_url, &[(PAINTER, Capability::Image)])
+        .await;
+    let (canvas_id, _root) = harness.project("Compared").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "a paper lantern over a quiet lake",
+                Some(json!({ "size": "1024x1024" }))) },
+        ]))
+        .await;
+
+    // The first ask answers a node holding nothing, so it fills the node in and
+    // needs no card to put anything on.
+    let first = harness.start(&canvas_id, json!(["n-poster"])).await;
+    assert_eq!(harness.settled(&first).await["status"], "succeeded");
+    let document = harness.document().await;
+    let nodes = document["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "an answer the node had room for made no card"
+    );
+    let kept = node_by_id(nodes, "n-poster")["data"]["assetId"]
+        .as_str()
+        .expect("the node holds the answer")
+        .to_string();
+
+    // The second ask answers a node that is showing something, which keeps it:
+    // the answer goes on a card beside it, and the canvas says where it came from.
+    let second = harness.start(&canvas_id, json!(["n-poster"])).await;
+    assert_eq!(harness.settled(&second).await["status"], "succeeded");
+    let document = harness.document().await;
+    let nodes = document["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    assert_eq!(
+        nodes.len(),
+        2,
+        "the answer went beside the node rather than over it"
+    );
+    let poster = node_by_id(nodes, "n-poster");
+    assert_eq!(
+        poster["data"]["assetId"],
+        json!(kept),
+        "what the node showed is still what it shows"
+    );
+    let slots = poster["data"]["resultSlots"]
+        .as_array()
+        .expect("results are recorded");
+    assert_eq!(slots.len(), 1);
+    assert_eq!(
+        slots[0]["isPrimary"],
+        json!(false),
+        "an answer the node is not showing is not its own"
+    );
+    let beside = slots[0]["assetId"]
+        .as_str()
+        .expect("the answer was filed")
+        .to_string();
+    assert_ne!(
+        beside, kept,
+        "and it is a second answer, not the first again"
+    );
+
+    let cards = poster["data"]["resultNodeIds"]
+        .as_array()
+        .expect("the card is recorded");
+    assert_eq!(cards.len(), 1);
+    let card_id = cards[0].as_str().expect("a card has an id");
+    let card = node_by_id(nodes, card_id);
+    assert_eq!(card["kind"], "image", "a card is the same kind of thing");
+    assert_eq!(card["title"], json!("Poster 1"));
+    assert_eq!(card["data"]["assetId"], json!(beside));
+    assert!(
+        card["data"].get("generation").is_none(),
+        "a card holds an answer, it does not ask for one"
+    );
+    assert!(
+        card["bounds"]["x"].as_f64().expect("a card is placed")
+            > poster["bounds"]["x"].as_f64().expect("a node is placed"),
+        "to the right of the node that asked"
+    );
+    assert_eq!(
+        card["bounds"]["y"], poster["bounds"]["y"],
+        "on the same line as it"
+    );
+
+    let edges = document["moka"]["canvas"][0]["edges"]
+        .as_array()
+        .expect("a canvas has edges");
+    assert_eq!(
+        edges.len(),
+        1,
+        "the card is joined back to what it came from"
+    );
+    assert_eq!(edges[0]["source"]["nodeId"], json!("n-poster"));
+    assert_eq!(edges[0]["source"]["portId"], json!("out"));
+    assert_eq!(edges[0]["target"]["nodeId"], json!(card_id));
+    assert_eq!(
+        edges[0]["target"]["portId"],
+        json!("images"),
+        "a picture goes in where pictures are read"
+    );
+
+    // Asking a third time finds the card the second ask made and writes into it,
+    // which is how a canvas is not littered with one card per ask.
+    let third = harness.start(&canvas_id, json!(["n-poster"])).await;
+    assert_eq!(harness.settled(&third).await["status"], "succeeded");
+    let document = harness.document().await;
+    let nodes = document["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    assert_eq!(nodes.len(), 2, "and makes no second card beside it");
+    let poster = node_by_id(nodes, "n-poster");
+    assert_eq!(
+        poster["data"]["assetId"],
+        json!(kept),
+        "the node is still showing what it was showing"
+    );
+    let slots = poster["data"]["resultSlots"]
+        .as_array()
+        .expect("results are recorded");
+    assert_ne!(
+        slots[0]["assetId"],
+        json!(beside),
+        "the card was written into with the newest answer"
+    );
+    assert_eq!(
+        poster["data"]["resultNodeIds"]
+            .as_array()
+            .expect("the card is recorded"),
+        cards,
+        "and it is the same card"
+    );
+    assert_eq!(
+        document["moka"]["canvas"][0]["edges"]
+            .as_array()
+            .expect("a canvas has edges")
+            .len(),
+        1,
+        "an edge that is there is not added again"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

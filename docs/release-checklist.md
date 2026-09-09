@@ -59,9 +59,13 @@ npm run test:e2e  # Playwright: critical path, provider settings, and a
     parameters it was asked with. Search the project directory and an
     exported package for the channel's key and find nothing, the
     snapshot included. Ask for several at once and confirm the node
-    keeps the first while the rest become cards of their own. Revoke the
-    key and run again: the step fails with a reason and the node still
-    says what it said before. Finally import a package whose run records
+    keeps the first while the rest become cards of their own. Run a
+    node that is already showing an answer and confirm it goes on
+    showing that one while the new answer becomes a card to its right
+    with an edge between them; run it once more and confirm the card is
+    written into rather than doubled. Revoke the key and run again: the
+    step fails with a reason and the node still says what it said
+    before. Finally import a package whose run records
     did not travel with it and click **Run again** on one of its assets —
     a new run starts under the snapshot's parameters rather than a retry
     of a run this project has never heard of. The automated equivalents
