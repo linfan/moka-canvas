@@ -137,4 +137,15 @@ pub trait ProjectStore: Send + Sync {
         &self,
         run: crate::domain::RunRecord,
     ) -> Result<crate::domain::RunRecord, ProjectError>;
+    /// Keeps a record of work a provider is still doing, so the poll that
+    /// collects it can be placed again after this process has been restarted.
+    ///
+    /// The payload is opaque here on purpose: what a job is belongs to the layer
+    /// that placed it, and what this layer promises is only that the record
+    /// stays inside the project and out of an exported package.
+    async fn record_job(&self, id: &str, record: serde_json::Value) -> Result<(), ProjectError>;
+    /// Drops one, because the job answered or nobody is coming back for it.
+    async fn drop_job(&self, id: &str) -> Result<(), ProjectError>;
+    /// The record kept for one job, if there still is one.
+    async fn job(&self, id: &str) -> Result<Option<serde_json::Value>, ProjectError>;
 }

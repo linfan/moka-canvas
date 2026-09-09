@@ -157,6 +157,10 @@ pub async fn open_project(
         .open_project(FsPath::new(request.path.trim()))
         .await?;
     upsert_recent(&state, &opened).await;
+    // The project is open, so there is somewhere for an answer to go again. The
+    // sweep on open has already failed whatever cannot be picked up, and what is
+    // left is waiting on a job a provider is still running.
+    state.runs.resume_interrupted().await;
     Ok(Json(open_response(opened)))
 }
 

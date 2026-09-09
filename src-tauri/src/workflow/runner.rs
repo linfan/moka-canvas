@@ -7,7 +7,8 @@
 use super::validate::{validate_run, RunSnapshot};
 use super::{
     data_type_for, executor_key_for, operation_type_for, ExecutionError, ExecutionOutput,
-    ExecutionRequest, ProgressReporter, ValueProvenance, WorkflowExecutor, WorkflowValue,
+    ExecutionRequest, PlacedJob, ProgressReporter, ValueProvenance, WorkflowExecutor,
+    WorkflowValue,
 };
 use crate::domain::commands::make_node;
 use crate::domain::validate::MAX_TITLE_LENGTH;
@@ -16,7 +17,7 @@ use crate::domain::{
     NodeKind, NodePatch, PortDirection, ResultSlot, ResultSlotStatus, RunId, RunRecord, RunStatus,
     RunStepRecord, ValidationIssue, WorkflowNode,
 };
-use crate::generate::{ingest_generated, AsyncTask, GenerateResult};
+use crate::generate::{ingest_generated, GenerateResult};
 use crate::project::store::FsProjectStore;
 use crate::project::{ProjectError, ProjectStore};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -51,13 +52,72 @@ struct StepArtifacts {
     assets: Option<Vec<AssetId>>,
     /// The upstream job the step went through, for the ones that are a job
     /// rather than an answer waited out.
-    task: Option<AsyncTask>,
+    task: Option<PlacedJob>,
+}
+
+/// What one scheduled node turned out to be.
+///
+/// Decided before anything is run, because the two answers need different
+/// things done to them: one is written down and waited out in two halves, and
+/// the other has nothing to wait for.
+enum StepPlan {
+    /// Nothing an executor could do, so the node passes on what it already had.
+    Passthrough(Option<WorkflowValue>, StepArtifacts),
+    /// An executor takes it.
+    Scheduled {
+        executor: Arc<dyn WorkflowExecutor>,
+        request: ExecutionRequest,
+    },
 }
 
 /// How far to the right of a node the results past its first are placed, and how
 /// far apart from each other: enough that the cards do not overlap, close enough
 /// that the set still reads as one answer.
 const RESULT_GAP: f64 = 40.0;
+
+/// What a cancelled run says when a provider was still working for it.
+///
+/// The stop is this app's alone. There is no way back to a job once it has been
+/// placed, so it ends when the far end ends it and is charged for as usual, and
+/// somebody reading a cancelled run has to be told that rather than left to find
+/// it on a bill.
+const JOB_OUTLIVES_CANCEL: &str =
+    "Cancelled here, but the job the provider is running was not: it may still finish and still be billed.";
+
+/// What a step a previous process already finished still has to hand downstream.
+///
+/// Read off the record rather than asked of anybody again. A node nothing ran
+/// passes on what it carries, exactly as it would have the first time through;
+/// the answer of a node an executor ran is what the record says it produced.
+fn remembered(
+    snapshot: &RunSnapshot,
+    node_id: &str,
+    step: &RunStepRecord,
+) -> Option<WorkflowValue> {
+    let node = snapshot.nodes.get(node_id)?;
+    if executor_key_for(node).is_none() {
+        return snapshot.source_value(node_id);
+    }
+    let source = ValueProvenance {
+        node_id: node.id.clone(),
+        port_id: "out".to_string(),
+    };
+    match step.output_asset_ids.clone().unwrap_or_default().first() {
+        // A picture, a voice or a shot travelled as the asset it became; words
+        // travelled as words.
+        Some(asset_id) if data_type_for(node.kind) != DataType::Text => {
+            Some(WorkflowValue::Media {
+                media_type: data_type_for(node.kind),
+                asset_id: asset_id.clone(),
+                source,
+            })
+        }
+        _ => step
+            .output_text
+            .clone()
+            .map(|text| WorkflowValue::Text { text, source }),
+    }
+}
 
 /// What a finished step leaves on the node that made it.
 ///
@@ -329,6 +389,112 @@ impl RunManager {
         .await
     }
 
+    /// Picks up the runs a previous process was in the middle of.
+    ///
+    /// Called when a project opens, because that is the first moment there is
+    /// somewhere to put an answer. The sweep on open has already failed
+    /// everything that cannot be picked up again, so what is left here is
+    /// waiting on a job a provider is still running.
+    pub async fn resume_interrupted(self: &Arc<Self>) {
+        let interrupted = match self.store.interrupted_runs().await {
+            Ok(interrupted) => interrupted,
+            Err(error) => {
+                tracing::warn!("the runs left in progress could not be listed: {error}");
+                return;
+            }
+        };
+        for run_id in interrupted {
+            let driver = Arc::clone(self);
+            tokio::spawn(async move {
+                driver.resume(run_id).await;
+            });
+        }
+    }
+
+    /// Drives a run that was already under way.
+    ///
+    /// Revalidated against the document rather than trusted: it may have been
+    /// edited while the process was down, and a step whose node is gone has
+    /// nothing left to wait out.
+    async fn resume(self: Arc<Self>, run_id: RunId) {
+        let run = match self.store.get_run(&run_id).await {
+            Ok(run) => run,
+            Err(error) => {
+                tracing::warn!("run {run_id}: could not be read back: {error}");
+                return;
+            }
+        };
+        let Some(opened) = self.store.current().await.ok().flatten() else {
+            return;
+        };
+        let snapshot = match validate_run(
+            &opened.root,
+            &opened.moka,
+            &run.canvas_id,
+            &run.requested_node_ids,
+            &self.executors,
+            &self.enabled_executors,
+        )
+        .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(issues) => {
+                let reason = issues
+                    .first()
+                    .map(|issue| issue.message.clone())
+                    .unwrap_or_else(|| "The document no longer supports this run".to_string());
+                tracing::warn!("run {run_id}: {reason}");
+                self.end_unresumable(run, &reason).await;
+                return;
+            }
+        };
+        // Steps are walked by position, so an order that came out differently is
+        // a record this driver cannot read: it would write one node's answer
+        // onto another's step.
+        let same_walk = snapshot.order.len() == run.steps.len()
+            && snapshot
+                .order
+                .iter()
+                .zip(run.steps.iter())
+                .all(|(node_id, step)| node_id == &step.node_id);
+        if !same_walk {
+            let reason = "The graph was edited while this run was in progress";
+            tracing::warn!("run {run_id}: {reason}");
+            self.end_unresumable(run, reason).await;
+            return;
+        }
+        self.drive(run_id, snapshot).await;
+    }
+
+    /// Ends a run that cannot be picked up again.
+    ///
+    /// Left in progress it would be attempted at every open after this one, and
+    /// the notes of the jobs it was waiting on would stay on disk for nobody.
+    async fn end_unresumable(&self, run: RunRecord, reason: &str) {
+        let _guard = self.transitions.lock().await;
+        let run_id = run.id.clone();
+        let mut run = run;
+        for step in &run.steps {
+            if let Some(task_id) = &step.task_id {
+                if let Err(error) = self.store.drop_job(task_id).await {
+                    tracing::warn!("run {run_id}: job {task_id} could not be forgotten: {error}");
+                }
+            }
+        }
+        run.status = RunStatus::Failed;
+        run.error = Some(reason.to_string());
+        for step in &mut run.steps {
+            if matches!(step.status, RunStatus::Queued | RunStatus::Running) {
+                step.status = RunStatus::Failed;
+                step.error = Some("Interrupted before completion".to_string());
+            }
+        }
+        run.updated_at = now_iso();
+        if let Err(error) = self.store.update_run(run).await {
+            tracing::warn!("run {run_id}: could not be ended: {error}");
+        }
+    }
+
     pub async fn cancel(&self, run_id: &str) -> Result<RunRecord, ProjectError> {
         let _guard = self.transitions.lock().await;
         let run = self.store.get_run(run_id).await?;
@@ -389,6 +555,10 @@ impl RunManager {
                         }
                     }
                 }
+                // A run a previous process was in the middle of. It is already
+                // recorded as running, so picking it up is walking the steps it
+                // had not reached rather than starting over.
+                Ok(run) if run.status == RunStatus::Running => run,
                 // Cancelled while waiting for the gate; nothing to do.
                 _ => return,
             }
@@ -407,14 +577,41 @@ impl RunManager {
                 halt = Some((RunStatus::Cancelled, None));
                 break;
             }
-            run.steps[position].status = RunStatus::Running;
-            run.steps[position].started_at = Some(now_iso());
-            run.updated_at = now_iso();
-            if let Err(error) = self.store.update_run(run.clone()).await {
-                tracing::warn!("run {run_id}: could not persist step start: {error}");
+            // A step a previous process already finished is remembered rather
+            // than run again: what the steps after it need is the answer, and
+            // asking a provider for it a second time would pay twice for one.
+            if run.steps[position].status == RunStatus::Succeeded {
+                if let Some(value) = remembered(&snapshot, node_id, &run.steps[position]) {
+                    snapshot.record_output(node_id, &value);
+                    outputs.insert(node_id.clone(), value);
+                }
+                continue;
+            }
+            // A handle already on the record is a job that was placed before the
+            // process stopped, which is waited out rather than placed again.
+            let placed = run.steps[position]
+                .task_id
+                .clone()
+                .map(|task_id| PlacedJob {
+                    run_id: run.id.clone(),
+                    task_id,
+                    created_at: run.steps[position]
+                        .task_created_at
+                        .clone()
+                        .unwrap_or_else(now_iso),
+                });
+            if run.steps[position].status != RunStatus::Running {
+                run.steps[position].status = RunStatus::Running;
+                run.steps[position].started_at = Some(now_iso());
+                run.updated_at = now_iso();
+                if let Err(error) = self.store.update_run(run.clone()).await {
+                    tracing::warn!("run {run_id}: could not persist step start: {error}");
+                }
             }
 
-            let outcome = self.execute_step(&run, &snapshot, node_id, &outputs).await;
+            let outcome = self
+                .run_step(&mut run, &snapshot, position, &outputs, placed)
+                .await;
             run.steps[position].finished_at = Some(now_iso());
             match outcome {
                 Ok((value, artifacts)) => {
@@ -424,8 +621,8 @@ impl RunManager {
                     step.status = RunStatus::Succeeded;
                     step.output_text = artifacts.text;
                     step.output_asset_ids = artifacts.assets;
-                    step.task_id = artifacts.task.as_ref().map(|task| task.id.clone());
-                    step.task_created_at = artifacts.task.map(|task| task.created_at);
+                    step.task_id = artifacts.task.as_ref().map(|job| job.task_id.clone());
+                    step.task_created_at = artifacts.task.map(|job| job.created_at);
                     if let Some(promotion) = promotion {
                         self.promote_result(&snapshot, node_id, promotion).await;
                     }
@@ -437,7 +634,14 @@ impl RunManager {
                 Err(error) => {
                     if error.cancelled {
                         run.steps[position].status = RunStatus::Cancelled;
-                        halt = Some((RunStatus::Cancelled, None));
+                        // Stopping here stops the waiting, not the work: a job a
+                        // provider is running has no way back and keeps costing
+                        // until it ends on its own.
+                        let billing = run.steps[position]
+                            .task_id
+                            .is_some()
+                            .then(|| JOB_OUTLIVES_CANCEL.to_string());
+                        halt = Some((RunStatus::Cancelled, billing));
                     } else {
                         run.steps[position].status = RunStatus::Failed;
                         run.steps[position].error = Some(error.message.clone());
@@ -467,6 +671,17 @@ impl RunManager {
         }
 
         let (status, error) = halt.unwrap_or((RunStatus::Succeeded, None));
+        // Given up before the run is written as ended, because the note of a job
+        // is the only thing that makes a run resumable: a process that stops in
+        // between leaves a run that fails the next time somebody asks after the
+        // job, rather than a handle on disk that nobody is ever coming back for.
+        for step in &run.steps {
+            if let Some(task_id) = &step.task_id {
+                if let Err(error) = self.store.drop_job(task_id).await {
+                    tracing::warn!("run {run_id}: job {task_id} could not be forgotten: {error}");
+                }
+            }
+        }
         {
             let _guard = self.transitions.lock().await;
             for step in &mut run.steps {
@@ -476,7 +691,7 @@ impl RunManager {
             }
             run.status = status;
             run.error = error;
-            if status == RunStatus::Cancelled {
+            if run.status == RunStatus::Cancelled {
                 run.cancel_requested = true;
             }
             run.updated_at = now_iso();
@@ -490,25 +705,19 @@ impl RunManager {
             .remove(&run_id);
     }
 
-    /// Runs one scheduled node.
+    /// Resolves one scheduled node into what is going to happen to it.
     ///
     /// A node with nothing an executor could do passes the value it already had
     /// downstream, which is how written words or a bound image reach the step
-    /// after them. Everything else goes to the executor it names, and a
-    /// generation's answer is filed in the project before any of it travels on:
-    /// what flows between nodes is an asset reference, never the bytes.
-    async fn execute_step(
+    /// after them. Everything else is handed to the executor it names.
+    fn plan_step(
         &self,
         run: &RunRecord,
         snapshot: &RunSnapshot,
         node_id: &str,
         outputs: &HashMap<NodeId, WorkflowValue>,
-    ) -> Result<(Option<WorkflowValue>, StepArtifacts), ExecutionError> {
+    ) -> Result<StepPlan, ExecutionError> {
         let node = &snapshot.nodes[node_id];
-        let source = ValueProvenance {
-            node_id: node.id.clone(),
-            port_id: "out".to_string(),
-        };
         let Some(executor_key) = executor_key_for(node) else {
             let value = snapshot.source_value(&node.id);
             let artifacts = match &value {
@@ -529,7 +738,7 @@ impl RunManager {
                     task: None,
                 },
             };
-            return Ok((value, artifacts));
+            return Ok(StepPlan::Passthrough(value, artifacts));
         };
 
         let operation_type = operation_type_for(node);
@@ -562,10 +771,6 @@ impl RunManager {
             }
         }
 
-        // Resolved once here rather than in the executor: the same reading of
-        // the graph builds the request and stamps the answer that comes back,
-        // so the two cannot disagree about what fed it.
-        let resolved = snapshot.generation_inputs(&node.id);
         let request = ExecutionRequest {
             run_id: run.id.clone(),
             node_id: node.id.clone(),
@@ -580,12 +785,91 @@ impl RunManager {
                 .data
                 .generation
                 .as_ref()
-                .map(|spec| resolved.request_for(spec)),
+                // Resolved once here rather than in the executor: the same
+                // reading of the graph builds the request and stamps the answer
+                // that comes back, so the two cannot disagree about what fed it.
+                .map(|spec| snapshot.generation_inputs(&node.id).request_for(spec)),
         };
-        let ExecutionOutput { text, items, task } = executor
-            .execute(request, ProgressReporter::default())
-            .await?;
+        Ok(StepPlan::Scheduled {
+            executor: Arc::clone(executor),
+            request,
+        })
+    }
 
+    /// Runs one scheduled node.
+    ///
+    /// A step whose answer arrives later is the reason this is not one call:
+    /// the handle is written onto the record the moment a job exists, because a
+    /// shot takes minutes and a process that stops in the middle of one has to
+    /// leave enough behind to ask again rather than pay for a second shot.
+    async fn run_step(
+        &self,
+        run: &mut RunRecord,
+        snapshot: &RunSnapshot,
+        position: usize,
+        outputs: &HashMap<NodeId, WorkflowValue>,
+        placed: Option<PlacedJob>,
+    ) -> Result<(Option<WorkflowValue>, StepArtifacts), ExecutionError> {
+        let node_id = run.steps[position].node_id.clone();
+        let plan = self.plan_step(run, snapshot, &node_id, outputs)?;
+        match plan {
+            StepPlan::Passthrough(value, artifacts) => Ok((value, artifacts)),
+            StepPlan::Scheduled { executor, request } => {
+                let job = match placed {
+                    // A job a previous process placed is waited out rather than
+                    // placed again: it survived, and so did the answer it is
+                    // going to give.
+                    Some(job) => job,
+                    None => {
+                        let Some(job) = executor.place_job(request.clone()).await? else {
+                            // Nothing to wait for, so nothing to write down.
+                            let output = executor
+                                .execute(request, ProgressReporter::default())
+                                .await?;
+                            return self.finish_step(run, snapshot, &node_id, output).await;
+                        };
+                        run.steps[position].task_id = Some(job.task_id.clone());
+                        run.steps[position].task_created_at = Some(job.created_at.clone());
+                        run.updated_at = now_iso();
+                        if let Err(error) = self.store.update_run(run.clone()).await {
+                            tracing::warn!(
+                                "run {}: could not persist the job handle: {error}",
+                                run.id
+                            );
+                        }
+                        job
+                    }
+                };
+                let output = executor
+                    .wait_job(job.clone(), ProgressReporter::default())
+                    .await?;
+                let (value, mut artifacts) =
+                    self.finish_step(run, snapshot, &node_id, output).await?;
+                // Reported with the artifacts as well, so a step waited out in
+                // one call and one waited out in two leave the same record.
+                artifacts.task = Some(job);
+                Ok((value, artifacts))
+            }
+        }
+    }
+
+    /// Files a step's answer in the project and turns it into what travels on.
+    ///
+    /// A generation's answer is filed before any of it travels downstream: what
+    /// flows between nodes is an asset reference, never the bytes.
+    async fn finish_step(
+        &self,
+        run: &RunRecord,
+        snapshot: &RunSnapshot,
+        node_id: &str,
+        output: ExecutionOutput,
+    ) -> Result<(Option<WorkflowValue>, StepArtifacts), ExecutionError> {
+        let node = &snapshot.nodes[node_id];
+        let source = ValueProvenance {
+            node_id: node.id.clone(),
+            port_id: "out".to_string(),
+        };
+        let ExecutionOutput { text, items, task } = output;
         if node.data.generation.is_none() {
             let value = text
                 .clone()
@@ -605,6 +889,7 @@ impl RunManager {
             items,
             usage: None,
         };
+        let resolved = snapshot.generation_inputs(&node.id);
         let entries = ingest_generated(self.store.as_ref(), run, node, &resolved, &result)
             .await
             .map_err(|error| ExecutionError {

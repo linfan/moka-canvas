@@ -4,7 +4,7 @@
 //! minutes does, because the request that started it is long gone by the time
 //! it finishes. What is kept here is the link between the handle a client was
 //! given and the job a provider is running, which is exactly as much as one
-//! poll needs and nothing that outlives it.
+//! poll needs.
 
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -29,11 +29,10 @@ struct Tracked {
 
 /// The jobs started here, looked up by the handle a client polls with.
 ///
-/// In memory and nothing else. A job is a conversation between one run of this
-/// process and one provider: a handle that survived a restart would name a
-/// channel configuration that may have been edited since, and polling it would
-/// either fail confusingly or ask the wrong provider. Reporting such a handle
-/// as gone is honest; storing it would promise a poll that cannot be placed.
+/// In memory. What outlives the process is the note the gateway writes beside
+/// the run history when a job starts, and a handle this table has never seen is
+/// looked for there before it is reported missing: a shot takes minutes and a
+/// process does not, and the answer is still coming either way.
 #[derive(Debug, Default)]
 pub struct TaskRegistry {
     tracked: RwLock<HashMap<String, Tracked>>,
@@ -44,11 +43,15 @@ impl TaskRegistry {
         Self::default()
     }
 
-    /// Starts tracking a job.
+    /// Starts tracking a job, or picks one up again after a restart.
     ///
     /// Pruning happens here rather than on a timer: a table that only grows
     /// when jobs are started is a table that can be cleaned when jobs are
     /// started, and nothing else needs to run.
+    ///
+    /// A job picked up again gets a whole window rather than the one it was
+    /// started with: whoever is asking is here now, and the ceiling on the poll
+    /// loop that is waiting for it is what bounds the wait from here.
     pub fn register(&self, task: AsyncTask) {
         let mut tracked = self.tracked.write().expect("a panic left this unlocked");
         let now = Instant::now();

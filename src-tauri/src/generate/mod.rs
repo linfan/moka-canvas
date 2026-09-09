@@ -208,12 +208,18 @@ pub struct Usage {
 }
 
 /// An upstream job that outlives the request that started it.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Serializable because one is written down when it starts: a shot takes
+/// minutes, and a process that stops in the middle of one has to leave enough
+/// behind to ask again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AsyncTask {
     /// The handle the client polls with. Ours, not the provider's.
     pub id: String,
     /// The provider's own job handle. Opaque, and never disclosed: it is a
-    /// credential-adjacent identifier in some protocols.
+    /// credential-adjacent identifier in some protocols, so the only place it is
+    /// written is a record that is neither served to a client nor packaged.
     pub reference: String,
     pub protocol: Protocol,
     pub capability: Capability,

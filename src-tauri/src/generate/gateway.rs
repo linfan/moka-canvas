@@ -141,12 +141,64 @@ impl Gateway {
         // Tracked before the handle is handed back: a client that polls at
         // once must not find it missing.
         self.tasks.register(task.clone());
+        self.noted(&task).await;
         Ok(task)
+    }
+
+    /// Writes a job down beside the run history.
+    ///
+    /// A shot takes minutes and this process may not last them, so what is
+    /// written here is the difference between picking a job up again after a
+    /// restart and reporting one already paid for as never heard of. Failing to
+    /// write it is a warning rather than an error: the job is running either
+    /// way, and refusing the handle would lose it.
+    async fn noted(&self, task: &AsyncTask) {
+        let Ok(record) = serde_json::to_value(task) else {
+            return;
+        };
+        if let Err(error) = self.assets.record_job(&task.id, record).await {
+            tracing::warn!("job {}: could not be written down: {error}", task.id);
+        }
+    }
+
+    /// The job a handle names, read back from the note beside the run history
+    /// when this process has not seen it.
+    ///
+    /// A note that cannot be read is taken for one that is not there: the job it
+    /// named cannot be asked after either way, and what a caller needs is one
+    /// answer rather than an account of the disk.
+    async fn recall(&self, task: &str) -> Option<AsyncTask> {
+        let record = self.assets.job(task).await.ok().flatten()?;
+        serde_json::from_value(record).ok()
+    }
+
+    /// A job that will not answer again, dropped from the table and from the
+    /// note that outlived the request which started it.
+    async fn settled(&self, task: &str) {
+        self.tasks.forget(task);
+        if let Err(error) = self.assets.drop_job(task).await {
+            tracing::warn!("job {task}: the note of it could not be dropped: {error}");
+        }
     }
 
     /// One look at a job started here.
     pub async fn poll(&self, task: &str, cancel: &Cancel) -> Result<TaskState, ProviderError> {
-        let tracked = self.tasks.get(task)?;
+        let tracked = match self.tasks.get(task) {
+            Ok(tracked) => tracked,
+            // A restart empties the table without ending the job.
+            Err(ProviderError::TaskMissing { .. }) => match self.recall(task).await {
+                Some(recalled) => {
+                    self.tasks.register(recalled.clone());
+                    recalled
+                }
+                None => {
+                    return Err(ProviderError::TaskMissing {
+                        task: task.to_string(),
+                    })
+                }
+            },
+            Err(error) => return Err(error),
+        };
         cancel.check()?;
         // The job stays with the channel that started it. Polling through
         // whatever the default is now would ask one provider about a handle
@@ -162,8 +214,8 @@ impl Gateway {
             // A job that answered is done with, and one the provider has
             // forgotten cannot answer again: keeping either handle would only
             // grow the table.
-            Ok(TaskState::Succeeded(_) | TaskState::Failed { .. }) => self.tasks.forget(task),
-            Err(ProviderError::TaskExpired { .. }) => self.tasks.forget(task),
+            Ok(TaskState::Succeeded(_) | TaskState::Failed { .. }) => self.settled(task).await,
+            Err(ProviderError::TaskExpired { .. }) => self.settled(task).await,
             // Anything else is this process failing to look rather than the
             // job ending, and dropping the handle would lose a shot the
             // provider is still making.

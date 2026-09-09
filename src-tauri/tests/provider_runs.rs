@@ -6,25 +6,30 @@
 //! that the answer it comes back with is filed in the project bearing the run
 //! it came from, that an answer from earlier in the same run reaches the node
 //! below it, that an ask answered several times over is written back onto the
-//! canvas whole, and that a cancel arrives at a step already waiting on a
-//! provider.
+//! canvas whole, that a cancel arrives at a step already waiting on a
+//! provider, that a shot is written down the moment it is placed rather than
+//! when it answers, and that a run left waiting on one asks after the same job
+//! when the project is opened again.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::{to_bytes, Body, Bytes};
+use axum::extract::Path as Route;
 use axum::http::{header, Request, StatusCode};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, RuntimeMode};
 use moka_canvas::domain::commands::make_node;
 use moka_canvas::domain::{
-    generation_capability_for, now_iso, Capability, GenerationInputMode, GenerationMode,
+    generation_capability_for, new_id, now_iso, Capability, GenerationInputMode, GenerationMode,
     GenerationSpec, NodeKind,
 };
+use moka_canvas::generate::AsyncTask;
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
 use moka_canvas::metadata::{ChannelDraft, ChannelModel, Defaults, Protocol};
 use serde_json::{json, Value};
@@ -42,10 +47,21 @@ const CHANNEL: &str = "a-channel";
 /// what is asked for lands on the route the mock serves.
 const WRITER: &str = "gpt-scribe-1";
 const PAINTER: &str = "painter-1";
+const SHOOTER: &str = "shooter-1";
+
+/// The handle a provider's job endpoint issues for a shot. It is the provider's
+/// own, and the whole point of keeping it out of a run record is that a client
+/// never sees it.
+const JOB: &str = "job-at-the-provider";
 
 /// What the writer says, and what the painter says it drew.
 const SENTENCE: &str = "A paper lantern drifts over a quiet lake.";
 const CAPTION: &str = "a paper lantern, asleep";
+
+/// What a provider sends for a finished shot. The header of an MP4 and nothing
+/// else, because what a filed asset is filed as is read off its bytes rather
+/// than trusted from the answer that carried them.
+const SHOT: &[u8] = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom";
 
 struct Harness {
     app: Router,
@@ -164,7 +180,7 @@ impl Harness {
     }
 
     async fn document(&self) -> Value {
-        self.send_json(get("/api/v1/projects/current"), StatusCode::OK)
+        self.send_json(get_request("/api/v1/projects/current"), StatusCode::OK)
             .await
     }
 
@@ -186,7 +202,7 @@ impl Harness {
 
     async fn run(&self, run_id: &str) -> Value {
         self.send_json(
-            get(&format!("/api/v1/projects/current/runs/{run_id}")),
+            get_request(&format!("/api/v1/projects/current/runs/{run_id}")),
             StatusCode::OK,
         )
         .await
@@ -223,6 +239,16 @@ impl Harness {
         body_json(response).await
     }
 
+    /// Opens the project again, which is what a restart does before anything
+    /// else and the moment the runs a previous process left behind are picked up.
+    async fn reopen(&self, root: &str) {
+        self.send_json(
+            json_request("POST", "/api/v1/projects/open", json!({ "path": root })),
+            StatusCode::OK,
+        )
+        .await;
+    }
+
     async fn send_json(&self, request: Request<Body>, expected: StatusCode) -> Value {
         let response = self
             .app
@@ -237,7 +263,7 @@ impl Harness {
     }
 }
 
-fn get(uri: &str) -> Request<Body> {
+fn get_request(uri: &str) -> Request<Body> {
     Request::builder()
         .uri(uri)
         .body(Body::empty())
@@ -275,22 +301,55 @@ async fn serve(routes: Router) -> String {
 /// What a throwaway provider was asked, in the order it was asked. A test reads
 /// this to see the request that reached the far end of the whole pipeline.
 #[derive(Clone, Default)]
-struct Recorded(Arc<Mutex<Vec<Value>>>);
+struct Recorded {
+    asks: Arc<Mutex<Vec<Value>>>,
+    /// The jobs it was asked about afterwards, by the handle it issued for each.
+    /// Kept apart from the asks because a shot is placed once and looked at as
+    /// often as it takes, and a test that could not tell the two apart could not
+    /// see one placed twice.
+    looks: Arc<Mutex<Vec<String>>>,
+}
 
 impl Recorded {
     fn note(&self, body: &Bytes) {
-        self.0
+        self.asks
             .lock()
             .expect("the recorder is not poisoned")
             .push(serde_json::from_slice(body).expect("a generation is sent as JSON"));
     }
 
     fn calls(&self) -> usize {
-        self.0.lock().expect("the recorder is not poisoned").len()
+        self.asks
+            .lock()
+            .expect("the recorder is not poisoned")
+            .len()
     }
 
     fn call(&self, index: usize) -> Value {
-        self.0.lock().expect("the recorder is not poisoned")[index].clone()
+        self.asks.lock().expect("the recorder is not poisoned")[index].clone()
+    }
+
+    fn look(&self, reference: &str) {
+        self.looks
+            .lock()
+            .expect("the recorder is not poisoned")
+            .push(reference.to_string());
+    }
+
+    fn looks(&self) -> usize {
+        self.looks
+            .lock()
+            .expect("the recorder is not poisoned")
+            .len()
+    }
+
+    fn last_look(&self) -> String {
+        self.looks
+            .lock()
+            .expect("the recorder is not poisoned")
+            .last()
+            .expect("the job was asked about")
+            .clone()
     }
 }
 
@@ -364,6 +423,48 @@ fn painting(recorded: Recorded, sizes: &[(u32, u32)]) -> Router {
             }
         }),
     )
+}
+
+/// A provider that takes a shot as a job and answers about it afterwards.
+///
+/// Whether the job has finished is the test's to say, because that is what a
+/// restart has to survive: the app is not in the middle of a call when it stops,
+/// it is in the middle of a wait between two looks at a job somebody else is
+/// running.
+fn shooting(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
+    let starting = recorded.clone();
+    let asking = recorded.clone();
+    Router::new()
+        .route(
+            "/v1/videos",
+            post(move |body: Bytes| {
+                let recorded = starting.clone();
+                async move {
+                    recorded.note(&body);
+                    Json(json!({ "id": JOB, "status": "queued" }))
+                }
+            }),
+        )
+        .route(
+            "/v1/videos/{reference}",
+            get(move |Route(reference): Route<String>| {
+                let recorded = asking.clone();
+                let finished = Arc::clone(&finished);
+                async move {
+                    recorded.look(&reference);
+                    let status = if finished.load(Ordering::SeqCst) {
+                        "succeeded"
+                    } else {
+                        "in_progress"
+                    };
+                    Json(json!({ "id": reference, "status": status }))
+                }
+            }),
+        )
+        .route(
+            "/v1/videos/{reference}/content",
+            get(|| async { ([(header::CONTENT_TYPE, "video/mp4")], SHOT.to_vec()) }),
+        )
 }
 
 /// A node in a canvas as the API reports it.
@@ -454,6 +555,15 @@ fn files_in(root: &str, category: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// Where the note of a job a provider is still running is kept.
+fn jobs_dir(root: &str) -> PathBuf {
+    Path::new(root).join("history").join("jobs")
+}
+
+fn job_note(root: &str, task_id: &str) -> PathBuf {
+    jobs_dir(root).join(format!("{task_id}.json"))
+}
+
 /// Waits until a throwaway provider has been asked, so what follows happens
 /// while the step is in the middle of a call rather than before it.
 async fn until_asked(recorded: &Recorded) {
@@ -464,6 +574,84 @@ async fn until_asked(recorded: &Recorded) {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     panic!("the provider was never asked");
+}
+
+/// Waits until a step has written down the job it is waiting on, and says which
+/// one. The shot itself is still running, and is going to stay that way.
+async fn until_placed(harness: &Harness, run_id: &str) -> String {
+    for _ in 0..200 {
+        let run = harness.run(run_id).await;
+        if let Some(task) = run["steps"][0]["taskId"].as_str() {
+            return task.to_string();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("run {run_id} never wrote down the job it was waiting on");
+}
+
+/// What a process that stopped in the middle of a shot leaves behind: a run
+/// still in progress whose step names the job it was waiting on, and the note of
+/// that job beside the run history.
+///
+/// Written rather than caused, because causing it means stopping a process. What
+/// matters is what the next one makes of what it finds, and this is exactly what
+/// it finds. Returns the run it can be followed by and the job it was waiting on.
+async fn left_behind(harness: &Harness, root: &str, canvas_id: &str) -> (String, String) {
+    let project_id = harness.document().await["moka"]["metadata"]["id"]
+        .as_str()
+        .expect("the document names its project")
+        .to_string();
+    let run_id = new_id();
+    let task_id = new_id();
+    let started = now_iso();
+    let run = json!({
+        "id": run_id,
+        "projectId": project_id,
+        "canvasId": canvas_id,
+        "requestedNodeIds": ["n-shot"],
+        "status": "running",
+        "executorKey": "provider",
+        // What the graph looked like when the run started. Read again rather
+        // than trusted, so it says nothing about whether this can be picked up.
+        "graphHash": "as-it-was",
+        "parameters": { "n-shot": { "prompt": "a lantern drifting" } },
+        "steps": [{
+            "nodeId": "n-shot",
+            "status": "running",
+            "startedAt": started,
+            "taskId": task_id,
+            "taskCreatedAt": started,
+        }],
+        "cancelRequested": false,
+        "createdAt": started,
+        "updatedAt": started,
+    });
+    let runs = Path::new(root).join("history").join("runs");
+    std::fs::create_dir_all(&runs).expect("the run history exists");
+    std::fs::write(
+        runs.join(format!("{run_id}.json")),
+        serde_json::to_vec_pretty(&run).expect("a run is written as it is kept"),
+    )
+    .expect("the run is left behind");
+
+    // The note is the reason the run above is worth picking up: without it there
+    // is no way to ask after the job, and the sweep fails the run instead.
+    let note = serde_json::to_value(AsyncTask {
+        id: task_id.clone(),
+        reference: JOB.to_string(),
+        protocol: Protocol::Openai,
+        capability: Capability::Video,
+        model: reference(SHOOTER),
+        created_at: started,
+    })
+    .expect("a job note is written as it is kept");
+    std::fs::create_dir_all(jobs_dir(root)).expect("the job notes have a directory");
+    std::fs::write(
+        job_note(root, &task_id),
+        serde_json::to_vec_pretty(&note).expect("a note is JSON"),
+    )
+    .expect("the note is left behind");
+    (run_id, task_id)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -807,4 +995,177 @@ async fn a_cancel_reaches_a_step_that_is_waiting_on_a_provider() {
         0,
         "the bytes that arrived on the way out were not left behind"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_shot_is_written_down_the_moment_it_is_placed_and_not_when_it_answers() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let finished = Arc::new(AtomicBool::new(false));
+    let base_url = serve(shooting(recorded.clone(), Arc::clone(&finished))).await;
+    harness
+        .configure(&base_url, &[(SHOOTER, Capability::Video)])
+        .await;
+    let (canvas_id, root) = harness.project("Shot").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-shot", NodeKind::Video, "Shot", &reference(SHOOTER),
+                "a lantern drifting over the lake", None) },
+        ]))
+        .await;
+
+    let run_id = harness.start(&canvas_id, json!(["n-shot"])).await;
+    // The shot is still running and is going to stay that way, so what arrives
+    // here is a step waiting on a job rather than a step that finished.
+    let task_id = until_placed(&harness, &run_id).await;
+
+    let running = harness.run(&run_id).await;
+    assert_eq!(running["status"], "running");
+    let step = &running["steps"][0];
+    assert_eq!(
+        step["status"], "running",
+        "a job is waited out, not answered"
+    );
+    assert_eq!(step["taskId"], json!(task_id));
+    assert!(
+        step["taskCreatedAt"].is_string(),
+        "so a reader can say how long it has been running"
+    );
+    // What the provider issued is credential-adjacent in some protocols, and a
+    // run record is served to clients and carried into packages.
+    assert!(
+        !running.to_string().contains(JOB),
+        "the provider's own handle is not this app's to hand out: {running}"
+    );
+
+    // The note beside the run history is the only place it is written, and it is
+    // what makes the wait above survivable.
+    let note: Value = serde_json::from_slice(
+        &std::fs::read(job_note(&root, &task_id)).expect("the job was written down"),
+    )
+    .expect("the note is JSON");
+    assert_eq!(note["reference"], json!(JOB));
+    assert_eq!(
+        note["model"],
+        json!(reference(SHOOTER)),
+        "so a poll cannot be pointed at a channel that never started the job"
+    );
+    assert_eq!(recorded.calls(), 1, "one step, one shot");
+
+    // Calling it off stops the waiting here. The work out there has no way back,
+    // and saying so is the difference between a cancel and a surprise on a bill.
+    harness.cancel(&run_id).await;
+    let cancelled = harness.settled(&run_id).await;
+    assert_eq!(cancelled["status"], "cancelled");
+    let error = cancelled["error"]
+        .as_str()
+        .expect("a run stopped mid-shot says what it cost");
+    assert!(error.contains("billed"), "{error}");
+    assert_eq!(cancelled["steps"][0]["status"], "cancelled");
+    assert!(
+        !job_note(&root, &task_id).exists(),
+        "a run that has ended leaves nothing for a job to answer to"
+    );
+    assert!(
+        harness.document().await["moka"]["resources"]["videos"]
+            .as_array()
+            .expect("a registry")
+            .is_empty(),
+        "and nothing was filed for it"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_run_left_waiting_on_a_shot_asks_after_the_same_one_when_the_project_reopens() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let finished = Arc::new(AtomicBool::new(false));
+    let base_url = serve(shooting(recorded.clone(), Arc::clone(&finished))).await;
+    harness
+        .configure(&base_url, &[(SHOOTER, Capability::Video)])
+        .await;
+    let (canvas_id, root) = harness.project("Resumed").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-shot", NodeKind::Video, "Shot", &reference(SHOOTER),
+                "a lantern drifting over the lake", None) },
+        ]))
+        .await;
+    let (run_id, task_id) = left_behind(&harness, &root, &canvas_id).await;
+
+    // The shot finished while nobody here was watching, which is what makes the
+    // difference between picking a run up again and paying for a second shot.
+    finished.store(true, Ordering::SeqCst);
+    harness.reopen(&root).await;
+
+    let resumed = harness.settled(&run_id).await;
+    assert_eq!(resumed["status"], "succeeded");
+    assert!(
+        resumed["error"].is_null(),
+        "a run that was picked up again did not go wrong: {:?}",
+        resumed["error"]
+    );
+    let step = &resumed["steps"][0];
+    assert_eq!(step["nodeId"], "n-shot");
+    assert_eq!(step["status"], "succeeded");
+    assert_eq!(
+        step["taskId"],
+        json!(task_id),
+        "the record still names the job it waited out"
+    );
+
+    // The whole point: a second shot would be a second bill for one answer.
+    assert_eq!(recorded.calls(), 0, "nothing was placed again");
+    assert!(recorded.looks() > 0, "the job was asked after");
+    assert_eq!(
+        recorded.last_look(),
+        JOB,
+        "by the handle the provider issued, read back off the note"
+    );
+
+    let assets: Vec<String> = step["outputAssetIds"]
+        .as_array()
+        .expect("the shot was filed")
+        .iter()
+        .map(|id| id.as_str().expect("an asset has an id").to_string())
+        .collect();
+    assert_eq!(assets.len(), 1, "one shot, one asset");
+
+    let entries = harness.document().await["moka"]["resources"]["videos"].clone();
+    let entries = entries.as_array().expect("the registry holds the shot");
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry["id"], json!(assets[0]));
+    assert_eq!(entry["mime"], json!("video/mp4"));
+    let path = entry["path"].as_str().expect("an asset has a path");
+    assert!(path.starts_with("assets/videos/"), "{path}");
+    assert_eq!(
+        std::fs::read(Path::new(&root).join(path)).expect("the shot is on disk"),
+        SHOT,
+        "the bytes the provider sent, not a copy of them"
+    );
+    assert_eq!(
+        entry["provenance"]["runId"],
+        json!(run_id),
+        "filed under the run that was waiting, not a new one"
+    );
+    assert_eq!(entry["provenance"]["operationNodeId"], json!("n-shot"));
+
+    // The node holds what the run it was picked up from made.
+    let nodes = harness.document().await["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes")
+        .clone();
+    assert_eq!(
+        node_by_id(&nodes, "n-shot")["data"]["assetId"],
+        json!(assets[0])
+    );
+
+    assert!(
+        !job_note(&root, &task_id).exists(),
+        "a job that answered leaves nothing behind to be asked after again"
+    );
+    assert_eq!(files_in(&root, "videos"), 1);
 }

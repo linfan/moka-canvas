@@ -10,8 +10,10 @@ pub mod provider;
 pub mod runner;
 pub mod validate;
 
-use crate::domain::{AssetId, DataType, NodeId, NodeKind, RunId, ValidationIssue, WorkflowNode};
-use crate::generate::{AsyncTask, GenerateRequest, GeneratedItem};
+use crate::domain::{
+    AssetId, DataType, IsoTimestamp, NodeId, NodeKind, RunId, ValidationIssue, WorkflowNode,
+};
+use crate::generate::{GenerateRequest, GeneratedItem};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -117,6 +119,19 @@ pub struct ExecutionRequest {
     pub generation: Option<GenerateRequest>,
 }
 
+/// A step that answers later, in the run's hands.
+///
+/// What a run records about a job and what it needs to wait one out: the handle
+/// it is polled by, when it started, and the run whose cancellation it answers
+/// to. The job's own business — who is running it and under what name — stays
+/// with the gateway, because a run record is served to clients.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedJob {
+    pub run_id: RunId,
+    pub task_id: String,
+    pub created_at: IsoTimestamp,
+}
+
 /// What a step produced.
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionOutput {
@@ -127,7 +142,7 @@ pub struct ExecutionOutput {
     /// The upstream job a step went through. A shot is always a job rather than
     /// an answer waited out, and recording which one produced the result is what
     /// lets a run say so afterwards.
-    pub task: Option<AsyncTask>,
+    pub task: Option<PlacedJob>,
 }
 
 /// Validation failure from the executor's own operation schema.
@@ -192,5 +207,31 @@ pub trait WorkflowExecutor: Send + Sync {
         request: ExecutionRequest,
         progress: ProgressReporter,
     ) -> Result<ExecutionOutput, ExecutionError>;
+    /// Starts a step whose answer arrives later, when this executor has one.
+    ///
+    /// Split out of [`WorkflowExecutor::execute`] so the handle can be written
+    /// down before the wait: a shot takes minutes and a run does not, and what
+    /// is left behind is the difference between asking again and paying twice.
+    /// `None` is the ordinary answer — this executor answers inside `execute`.
+    async fn place_job(
+        &self,
+        _request: ExecutionRequest,
+    ) -> Result<Option<PlacedJob>, ExecutionError> {
+        Ok(None)
+    }
+    /// Waits out a job, whether this process started it a moment ago or before a
+    /// restart.
+    ///
+    /// Only ever handed a handle [`WorkflowExecutor::place_job`] gave out, or
+    /// one read back off a run record that was.
+    async fn wait_job(
+        &self,
+        _job: PlacedJob,
+        _progress: ProgressReporter,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        Err(ExecutionError::failed(
+            "This executor starts no job to wait out",
+        ))
+    }
     async fn cancel(&self, run_id: &RunId) -> Result<(), ExecutionError>;
 }

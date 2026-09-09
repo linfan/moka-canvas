@@ -77,26 +77,63 @@ impl FsProjectStore {
         Ok(Self::runs_dir(root).join(format!("{id}.json")))
     }
 
-    fn write_run(root: &Path, run: &RunRecord) -> Result<(), ProjectError> {
-        let dir = Self::runs_dir(root);
-        std::fs::create_dir_all(&dir)?;
-        let bytes = serde_json::to_vec_pretty(run)
-            .map_err(|error| ProjectError::domain("INTERNAL", error.to_string()))?;
-        let tmp = dir.join(format!(".{}.{}.tmp", run.id, uuid::Uuid::now_v7()));
-        std::fs::write(&tmp, &bytes)?;
+    /// One JSON file, written so a process that stops mid-write leaves the
+    /// previous contents in place rather than half of the new ones.
+    fn write_json(dir: &Path, id: &str, bytes: &[u8]) -> Result<(), ProjectError> {
+        std::fs::create_dir_all(dir)?;
+        let tmp = dir.join(format!(".{id}.{}.tmp", uuid::Uuid::now_v7()));
+        std::fs::write(&tmp, bytes)?;
         {
             let file = std::fs::File::open(&tmp)?;
             file.sync_all()?;
         }
-        std::fs::rename(&tmp, Self::run_path(root, &run.id)?)?;
-        if let Ok(dir_handle) = std::fs::File::open(&dir) {
+        std::fs::rename(&tmp, dir.join(format!("{id}.json")))?;
+        if let Ok(dir_handle) = std::fs::File::open(dir) {
             let _ = dir_handle.sync_all();
         }
         Ok(())
     }
 
-    /// Runs left queued/running by a dead process are failed on open — they
-    /// can never resume, and the record must not claim otherwise.
+    fn write_run(root: &Path, run: &RunRecord) -> Result<(), ProjectError> {
+        let bytes = serde_json::to_vec_pretty(run)
+            .map_err(|error| ProjectError::domain("INTERNAL", error.to_string()))?;
+        Self::write_json(&Self::runs_dir(root), &run.id, &bytes)
+    }
+
+    /// The records of jobs a provider is still running, kept beside the runs
+    /// that are waiting on them.
+    ///
+    /// Apart from the run record on purpose. A job is addressed by a handle the
+    /// far end issued, which is not this app's to hand out: run records are
+    /// served to clients and carried into exported packages, and nothing here
+    /// is either.
+    fn jobs_dir(root: &Path) -> PathBuf {
+        root.join("history").join("jobs")
+    }
+
+    fn job_path(root: &Path, id: &str) -> Result<PathBuf, ProjectError> {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(ProjectError::domain("JOB_NOT_FOUND", "Job not found"));
+        }
+        Ok(Self::jobs_dir(root).join(format!("{id}.json")))
+    }
+
+    /// Whether a run left in progress can be picked up again rather than failed.
+    ///
+    /// Only a step waiting on a job can be: the job is being worked on by
+    /// somebody else and outlived this process, so the answer is still coming
+    /// and the handle to ask again with is on the record. Anything else was in
+    /// the middle of something this process was doing, which stopped with it.
+    fn is_resumable(run: &RunRecord) -> bool {
+        run.steps
+            .iter()
+            .any(|step| step.status == RunStatus::Running && step.task_id.is_some())
+    }
+
+    /// Runs left queued/running by a dead process are failed on open, unless
+    /// one is waiting on a job that is still out there — that one is left as it
+    /// is and picked up again, because failing it would throw away an answer
+    /// already paid for.
     fn sweep_interrupted_runs(root: &Path) {
         let dir = Self::runs_dir(root);
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -116,6 +153,9 @@ impl FsProjectStore {
             if !matches!(run.status, RunStatus::Queued | RunStatus::Running) {
                 continue;
             }
+            if Self::is_resumable(&run) {
+                continue;
+            }
             run.status = RunStatus::Failed;
             run.error = Some("The app stopped while this run was in progress".to_string());
             for step in &mut run.steps {
@@ -127,6 +167,22 @@ impl FsProjectStore {
             run.updated_at = now_iso();
             let _ = Self::write_run(root, &run);
         }
+    }
+
+    /// The runs a previous process left mid-flight, which is to say the ones
+    /// the sweep just declined to fail.
+    ///
+    /// Read after a project is open and only there: the sweep has already
+    /// failed everything that cannot be picked up again, so what is still in
+    /// progress is waiting on a job a provider is still running.
+    pub async fn interrupted_runs(&self) -> Result<Vec<String>, ProjectError> {
+        Ok(self
+            .list_runs()
+            .await?
+            .into_iter()
+            .filter(|run| matches!(run.status, RunStatus::Queued | RunStatus::Running))
+            .map(|run| run.id)
+            .collect())
     }
 
     /// Resolves a project-relative path and verifies it stays inside the
@@ -721,6 +777,60 @@ impl ProjectStore for FsProjectStore {
         Self::write_run(&root, &run)?;
         Ok(run)
     }
+
+    async fn record_job(&self, id: &str, record: serde_json::Value) -> Result<(), ProjectError> {
+        let root = {
+            let guard = self.state.lock().expect("store poisoned");
+            guard
+                .as_ref()
+                .map(|state| state.root.clone())
+                .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?
+        };
+        // Checked before anything is written, so a handle that is not one can
+        // never name a path.
+        Self::job_path(&root, id)?;
+        let bytes = serde_json::to_vec_pretty(&record)
+            .map_err(|error| ProjectError::domain("INTERNAL", error.to_string()))?;
+        Self::write_json(&Self::jobs_dir(&root), id, &bytes)?;
+        Ok(())
+    }
+
+    async fn drop_job(&self, id: &str) -> Result<(), ProjectError> {
+        let root = {
+            let guard = self.state.lock().expect("store poisoned");
+            guard
+                .as_ref()
+                .map(|state| state.root.clone())
+                .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?
+        };
+        let path = Self::job_path(&root, id)?;
+        match std::fs::remove_file(&path) {
+            // A job ending and the run that waited on it ending can happen in
+            // either order, and the second one to arrive has nothing to drop.
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(ProjectError::Io(error)),
+        }
+    }
+
+    async fn job(&self, id: &str) -> Result<Option<serde_json::Value>, ProjectError> {
+        let root = {
+            let guard = self.state.lock().expect("store poisoned");
+            guard
+                .as_ref()
+                .map(|state| state.root.clone())
+                .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?
+        };
+        let path = Self::job_path(&root, id)?;
+        let raw = match std::fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(ProjectError::Io(error)),
+        };
+        // A record that cannot be read is a record that is not there: what it
+        // named is gone either way, and saying so lets the caller answer once.
+        Ok(serde_json::from_str(&raw).ok())
+    }
 }
 
 /// Normalizes a path without touching the filesystem (used by package entry checks).
@@ -737,5 +847,107 @@ pub fn normalize_relative(path: &str) -> Option<String> {
         None
     } else {
         Some(parts.join("/"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::RunStepRecord;
+
+    /// A run a process stopped in the middle of, with or without a job it was
+    /// waiting on: the two look the same on the record apart from that.
+    fn left_running(id: &str, task_id: Option<&str>) -> RunRecord {
+        RunRecord {
+            id: id.to_string(),
+            project_id: "project-1".to_string(),
+            canvas_id: "canvas-1".to_string(),
+            requested_node_ids: vec!["n-shot".to_string()],
+            status: RunStatus::Running,
+            executor_key: "provider".to_string(),
+            graph_hash: "abc".to_string(),
+            parameters: serde_json::Value::Null,
+            retry_of_run_id: None,
+            steps: vec![RunStepRecord {
+                node_id: "n-shot".to_string(),
+                status: RunStatus::Running,
+                started_at: Some("2026-01-01T00:00:00Z".to_string()),
+                finished_at: None,
+                error: None,
+                output_asset_ids: None,
+                output_text: None,
+                task_id: task_id.map(str::to_string),
+                task_created_at: task_id.map(|_| "2026-01-01T00:00:00Z".to_string()),
+                progress: None,
+            }],
+            error: None,
+            cancel_requested: false,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn recorded(root: &Path, id: &str) -> RunRecord {
+        let raw =
+            std::fs::read_to_string(FsProjectStore::runs_dir(root).join(format!("{id}.json")))
+                .expect("the run is on disk");
+        serde_json::from_str(&raw).expect("the run is readable")
+    }
+
+    #[test]
+    fn only_a_run_waiting_on_a_job_is_left_for_the_process_that_comes_next() {
+        let root = tempfile::tempdir().expect("a temporary directory");
+        let waiting = left_running("run-waiting", Some("0192b7d4-0000-7000-8000-000000000001"));
+        let stranded = left_running("run-stranded", None);
+        for run in [&waiting, &stranded] {
+            FsProjectStore::write_run(root.path(), run).expect("the run is written");
+        }
+
+        FsProjectStore::sweep_interrupted_runs(root.path());
+
+        // The job is being worked on by somebody else and outlived the process,
+        // so the answer is still coming and failing the run would throw away a
+        // shot that has already been paid for.
+        let resumed = recorded(root.path(), "run-waiting");
+        assert_eq!(resumed.status, RunStatus::Running);
+        assert_eq!(resumed.steps[0].status, RunStatus::Running);
+        assert!(resumed.error.is_none());
+
+        // What was in the middle of something this process was doing stopped
+        // with it, and there is nothing to pick up.
+        let failed = recorded(root.path(), "run-stranded");
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert_eq!(failed.steps[0].status, RunStatus::Failed);
+        assert_eq!(
+            failed.steps[0].error.as_deref(),
+            Some("Interrupted before completion")
+        );
+    }
+
+    #[test]
+    fn a_job_is_named_by_its_handle_and_by_nothing_that_could_name_a_path() {
+        let root = Path::new("/a/project");
+        assert_eq!(
+            FsProjectStore::job_path(root, "0192b7d4-0000-7000-8000-000000000001")
+                .expect("a handle names a note"),
+            root.join("history/jobs/0192b7d4-0000-7000-8000-000000000001.json")
+        );
+        // Checked before anything touches the disk, so a handle that is not one
+        // can never reach a path.
+        for handle in [
+            "",
+            ".",
+            "..",
+            "../secrets",
+            "a/b",
+            "a\\b",
+            "note.json",
+            "../../etc/passwd",
+        ] {
+            assert!(
+                FsProjectStore::job_path(root, handle).is_err(),
+                "{handle} must not name a note"
+            );
+        }
     }
 }

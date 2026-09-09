@@ -1,14 +1,16 @@
 //! The provider executor: one generation step, placed through the gateway.
 //!
 //! Who answers and how is the gateway's business; this module is the shape
-//! that fits a generation into the run pipeline. It adds the two things the
+//! that fits a generation into the run pipeline. It adds the three things the
 //! gateway has no words for: a cancellation flag per run, because a run is
 //! cancelled from the outside while a step sits in the middle of a provider
-//! call, and a wait for a job that answers later rather than at once.
+//! call; a wait for a job that answers later rather than at once; and the
+//! splitting of that job into a start and a wait, so the run can write the
+//! handle down in between and pick the same job up after a restart.
 
 use super::{
-    ExecutionError, ExecutionOutput, ExecutionRequest, ExecutionValidationError, ProgressReporter,
-    WorkflowExecutor, PROVIDER_EXECUTOR_KEY,
+    ExecutionError, ExecutionOutput, ExecutionRequest, ExecutionValidationError, PlacedJob,
+    ProgressReporter, WorkflowExecutor, PROVIDER_EXECUTOR_KEY,
 };
 use crate::domain::{Capability, RunId, ValidationIssue};
 use crate::generate::{
@@ -115,41 +117,53 @@ fn asks_for_nothing(generation: &GenerateRequest) -> bool {
     generation.prompt.trim().is_empty() && generation.inputs.is_empty()
 }
 
-/// One answer, waited out or read as it arrives.
+/// What a step asks for, or the reason there is nothing to send.
+///
+/// One guard for both halves of a step: a request too empty to answer at once
+/// is too empty to start a job for.
+fn asked_for(request: &ExecutionRequest) -> Result<GenerateRequest, ExecutionError> {
+    let Some(generation) = request.generation.clone() else {
+        return Err(ExecutionError::failed(
+            "The step carries no resolved generation",
+        ));
+    };
+    // Asked here rather than before the run: this is the first moment the
+    // question has an answer.
+    if asks_for_nothing(&generation) {
+        return Err(ExecutionError {
+            code: "GENERATION_PROMPT_EMPTY",
+            message: "The prompt resolved to nothing and no reference came with it".to_string(),
+            retryable: false,
+            cancelled: false,
+        });
+    }
+    Ok(generation)
+}
+
+/// One answer, read as it arrives.
 ///
 /// The capability decides which call is made, and the gateway stamps the same
 /// capability back on, so a request that disagreed with the node it came from
 /// cannot reach a provider it was not meant for.
-async fn place(
+async fn answered(
     gateway: &Gateway,
     request: &GenerateRequest,
     cancel: &Cancel,
-    progress: &ProgressReporter,
-) -> Result<ExecutionOutput, ProviderError> {
-    let (result, task) = match request.capability {
-        Capability::Text => (
+) -> Result<GenerateResult, ProviderError> {
+    match request.capability {
+        Capability::Text => {
             gateway
                 .text(request.clone(), &DeltaSink::default(), cancel)
-                .await?,
-            None,
-        ),
-        Capability::Image => (gateway.image(request.clone(), cancel).await?, None),
-        Capability::Audio => (gateway.audio(request.clone(), cancel).await?, None),
-        Capability::Video => {
-            let task = gateway.video(request.clone(), cancel).await?;
-            let result = waited(gateway, &task.id, cancel, progress).await?;
-            (result, Some(task))
+                .await
         }
-    };
-    // Checked on the way out as well as on the way in: a cancel that landed
-    // while the provider was thinking still means the run that asked has gone,
-    // and keeping an answer for it would store a result nobody wanted.
-    cancel.check()?;
-    Ok(ExecutionOutput {
-        text: result.text,
-        items: result.items,
-        task,
-    })
+        Capability::Image => gateway.image(request.clone(), cancel).await,
+        Capability::Audio => gateway.audio(request.clone(), cancel).await,
+        // A shot is started and then waited out, and starting one here would be
+        // starting something nobody in this call is going to collect.
+        Capability::Video => Err(ProviderError::invalid(
+            "a shot is a job rather than an answer waited out",
+        )),
+    }
 }
 
 /// Waits a job out, one look at a time.
@@ -239,28 +253,78 @@ impl WorkflowExecutor for ProviderExecutor {
         request: ExecutionRequest,
         progress: ProgressReporter,
     ) -> Result<ExecutionOutput, ExecutionError> {
-        let Some(generation) = request.generation.clone() else {
-            return Err(ExecutionError::failed(
-                "The step carries no resolved generation",
-            ));
-        };
-        // Asked here rather than before the run: this is the first moment the
-        // question has an answer.
-        if asks_for_nothing(&generation) {
-            return Err(ExecutionError {
-                code: "GENERATION_PROMPT_EMPTY",
-                message: "The prompt resolved to nothing and no reference came with it".to_string(),
-                retryable: false,
-                cancelled: false,
-            });
+        // A shot goes through the same two halves a run drives separately, so
+        // asking for a whole step and asking for it in two cannot come apart.
+        if let Some(job) = self.place_job(request.clone()).await? {
+            let mut output = self.wait_job(job.clone(), progress).await?;
+            output.task = Some(job);
+            return Ok(output);
         }
+        let generation = asked_for(&request)?;
         progress.report(0.0);
         let cancel = self.in_flight.flag(&request.run_id);
-        let outcome = place(&self.gateway, &generation, &cancel, &progress).await;
+        let outcome = answered(&self.gateway, &generation, &cancel).await;
         self.in_flight.release(&request.run_id);
-        let output = outcome.map_err(step_error)?;
+        let result = outcome.map_err(step_error)?;
+        // Checked on the way out as well as on the way in: a cancel that landed
+        // while the provider was working still means the run that asked has
+        // gone, and keeping an answer for it would store a result nobody wanted.
+        cancel.check().map_err(step_error)?;
         progress.report(1.0);
-        Ok(output)
+        Ok(ExecutionOutput {
+            text: result.text,
+            items: result.items,
+            task: None,
+        })
+    }
+
+    async fn place_job(
+        &self,
+        request: ExecutionRequest,
+    ) -> Result<Option<PlacedJob>, ExecutionError> {
+        let generation = asked_for(&request)?;
+        // Only a shot is a job. Everything else answers inside the call that
+        // asks, and there is nothing to write down in between.
+        if generation.capability != Capability::Video {
+            return Ok(None);
+        }
+        let cancel = self.in_flight.flag(&request.run_id);
+        let task = match self.gateway.video(generation, &cancel).await {
+            Ok(task) => task,
+            Err(error) => {
+                self.in_flight.release(&request.run_id);
+                return Err(step_error(error));
+            }
+        };
+        // Handed back before the wait rather than after it: this is the moment
+        // a job exists at the far end and nothing on this side says so yet.
+        Ok(Some(PlacedJob {
+            run_id: request.run_id,
+            task_id: task.id,
+            created_at: task.created_at,
+        }))
+    }
+
+    async fn wait_job(
+        &self,
+        job: PlacedJob,
+        progress: ProgressReporter,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        progress.report(0.0);
+        let cancel = self.in_flight.flag(&job.run_id);
+        let outcome = waited(&self.gateway, &job.task_id, &cancel, &progress).await;
+        self.in_flight.release(&job.run_id);
+        let result = outcome.map_err(step_error)?;
+        cancel.check().map_err(step_error)?;
+        progress.report(1.0);
+        // The job is not reported back: whoever waited it out already had the
+        // handle, and a run that picked this up after a restart read it off its
+        // own record.
+        Ok(ExecutionOutput {
+            text: result.text,
+            items: result.items,
+            task: None,
+        })
     }
 
     async fn cancel(&self, run_id: &RunId) -> Result<(), ExecutionError> {

@@ -34,6 +34,14 @@ pub struct PackageManifest {
 const MANIFEST_NAME: &str = "moka-package.json";
 const OS_JUNK: [&str; 3] = [".DS_Store", "Thumbs.db", "desktop.ini"];
 
+/// Where a job a provider is still running is noted, so the poll that collects
+/// it can be placed again after a restart.
+///
+/// Local to the process that placed the job and to the machine it ran on: it is
+/// addressed by a handle the far end issued, which a package opened somewhere
+/// else could not ask after even if it were allowed to carry one.
+const JOB_RECORDS: &str = "history/jobs/";
+
 /// Application-level metadata documents that sit at the project root only.
 /// Matching the whole relative path keeps an asset that happens to share a
 /// name — a project may well contain its own `meta.json` — in the package.
@@ -62,6 +70,9 @@ fn is_metadata(relative: &str) -> bool {
 
 fn is_excluded(relative: &str) -> bool {
     if relative.starts_with("tmp/") || relative == "tmp" {
+        return true;
+    }
+    if relative.starts_with(JOB_RECORDS) {
         return true;
     }
     if is_metadata(relative) {
@@ -162,7 +173,7 @@ pub fn export_project(
         project_name: moka.metadata.name.clone(),
         incomplete: !missing.is_empty(),
         exclusions: [
-            vec!["tmp/**".into()],
+            vec!["tmp/**".into(), format!("{JOB_RECORDS}**")],
             METADATA_DOCUMENTS
                 .iter()
                 .map(|document| document.to_string())
@@ -416,5 +427,17 @@ mod tests {
         ] {
             assert!(is_excluded(relative), "{relative} must not be packaged");
         }
+    }
+
+    #[test]
+    fn a_job_still_running_somewhere_else_is_not_part_of_the_work() {
+        assert!(is_excluded(
+            "history/jobs/0192b7d4-0000-7000-8000-000000000000.json"
+        ));
+        // The run history beside it ships: a record of what a project did is
+        // part of the project, and it names no handle but this app's own.
+        assert!(!is_excluded(
+            "history/runs/0192b7d4-0000-7000-8000-000000000000.json"
+        ));
     }
 }
