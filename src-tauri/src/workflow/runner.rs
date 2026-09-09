@@ -6,14 +6,15 @@
 
 use super::validate::{validate_run, RunSnapshot};
 use super::{
-    executor_key_for, ExecutionRequest, ProgressReporter, ValueProvenance, WorkflowExecutor,
-    WorkflowValue,
+    data_type_for, executor_key_for, operation_type_for, ExecutionError, ExecutionOutput,
+    ExecutionRequest, ProgressReporter, ValueProvenance, WorkflowExecutor, WorkflowValue,
 };
 use crate::domain::{
-    new_id, now_iso, AssetId, DocumentCommand, NodeId, NodeKind, NodePatch, PortDirection,
-    ResultSlot, ResultSlotStatus, RunId, RunRecord, RunStatus, RunStepRecord, ValidationIssue,
-    WorkflowNode,
+    new_id, now_iso, AssetId, DataType, DocumentCommand, NodeId, NodeKind, NodePatch,
+    PortDirection, ResultSlot, ResultSlotStatus, RunId, RunRecord, RunStatus, RunStepRecord,
+    ValidationIssue,
 };
+use crate::generate::{ingest_generated, AsyncTask, GenerateResult};
 use crate::project::store::FsProjectStore;
 use crate::project::{ProjectError, ProjectStore};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -41,9 +42,14 @@ impl From<ProjectError> for StartRunError {
     }
 }
 
+/// What one step leaves behind: what to write on the run record, and what the
+/// node downstream reads.
 struct StepArtifacts {
     text: Option<String>,
     assets: Option<Vec<AssetId>>,
+    /// The upstream job the step went through, for the ones that are a job
+    /// rather than an answer waited out.
+    task: Option<AsyncTask>,
 }
 
 impl RunManager {
@@ -231,15 +237,19 @@ impl RunManager {
             }
         };
 
+        // The snapshot is written to as the run goes, so the order it is walked
+        // in is taken out first: a step's answer has to reach the step after it,
+        // and the order is the one thing about the walk that must not change.
+        let mut snapshot = snapshot;
+        let order = snapshot.order.clone();
         let mut outputs: HashMap<NodeId, WorkflowValue> = HashMap::new();
         let mut halt: Option<(RunStatus, Option<String>)> = None;
 
-        for (position, node_id) in snapshot.order.iter().enumerate() {
+        for (position, node_id) in order.iter().enumerate() {
             if self.cancellation_requested(&run_id) {
                 halt = Some((RunStatus::Cancelled, None));
                 break;
             }
-            let node = &snapshot.nodes[node_id];
             run.steps[position].status = RunStatus::Running;
             run.steps[position].started_at = Some(now_iso());
             run.updated_at = now_iso();
@@ -247,18 +257,22 @@ impl RunManager {
                 tracing::warn!("run {run_id}: could not persist step start: {error}");
             }
 
-            let outcome = self.execute_step(&run, &snapshot, node, &outputs).await;
+            let outcome = self.execute_step(&run, &snapshot, node_id, &outputs).await;
             run.steps[position].finished_at = Some(now_iso());
             match outcome {
                 Ok((value, artifacts)) => {
-                    run.steps[position].status = RunStatus::Succeeded;
-                    run.steps[position].output_text = artifacts.text;
-                    run.steps[position].output_asset_ids = artifacts.assets;
-                    if node.kind == NodeKind::Operation {
-                        let text = run.steps[position].output_text.clone().unwrap_or_default();
-                        self.promote_result(&snapshot, node, Ok(text)).await;
+                    let step = &mut run.steps[position];
+                    step.status = RunStatus::Succeeded;
+                    step.output_text = artifacts.text;
+                    step.output_asset_ids = artifacts.assets;
+                    step.task_id = artifacts.task.as_ref().map(|task| task.id.clone());
+                    step.task_created_at = artifacts.task.map(|task| task.created_at);
+                    let words = step.output_text.clone().unwrap_or_default();
+                    if snapshot.nodes[node_id].kind == NodeKind::Operation {
+                        self.promote_result(&snapshot, node_id, Ok(words)).await;
                     }
                     if let Some(value) = value {
+                        snapshot.record_output(node_id, &value);
                         outputs.insert(node_id.clone(), value);
                     }
                 }
@@ -269,14 +283,15 @@ impl RunManager {
                     } else {
                         run.steps[position].status = RunStatus::Failed;
                         run.steps[position].error = Some(error.message.clone());
+                        let title = &snapshot.nodes[node_id].title;
                         halt = Some((
                             RunStatus::Failed,
-                            Some(format!("\"{}\": {}", node.title, error.message)),
+                            Some(format!("\"{title}\": {}", error.message)),
                         ));
                         // A cancellation produced no output; only genuine
                         // failures mark the node's result slot as failed.
-                        if node.kind == NodeKind::Operation {
-                            self.promote_result(&snapshot, node, Err(error.message.clone()))
+                        if snapshot.nodes[node_id].kind == NodeKind::Operation {
+                            self.promote_result(&snapshot, node_id, Err(error.message.clone()))
                                 .await;
                         }
                     }
@@ -315,39 +330,57 @@ impl RunManager {
             .remove(&run_id);
     }
 
+    /// Runs one scheduled node.
+    ///
+    /// A node with nothing an executor could do passes the value it already had
+    /// downstream, which is how written words or a bound image reach the step
+    /// after them. Everything else goes to the executor it names, and a
+    /// generation's answer is filed in the project before any of it travels on:
+    /// what flows between nodes is an asset reference, never the bytes.
     async fn execute_step(
         &self,
         run: &RunRecord,
         snapshot: &RunSnapshot,
-        node: &WorkflowNode,
+        node_id: &str,
         outputs: &HashMap<NodeId, WorkflowValue>,
-    ) -> Result<(Option<WorkflowValue>, StepArtifacts), super::ExecutionError> {
-        if node.kind != NodeKind::Operation {
+    ) -> Result<(Option<WorkflowValue>, StepArtifacts), ExecutionError> {
+        let node = &snapshot.nodes[node_id];
+        let source = ValueProvenance {
+            node_id: node.id.clone(),
+            port_id: "out".to_string(),
+        };
+        let Some(executor_key) = executor_key_for(node) else {
             let value = snapshot.source_value(&node.id);
             let artifacts = match &value {
                 Some(WorkflowValue::Text { text, .. }) => StepArtifacts {
                     text: Some(text.clone()),
                     assets: None,
+                    task: None,
                 },
                 Some(WorkflowValue::Media { asset_id, .. })
                 | Some(WorkflowValue::Artifact { asset_id, .. }) => StepArtifacts {
                     text: None,
                     assets: Some(vec![asset_id.clone()]),
+                    task: None,
                 },
                 None => StepArtifacts {
                     text: None,
                     assets: None,
+                    task: None,
                 },
             };
             return Ok((value, artifacts));
-        }
+        };
 
-        let operation_type = node.data.operation_type.clone().unwrap_or_default();
+        let operation_type = operation_type_for(node);
         let executor = self
             .executors
             .iter()
-            .find(|executor| executor.supports(&operation_type))
-            .ok_or_else(|| super::ExecutionError {
+            // Both halves matter: an executor that would take the operation but
+            // is not the one the node named would run a step the document never
+            // asked for.
+            .find(|executor| executor.key() == executor_key && executor.supports(&operation_type))
+            .ok_or_else(|| ExecutionError {
                 code: "OPERATION_UNSUPPORTED",
                 message: format!("No executor supports \"{operation_type}\""),
                 retryable: false,
@@ -369,6 +402,10 @@ impl RunManager {
             }
         }
 
+        // Resolved once here rather than in the executor: the same reading of
+        // the graph builds the request and stamps the answer that comes back,
+        // so the two cannot disagree about what fed it.
+        let resolved = snapshot.generation_inputs(&node.id);
         let request = ExecutionRequest {
             run_id: run.id.clone(),
             node_id: node.id.clone(),
@@ -379,19 +416,74 @@ impl RunManager {
                 .clone()
                 .unwrap_or(serde_json::Value::Null),
             inputs,
+            generation: node
+                .data
+                .generation
+                .as_ref()
+                .map(|spec| resolved.request_for(spec)),
         };
-        let output = executor
+        let ExecutionOutput { text, items, task } = executor
             .execute(request, ProgressReporter::default())
             .await?;
-        let text = output.text;
-        let value = text.clone().map(|text| WorkflowValue::Text {
-            text,
-            source: ValueProvenance {
-                node_id: node.id.clone(),
-                port_id: "out".to_string(),
+
+        if node.data.generation.is_none() {
+            let value = text
+                .clone()
+                .map(|text| WorkflowValue::Text { text, source });
+            return Ok((
+                value,
+                StepArtifacts {
+                    text,
+                    assets: None,
+                    task: None,
+                },
+            ));
+        }
+
+        let result = GenerateResult {
+            text: text.clone(),
+            items,
+            usage: None,
+        };
+        let entries = ingest_generated(self.store.as_ref(), run, node, &resolved, &result)
+            .await
+            .map_err(|error| ExecutionError {
+                code: error.code(),
+                message: error.to_string(),
+                // The provider already answered; what failed is filing the
+                // answer. Retrying the step would pay for a second generation
+                // to fix a problem on this disk.
+                retryable: false,
+                cancelled: false,
+            })?;
+        let assets: Vec<AssetId> = entries.into_iter().map(|entry| entry.id).collect();
+        let value = match assets.first() {
+            // A picture, a voice or a shot travels as the asset it became.
+            // Words travel as words, whether or not filing them made a text
+            // asset of its own.
+            Some(asset_id) if data_type_for(node.kind) != DataType::Text => {
+                Some(WorkflowValue::Media {
+                    media_type: data_type_for(node.kind),
+                    asset_id: asset_id.clone(),
+                    source,
+                })
+            }
+            _ => text
+                .clone()
+                .map(|text| WorkflowValue::Text { text, source }),
+        };
+        Ok((
+            value,
+            StepArtifacts {
+                text,
+                assets: if assets.is_empty() {
+                    None
+                } else {
+                    Some(assets)
+                },
+                task,
             },
-        });
-        Ok((value, StepArtifacts { text, assets: None }))
+        ))
     }
 
     /// Writes the operation's result slot through the command pipeline so the
@@ -401,10 +493,10 @@ impl RunManager {
     async fn promote_result(
         &self,
         snapshot: &RunSnapshot,
-        node: &WorkflowNode,
+        node_id: &str,
         outcome: Result<String, String>,
     ) {
-        for attempt in 0..5 {
+        for _ in 0..5 {
             let current = match self.store.current().await {
                 Ok(Some(opened)) => opened,
                 _ => return,
@@ -412,7 +504,7 @@ impl RunManager {
             let Some(live) = current
                 .moka
                 .canvas(&snapshot.canvas_id)
-                .and_then(|canvas| canvas.node(&node.id))
+                .and_then(|canvas| canvas.node(node_id))
             else {
                 return;
             };
@@ -442,7 +534,7 @@ impl RunManager {
                     current.moka.metadata.revision,
                     vec![DocumentCommand::UpdateNode {
                         canvas_id: snapshot.canvas_id.clone(),
-                        node_id: node.id.clone(),
+                        node_id: node_id.to_string(),
                         patch: NodePatch {
                             title: None,
                             z_index: None,
@@ -453,9 +545,9 @@ impl RunManager {
                 .await;
             match result {
                 Ok(_) => return,
-                Err(error) if error.code() == "REVISION_CONFLICT" && attempt < 4 => continue,
+                Err(error) if error.code() == "REVISION_CONFLICT" => continue,
                 Err(error) => {
-                    tracing::warn!("run: result promotion failed for node {}: {error}", node.id);
+                    tracing::warn!("run: result promotion failed for node {node_id}: {error}");
                     return;
                 }
             }

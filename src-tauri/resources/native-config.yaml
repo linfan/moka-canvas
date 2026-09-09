@@ -10,7 +10,7 @@ metadata:
   dir: "${appData}/metadata"
   maxDocumentBytes: 33554432
 workflow:
-  enabledExecutors: ["deterministic"]
+  enabledExecutors: ["deterministic", "provider"]
 generate:
   textTimeoutSeconds: 120
   imageTimeoutSeconds: 300

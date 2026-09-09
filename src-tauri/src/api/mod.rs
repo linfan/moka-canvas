@@ -4,6 +4,7 @@ use crate::metadata::{self, MetadataStore};
 use crate::project::store::FsProjectStore;
 use crate::project::ProjectStore;
 use crate::workflow::executor::DeterministicExecutor;
+use crate::workflow::provider::ProviderExecutor;
 use crate::workflow::runner::RunManager;
 use crate::workflow::WorkflowExecutor;
 use std::path::Path;
@@ -51,8 +52,10 @@ impl ApiState {
             Arc::clone(&store) as Arc<dyn ProjectStore>,
             config.generate.clone(),
         ));
-        let executors: Vec<Arc<dyn WorkflowExecutor>> =
-            vec![Arc::new(DeterministicExecutor::new())];
+        let executors: Vec<Arc<dyn WorkflowExecutor>> = vec![
+            Arc::new(DeterministicExecutor::new()),
+            Arc::new(ProviderExecutor::new(Arc::clone(&gateway))),
+        ];
         let runs = RunManager::new(
             Arc::clone(&store),
             executors,

@@ -21,7 +21,7 @@ use crate::domain::{
     ResultSlotStatus, WorkflowNode,
 };
 
-use super::{GenerateInput, InputRole};
+use super::{GenerateInput, GenerateRequest, InputRole};
 
 /// A prompt with its upstream text folded in, the media travelling beside it,
 /// and which nodes contributed.
@@ -37,6 +37,36 @@ pub struct ResolvedInputs {
     /// A node with nothing to give is not in here, which is what makes this
     /// list safe to record as provenance.
     pub used_node_ids: Vec<NodeId>,
+}
+
+impl ResolvedInputs {
+    /// The request these inputs form for one node's spec.
+    ///
+    /// Built beside the resolver rather than by whoever calls the gateway, so
+    /// that a run, a preview, and anything else that can reach a node asks in
+    /// the same words. The prompt is the resolved one — the spec's own with the
+    /// contributing text folded in behind the labels that point at it — and the
+    /// media travels under the role its port implied.
+    ///
+    /// No instruction is set: a spec carries none, and the only `instructions`
+    /// parameter in the whitelist belongs to speech, where it is a direction to
+    /// the voice rather than a framing instruction. A global one is offered by
+    /// the gateway, which is the only place that knows the preferences.
+    pub fn request_for(&self, spec: &GenerationSpec) -> GenerateRequest {
+        GenerateRequest {
+            capability: spec.capability,
+            model: spec.model.clone(),
+            prompt: self.prompt.clone(),
+            system: None,
+            params: spec
+                .params
+                .as_ref()
+                .and_then(|params| params.as_object())
+                .cloned()
+                .unwrap_or_default(),
+            inputs: self.inputs.clone(),
+        }
+    }
 }
 
 /// What a connection, or a reference picked by hand, is allowed to contribute.

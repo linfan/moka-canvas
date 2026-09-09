@@ -3,15 +3,17 @@
 //! run-specific phases from the execution contract.
 
 use super::{
-    executor_key_for, operation_type_for, ExecutionRequest, ValueProvenance, WorkflowExecutor,
-    WorkflowValue,
+    data_type_for, executor_key_for, operation_type_for, ExecutionRequest, ValueProvenance,
+    WorkflowExecutor, WorkflowValue,
 };
 use crate::domain::validate::topological_order;
 use crate::domain::{
-    CanvasDocument, CanvasId, DataType, MokaFile, NodeId, NodeKind, ValidationIssue, WorkflowEdge,
+    CanvasDocument, CanvasId, MokaFile, NodeId, NodeKind, ValidationIssue, WorkflowEdge,
     WorkflowNode,
 };
-use crate::generate::{collect_generation_inputs, context_node_ids, ResolvedInputs};
+use crate::generate::{
+    collect_generation_inputs, context_node_ids, GenerateRequest, ResolvedInputs,
+};
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -88,6 +90,40 @@ impl RunSnapshot {
         };
         collect_generation_inputs(&self.readable, node)
     }
+
+    /// The request one scheduled generation step sends, or `None` for a node
+    /// that has nothing to generate.
+    pub fn generation_request(&self, node_id: &str) -> Option<GenerateRequest> {
+        let spec = self.nodes.get(node_id)?.data.generation.as_ref()?;
+        Some(self.generation_inputs(node_id).request_for(spec))
+    }
+
+    /// Folds a finished step's answer into the canvas the next step resolves
+    /// against.
+    ///
+    /// A generation reads its inputs from this document, and without this an
+    /// upstream node's answer from the same run would be invisible to it: the
+    /// document says what was true when the run started, not what the run has
+    /// made since. Only the two fields a resolver reads are written. The order,
+    /// the closure and the hash stay frozen, because they are what the run
+    /// record claims was run and changing them mid-run would make that claim
+    /// false.
+    pub fn record_output(&mut self, node_id: &str, value: &WorkflowValue) {
+        let Some(node) = self
+            .readable
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == node_id)
+        else {
+            return;
+        };
+        match value {
+            WorkflowValue::Text { text, .. } => node.data.content = Some(text.clone()),
+            WorkflowValue::Media { asset_id, .. } | WorkflowValue::Artifact { asset_id, .. } => {
+                node.data.asset_id = Some(asset_id.clone())
+            }
+        }
+    }
 }
 
 /// A node's value as fixed at snapshot time (operations resolve for real
@@ -103,11 +139,7 @@ fn snapshot_value(node: &WorkflowNode, port_id: &str) -> WorkflowValue {
             source,
         },
         NodeKind::Image | NodeKind::Audio | NodeKind::Video => WorkflowValue::Media {
-            media_type: match node.kind {
-                NodeKind::Image => DataType::Image,
-                NodeKind::Audio => DataType::Audio,
-                _ => DataType::Video,
-            },
+            media_type: data_type_for(node.kind),
             asset_id: node.data.asset_id.clone().unwrap_or_default(),
             source,
         },
@@ -400,6 +432,7 @@ async fn validate_step(
             .clone()
             .unwrap_or(serde_json::Value::Null),
         inputs: snapshot.resolved_inputs(&node.id),
+        generation: snapshot.generation_request(&node.id),
     };
     if let Err(error) = executor.validate(&request).await {
         issues.extend(error.issues.into_iter().map(|mut item| {

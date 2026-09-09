@@ -213,6 +213,7 @@ impl WorkflowExecutor for DeterministicExecutor {
         progress.report(1.0);
         Ok(ExecutionOutput {
             text: Some(texts.join(&params.separator)),
+            ..Default::default()
         })
     }
 

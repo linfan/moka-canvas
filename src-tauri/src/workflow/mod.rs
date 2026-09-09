@@ -1,11 +1,17 @@
 //! Graph execution: authoritative run validation, the executor boundary,
 //! and the durable run lifecycle persisted under `history/runs/`.
+//!
+//! [`executor`] answers the operations that need nothing but the document.
+//! [`provider`] answers the ones that need a channel, and is the only place a
+//! run reaches the gateway.
 
 pub mod executor;
+pub mod provider;
 pub mod runner;
 pub mod validate;
 
 use crate::domain::{AssetId, DataType, NodeId, NodeKind, RunId, ValidationIssue, WorkflowNode};
+use crate::generate::{AsyncTask, GenerateRequest, GeneratedItem};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -82,6 +88,17 @@ pub fn operation_type_for(node: &WorkflowNode) -> String {
     }
 }
 
+/// The type a node's answer travels downstream as. Everything that is not media
+/// travels as words, which is what an operation node reads.
+pub fn data_type_for(kind: NodeKind) -> DataType {
+    match kind {
+        NodeKind::Image => DataType::Image,
+        NodeKind::Audio => DataType::Audio,
+        NodeKind::Video => DataType::Video,
+        _ => DataType::Text,
+    }
+}
+
 /// Everything an executor needs for one node step — resolved values and a
 /// sanitized parameter model, never raw HTTP data or filesystem handles.
 #[derive(Debug, Clone)]
@@ -92,13 +109,25 @@ pub struct ExecutionRequest {
     pub parameters: serde_json::Value,
     /// Input port id → values in deterministic edge order.
     pub inputs: BTreeMap<String, Vec<WorkflowValue>>,
+    /// What a generation step asks for, already resolved against the graph.
+    ///
+    /// Resolved by the run rather than by the executor, so that the graph is
+    /// read in one place and an executor never needs a canvas to do its job.
+    /// `None` for every other step.
+    pub generation: Option<GenerateRequest>,
 }
 
-/// What a step produced. Staged asset bytes join in a later phase; the
-/// deterministic executor only emits text.
+/// What a step produced.
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionOutput {
     pub text: Option<String>,
+    /// Media a provider made, in the order it gave it. Empty for a step that
+    /// only produced words.
+    pub items: Vec<GeneratedItem>,
+    /// The upstream job a step went through. A shot is always a job rather than
+    /// an answer waited out, and recording which one produced the result is what
+    /// lets a run say so afterwards.
+    pub task: Option<AsyncTask>,
 }
 
 /// Validation failure from the executor's own operation schema.

@@ -41,7 +41,7 @@ metadata:
   dir: ${JSON.stringify(join(home, "metadata"))}
   maxDocumentBytes: 33554432
 workflow:
-  enabledExecutors: ["deterministic"]
+  enabledExecutors: ["deterministic", "provider"]
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

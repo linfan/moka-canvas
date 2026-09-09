@@ -182,7 +182,7 @@ fn default_max_document_bytes() -> u64 {
     33_554_432
 }
 fn default_enabled_executors() -> Vec<String> {
-    vec!["deterministic".to_string()]
+    vec!["deterministic".to_string(), "provider".to_string()]
 }
 fn default_allowed_media_types() -> Vec<String> {
     vec![
@@ -407,10 +407,12 @@ mod tests {
         let config = parse_config(raw).expect("example config must parse");
         assert_eq!(config.server.bind, "127.0.0.1:3000");
         assert_eq!(config.public.product_name, "Moka Canvas");
-        assert!(config
-            .workflow
-            .enabled_executors
-            .contains(&"deterministic".to_string()));
+        // Both, because an example that named only the local one would refuse
+        // every generation node the moment somebody copied it.
+        assert_eq!(
+            config.workflow.enabled_executors,
+            vec!["deterministic".to_string(), "provider".to_string()]
+        );
     }
 
     #[test]
