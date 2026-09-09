@@ -2,7 +2,10 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
 use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
-use moka_canvas::domain::{AssetProvenance, MokaFile};
+use moka_canvas::domain::{
+    derive_ports, AssetProvenance, DocumentCommand, MokaFile, NodeData, NodeKind, Rect,
+    WorkflowNode,
+};
 use moka_canvas::project::codec::decode_moka_file;
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{CreateProject, PackageScope, ProjectStore, StagedAsset};
@@ -471,7 +474,7 @@ async fn a_run_record_travels_only_in_a_package_that_asked_for_it() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| row["pattern"] == "history/runs/**")
+        .find(|row| row["rule"] == "history/runs/**")
         .expect("the manifest names the rule that kept the runs out");
     assert_eq!(runs["files"], 1);
     assert_eq!(runs["bytes"], record_bytes.len() as u64);
@@ -499,7 +502,7 @@ async fn a_run_record_travels_only_in_a_package_that_asked_for_it() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|row| row["pattern"] != "history/runs/**"),
+            .all(|row| row["rule"] != "history/runs/**"),
         "a rule that kept nothing out has nothing to say"
     );
 
@@ -511,9 +514,19 @@ async fn a_run_record_travels_only_in_a_package_that_asked_for_it() {
 /// The run that made the fixture's asset.
 const MADE_BY_RUN: &str = "0192b7d4-2222-7000-8000-000000000002";
 
-/// A project holding an asset a run made, built through the store rather than
-/// the API: how an asset came to be is not a thing an upload can claim.
-async fn stage_generated_project(root: &Path) -> (FsProjectStore, PathBuf, String) {
+/// A project with an asset on a canvas and one on the shelf.
+struct StagedProject {
+    store: FsProjectStore,
+    root: PathBuf,
+    /// The asset a run made, which a node holds.
+    placed: String,
+    /// The asset somebody brought in and never placed.
+    shelf: String,
+}
+
+/// Built through the store rather than the API: how an asset came to be is not
+/// a thing an upload can claim.
+async fn stage_generated_project(root: &Path) -> StagedProject {
     let store = FsProjectStore::new(Arc::new(parse_test_config(root)));
     let created = store
         .create_project(
@@ -529,7 +542,7 @@ async fn stage_generated_project(root: &Path) -> (FsProjectStore, PathBuf, Strin
 
     let staged = root.join("staged.png");
     std::fs::write(&staged, make_test_png()).unwrap();
-    let change = store
+    let made = store
         .add_asset(StagedAsset {
             name: "made.png".to_string(),
             tmp_path: staged,
@@ -537,7 +550,7 @@ async fn stage_generated_project(root: &Path) -> (FsProjectStore, PathBuf, Strin
             category_hint: None,
             provenance: Some(AssetProvenance {
                 run_id: Some(MADE_BY_RUN.to_string()),
-                canvas_id: Some(canvas_id),
+                canvas_id: Some(canvas_id.clone()),
                 operation_node_id: Some("node-1".to_string()),
                 input_asset_ids: None,
                 parameter_snapshot: Some(json!({
@@ -549,7 +562,64 @@ async fn stage_generated_project(root: &Path) -> (FsProjectStore, PathBuf, Strin
         })
         .await
         .unwrap();
-    (store, project_root, change.entry.id)
+
+    let staged = root.join("shelf.png");
+    std::fs::write(&staged, make_test_png()).unwrap();
+    let brought = store
+        .add_asset(StagedAsset {
+            name: "brought.png".to_string(),
+            tmp_path: staged,
+            declared_mime: None,
+            category_hint: None,
+            provenance: None,
+        })
+        .await
+        .unwrap();
+
+    let revision = store
+        .current()
+        .await
+        .unwrap()
+        .expect("a project is open")
+        .moka
+        .metadata
+        .revision;
+    let now = "2026-01-01T00:00:00Z".to_string();
+    store
+        .apply_commands(
+            revision,
+            vec![DocumentCommand::AddNode {
+                canvas_id,
+                node: WorkflowNode {
+                    id: "node-1".to_string(),
+                    kind: NodeKind::Image,
+                    title: "Lake".to_string(),
+                    bounds: Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 280.0,
+                        height: 200.0,
+                    },
+                    z_index: 0,
+                    ports: derive_ports(NodeKind::Image),
+                    data: NodeData {
+                        asset_id: Some(made.entry.id.clone()),
+                        ..NodeData::default()
+                    },
+                    created_at: now.clone(),
+                    updated_at: now,
+                },
+            }],
+        )
+        .await
+        .unwrap();
+
+    StagedProject {
+        store,
+        root: project_root,
+        placed: made.entry.id,
+        shelf: brought.entry.id,
+    }
 }
 
 fn document_in(archive: &Path) -> MokaFile {
@@ -576,15 +646,17 @@ fn provenance_of(document: &MokaFile, asset_id: &str) -> AssetProvenance {
 #[tokio::test]
 async fn a_package_of_the_work_forgets_the_run_but_keeps_the_asking() {
     let temp = tempfile::tempdir().unwrap();
-    let (store, root, asset_id) = stage_generated_project(temp.path()).await;
+    let staged = stage_generated_project(temp.path()).await;
+    let asset_id = &staged.placed;
 
     let work = temp.path().join("work.mokapkg.zip");
-    store
+    staged
+        .store
         .export_package(Some(&work), false, PackageScope::default())
         .await
         .unwrap();
 
-    let provenance = provenance_of(&document_in(&work), &asset_id);
+    let provenance = provenance_of(&document_in(&work), asset_id);
     assert_eq!(
         provenance.run_id, None,
         "a package of the work points at no run: its record did not travel"
@@ -618,21 +690,28 @@ async fn a_package_of_the_work_forgets_the_run_but_keeps_the_asking() {
     hasher.update(bytes);
     assert_eq!(row["sha256"], hex::encode(hasher.finalize()));
 
-    let held = store.current().await.unwrap().expect("a project is open");
+    let held = staged
+        .store
+        .current()
+        .await
+        .unwrap()
+        .expect("a project is open");
     assert_eq!(
-        provenance_of(&held.moka, &asset_id).run_id.as_deref(),
+        provenance_of(&held.moka, asset_id).run_id.as_deref(),
         Some(MADE_BY_RUN),
         "what this machine knows is not a package's to forget"
     );
-    let on_disk = decode_moka_file(&std::fs::read(root.join("canvas.moka")).unwrap()).unwrap();
+    let on_disk =
+        decode_moka_file(&std::fs::read(staged.root.join("canvas.moka")).unwrap()).unwrap();
     assert_eq!(
-        provenance_of(&on_disk, &asset_id).run_id.as_deref(),
+        provenance_of(&on_disk, asset_id).run_id.as_deref(),
         Some(MADE_BY_RUN),
         "making a package redacts a copy, not the project"
     );
 
     let backup = temp.path().join("backup.mokapkg.zip");
-    store
+    staged
+        .store
         .export_package(
             Some(&backup),
             false,
@@ -644,14 +723,15 @@ async fn a_package_of_the_work_forgets_the_run_but_keeps_the_asking() {
         .await
         .unwrap();
     assert_eq!(
-        provenance_of(&document_in(&backup), &asset_id)
+        provenance_of(&document_in(&backup), asset_id)
             .run_id
             .as_deref(),
         Some(MADE_BY_RUN),
         "a full backup carries the run with the work"
     );
 
-    let imported = store
+    let imported = staged
+        .store
         .import_package(&work, &temp.path().join("imports").join("Made"))
         .await
         .unwrap();
@@ -660,7 +740,110 @@ async fn a_package_of_the_work_forgets_the_run_but_keeps_the_asking() {
         "the work package opens clean: {:?}",
         imported.self_check.issues
     );
-    let provenance = provenance_of(&imported.moka, &asset_id);
+    let provenance = provenance_of(&imported.moka, asset_id);
     assert_eq!(provenance.run_id, None);
     assert_eq!(provenance.operation_node_id.as_deref(), Some("node-1"));
+}
+
+/// A package asked to travel light leaves the shelf behind, and leaves it
+/// behind whole: an entry whose file did not come opens as damage, and a file
+/// nobody listed opens as nothing at all.
+#[tokio::test]
+async fn a_small_package_leaves_the_shelf_behind_entry_and_file_together() {
+    let temp = tempfile::tempdir().unwrap();
+    let staged = stage_generated_project(temp.path()).await;
+
+    let whole = temp.path().join("whole.mokapkg.zip");
+    staged
+        .store
+        .export_package(Some(&whole), false, PackageScope::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        document_in(&whole).resources.all().count(),
+        2,
+        "a package nobody asked to be small carries the shelf too"
+    );
+
+    let small = temp.path().join("small.mokapkg.zip");
+    staged
+        .store
+        .export_package(
+            Some(&small),
+            false,
+            PackageScope {
+                referenced_assets_only: true,
+                ..PackageScope::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let document = document_in(&small);
+    let carried: Vec<&str> = document
+        .resources
+        .all()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    assert_eq!(
+        carried,
+        vec![staged.placed.as_str()],
+        "only what a canvas points at is listed"
+    );
+
+    let held = staged
+        .store
+        .current()
+        .await
+        .unwrap()
+        .expect("a project is open");
+    let placed_path = held
+        .moka
+        .resources
+        .find(&staged.placed)
+        .unwrap()
+        .path
+        .clone();
+    let shelf_path = held
+        .moka
+        .resources
+        .find(&staged.shelf)
+        .unwrap()
+        .path
+        .clone();
+
+    let entries = read_zip_entries(&small);
+    let names: Vec<&str> = entries.iter().map(|(name, _)| name.as_str()).collect();
+    assert!(
+        names.contains(&placed_path.as_str()),
+        "the placed asset's file travels with its entry"
+    );
+    assert!(
+        !names.contains(&shelf_path.as_str()),
+        "and the shelf asset's file stayed behind with its entry"
+    );
+
+    let manifest = manifest_of(&entries);
+    let row = manifest["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["rule"] == "assets no canvas points at")
+        .expect("the manifest says what the shelf cost");
+    assert_eq!(row["files"], 1);
+    assert!(
+        row["bytes"].as_u64().unwrap() > 0,
+        "and how much room it freed"
+    );
+
+    let imported = staged
+        .store
+        .import_package(&small, &temp.path().join("imports").join("Small"))
+        .await
+        .unwrap();
+    assert!(
+        imported.self_check.issues.is_empty(),
+        "what arrives opens as whole: {:?}",
+        imported.self_check.issues
+    );
 }

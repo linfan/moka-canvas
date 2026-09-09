@@ -1,5 +1,5 @@
 use crate::config::LimitsConfig;
-use crate::domain::{now_iso, ASSET_CATEGORIES};
+use crate::domain::{now_iso, AssetId, ASSET_CATEGORIES};
 use crate::domain::{MokaFile, PACKAGE_MANIFEST_VERSION};
 use crate::metadata::crypto;
 use crate::metadata::docs;
@@ -8,7 +8,7 @@ use crate::project::store::normalize_relative;
 use crate::project::{PackageReport, PackageScope, ProjectError};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -28,7 +28,10 @@ pub struct PackageManifestEntry {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageSkip {
-    pub pattern: String,
+    /// The rule, stated as a path pattern where it has one. Not all of them do:
+    /// which assets a small package leaves behind is decided by the document
+    /// rather than by where they sit.
+    pub rule: String,
     pub files: u64,
     pub bytes: u64,
 }
@@ -111,6 +114,9 @@ enum Skip {
     MasterKey,
     /// A document this app put aside as unreadable.
     Corrupt,
+    /// An asset no canvas points at, left behind by a package asked to carry
+    /// only what is placed. Decided by the document rather than by the path.
+    Unreferenced,
     /// An application-level document, which belongs at a project root only.
     /// Matched on the whole relative path, so an asset that happens to share a
     /// name — a project may well contain its own `meta.json` — still ships.
@@ -120,8 +126,8 @@ enum Skip {
 }
 
 impl Skip {
-    /// The rule stated as a path pattern, which is how a manifest names it.
-    fn pattern(&self) -> String {
+    /// The rule as a manifest names it.
+    fn rule(&self) -> String {
         match self {
             Self::Scratch => "tmp/**".into(),
             Self::Job => format!("{JOB_RECORDS}**"),
@@ -129,6 +135,7 @@ impl Skip {
             Self::Secret => format!("**/{}", docs::SECRETS_DOC),
             Self::MasterKey => format!("**/{}", crypto::MASTER_KEY_FILE),
             Self::Corrupt => "**/*.corrupt.*".into(),
+            Self::Unreferenced => "assets no canvas points at".into(),
             Self::ApplicationDocument(document) => (*document).to_string(),
             Self::SystemJunk(name) => format!("**/{name}"),
         }
@@ -218,7 +225,11 @@ struct Collected {
     skips: BTreeMap<Skip, (u64, u64)>,
 }
 
-fn collect_files(root: &Path, scope: &PackageScope) -> Result<Collected, ProjectError> {
+fn collect_files(
+    root: &Path,
+    scope: &PackageScope,
+    left_behind: &BTreeSet<String>,
+) -> Result<Collected, ProjectError> {
     let mut collected = Collected {
         files: Vec::new(),
         skips: BTreeMap::new(),
@@ -229,7 +240,12 @@ fn collect_files(root: &Path, scope: &PackageScope) -> Result<Collected, Project
             let entry = entry?;
             let path = entry.path();
             let relative = relative_to(root, &path)?;
-            if let Some(rule) = skipped(&relative, scope) {
+            let rule = skipped(&relative, scope).or_else(|| {
+                left_behind
+                    .contains(&relative)
+                    .then_some(Skip::Unreferenced)
+            });
+            if let Some(rule) = rule {
                 let (files, bytes) = measure(&path);
                 let total = collected.skips.entry(rule).or_default();
                 total.0 += files;
@@ -253,24 +269,68 @@ fn collect_files(root: &Path, scope: &PackageScope) -> Result<Collected, Project
 /// names to strike out: somebody's prompt may well contain the word `runId`,
 /// and what they typed is not this function's to judge.
 ///
-/// A full backup is not touched at all. It is one person's project moving to
-/// another of their machines, and how it was made is part of what is moving.
+/// A full backup keeps the record of how the project was made. A package asked
+/// to hold only what is placed keeps the registry down to the assets a canvas
+/// points at, which is a choice about size rather than about anybody's history,
+/// so the two are decided separately and can be asked for together.
 fn document_for_export(moka: &MokaFile, scope: &PackageScope) -> MokaFile {
-    if scope.personal_history {
-        return moka.clone();
-    }
     let mut document = moka.clone();
-    for entry in document.resources.all_mut() {
-        if let Some(provenance) = entry.provenance.as_mut() {
-            // The one reference a package cannot honour: the record of the run
-            // stayed on the machine that made it. Which canvas and which node
-            // asked, what was handed over and what came back all still resolve
-            // inside the package, and asking the same way again is built from
-            // them — so only the dangling one goes.
-            provenance.run_id = None;
+    if !scope.personal_history {
+        for entry in document.resources.all_mut() {
+            if let Some(provenance) = entry.provenance.as_mut() {
+                // The one reference a package cannot honour: the record of the run
+                // stayed on the machine that made it. Which canvas and which node
+                // asked, what was handed over and what came back all still resolve
+                // inside the package, and asking the same way again is built from
+                // them — so only the dangling one goes.
+                provenance.run_id = None;
+            }
+        }
+    }
+    if scope.referenced_assets_only {
+        let placed = document.asset_references();
+        for category in ASSET_CATEGORIES {
+            if let Some(entries) = document.resources.category_mut(category) {
+                entries.retain(|entry| placed.contains_key(&entry.id));
+            }
+        }
+        // An asset left behind is a reference the package cannot honour either,
+        // so the ones that stay stop naming it.
+        for entry in document.resources.all_mut() {
+            let Some(provenance) = entry.provenance.as_mut() else {
+                continue;
+            };
+            let Some(inputs) = provenance.input_asset_ids.as_ref() else {
+                continue;
+            };
+            let kept: Vec<AssetId> = inputs
+                .iter()
+                .filter(|id| placed.contains_key(*id))
+                .cloned()
+                .collect();
+            provenance.input_asset_ids = (!kept.is_empty()).then_some(kept);
         }
     }
     document
+}
+
+/// The paths of assets a package leaves on this machine.
+///
+/// Empty unless the package was asked to be small. Both the registry entry and
+/// the file have to go together: an entry whose file is missing reads as damage
+/// to whoever opens the package next, and a file nobody listed reads as nothing
+/// at all.
+fn left_behind(moka: &MokaFile, document: &MokaFile) -> BTreeSet<String> {
+    let kept: BTreeSet<&str> = document
+        .resources
+        .all()
+        .map(|entry| entry.path.as_str())
+        .collect();
+    moka.resources
+        .all()
+        .map(|entry| entry.path.clone())
+        .filter(|path| !kept.contains(path.as_str()))
+        .collect()
 }
 
 /// The bytes a package carries for a path.
@@ -294,11 +354,14 @@ pub fn export_project(
     allow_incomplete: bool,
     scope: PackageScope,
 ) -> Result<PackageReport, ProjectError> {
-    let collected = collect_files(root, &scope)?;
+    let document = document_for_export(moka, &scope);
+    let collected = collect_files(root, &scope, &left_behind(moka, &document))?;
 
-    // Completeness: every referenced resource must exist on disk.
+    // Completeness: everything the package carries must be there to carry. An
+    // asset left behind because no canvas points at it is not missing from a
+    // package that never claimed it.
     let mut missing = Vec::new();
-    for entry in moka.resources.all() {
+    for entry in document.resources.all() {
         if !root.join(&entry.path).is_file() {
             missing.push(entry.path.clone());
         }
@@ -313,11 +376,11 @@ pub fn export_project(
         ));
     }
 
+    let encoded = encode_moka_file(&document, None)?;
     let mut entries = Vec::new();
-    let document = encode_moka_file(&document_for_export(moka, &scope), None)?;
     for file in &collected.files {
         let relative = relative_to(root, file)?;
-        let bytes = entry_bytes(root, &relative, &document)?;
+        let bytes = entry_bytes(root, &relative, &encoded)?;
         entries.push(PackageManifestEntry {
             path: relative,
             bytes: bytes.len() as u64,
@@ -352,8 +415,8 @@ pub fn export_project(
             .skips
             .into_iter()
             .filter(|(_, (files, _))| *files > 0)
-            .map(|(rule, (files, bytes))| PackageSkip {
-                pattern: rule.pattern(),
+            .map(|(skip, (files, bytes))| PackageSkip {
+                rule: skip.rule(),
                 files,
                 bytes,
             })
@@ -376,7 +439,7 @@ pub fn export_project(
         writer.write_all(&manifest_json)?;
         for entry in &manifest.entries {
             writer.start_file(&entry.path, options)?;
-            writer.write_all(&entry_bytes(root, &entry.path, &document)?)?;
+            writer.write_all(&entry_bytes(root, &entry.path, &encoded)?)?;
         }
         writer.finish()?;
         Ok(PackageReport {
@@ -562,8 +625,8 @@ pub fn asset_categories() -> &'static [&'static str] {
 mod tests {
     use super::*;
     use crate::domain::{
-        AssetProvenance, CanvasDocument, ProjectMetadata, ResourceEntry, ResourceRegistry,
-        MOKA_FILE_VERSION,
+        derive_ports, AssetProvenance, CanvasDocument, NodeData, NodeKind, ProjectMetadata, Rect,
+        ResourceEntry, ResourceRegistry, WorkflowNode, MOKA_FILE_VERSION,
     };
 
     /// The package an export makes unless it is asked for more.
@@ -663,7 +726,8 @@ mod tests {
         }
     }
 
-    /// A project holding an asset a run made and one somebody brought in.
+    /// A project holding an asset a run made and placed on a canvas, and one
+    /// somebody brought in and left on the shelf.
     fn fixture() -> MokaFile {
         let made = entry(
             "asset-made",
@@ -682,6 +746,26 @@ mod tests {
         );
         let brought = entry("asset-brought", "brought.png", None);
         let now = now_iso();
+        let mut canvas = CanvasDocument::empty("canvas-1".to_string(), "Canvas 1".to_string());
+        canvas.nodes = vec![WorkflowNode {
+            id: "node-1".to_string(),
+            kind: NodeKind::Image,
+            title: "Lake".to_string(),
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 280.0,
+                height: 200.0,
+            },
+            z_index: 0,
+            ports: derive_ports(NodeKind::Image),
+            data: NodeData {
+                asset_id: Some("asset-made".to_string()),
+                ..NodeData::default()
+            },
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        }];
         MokaFile {
             version: MOKA_FILE_VERSION.to_string(),
             metadata: ProjectMetadata {
@@ -697,10 +781,7 @@ mod tests {
                 images: vec![made, brought],
                 ..ResourceRegistry::default()
             },
-            canvas: vec![CanvasDocument::empty(
-                "canvas-1".to_string(),
-                "Canvas 1".to_string(),
-            )],
+            canvas: vec![canvas],
         }
     }
 
@@ -814,6 +895,87 @@ mod tests {
                 .as_deref(),
             Some(RUN),
             "what is known here is not a package's to forget"
+        );
+    }
+
+    /// The package a user asks for when the size of it matters more than the
+    /// shelf of material nobody has placed yet.
+    const PLACED_ONLY: PackageScope = PackageScope {
+        personal_history: false,
+        referenced_assets_only: true,
+    };
+
+    #[test]
+    fn a_small_package_drops_the_shelf_and_the_names_pointing_at_it() {
+        let fixture = fixture();
+        let small = document_for_export(&fixture, &PLACED_ONLY);
+
+        let carried: Vec<&str> = small
+            .resources
+            .all()
+            .map(|entry| entry.id.as_str())
+            .collect();
+        assert_eq!(
+            carried,
+            vec!["asset-made"],
+            "what no canvas points at stays"
+        );
+        assert_eq!(
+            left_behind(&fixture, &small)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["assets/brought.png".to_string()],
+            "and its file goes with the entry, or the package opens as damaged"
+        );
+        let provenance = small
+            .resources
+            .find("asset-made")
+            .unwrap()
+            .provenance
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            provenance.input_asset_ids, None,
+            "what stays stops naming what went"
+        );
+        assert_eq!(
+            provenance.run_id, None,
+            "asking for a small package does not ask for anybody's history"
+        );
+    }
+
+    #[test]
+    fn a_package_nobody_asked_to_be_small_keeps_the_whole_shelf() {
+        let fixture = fixture();
+        assert!(left_behind(&fixture, &document_for_export(&fixture, &WORK)).is_empty());
+    }
+
+    #[test]
+    fn the_two_choices_are_made_separately() {
+        let fixture = fixture();
+        let small_backup = document_for_export(
+            &fixture,
+            &PackageScope {
+                personal_history: true,
+                referenced_assets_only: true,
+            },
+        );
+        let provenance = small_backup
+            .resources
+            .find("asset-made")
+            .unwrap()
+            .provenance
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            provenance.run_id.as_deref(),
+            Some(RUN),
+            "a backup keeps the record of how it was made"
+        );
+        assert_eq!(
+            small_backup.resources.all().count(),
+            1,
+            "and can still be asked to travel light"
         );
     }
 }
