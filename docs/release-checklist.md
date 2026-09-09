@@ -36,19 +36,19 @@ npm run test:e2e  # Playwright critical path against the built app
    adjust generation preferences; save, reload, and confirm everything
    persisted. Editing the same channel in two windows at once surfaces a
    conflict notice in the loser instead of silently overwriting.
-9. Generate against a channel you really configured: `POST
-   /api/v1/generate/text` returns text, `/image` and `/audio` return the
-   media base64-encoded beside a mime type, kind, and dimensions, and
-   nothing appears in the project directory as a result. Repeat the text
-   call with `params.stream: true` and confirm `text/event-stream`,
-   several `delta` frames, and one closing `done` frame. `POST
-   /api/v1/generate/video` returns a handle instead; poll `GET
-   /api/v1/generate/tasks/{id}` until it ends, then poll a handle you
-   invented and confirm it is reported missing rather than unfinished.
-   Finally remove the channel's default model and confirm the answer is
-   one problem document — code in the body and in `x-error-code`, the
-   provider's message rather than its raw body, and no credential
-   anywhere in it. The automated equivalent is
+9. Generate against a channel you really configured. The text route
+   `POST /api/v1/generate/text` returns text; `/image` and `/audio`
+   return the media base64-encoded beside a mime type, kind, and
+   dimensions, and nothing appears in the project directory as a result.
+   Repeat the text call with `params.stream: true` and confirm
+   `text/event-stream`, several `delta` frames, and one closing `done`
+   frame. `POST /api/v1/generate/video` returns a handle instead: poll
+   `GET /api/v1/generate/tasks/{id}` until it ends, then poll a handle
+   you invented and confirm it is reported missing rather than
+   unfinished. Finally remove the channel's default model and confirm
+   the answer is one problem document — code in the body and in
+   `x-error-code`, the provider's message rather than its raw body, and
+   no credential anywhere in it. The automated equivalent is
    `cargo test --test generate_api`.
 
 ## macOS (`make package-macos`)
