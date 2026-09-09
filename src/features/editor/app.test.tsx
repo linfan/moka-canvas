@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,6 +10,7 @@ import {
 } from "@testing-library/react";
 import App from "../../App";
 import { buildGoldenMokaFile } from "../../shared/domain/fixtures";
+import { Toasts } from "./components/Toasts";
 import { useAppStore } from "./stores/appStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
@@ -106,5 +108,41 @@ describe("app boot", () => {
     // Switching canvases swaps the scene summary.
     fireEvent.click(screen.getByRole("button", { name: "Canvas 2" }));
     expect(await within(host).findByText("0 nodes · 0 edges")).toBeTruthy();
+  });
+});
+
+describe("what has just happened", () => {
+  it("goes away on being chosen", () => {
+    render(<Toasts />);
+    act(() => {
+      useAppStore.getState().pushToast("info", "Saved");
+    });
+    const said = screen.getByRole("button", { name: "Saved" });
+    expect(said).toHaveProperty("title", "Dismiss");
+
+    fireEvent.click(said);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("goes where it says first when it named a place", () => {
+    render(<Toasts />);
+    let went = 0;
+    act(() => {
+      useAppStore.getState().pushToast("success", "Filed under Images (1)", {
+        label: "Show assets",
+        go: () => {
+          went += 1;
+        },
+      });
+    });
+    const said = screen.getByRole("button", { name: /Filed under Images/ });
+    // The label is what tells a reader this one leads somewhere rather than
+    // only away.
+    expect(said).toHaveProperty("title", "Show assets");
+    expect(said.textContent).toContain("Show assets");
+
+    fireEvent.click(said);
+    expect(went).toBe(1);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

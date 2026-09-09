@@ -6,6 +6,7 @@ import type {
   ResourceEntry,
   WorkflowNode,
 } from "../../../shared/domain";
+import { ASSET_CATEGORY_LABELS } from "../../../shared/domain";
 import { buildIssueIndex, formatBytes } from "../canvas/mediaCards";
 import {
   ASSET_DRAG_MIME,
@@ -16,14 +17,6 @@ import {
 } from "../interactions/actions";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
-
-const CATEGORY_LABELS: Record<string, string> = {
-  images: "Images",
-  music: "Music",
-  voice: "Voice",
-  texts: "Texts",
-  videos: "Videos",
-};
 
 interface ImportJob {
   file: File;
@@ -261,7 +254,7 @@ function ResourcesSection() {
         .map(([category, entries]) => (
           <div className="side-resource-group" key={category}>
             <h3>
-              {CATEGORY_LABELS[category] ?? category} · {entries.length}
+              {ASSET_CATEGORY_LABELS[category]} · {entries.length}
             </h3>
             <ul className="side-resource-list">
               {entries.map((entry) => (

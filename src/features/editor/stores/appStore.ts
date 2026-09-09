@@ -12,6 +12,13 @@ export interface Toast {
   id: number;
   kind: "info" | "success" | "error";
   message: string;
+  /**
+   * Where choosing the toast goes, for a report of something that has a place.
+   * A toast is read and gone in a few seconds, so a reader who wants to see the
+   * thing it named should not have to remember where it was put; the label is
+   * what tells them choosing it leads somewhere rather than only away.
+   */
+  choice?: { label: string; go: () => void };
 }
 
 interface AppState {
@@ -21,7 +28,11 @@ interface AppState {
   toasts: Toast[];
   boot: () => Promise<void>;
   setPhase: (phase: AppPhase) => void;
-  pushToast: (kind: Toast["kind"], message: string) => void;
+  pushToast: (
+    kind: Toast["kind"],
+    message: string,
+    choice?: Toast["choice"],
+  ) => void;
   dismissToast: (id: number) => void;
 }
 
@@ -53,9 +64,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ phase });
   },
 
-  pushToast(kind, message) {
+  pushToast(kind, message, choice) {
     const id = nextToastId++;
-    set((state) => ({ toasts: [...state.toasts, { id, kind, message }] }));
+    set((state) => ({
+      toasts: [...state.toasts, { id, kind, message, choice }],
+    }));
     setTimeout(() => get().dismissToast(id), 6000);
   },
 

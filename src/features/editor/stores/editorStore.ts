@@ -136,6 +136,7 @@ interface EditorState {
   setGesture: (gesture: ActiveGesture) => void;
   setPointerWorld: (point: Point | null) => void;
   toggleResourcesPanel: () => void;
+  openResourcesPanel: () => void;
   toggleInspector: () => void;
   openContextMenu: (menu: ContextMenuState) => void;
   closeContextMenu: () => void;
@@ -204,6 +205,7 @@ export const useEditorStore = create<EditorState>()((set) => ({
   setPointerWorld: (point) => set({ pointerWorld: point }),
   toggleResourcesPanel: () =>
     set((state) => ({ resourcesPanelOpen: !state.resourcesPanelOpen })),
+  openResourcesPanel: () => set({ resourcesPanelOpen: true }),
   toggleInspector: () =>
     set((state) => ({ inspectorOpen: !state.inspectorOpen })),
   openContextMenu: (menu) => set({ contextMenu: menu }),

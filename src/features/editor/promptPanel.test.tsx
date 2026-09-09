@@ -13,7 +13,11 @@ import {
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
-import { MAX_IMAGES_PER_RUN, createNode } from "../../shared/domain";
+import {
+  MAX_IMAGES_PER_RUN,
+  MAX_PROMPT_LENGTH,
+  createNode,
+} from "../../shared/domain";
 import type { GenerationSpec, MokaFile, RunRecord } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
 import type { ProvidersView } from "../../api";
@@ -81,6 +85,8 @@ interface MockApi {
   calls: { url: string; method: string; body?: unknown }[];
   executors: string[];
   providers: ProvidersView;
+  /** The runs the server is holding, which the editor reads when it opens. */
+  runs: RunRecord[];
   moka: () => MokaFile;
 }
 
@@ -88,6 +94,7 @@ const api: MockApi = {
   calls: [],
   executors: [PROVIDER_EXECUTOR_KEY],
   providers: providers([PAINTER]),
+  runs: [],
   moka: () => buildGoldenMokaFile(),
 };
 
@@ -153,10 +160,16 @@ function route(url: string, method: string, body: unknown): Response {
     });
   }
   if (url === "/api/v1/projects/current/runs" && method === "GET") {
-    return json([]);
+    return json(api.runs);
   }
   if (url === "/api/v1/projects/current/runs" && method === "POST") {
     return json(makeRun(), 201);
+  }
+  if (url === "/api/v1/projects/current/runs/run-1/cancel") {
+    return json(makeRun({ status: "running", cancelRequested: true }));
+  }
+  if (url === "/api/v1/projects/current/runs/run-1/retry") {
+    return json(makeRun({ id: "run-2", retryOfRunId: "run-1" }));
   }
   return json({ code: "NOT_FOUND", message: url, status: 404 }, 404);
 }
@@ -201,6 +214,7 @@ beforeEach(() => {
   api.calls = [];
   api.executors = [PROVIDER_EXECUTOR_KEY];
   api.providers = providers([PAINTER]);
+  api.runs = [];
   api.moka = () => buildGoldenMokaFile();
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal(
@@ -238,6 +252,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // A run left going keeps a poll going with it, and the stub it reads through
+  // is gone by then.
+  useRunStore.getState().reset();
   vi.unstubAllGlobals();
 });
 
@@ -732,5 +749,173 @@ describe("the parameters a node carries", () => {
     await settle();
     expect(specOf(empty.image)?.params.count).toBeUndefined();
     expect(images).toHaveProperty("value", "");
+  });
+});
+
+/**
+ * A document with one empty image node that words arrive at, which is a node
+ * with nothing of its own to ask for and still something to be asked for.
+ */
+function withFedNode() {
+  const moka = buildGoldenMokaFile();
+  const source = createNode("text", { x: 800, y: 0 });
+  const target = createNode("image", { x: 1200, y: 0 });
+  source.data = { content: "A heron stands in the shallows." };
+  moka.canvas[0].nodes.push(source, target);
+  moka.canvas[0].edges.push({
+    id: "edge-fed",
+    source: { nodeId: source.id, portId: "out" },
+    target: { nodeId: target.id, portId: "prompt" },
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  api.moka = () => moka;
+  return target.id;
+}
+
+/** Opens the editor on a run the server is already holding for the image node. */
+async function openWithRun(run: RunRecord) {
+  api.runs = [run];
+  await openEditor();
+  selectNode(ids.image);
+  await settle();
+}
+
+function type(value: string) {
+  fireEvent.change(within(panel()).getByRole("textbox"), {
+    target: { value },
+  });
+}
+
+/** The control that sends an ask, whatever it reads as at the moment. */
+function ask() {
+  return within(panel()).getByRole("button", {
+    name: /^(Run|Ask again|Stop|Stopping…|Starting…)$/,
+  });
+}
+
+describe("driving one node's run", () => {
+  it("says on the button why there is nothing to ask for yet", async () => {
+    const empty = withEmptyNodes();
+    await openEditor();
+    selectNode(empty.image);
+    await settle();
+    expect(ask()).toHaveProperty("disabled", true);
+    expect(ask()).toHaveProperty(
+      "title",
+      "Nothing to ask for yet: write a prompt, or connect one",
+    );
+
+    // Words are one way out of it, and the reason goes with the refusal.
+    type("A heron at dawn");
+    await settle();
+    expect(ask()).toHaveProperty("disabled", false);
+    expect(ask()).toHaveProperty("title", "");
+  });
+
+  it("asks a node that is fed from upstream without words of its own", async () => {
+    const fed = withFedNode();
+    await openEditor();
+    selectNode(fed);
+    await settle();
+    expect(ask()).toHaveProperty("disabled", false);
+    expect(specOf(fed)).toBeUndefined();
+  });
+
+  it("says on the button when this kind of node has no model", async () => {
+    api.providers = providers([]);
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    expect(ask()).toHaveProperty("disabled", true);
+    expect(ask()).toHaveProperty("title", "No image model is configured yet");
+  });
+
+  it("counts a prompt out loud as it nears the limit", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    const limit = MAX_PROMPT_LENGTH.toLocaleString();
+
+    // A short ask is most of them, and a count beside each would be noise.
+    type("A heron at dawn");
+    await settle();
+    expect(panel().querySelector(".prompt-panel-count")).toBeNull();
+
+    type("a".repeat(MAX_PROMPT_LENGTH));
+    await settle();
+    expect(panel().textContent).toContain(`${limit} of ${limit} characters`);
+    // At the limit rather than past it, so the ask still stands.
+    expect(ask()).toHaveProperty("disabled", false);
+
+    type("a".repeat(MAX_PROMPT_LENGTH + 5));
+    await settle();
+    expect(panel().querySelector(".prompt-panel-count.is-over")).toBeTruthy();
+    expect(ask()).toHaveProperty("disabled", true);
+    expect(ask()).toHaveProperty(
+      "title",
+      `The prompt is 5 characters past the ${limit} it may be`,
+    );
+  });
+
+  it("becomes the way to stop a run while that run is going", async () => {
+    await openWithRun(
+      makeRun({
+        status: "running",
+        steps: [{ nodeId: ids.image, status: "running", progress: 0.4 }],
+      }),
+    );
+    expect(ask()).toHaveProperty("textContent", "Stop");
+
+    fireEvent.click(ask());
+    // Said at once: a run takes a moment to notice, and until it does a control
+    // still reading as one that can be asked would be asked again.
+    expect(ask()).toHaveProperty("textContent", "Stopping…");
+    expect(ask()).toHaveProperty("disabled", true);
+    await settle();
+    expect(
+      api.calls.some((call) => call.url.endsWith("/runs/run-1/cancel")),
+    ).toBe(true);
+  });
+
+  it("asks a run that gave up again as a follower of itself", async () => {
+    await openWithRun(
+      makeRun({
+        status: "failed",
+        steps: [{ nodeId: ids.image, status: "failed", error: "Refused" }],
+      }),
+    );
+    expect(ask()).toHaveProperty("textContent", "Ask again");
+
+    // A retry is asked against the document as it now stands, so what is typed
+    // since the run gave up still counts.
+    type("A heron at dawn, painted");
+    await settle();
+    fireEvent.click(ask());
+    await settle();
+    expect(
+      api.calls.some((call) => call.url.endsWith("/runs/run-1/retry")),
+    ).toBe(true);
+    // Followed rather than started over, so the two stay one question asked
+    // twice; and the run that follows is going, so the control stops it.
+    expect(
+      api.calls.filter(
+        (call) => call.url.endsWith("/runs") && call.method === "POST",
+      ),
+    ).toHaveLength(0);
+    expect(ask()).toHaveProperty("textContent", "Stop");
+  });
+
+  it("does not offer a run of several nodes again from one of their panels", async () => {
+    await openWithRun(
+      makeRun({
+        status: "failed",
+        requestedNodeIds: [ids.image, ids.text],
+        steps: [
+          { nodeId: ids.image, status: "failed", error: "Refused" },
+          { nodeId: ids.text, status: "cancelled" },
+        ],
+      }),
+    );
+    expect(ask()).toHaveProperty("textContent", "Run");
   });
 });

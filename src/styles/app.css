@@ -1228,6 +1228,18 @@ button.danger:hover:not(:disabled) {
   padding: 6px 8px;
 }
 
+.prompt-panel-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin: -4px 0 0;
+  text-align: right;
+}
+
+.prompt-panel-count.is-over {
+  color: var(--danger);
+}
+
 .prompt-panel-params {
   display: grid;
   gap: 8px;
@@ -1300,6 +1312,13 @@ button.danger:hover:not(:disabled) {
 
 .toast-error {
   border-color: var(--danger);
+}
+
+.toast-choice {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 3px;
 }
 
 .error-state {

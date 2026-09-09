@@ -42,6 +42,15 @@ export const PROJECT_ASSET_CATEGORIES = [
 ] as const;
 export type AssetCategory = (typeof PROJECT_ASSET_CATEGORIES)[number];
 
+/** What each place assets are filed is called where a reader is told of it. */
+export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
+  images: "Images",
+  music: "Music",
+  voice: "Voice",
+  texts: "Texts",
+  videos: "Videos",
+};
+
 export const MODEL_CAPABILITIES = ["text", "image", "audio", "video"] as const;
 export type Capability = (typeof MODEL_CAPABILITIES)[number];
 

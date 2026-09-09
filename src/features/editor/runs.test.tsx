@@ -16,8 +16,10 @@ import {
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
 import type {
+  AssetCategory,
   GenerationSpec,
   MokaFile,
+  ResourceEntry,
   RunRecord,
   RunStatus,
 } from "../../shared/domain";
@@ -81,6 +83,33 @@ function withStepStatus(run: RunRecord, status: RunStatus): RunRecord {
     ...run,
     steps: run.steps.map((step) => ({ ...step, status })),
   };
+}
+
+/**
+ * A document with one asset filed on each of the given shelves by one run.
+ *
+ * A run counts what it made but does not say where it went, and only the
+ * registry's own note of where an asset came from does, so this is the one place
+ * the two can be read together.
+ */
+function withFiledRun(runId: string, shelves: AssetCategory[]): MokaFile {
+  const moka = buildGoldenMokaFile();
+  for (const shelf of shelves) {
+    const entry: ResourceEntry = {
+      id: `asset-${shelf}`,
+      name: `made-${shelf}.bin`,
+      path: `assets/${shelf}/made-00000000.bin`,
+      createdAt: "2026-01-01T00:00:04.000Z",
+      updatedAt: "2026-01-01T00:00:04.000Z",
+      provenance: {
+        runId,
+        operationNodeId: ids.operation,
+        createdAt: "2026-01-01T00:00:04.000Z",
+      },
+    };
+    moka.resources[shelf] = [...moka.resources[shelf], entry];
+  }
+  return moka;
 }
 
 interface MockApi {
@@ -355,6 +384,59 @@ describe("runStore", () => {
     expect(
       useAppStore.getState().toasts.some((toast) => toast.kind === "success"),
     ).toBe(true);
+  });
+
+  it("says where a run that finished put what it made", async () => {
+    api.moka = () => withFiledRun("run-1", ["images", "texts"]);
+    useProjectStore.getState().hydrate({
+      root: "/tmp/golden",
+      moka: buildGoldenMokaFile(),
+      selfCheck: { ok: true, issues: [] },
+    });
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+
+    api.runs = [withStepStatus(makeRun({ status: "succeeded" }), "succeeded")];
+    await act(async () => {
+      await useRunStore.getState().load();
+      await settle();
+    });
+    const said = useAppStore
+      .getState()
+      .toasts.find((toast) => toast.kind === "success");
+    expect(said?.message).toBe("Filed under Images (1), Texts (1)");
+
+    // A toast is read and gone in a few seconds, so the place it named is one
+    // choice away rather than something to remember and find.
+    useEditorStore.setState({ resourcesPanelOpen: false });
+    act(() => {
+      said?.choice?.go();
+    });
+    expect(useEditorStore.getState().resourcesPanelOpen).toBe(true);
+  });
+
+  it("says a run that filed nothing finished, and nothing more", async () => {
+    api.moka = () => buildGoldenMokaFile();
+    useProjectStore.getState().hydrate({
+      root: "/tmp/golden",
+      moka: buildGoldenMokaFile(),
+      selfCheck: { ok: true, issues: [] },
+    });
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+
+    api.runs = [withStepStatus(makeRun({ status: "succeeded" }), "succeeded")];
+    await act(async () => {
+      await useRunStore.getState().load();
+      await settle();
+    });
+    const said = useAppStore
+      .getState()
+      .toasts.find((toast) => toast.kind === "success");
+    // A written answer lands in its node rather than among the assets, and
+    // naming a shelf it was not put on would send a reader looking.
+    expect(said?.message).toBe("Run finished");
+    expect(said?.choice).toBeUndefined();
   });
 
   it("defers the post-run resync while local edits are pending", async () => {

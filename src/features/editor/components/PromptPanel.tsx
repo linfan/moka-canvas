@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   CAPABILITY_LABELS,
+  MAX_PROMPT_LENGTH,
   boundsForShape,
   defaultGenerationSpec,
   findNode,
@@ -11,6 +12,7 @@ import {
   type GenerationSpec,
   type NodeId,
   type Rect,
+  type RunStatus,
   type WorkflowNode,
 } from "../../../shared/domain";
 import { ModelPicker } from "../../settings/ModelPicker";
@@ -27,13 +29,15 @@ import {
 } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
-import { useRunStore } from "../stores/runStore";
+import { useLatestRunForNode, useRunStore } from "../stores/runStore";
 import { GenerationParams, type ParamValue } from "./GenerationParams";
 
 const PANEL_WIDTH = 320;
 const PANEL_HEIGHT = 220;
 /** The tallest the panel gets, which is with every parameter it has showing. */
 const PANEL_HEIGHT_PARAMS = 360;
+/** What the panel grows by once it is counting a prompt out loud. */
+const PANEL_HEIGHT_COUNT = 22;
 /** Gap left between the panel and the node, and between it and a canvas edge. */
 const GAP = 8;
 
@@ -69,6 +73,50 @@ function holdsSomething(node: WorkflowNode): boolean {
   return Boolean(data.assetId) || (data.content ?? "").trim() !== "";
 }
 
+/** Whether a run still has something left to do. */
+function isGoing(status: RunStatus): boolean {
+  return status === "queued" || status === "running";
+}
+
+/**
+ * How long a prompt gets before the panel counts it out loud.
+ *
+ * A count beside every word would be noise for the short asks that are most of
+ * them; what matters is that the limit is not reached in silence.
+ */
+const COUNTED_FROM = Math.round(MAX_PROMPT_LENGTH * 0.9);
+
+/**
+ * Why this node cannot be asked yet, or null when it can.
+ *
+ * Stated on the control rather than left to be discovered by using it: a refusal
+ * that arrives as a failed run costs a round trip, and reads as something a
+ * provider did rather than as something missing here.
+ */
+function refusalFor(asked: {
+  available: boolean;
+  /** Settled: the models were read, and this kind of node has none to be pointed at. */
+  noModel: boolean;
+  capability: Capability;
+  prompt: string;
+  fedFromUpstream: boolean;
+}): string | null {
+  if (!asked.available) return GENERATION_UNAVAILABLE;
+  if (asked.noModel) {
+    const kind = CAPABILITY_LABELS[asked.capability].toLowerCase();
+    return `No ${kind} model is configured yet`;
+  }
+  if (asked.prompt.trim() === "" && !asked.fedFromUpstream) {
+    return "Nothing to ask for yet: write a prompt, or connect one";
+  }
+  const over = asked.prompt.length - MAX_PROMPT_LENGTH;
+  if (over > 0) {
+    const limit = MAX_PROMPT_LENGTH.toLocaleString();
+    return `The prompt is ${over.toLocaleString()} characters past the ${limit} it may be`;
+  }
+  return null;
+}
+
 /**
  * Asks one node for something: the mode, the model, the words, and the button
  * that sends them.
@@ -91,9 +139,9 @@ export function PromptPanel() {
   const camera = useEditorStore((state) => state.camera);
   const moka = useProjectStore((state) => state.moka);
   const activeCanvasId = useProjectStore((state) => state.activeCanvasId);
-  const starting = useRunStore((state) => state.starting);
   const generationOn = useGenerationAvailable();
   const providers = useProviderStore((state) => state.view);
+  const run = useLatestRunForNode(open?.nodeId ?? null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const shownFor = useRef<NodeId | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -168,6 +216,40 @@ export function PromptPanel() {
     capability === "image" && holdsSomething(node) ? "edit" : "generate";
   const mode = stored && offered.includes(stored.mode) ? stored.mode : opening;
   const models = modelOptionsFor(providers, capability);
+  const going = run !== null && isGoing(run.status);
+  const stopping = run !== null && going && run.cancelRequested;
+  /**
+   * Whether the run this node was last asked in is one worth asking again as a
+   * follower of itself, which is what keeps the two visible as one question
+   * asked twice rather than as two that have nothing to do with each other.
+   * Only where it asked for this node and nothing else: a run that drove several
+   * is not this panel's to send off again.
+   */
+  const again =
+    run !== null &&
+    !going &&
+    (run.status === "failed" || run.status === "cancelled") &&
+    run.requestedNodeIds.length === 1 &&
+    run.requestedNodeIds[0] === node.id;
+  // A configuration still being read is not one with nothing in it.
+  const noModel = providers !== null && models.length === 0;
+  // What a node with no words of its own may still be asked for: something
+  // arriving on its prompt port, or a reference it points at by hand.
+  const fedFromUpstream =
+    spec.referenceNodeIds.length > 0 ||
+    canvas.edges.some(
+      (edge) =>
+        edge.target.nodeId === node.id && edge.target.portId === "prompt",
+    );
+  const refusal = refusalFor({
+    available: generationOn,
+    noModel,
+    capability,
+    prompt,
+    fedFromUpstream,
+  });
+  const over = prompt.length - MAX_PROMPT_LENGTH;
+  const counted = prompt.length >= COUNTED_FROM;
 
   const commit = (patch: Partial<GenerationSpec> = {}, bounds?: Rect) => {
     setNodeGeneration(
@@ -207,14 +289,24 @@ export function PromptPanel() {
     commit({ prompt });
   };
 
-  const generate = async () => {
+  /**
+   * Asks the node for what the panel holds.
+   *
+   * Where a run of this node's gave up, the ask follows it rather than starting
+   * over: a retry is asked against the document as it now stands, so what has
+   * been typed since still counts, and the two runs stay visible as one question
+   * asked twice rather than as two with nothing to do with each other.
+   */
+  const ask = async () => {
     setBusy(true);
     try {
       // A run is served from the document on disk, so what the panel holds is
       // saved before the run is asked for.
       commit();
       await useProjectStore.getState().flush();
-      await useRunStore.getState().start(canvas.id, [node.id]);
+      const runs = useRunStore.getState();
+      if (again && run) await runs.retry(run.id);
+      else await runs.start(canvas.id, [node.id]);
     } catch (error) {
       useAppStore
         .getState()
@@ -227,6 +319,16 @@ export function PromptPanel() {
     }
   };
 
+  /**
+   * Asks a run still going to stop.
+   *
+   * The store says so at once rather than when the server answers, so the
+   * control reads as one that has been used instead of one still waiting to be.
+   */
+  const stop = () => {
+    if (run) void useRunStore.getState().cancel(run.id);
+  };
+
   const dismiss = () => useEditorStore.getState().closePromptPanel();
 
   // The camera is read for its own sake as much as for the zoom: it is what
@@ -237,7 +339,9 @@ export function PromptPanel() {
     x: node.bounds.x,
     y: node.bounds.y + node.bounds.height,
   });
-  const tall = paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT;
+  const tall =
+    (paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT) +
+    (counted ? PANEL_HEIGHT_COUNT : 0);
   const style: React.CSSProperties = {
     left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${
       PANEL_WIDTH + GAP
@@ -280,7 +384,7 @@ export function PromptPanel() {
         </button>
       </div>
 
-      {models.length === 0 ? (
+      {noModel ? (
         <div className="prompt-panel-models">
           <p className="prompt-panel-note">
             No {CAPABILITY_LABELS[capability].toLowerCase()} model is configured
@@ -310,7 +414,7 @@ export function PromptPanel() {
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
-            void generate();
+            void ask();
           } else if (event.key === "Escape") {
             event.preventDefault();
             dismiss();
@@ -321,6 +425,17 @@ export function PromptPanel() {
         rows={3}
         value={prompt}
       />
+
+      {counted && (
+        <p
+          className={
+            over > 0 ? "prompt-panel-count is-over" : "prompt-panel-count"
+          }
+        >
+          {prompt.length.toLocaleString()} of{" "}
+          {MAX_PROMPT_LENGTH.toLocaleString()} characters
+        </p>
+      )}
 
       {paramsOpen && (
         <GenerationParams
@@ -341,15 +456,31 @@ export function PromptPanel() {
         >
           Parameters
         </button>
-        <button
-          className="primary"
-          disabled={busy || starting || !generationOn}
-          onClick={() => void generate()}
-          title={generationOn ? undefined : GENERATION_UNAVAILABLE}
-          type="button"
-        >
-          {busy || starting ? "Starting…" : "Run"}
-        </button>
+        {going ? (
+          <button
+            className="primary"
+            disabled={stopping}
+            onClick={stop}
+            title={
+              stopping
+                ? "This run has been asked to stop and has not noticed yet"
+                : "Stop this run"
+            }
+            type="button"
+          >
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        ) : (
+          <button
+            className="primary"
+            disabled={busy || refusal !== null}
+            onClick={() => void ask()}
+            title={refusal ?? undefined}
+            type="button"
+          >
+            {busy ? "Starting…" : again ? "Ask again" : "Run"}
+          </button>
+        )}
       </div>
     </div>
   );

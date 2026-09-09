@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { isApiError, runsApi } from "../../../api";
 import type {
+  AssetCategory,
   CanvasId,
   NodeId,
   ResourceEntry,
@@ -11,7 +12,9 @@ import type {
   RunStepRecord,
   ValidationIssue,
 } from "../../../shared/domain";
+import { ASSET_CATEGORY_LABELS } from "../../../shared/domain";
 import { useAppStore } from "./appStore";
+import { useEditorStore } from "./editorStore";
 import { useProjectStore } from "./projectStore";
 
 const POLL_INTERVAL_MS = 800;
@@ -97,16 +100,54 @@ function stopListening() {
   listening.clear();
 }
 
-/** The server wrote run results into canvas.moka; adopt them when idle. */
-function adoptServerState() {
+/**
+ * The server wrote run results into the document; adopt them when idle, and hand
+ * back the reading so that whatever waits on the new assets can wait for it.
+ */
+function adoptServerState(): Promise<void> | null {
   const project = useProjectStore.getState();
-  if (!project.moka) return;
+  if (!project.moka) return null;
   if (project.pending.length > 0 || project.saveStatus === "conflicted") {
     resyncNeeded = true;
-    return;
+    return null;
   }
   resyncNeeded = false;
-  void project.reload();
+  return project.reload();
+}
+
+/**
+ * Where a run that just finished put what it made.
+ *
+ * Asked once the document has been read back, because the run counts its results
+ * but does not say which shelf they were filed on and only the registry does. A
+ * run that filed nothing is said to have finished and nothing more: a written
+ * answer lands in its node rather than among the assets, and naming a shelf it
+ * was not put on would send a reader looking.
+ */
+async function announceFiling(run: RunRecord, adopted: Promise<void> | null) {
+  if (adopted) await adopted;
+  const registry = useProjectStore.getState().moka?.resources;
+  const filed = registry
+    ? (Object.entries(registry) as [AssetCategory, ResourceEntry[]][])
+        .map(([shelf, entries]) => ({
+          shelf,
+          count: entries.filter((entry) => entry.provenance?.runId === run.id)
+            .length,
+        }))
+        .filter((entry) => entry.count > 0)
+    : [];
+  const app = useAppStore.getState();
+  if (filed.length === 0) {
+    app.pushToast("success", "Run finished");
+    return;
+  }
+  const named = filed
+    .map(({ shelf, count }) => `${ASSET_CATEGORY_LABELS[shelf]} (${count})`)
+    .join(", ");
+  app.pushToast("success", `Filed under ${named}`, {
+    label: "Show assets",
+    go: () => useEditorStore.getState().openResourcesPanel(),
+  });
 }
 
 export const useRunStore = create<RunState>()((set, get) => {
@@ -121,6 +162,18 @@ export const useRunStore = create<RunState>()((set, get) => {
     });
   };
 
+  /**
+   * The reasons a run was refused for what it asked for.
+   *
+   * Kept for the inspector rather than only said in a toast: the refusal is
+   * about the document, so it belongs where the document is read, and a toast is
+   * gone in a few seconds while the node is still sitting there unrun.
+   */
+  const noteRefusal = (error: unknown) => {
+    if (!isApiError(error, "RUN_VALIDATION_FAILED")) return;
+    set({ lastIssues: (error.details?.issues ?? []) as ValidationIssue[] });
+  };
+
   /** Swap in a fresh list, noticing runs that just reached a terminal state. */
   const integrate = (fresh: RunRecord[]) => {
     const previous = new Map(get().runs.map((run) => [run.id, run.status]));
@@ -133,29 +186,25 @@ export const useRunStore = create<RunState>()((set, get) => {
           ? state.selectedRunId
           : (fresh[0]?.id ?? null),
     }));
-    let completed = 0;
+    const succeeded: RunRecord[] = [];
     let failed = 0;
+    let adopted: Promise<void> | null = null;
     for (const run of fresh) {
       const before = previous.get(run.id);
-      if (before && isActive(before) && !isActive(run.status)) {
-        if (run.status === "succeeded") completed += 1;
-        else failed += 1;
-        adoptServerState();
-      }
+      if (!before || !isActive(before) || isActive(run.status)) continue;
+      if (run.status === "succeeded") succeeded.push(run);
+      else failed += 1;
+      adopted = adoptServerState() ?? adopted;
     }
-    if (completed > 0 || failed > 0) {
-      const app = useAppStore.getState();
-      if (completed > 0)
-        app.pushToast(
-          "success",
-          completed === 1 ? "Run finished" : `${completed} runs finished`,
-        );
-      if (failed > 0)
-        app.pushToast(
+    if (failed > 0) {
+      useAppStore
+        .getState()
+        .pushToast(
           "error",
           failed === 1 ? "Run did not finish" : `${failed} runs did not finish`,
         );
     }
+    for (const run of succeeded) void announceFiling(run, adopted);
     for (const run of fresh) {
       // Idempotent, so the poll that keeps arriving does not keep opening one.
       if (isActive(run.status)) get().openStream(run.id);
@@ -240,10 +289,7 @@ export const useRunStore = create<RunState>()((set, get) => {
         ensurePolling();
         return record;
       } catch (error) {
-        if (isApiError(error, "RUN_VALIDATION_FAILED")) {
-          const issues = (error.details?.issues ?? []) as ValidationIssue[];
-          set({ lastIssues: issues });
-        }
+        noteRefusal(error);
         throw error;
       } finally {
         set({ starting: false });
@@ -251,9 +297,19 @@ export const useRunStore = create<RunState>()((set, get) => {
     },
 
     async cancel(runId) {
+      // Said at once rather than when the server answers: a run takes a moment
+      // to notice, and until it does the control would still read as one that
+      // can be asked to stop, so the same hand would ask it again.
+      set((state) => {
+        const runs = state.runs.map((run) =>
+          run.id === runId ? { ...run, cancelRequested: true } : run,
+        );
+        return { runs, byNode: indexRuns(runs) };
+      });
       try {
         foldIn(await runsApi.cancel(runId));
       } catch (error) {
+        // The record still coming in from the poll says which of the two it was.
         set({
           error: error instanceof Error ? error.message : "Cancel failed",
         });
@@ -261,11 +317,19 @@ export const useRunStore = create<RunState>()((set, get) => {
     },
 
     async retry(runId) {
-      const record = await runsApi.retry(runId);
-      foldIn(record);
-      get().openStream(record.id);
-      ensurePolling();
-      return record;
+      set({ starting: true, error: null, lastIssues: [] });
+      try {
+        const record = await runsApi.retry(runId);
+        foldIn(record);
+        get().openStream(record.id);
+        ensurePolling();
+        return record;
+      } catch (error) {
+        noteRefusal(error);
+        throw error;
+      } finally {
+        set({ starting: false });
+      }
     },
 
     openStream(runId) {
@@ -372,9 +436,17 @@ function stepOf(byNode: RunsByNode, nodeId: NodeId): RunStepRecord | null {
   return runFor(byNode, nodeId)?.step ?? null;
 }
 
-/** The most recent run that included this node, if any. */
-export function useLatestRunForNode(nodeId: NodeId): RunRecord | null {
-  return useRunStore((state) => runFor(state.byNode, nodeId)?.run ?? null);
+/**
+ * The most recent run that included this node, if any.
+ *
+ * Asked of no node it answers nothing, so a reader holding a selection that may
+ * be empty can ask without branching first: a hook has to be called the same way
+ * every time round, whichever node — or none — is in hand.
+ */
+export function useLatestRunForNode(nodeId: NodeId | null): RunRecord | null {
+  return useRunStore((state) =>
+    nodeId === null ? null : (runFor(state.byNode, nodeId)?.run ?? null),
+  );
 }
 
 /** Latest run step status for a node, preferring runs that are still active. */
