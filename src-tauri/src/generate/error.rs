@@ -2,6 +2,7 @@
 //! configuration it has to fix from an outage it can only wait out.
 
 use crate::metadata::MetadataError;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -49,8 +50,14 @@ pub enum ProviderError {
     #[error("the channel rejected the stored credential: {0}")]
     Auth(String),
 
-    #[error("the channel is rate limiting requests: {0}")]
-    RateLimited(String),
+    /// The channel is busy. Carries its own advice about when to come back,
+    /// because a backoff that ignores `Retry-After` either hammers a provider
+    /// that asked for a minute or waits one out when it asked for a second.
+    #[error("the channel is rate limiting requests: {detail}")]
+    RateLimited {
+        detail: String,
+        retry_after: Option<Duration>,
+    },
 
     #[error("the channel did not answer in time: {0}")]
     Timeout(String),
@@ -112,7 +119,7 @@ impl ProviderError {
             Self::CapabilityMismatch { .. } => "MODEL_CAPABILITY_MISMATCH",
             Self::InUse { .. } => "CONFLICT",
             Self::Auth(_) => "PROVIDER_AUTH",
-            Self::RateLimited(_) => "PROVIDER_RATE_LIMIT",
+            Self::RateLimited { .. } => "PROVIDER_RATE_LIMIT",
             Self::Timeout(_) => "PROVIDER_TIMEOUT",
             Self::Unreachable(_) => "PROVIDER_UNAVAILABLE",
             Self::Rejected(_) => "PROVIDER_BAD_REQUEST",
@@ -132,7 +139,7 @@ impl ProviderError {
     pub fn retryable(&self) -> bool {
         match self {
             Self::Storage(error) => error.retryable(),
-            Self::RateLimited(_) | Self::Timeout(_) | Self::Unreachable(_) => true,
+            Self::RateLimited { .. } | Self::Timeout(_) | Self::Unreachable(_) => true,
             _ => false,
         }
     }

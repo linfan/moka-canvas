@@ -1,17 +1,18 @@
 //! The Gemini protocol.
+//!
+//! Listing only for now. A channel that can be configured and asked what it
+//! offers is already usable in Settings; generation through it is a separate
+//! step, and saying so here is better than an endpoint that answers nothing.
 
-use reqwest::header::HeaderName;
 use serde::Deserialize;
 
-use super::{client, exchange, not_a_model_list, provider_error, succeeded};
+use super::{
+    exchange, provider_error, succeeded, ChannelCall, Reply, MAX_MODEL_LIST_BYTES,
+    MODEL_LIST_TIMEOUT,
+};
 use crate::generate::error::ProviderError;
-use crate::generate::providers::join_url;
-use crate::metadata::Protocol;
 
-/// The credential goes in a header rather than in the query parameter the
-/// provider also accepts. A URL is logged and quoted back in error messages;
-/// a header is neither.
-const API_KEY_HEADER: HeaderName = HeaderName::from_static("x-goog-api-key");
+const MODELS: &str = "/models";
 
 /// Enough for everything a provider lists today to arrive in one page.
 const PAGE_SIZE: &str = "1000";
@@ -19,17 +20,20 @@ const PAGE_SIZE: &str = "1000";
 /// Identifiers arrive qualified, as in `models/gemini-2.5-flash`.
 const NAME_PREFIX: &str = "models/";
 
-pub async fn list_models(base_url: &str, api_key: &str) -> Result<Vec<String>, ProviderError> {
-    let url = join_url(Protocol::Gemini, base_url, "/models");
-    let request = client()?
-        .get(&url)
-        .query(&[("pageSize", PAGE_SIZE)])
-        .header(API_KEY_HEADER, api_key);
-    let (status, body) = exchange(request).await?;
-    if !succeeded(status) {
-        return Err(provider_error(status, &body, api_key));
+pub(super) async fn list_models(call: &ChannelCall) -> Result<Vec<String>, ProviderError> {
+    // The credential is already in a header rather than in the query parameter
+    // this provider also accepts: a URL is logged and quoted back in error
+    // messages, and a header is neither.
+    let reply = exchange(
+        call.get(MODELS).query(&[("pageSize", PAGE_SIZE)]),
+        MODEL_LIST_TIMEOUT,
+        MAX_MODEL_LIST_BYTES,
+    )
+    .await?;
+    if !succeeded(reply.status) {
+        return Err(provider_error(&reply, &call.api_key));
     }
-    identifiers(&body)
+    identifiers(&reply)
 }
 
 #[derive(Deserialize)]
@@ -43,8 +47,10 @@ struct ListedModel {
     name: Option<String>,
 }
 
-fn identifiers(body: &str) -> Result<Vec<String>, ProviderError> {
-    let payload: ModelPage = serde_json::from_str(body).map_err(not_a_model_list)?;
+/// An entry with no usable name is dropped rather than reported: one
+/// placeholder should not hide the rest of the list.
+fn identifiers(reply: &Reply) -> Result<Vec<String>, ProviderError> {
+    let payload: ModelPage = reply.decoded("model list")?;
     Ok(payload
         .models
         .into_iter()

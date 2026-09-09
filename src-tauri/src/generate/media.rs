@@ -33,6 +33,97 @@ impl MediaInput {
     pub fn is_image(&self) -> bool {
         self.mime.starts_with("image/")
     }
+
+    /// The bytes as a data URL, which is how a JSON body carries media.
+    pub fn data_url(&self) -> String {
+        use base64::Engine;
+        format!(
+            "data:{};base64,{}",
+            self.mime,
+            base64::engine::general_purpose::STANDARD.encode(&self.bytes)
+        )
+    }
+
+    /// A name for a multipart part. The extension follows the bytes, which
+    /// after a conversion is not the one the asset was stored with.
+    pub fn filename(&self) -> String {
+        // An empty name has no extension of its own, so the mime decides.
+        let extension = crate::assets::extension_for("", &self.mime);
+        format!("{}.{}", crate::assets::slugify(&self.name), extension)
+    }
+}
+
+/// A request body in named parts.
+///
+/// Assembled here rather than by the HTTP client, which is built without that
+/// feature: the only endpoint needing it takes a handful of fields, and the
+/// alternative is a dependency enabled for one call.
+pub struct MultipartBody {
+    boundary: String,
+    body: Vec<u8>,
+}
+
+impl MultipartBody {
+    pub fn new() -> Self {
+        Self {
+            // Chosen per body, so a part whose bytes happen to contain the
+            // delimiter cannot end the body early.
+            boundary: format!("----moka{}", crate::domain::new_id()),
+            body: Vec::new(),
+        }
+    }
+
+    /// A named setting, which is how everything but the media travels.
+    pub fn field(mut self, name: &str, value: &str) -> Self {
+        self.open_part(name, None, None);
+        self.body.extend_from_slice(value.as_bytes());
+        self.end_part();
+        self
+    }
+
+    /// A named piece of media, carrying the name and mime a provider reads
+    /// rather than the one the asset was stored under.
+    pub fn file(mut self, name: &str, media: &MediaInput) -> Self {
+        self.open_part(name, Some(&media.filename()), Some(&media.mime));
+        self.body.extend_from_slice(&media.bytes);
+        self.end_part();
+        self
+    }
+
+    /// The finished body and the content type that names its boundary.
+    pub fn finish(mut self) -> (Vec<u8>, String) {
+        self.body
+            .extend_from_slice(format!("--{}--\r\n", self.boundary).as_bytes());
+        (
+            self.body,
+            format!("multipart/form-data; boundary={}", self.boundary),
+        )
+    }
+
+    fn open_part(&mut self, name: &str, filename: Option<&str>, mime: Option<&str>) {
+        let mut head = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"",
+            self.boundary, name
+        );
+        if let Some(filename) = filename {
+            head.push_str(&format!("; filename=\"{filename}\""));
+        }
+        if let Some(mime) = mime {
+            head.push_str(&format!("\r\nContent-Type: {mime}"));
+        }
+        self.body
+            .extend_from_slice(format!("{head}\r\n\r\n").as_bytes());
+    }
+
+    fn end_part(&mut self) {
+        self.body.extend_from_slice(b"\r\n");
+    }
+}
+
+impl Default for MultipartBody {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Reads every reference a request names, in the request's own order, so an
@@ -379,6 +470,49 @@ mod tests {
         let media = prepare_with("notes", None, b"hello".to_vec(), &budgets(ROOMY, ROOMY))
             .expect("an unknown payload is still sendable");
         assert_eq!(media.mime, "application/octet-stream");
+    }
+
+    #[test]
+    fn a_payload_is_shaped_for_the_body_it_travels_in() {
+        let media = MediaInput {
+            role: InputRole::Mask,
+            asset_id: "asset-1".into(),
+            name: "Mask Art.tiff".into(),
+            bytes: vec![0x89, 0x50, 0x4e, 0x47],
+            mime: "image/png".into(),
+        };
+        assert_eq!(media.data_url(), "data:image/png;base64,iVBORw==");
+        // The extension follows the bytes rather than the stored name: after a
+        // conversion the two disagree, and a part named .tiff carrying png is
+        // refused by the endpoints that check.
+        assert_eq!(media.filename(), "mask-art.png");
+    }
+
+    #[test]
+    fn a_multipart_body_names_its_own_boundary() {
+        let media = MediaInput {
+            role: InputRole::Reference,
+            asset_id: "asset-1".into(),
+            name: "Cat Photo.png".into(),
+            bytes: b"png-bytes".to_vec(),
+            mime: "image/png".into(),
+        };
+        let (body, content_type) = MultipartBody::new()
+            .field("model", "an-image-model")
+            .file("image", &media)
+            .finish();
+
+        let boundary = content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .expect("the content type names the boundary");
+        let text = String::from_utf8(body).expect("every part here is text");
+        for expected in [
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nan-image-model\r\n"),
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"cat-photo.png\"\r\nContent-Type: image/png\r\n\r\npng-bytes\r\n"),
+            format!("--{boundary}--\r\n"),
+        ] {
+            assert!(text.contains(&expected), "missing {expected:?} in {text:?}");
+        }
     }
 
     fn media_input(asset_id: &str, role: InputRole, mime: &str) -> MediaInput {

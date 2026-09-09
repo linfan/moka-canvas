@@ -1,26 +1,38 @@
 //! The wire protocols a channel can speak.
 //!
-//! One module per protocol, all behind the same call, so nothing above this
-//! branches on the protocol itself. Listing models is the only operation
-//! today; generation arrives with the gateway that runs it.
+//! One module per protocol, all behind the same trait, so nothing above this
+//! branches on the protocol itself. An adapter is given an address, a
+//! credential, and a request phrased in the project's own words, and answers
+//! with bytes and a mime type: no provider field name crosses this boundary in
+//! either direction.
 
+mod custom;
 mod gemini;
 mod openai;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use reqwest::header::{HeaderMap, HeaderName};
+
+use crate::config::GenerateConfig;
+use crate::domain::Capability;
 use crate::metadata::Protocol;
 
 use super::error::ProviderError;
+use super::media::MediaInput;
+use super::providers::{join_url, ResolvedModel};
+use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskState, Usage};
 
 /// A model list is a small request, and a provider that cannot answer one in
 /// this long is not about to finish a generation.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A channel address is supplied by the user, so whatever answers at it is
-/// untrusted input rather than a provider's well-formed document.
-const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+/// untrusted input rather than a provider's well-formed document. A model list
+/// gets its own, tighter ceiling than a generation answer, which can carry an
+/// image.
+const MAX_MODEL_LIST_BYTES: u64 = 8 * 1024 * 1024;
 
 /// How much of a provider's complaint reaches a problem body and a log line.
 const MAX_DETAIL_CHARS: usize = 300;
@@ -31,60 +43,495 @@ const MIN_SCRUBBED_KEY_CHARS: usize = 8;
 
 const USER_AGENT: &str = concat!("moka-canvas/", env!("CARGO_PKG_VERSION"));
 
+/// The credential goes in a header for both protocols. The query parameter one
+/// of them also accepts is refused here: a URL is logged, and quoted back in
+/// error messages.
+const API_KEY_HEADER: HeaderName = HeaderName::from_static("x-goog-api-key");
+
+/// The sentinel that ends a server-sent stream.
+const STREAM_DONE: &str = "[DONE]";
+
+/// What the reserved protocol answers to everything. Kept in one place so
+/// configuring such a channel and generating through it explain themselves the
+/// same way.
+const CUSTOM_RESERVED: &str = "the custom protocol is reserved and has no implementation";
+
+/// One channel, addressed for a single call.
+///
+/// It carries the plaintext credential, which is why it is built when a request
+/// goes out and dropped when the call returns. No `Debug` on purpose: a stray
+/// `{call:?}` in a log line should fail to build rather than print a key.
+#[derive(Clone)]
+pub struct ChannelCall {
+    /// The provider's own model name, split out of the reference already.
+    pub model_id: String,
+    /// The resolved `channelId::modelId`, kept so a job started here can be
+    /// pointed back at the same channel.
+    pub reference: String,
+    pub protocol: Protocol,
+    pub base_url: String,
+    pub api_key: String,
+    pub budgets: GenerateConfig,
+    client: reqwest::Client,
+}
+
+impl ChannelCall {
+    pub fn new(
+        resolved: &ResolvedModel,
+        api_key: String,
+        budgets: GenerateConfig,
+    ) -> Result<Self, ProviderError> {
+        Ok(Self {
+            model_id: resolved.model_id.clone(),
+            reference: resolved.reference.clone(),
+            protocol: resolved.protocol,
+            base_url: resolved.base_url.clone(),
+            api_key,
+            budgets,
+            client: build_client()?,
+        })
+    }
+
+    /// A channel addressed to ask what it offers. No model has been chosen
+    /// yet, so there is nothing to carry; the budgets are the defaults because
+    /// a listing applies its own tighter deadline and ceiling.
+    fn listing(protocol: Protocol, base_url: &str, api_key: &str) -> Result<Self, ProviderError> {
+        Ok(Self {
+            model_id: String::new(),
+            reference: String::new(),
+            protocol,
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            budgets: GenerateConfig::default(),
+            client: build_client()?,
+        })
+    }
+
+    /// An address for one endpoint, with the version segment this protocol
+    /// wants added once.
+    pub fn url(&self, path: &str) -> String {
+        join_url(self.protocol, &self.base_url, path)
+    }
+
+    /// The address this channel was configured with, so a caller can tell
+    /// whether another URL belongs to the same provider.
+    pub fn origin(&self) -> Option<String> {
+        origin_of(&self.base_url)
+    }
+
+    fn post(&self, path: &str) -> reqwest::RequestBuilder {
+        self.credentialed(self.client.post(self.url(path)))
+    }
+
+    fn get(&self, path: &str) -> reqwest::RequestBuilder {
+        self.credentialed(self.client.get(self.url(path)))
+    }
+
+    /// A request for an address the provider handed back, rather than for one
+    /// of this channel's own endpoints. The credential follows it only where
+    /// the address is on the channel's own host: an image left on a third-party
+    /// CDN is public by nature, and a key sent after it would not be.
+    fn fetch(&self, address: &str) -> reqwest::RequestBuilder {
+        let request = self.client.get(address);
+        if origin_of(address).is_some() && origin_of(address) == self.origin() {
+            self.credentialed(request)
+        } else {
+            request
+        }
+    }
+
+    fn credentialed(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self.protocol {
+            Protocol::Gemini => request.header(API_KEY_HEADER, &self.api_key),
+            Protocol::Openai | Protocol::Custom => request.bearer_auth(&self.api_key),
+        }
+    }
+}
+
+fn build_client() -> Result<reqwest::Client, ProviderError> {
+    // No client-wide timeout: each request sets its own budget, and a stream
+    // that is still producing must not be cut off by a deadline meant for the
+    // first byte.
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .build()
+        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+}
+
+/// One wire protocol.
+///
+/// The methods mirror what a caller can ask for rather than what a provider
+/// happens to offer, and the ones a protocol cannot serve are refused by
+/// default: the gateway routes video through a job and text through a stream
+/// only where an adapter says it can.
+#[async_trait::async_trait]
+pub trait ProviderAdapter: Send + Sync {
+    fn protocol(&self) -> Protocol;
+
+    /// One generation, waited out.
+    async fn generate(
+        &self,
+        call: &ChannelCall,
+        request: &GenerateRequest,
+        inputs: &[MediaInput],
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError>;
+
+    /// The same generation, with text pushed to `sink` as it arrives. What
+    /// comes back is still the aggregate, because the aggregate is what gets
+    /// stored: the stream only makes the wait visible.
+    async fn generate_stream(
+        &self,
+        call: &ChannelCall,
+        request: &GenerateRequest,
+        inputs: &[MediaInput],
+        sink: &DeltaSink,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        let _ = (call, request, inputs, sink, cancel);
+        Err(ProviderError::invalid("this protocol does not stream"))
+    }
+
+    /// Starts a job that outlives this request and returns the handle to poll.
+    async fn create_task(
+        &self,
+        call: &ChannelCall,
+        request: &GenerateRequest,
+        inputs: &[MediaInput],
+        cancel: &Cancel,
+    ) -> Result<AsyncTask, ProviderError> {
+        let _ = (call, request, inputs, cancel);
+        Err(ProviderError::invalid("this protocol does not run jobs"))
+    }
+
+    /// One look at a job started earlier.
+    async fn poll_task(
+        &self,
+        call: &ChannelCall,
+        task: &AsyncTask,
+        cancel: &Cancel,
+    ) -> Result<TaskState, ProviderError> {
+        let _ = (call, task, cancel);
+        Err(ProviderError::invalid("this protocol does not run jobs"))
+    }
+}
+
+/// The adapter for a protocol, or none where a protocol can be configured and
+/// listed but has no generation behind it.
+pub fn for_protocol(protocol: Protocol) -> Option<&'static dyn ProviderAdapter> {
+    match protocol {
+        Protocol::Openai => Some(&openai::ADAPTER),
+        Protocol::Custom => Some(&custom::ADAPTER),
+        Protocol::Gemini => None,
+    }
+}
+
 /// Asks a provider what it currently offers, sorted and without duplicates.
 pub async fn list_models(
     protocol: Protocol,
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<String>, ProviderError> {
+    let call = ChannelCall::listing(protocol, base_url, api_key)?;
     let mut ids = match protocol {
-        Protocol::Openai => openai::list_models(base_url, api_key).await?,
-        Protocol::Gemini => gemini::list_models(base_url, api_key).await?,
-        Protocol::Custom => {
-            return Err(ProviderError::invalid(
-                "the custom protocol is reserved and has no implementation",
-            ))
-        }
+        Protocol::Openai => openai::list_models(&call).await?,
+        Protocol::Gemini => gemini::list_models(&call).await?,
+        Protocol::Custom => return Err(ProviderError::invalid(CUSTOM_RESERVED)),
     };
     ids.sort();
     ids.dedup();
     Ok(ids)
 }
 
-fn client() -> Result<reqwest::Client, ProviderError> {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+/// A provider's answer, reduced to what an adapter acts on.
+///
+/// The body is read on both paths because a provider explains a failure in it,
+/// and kept as bytes because audio and video arrive as neither text nor JSON.
+struct Reply {
+    status: u16,
+    headers: HeaderMap,
+    body: Vec<u8>,
 }
 
-/// Runs a request and reduces the answer to a status and a body. The body is
-/// read on both paths, because a provider explains a failure in it.
-async fn exchange(request: reqwest::RequestBuilder) -> Result<(u16, String), ProviderError> {
-    let response = request.send().await.map_err(transport)?;
-    let status = response.status().as_u16();
-    let body = read_body(response).await?;
-    Ok((status, body))
+impl Reply {
+    fn text(&self) -> Result<&str, ProviderError> {
+        std::str::from_utf8(&self.body)
+            .map_err(|_| ProviderError::Rejected("the answer is not valid UTF-8 text".to_string()))
+    }
+
+    fn decoded<T: serde::de::DeserializeOwned>(&self, what: &str) -> Result<T, ProviderError> {
+        serde_json::from_slice(&self.body).map_err(|error| {
+            ProviderError::Rejected(format!("the {what} is not the expected JSON: {error}"))
+        })
+    }
+
+    fn value(&self) -> Result<serde_json::Value, ProviderError> {
+        self.decoded("answer")
+    }
+
+    /// The mime of the body, without its parameters.
+    fn content_type(&self) -> Option<String> {
+        let value = self
+            .headers
+            .get(reqwest::header::CONTENT_TYPE)?
+            .to_str()
+            .ok()?;
+        let mime = value.split(';').next()?.trim();
+        (!mime.is_empty()).then(|| mime.to_string())
+    }
+
+    /// The provider's own advice about when to come back. A date is left alone:
+    /// a skewed clock would turn it into a wait of the wrong length, and the
+    /// gateway's backoff already covers that case.
+    fn retry_after(&self) -> Option<Duration> {
+        let value = self
+            .headers
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?;
+        value.trim().parse::<u64>().ok().map(Duration::from_secs)
+    }
 }
 
 fn succeeded(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
-/// A body that is not a model list at all — usually an HTML error page from a
-/// proxy sitting in front of the provider.
-fn not_a_model_list(error: serde_json::Error) -> ProviderError {
-    ProviderError::Rejected(format!("the model list is not the expected JSON: {error}"))
+/// Places a request under a deadline and reads the answer whole, leaving the
+/// status for the caller: one adapter has to see a 404 before it can decide to
+/// try a second endpoint.
+async fn exchange(
+    request: reqwest::RequestBuilder,
+    deadline: Duration,
+    ceiling: u64,
+) -> Result<Reply, ProviderError> {
+    drain(open(request.timeout(deadline)).await?, ceiling).await
+}
+
+/// [`exchange`] under the deadline for this kind of generation and the ceiling
+/// for an answer, refusing one that is not a success.
+async fn answer(
+    call: &ChannelCall,
+    request: reqwest::RequestBuilder,
+    capability: Capability,
+) -> Result<Reply, ProviderError> {
+    let reply = exchange(
+        request,
+        call.budgets.timeout_for(capability),
+        call.budgets.max_response_bytes,
+    )
+    .await?;
+    if succeeded(reply.status) {
+        Ok(reply)
+    } else {
+        Err(provider_error(&reply, &call.api_key))
+    }
+}
+
+/// Places a request and stops at the headers, which is what lets a failure be
+/// read whole and a success be streamed.
+async fn open(request: reqwest::RequestBuilder) -> Result<reqwest::Response, ProviderError> {
+    request.send().await.map_err(transport)
+}
+
+async fn drain(response: reqwest::Response, ceiling: u64) -> Result<Reply, ProviderError> {
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let mut response = response;
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = next_chunk(&mut response).await? {
+        body.extend_from_slice(&chunk);
+        if body.len() as u64 > ceiling {
+            return Err(ProviderError::Rejected(format!(
+                "the answer is larger than {ceiling} bytes"
+            )));
+        }
+    }
+    Ok(Reply {
+        status,
+        headers,
+        body,
+    })
+}
+
+/// The next piece of a body, or none once it has ended. Owned rather than
+/// borrowed from the client's own buffer type, which is not a dependency here.
+async fn next_chunk(response: &mut reqwest::Response) -> Result<Option<Vec<u8>>, ProviderError> {
+    response
+        .chunk()
+        .await
+        .map(|chunk| chunk.map(|bytes| bytes.to_vec()))
+        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+}
+
+/// An opened stream, or the answer that refused to open one.
+///
+/// Split out so an adapter that can try a second endpoint does so before a
+/// single character has reached anybody: once deltas are on screen, a fallback
+/// would repeat them.
+enum Opened {
+    Streaming(reqwest::Response),
+    Refused(Reply),
+}
+
+/// Places a request whose answer arrives in pieces and stops at the headers.
+async fn open_stream(
+    call: &ChannelCall,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<Opened, ProviderError> {
+    let response = open(call.post(path).json(body)).await?;
+    if succeeded(response.status().as_u16()) {
+        return Ok(Opened::Streaming(response));
+    }
+    let reply = drain(response, call.budgets.max_response_bytes).await?;
+    Ok(Opened::Refused(reply))
+}
+
+/// Reads an opened stream to its end, pushing each piece of text to the sink
+/// and returning the aggregate.
+///
+/// The deadline is checked between chunks instead of being set on the request:
+/// a request timeout would end a stream that is still producing text.
+async fn read_stream<F>(
+    response: reqwest::Response,
+    sink: &DeltaSink,
+    cancel: &Cancel,
+    deadline: Duration,
+    parse: F,
+) -> Result<GenerateResult, ProviderError>
+where
+    F: Fn(&serde_json::Value) -> StreamEvent,
+{
+    let mut response = response;
+    let mut reader = SseReader::new(&parse, sink);
+    let started = Instant::now();
+    while !reader.done {
+        let Some(chunk) = next_chunk(&mut response).await? else {
+            break;
+        };
+        cancel.check()?;
+        if started.elapsed() > deadline {
+            return Err(ProviderError::Timeout(format!(
+                "the stream was still open after {} seconds",
+                deadline.as_secs()
+            )));
+        }
+        reader.feed(&chunk);
+    }
+    Ok(reader.finish())
+}
+
+/// What one event in a stream contributed.
+#[derive(Debug, Default)]
+struct StreamEvent {
+    /// Text to show as it arrives and to add to the aggregate.
+    text: Option<String>,
+    /// The whole answer, where a protocol sends a copy of it with the event
+    /// that closes the stream. It replaces the aggregate rather than adding to
+    /// it, so a provider that sends both is not counted twice, and one that
+    /// buffers and sends only this still produces an answer.
+    complete: Option<String>,
+    /// Totals, which some protocols send only with the last event.
+    usage: Option<Usage>,
+}
+
+/// Reads a server-sent stream: lines out of chunks, events out of lines.
+///
+/// Split out from the read loop so the parsing can be tested against bytes
+/// rather than against a socket, and so a chunk that ends mid-line or mid-event
+/// is held over instead of dropped.
+struct SseReader<'a, F> {
+    parse: &'a F,
+    sink: &'a DeltaSink,
+    remainder: Vec<u8>,
+    data: Vec<String>,
+    aggregate: String,
+    usage: Option<Usage>,
+    done: bool,
+}
+
+impl<'a, F> SseReader<'a, F>
+where
+    F: Fn(&serde_json::Value) -> StreamEvent,
+{
+    fn new(parse: &'a F, sink: &'a DeltaSink) -> Self {
+        Self {
+            parse,
+            sink,
+            remainder: Vec::new(),
+            data: Vec::new(),
+            aggregate: String::new(),
+            usage: None,
+            done: false,
+        }
+    }
+
+    fn feed(&mut self, chunk: &[u8]) {
+        self.remainder.extend_from_slice(chunk);
+        while let Some(newline) = self.remainder.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = self.remainder.drain(..=newline).collect();
+            self.line(&String::from_utf8_lossy(&line));
+        }
+    }
+
+    fn line(&mut self, line: &str) {
+        let line = line.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            self.event();
+        } else if line.starts_with(':') {
+            // A comment, which proxies send to keep the connection warm.
+        } else if let Some(payload) = line.strip_prefix("data:") {
+            self.data.push(payload.trim_start().to_string());
+        }
+        // `event:`, `id:`, and `retry:` say nothing about the answer.
+    }
+
+    /// Ends one event. Several `data:` lines belong to a single event, so they
+    /// are joined before being parsed rather than parsed one at a time.
+    fn event(&mut self) {
+        if self.data.is_empty() {
+            return;
+        }
+        let payload = self.data.join("\n");
+        self.data.clear();
+        if payload.trim() == STREAM_DONE {
+            self.done = true;
+            return;
+        }
+        // An event that is not JSON is a keep-alive from something sitting in
+        // front of the provider; dropping it loses nothing the model said.
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload.trim()) {
+            let event = (self.parse)(&value);
+            if let Some(text) = event.text {
+                self.sink.push(&text);
+                self.aggregate.push_str(&text);
+            }
+            if let Some(whole) = event.complete {
+                self.aggregate = whole;
+            }
+            if event.usage.is_some() {
+                self.usage = event.usage;
+            }
+        }
+    }
+
+    /// Ends the stream. A provider that closes without a blank line after the
+    /// last event still ends it here.
+    fn finish(mut self) -> GenerateResult {
+        self.event();
+        GenerateResult {
+            text: (!self.aggregate.is_empty()).then_some(self.aggregate),
+            items: Vec::new(),
+            usage: self.usage,
+        }
+    }
 }
 
 fn transport(error: reqwest::Error) -> ProviderError {
     if error.is_timeout() {
-        ProviderError::Timeout(format!(
-            "no answer within {} seconds",
-            REQUEST_TIMEOUT.as_secs()
-        ))
+        ProviderError::Timeout("the channel did not answer in time".to_string())
     } else if error.is_builder() {
         // A credential carrying a newline is a stored-value problem rather
         // than an outage, and saying so stops a client from retrying it.
@@ -96,31 +543,15 @@ fn transport(error: reqwest::Error) -> ProviderError {
     }
 }
 
-async fn read_body(response: reqwest::Response) -> Result<String, ProviderError> {
-    let mut response = response;
-    let mut bytes: Vec<u8> = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| ProviderError::Unreachable(error.to_string()))?
-    {
-        bytes.extend_from_slice(&chunk);
-        if bytes.len() > MAX_RESPONSE_BYTES {
-            return Err(ProviderError::Rejected(format!(
-                "the answer is larger than {MAX_RESPONSE_BYTES} bytes"
-            )));
-        }
-    }
-    String::from_utf8(bytes)
-        .map_err(|_| ProviderError::Rejected("the answer is not valid UTF-8 text".to_string()))
-}
-
 /// Maps a provider's answer onto a code the client can act on.
-fn provider_error(status: u16, body: &str, api_key: &str) -> ProviderError {
-    let explained = explain(status, body, api_key);
-    match status {
+fn provider_error(reply: &Reply, api_key: &str) -> ProviderError {
+    let explained = explain(reply.status, reply.text().unwrap_or_default(), api_key);
+    match reply.status {
         401 | 403 => ProviderError::Auth(explained),
-        429 => ProviderError::RateLimited(explained),
+        429 => ProviderError::RateLimited {
+            detail: explained,
+            retry_after: reply.retry_after(),
+        },
         // A 404 here nearly always means the address is wrong rather than
         // that a model is missing, which makes it something the user fixes.
         400 | 404 | 405 | 422 => ProviderError::Rejected(explained),
@@ -167,74 +598,281 @@ fn truncate(text: &str) -> String {
     shortened
 }
 
+/// The scheme, host, and port of an address, which is what decides whether a
+/// URL a provider handed back belongs to the channel that produced it.
+fn origin_of(address: &str) -> Option<String> {
+    let parsed = url::Url::parse(address).ok()?;
+    Some(format!(
+        "{}://{}{}",
+        parsed.scheme(),
+        parsed.host_str()?,
+        parsed
+            .port()
+            .map(|port| format!(":{port}"))
+            .unwrap_or_default()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::header::HeaderValue;
+    use serde_json::Value;
+    use std::sync::{Arc, Mutex};
 
-    const API_KEY: &str = "sk-test-1234567890abcd";
+    /// A sink that records what it was shown, so a test can assert on the
+    /// display as well as on the aggregate that gets stored.
+    fn watching() -> (DeltaSink, Arc<Mutex<String>>) {
+        let seen = Arc::new(Mutex::new(String::new()));
+        let collected = Arc::clone(&seen);
+        let sink = DeltaSink::new(Arc::new(move |chunk: &str| {
+            collected
+                .lock()
+                .expect("the sink is not held across a call")
+                .push_str(chunk);
+        }));
+        (sink, seen)
+    }
+
+    fn shown(seen: &Arc<Mutex<String>>) -> String {
+        seen.lock()
+            .expect("the sink is not held across a call")
+            .clone()
+    }
+
+    /// An event shape of the test's own: text under `delta`, a whole answer
+    /// under `whole`, totals under `tokens`.
+    fn event(payload: &Value) -> StreamEvent {
+        let text = |key: &str| payload.get(key).and_then(Value::as_str).map(str::to_string);
+        StreamEvent {
+            text: text("delta"),
+            complete: text("whole"),
+            usage: payload
+                .get("tokens")
+                .and_then(Value::as_u64)
+                .map(|tokens| Usage {
+                    input_tokens: Some(tokens),
+                    output_tokens: None,
+                    images: None,
+                    seconds: None,
+                }),
+        }
+    }
+
+    /// Reads a stream delivered in the chunks given, stopping where the reader
+    /// would.
+    fn read(chunks: &[&str]) -> (GenerateResult, String) {
+        let (sink, seen) = watching();
+        let mut reader = SseReader::new(&event, &sink);
+        for chunk in chunks {
+            if reader.done {
+                break;
+            }
+            reader.feed(chunk.as_bytes());
+        }
+        (reader.finish(), shown(&seen))
+    }
+
+    fn event_with(payload: &str) -> String {
+        format!("data: {payload}\n\n")
+    }
 
     #[test]
-    fn a_provider_status_becomes_the_code_a_client_can_act_on() {
-        let cases = [
-            (401, "PROVIDER_AUTH"),
-            (403, "PROVIDER_AUTH"),
-            (429, "PROVIDER_RATE_LIMIT"),
-            (400, "PROVIDER_BAD_REQUEST"),
-            (404, "PROVIDER_BAD_REQUEST"),
-            (500, "PROVIDER_UNAVAILABLE"),
-            (503, "PROVIDER_UNAVAILABLE"),
-        ];
-        for (status, code) in cases {
-            assert_eq!(provider_error(status, "", API_KEY).code(), code, "{status}");
+    fn a_chunk_that_ends_midway_through_an_event_is_held_over() {
+        // Neither the transport nor the provider has to break a stream at an
+        // event boundary, and a reader that dropped the tail would lose words.
+        let (result, seen) = read(&[
+            r#"data: {"delt"#,
+            r#"a":"Hello"}"#,
+            "\n\n",
+            &event_with(r#"{"delta":", world"}"#),
+        ]);
+        assert_eq!(result.text.as_deref(), Some("Hello, world"));
+        assert_eq!(seen, "Hello, world");
+    }
+
+    #[test]
+    fn the_sentinel_ends_a_stream_and_what_follows_is_not_read() {
+        let (result, _) = read(&[
+            &event_with(r#"{"delta":"one"}"#),
+            &event_with(STREAM_DONE),
+            &event_with(r#"{"delta":"two"}"#),
+        ]);
+        assert_eq!(result.text.as_deref(), Some("one"));
+    }
+
+    #[test]
+    fn keep_alives_and_events_that_are_not_json_carry_nothing() {
+        let (result, seen) = read(&[
+            ": a proxy keeping the connection warm\n\n",
+            "event: ping\ndata: still not json\n\n",
+            &event_with(r#"{"delta":"the answer"}"#),
+        ]);
+        assert_eq!(result.text.as_deref(), Some("the answer"));
+        assert_eq!(seen, "the answer");
+    }
+
+    #[test]
+    fn several_data_lines_belong_to_one_event() {
+        let (result, _) = read(&["data: {\"delta\":\ndata: \"split\"}\n\n"]);
+        assert_eq!(result.text.as_deref(), Some("split"));
+    }
+
+    #[test]
+    fn an_event_carrying_the_whole_answer_replaces_the_deltas() {
+        // A provider that sends both must not be counted twice, and one that
+        // buffers and sends only this must still produce an answer.
+        let (result, seen) = read(&[
+            &event_with(r#"{"delta":"a"}"#),
+            &event_with(r#"{"delta":"b"}"#),
+            &event_with(r#"{"whole":"ab"}"#),
+        ]);
+        assert_eq!(result.text.as_deref(), Some("ab"));
+        assert_eq!(seen, "ab", "what was shown as it arrived is not changed");
+    }
+
+    #[test]
+    fn a_stream_that_said_nothing_is_no_answer_rather_than_a_blank_one() {
+        let (result, seen) = read(&[": nothing at all\n\n"]);
+        assert_eq!(result.text, None);
+        assert!(result.is_empty());
+        assert!(seen.is_empty());
+    }
+
+    #[test]
+    fn totals_arrive_with_the_event_that_reports_them() {
+        let (result, _) = read(&[
+            &event_with(r#"{"delta":"x"}"#),
+            &event_with(r#"{"tokens":12}"#),
+        ]);
+        assert_eq!(result.usage.and_then(|usage| usage.input_tokens), Some(12));
+    }
+
+    fn reply(status: u16, body: &str) -> Reply {
+        Reply {
+            status,
+            headers: HeaderMap::new(),
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    fn retry_after(value: &str) -> Reply {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            HeaderValue::from_str(value).expect("an ASCII header value"),
+        );
+        Reply {
+            status: 429,
+            headers,
+            body: Vec::new(),
         }
     }
 
     #[test]
-    fn waiting_can_fix_a_busy_or_absent_provider_but_not_a_wrong_key() {
-        assert!(provider_error(429, "", API_KEY).retryable());
-        assert!(provider_error(503, "", API_KEY).retryable());
-        assert!(!provider_error(401, "", API_KEY).retryable());
-        assert!(!provider_error(400, "", API_KEY).retryable());
+    fn a_status_maps_to_the_outcome_its_remedy_implies() {
+        for (status, code, retryable) in [
+            (401, "PROVIDER_AUTH", false),
+            (403, "PROVIDER_AUTH", false),
+            (429, "PROVIDER_RATE_LIMIT", true),
+            (400, "PROVIDER_BAD_REQUEST", false),
+            (404, "PROVIDER_BAD_REQUEST", false),
+            (405, "PROVIDER_BAD_REQUEST", false),
+            (422, "PROVIDER_BAD_REQUEST", false),
+            (500, "PROVIDER_UNAVAILABLE", true),
+            (503, "PROVIDER_UNAVAILABLE", true),
+        ] {
+            let error = provider_error(&reply(status, "{}"), "a-key");
+            assert_eq!(error.code(), code, "status {status}");
+            assert_eq!(error.retryable(), retryable, "status {status}");
+        }
     }
 
     #[test]
-    fn the_explanation_comes_out_of_the_error_envelope() {
-        let body =
-            r#"{"error":{"message":"that model is not yours","type":"invalid_request_error"}}"#;
-        assert_eq!(
-            explain(400, body, API_KEY),
-            "status 400: that model is not yours"
+    fn a_provider_explains_itself_through_its_own_envelope() {
+        let body = r#"{"error":{"message":"that model is not on this key","type":"invalid"}}"#;
+        let message = provider_error(&reply(403, body), "a-key").to_string();
+        assert!(
+            message.contains("that model is not on this key"),
+            "{message}"
         );
-        assert_eq!(
-            explain(500, "upstream exploded", API_KEY),
-            "status 500: upstream exploded"
-        );
-        assert_eq!(explain(502, "   ", API_KEY), "status 502");
+        assert!(message.contains("status 403"), "{message}");
     }
 
     #[test]
-    fn a_credential_the_provider_echoes_back_is_scrubbed() {
-        let body = format!(r#"{{"error":{{"message":"key {API_KEY} is not valid"}}}}"#);
-        let explained = explain(400, &body, API_KEY);
-        assert!(!explained.contains(API_KEY));
-        assert!(explained.contains("sk-…abcd"), "{explained}");
+    fn an_answer_that_is_not_json_is_quoted_as_it_arrived() {
+        let message = provider_error(&reply(502, "<html>bad gateway</html>"), "a-key").to_string();
+        assert!(message.contains("<html>bad gateway</html>"), "{message}");
     }
 
     #[test]
-    fn a_long_complaint_is_cut_down() {
-        let explained = explain(500, &"x".repeat(MAX_DETAIL_CHARS + 50), API_KEY);
-        assert_eq!(
-            explained.chars().count(),
-            "status 500: ".chars().count() + MAX_DETAIL_CHARS + 1
-        );
-        assert!(explained.ends_with('…'));
+    fn an_answer_that_explains_nothing_still_names_its_status() {
+        assert!(provider_error(&reply(500, ""), "a-key")
+            .to_string()
+            .contains("status 500"));
     }
 
-    #[tokio::test]
-    async fn the_reserved_protocol_says_so_instead_of_guessing() {
-        let error = list_models(Protocol::Custom, "https://provider.test", API_KEY)
-            .await
-            .unwrap_err();
-        assert_eq!(error.code(), "VALIDATION_FAILED");
+    #[test]
+    fn a_credential_echoed_back_is_masked_and_a_long_complaint_is_cut_down() {
+        let key = "sk-a-very-long-test-credential";
+        let body = format!(r#"{{"error":{{"message":"{key} {}"}}}}"#, "x".repeat(600));
+        let message = provider_error(&reply(400, &body), key).to_string();
+        assert!(!message.contains(key), "{message}");
+        assert!(message.contains("sk-…tial"), "{message}");
+        assert!(
+            message.chars().count() < 400,
+            "the complaint was not cut down: {message}"
+        );
+    }
+
+    #[test]
+    fn a_wait_measured_in_seconds_is_the_one_the_provider_asked_for() {
+        match provider_error(&retry_after("7"), "a-key") {
+            ProviderError::RateLimited { retry_after, .. } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(7)))
+            }
+            other => panic!("expected a rate limit, got {other}"),
+        }
+    }
+
+    #[test]
+    fn a_wait_given_as_a_date_is_left_to_the_backoff() {
+        // A clock that disagrees with the provider's would turn a date into a
+        // wait of the wrong length, and the backoff already covers being busy.
+        match provider_error(&retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), "a-key") {
+            ProviderError::RateLimited { retry_after, .. } => assert_eq!(retry_after, None),
+            other => panic!("expected a rate limit, got {other}"),
+        }
+    }
+
+    #[test]
+    fn an_origin_says_whether_an_address_belongs_to_the_channel() {
+        assert_eq!(
+            origin_of("https://api.example.com/v1/images").as_deref(),
+            Some("https://api.example.com")
+        );
+        assert_eq!(
+            origin_of("http://127.0.0.1:8787/v1").as_deref(),
+            Some("http://127.0.0.1:8787")
+        );
+        // A port that is the scheme's default is not part of the origin, so two
+        // spellings of one host still match.
+        assert_eq!(
+            origin_of("https://api.example.com:443/v1").as_deref(),
+            Some("https://api.example.com")
+        );
+        assert_eq!(origin_of("not a url"), None);
+    }
+
+    #[test]
+    fn a_protocol_answers_with_the_adapter_that_speaks_it() {
+        for protocol in [Protocol::Openai, Protocol::Custom] {
+            let adapter = for_protocol(protocol).expect("an adapter speaks it");
+            assert_eq!(adapter.protocol(), protocol);
+        }
+        // A channel speaking this protocol can be configured and asked what it
+        // offers; claiming a generation behind it would send a request nothing
+        // answers.
+        assert!(for_protocol(Protocol::Gemini).is_none());
     }
 }

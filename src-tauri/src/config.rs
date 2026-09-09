@@ -113,6 +113,12 @@ impl GenerateConfig {
         std::time::Duration::from_secs(secs)
     }
 
+    /// How long one look at an upstream job may take. Video is the only
+    /// capability with a job today, so its budget answers for all of them.
+    pub fn poll_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.video_poll_timeout_seconds)
+    }
+
     /// The input ceiling for an asset of this kind.
     pub fn input_cap_for(&self, capability: crate::domain::Capability) -> u64 {
         match capability {
@@ -456,6 +462,27 @@ public:
         assert_eq!(config.generate.image_timeout_seconds, 300);
         assert_eq!(config.generate.video_poll_timeout_seconds, 30);
         assert_eq!(config.generate.max_attempts, 3);
+    }
+
+    #[test]
+    fn each_capability_gets_its_own_budget() {
+        let budgets = GenerateConfig::default();
+        use crate::domain::Capability;
+        assert_eq!(budgets.timeout_for(Capability::Text).as_secs(), 120);
+        assert_eq!(budgets.timeout_for(Capability::Image).as_secs(), 300);
+        assert_eq!(budgets.timeout_for(Capability::Audio).as_secs(), 120);
+        // Starting a job answers at once, so it gets the short budget; waiting
+        // for the job itself is the caller's polling loop, not one request.
+        assert_eq!(budgets.timeout_for(Capability::Video).as_secs(), 60);
+        assert_eq!(budgets.poll_timeout().as_secs(), 30);
+        assert_eq!(
+            budgets.input_cap_for(Capability::Image),
+            budgets.max_image_input_bytes
+        );
+        assert_eq!(
+            budgets.input_cap_for(Capability::Video),
+            budgets.max_media_input_bytes
+        );
     }
 
     #[test]
