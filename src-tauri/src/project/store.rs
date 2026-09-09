@@ -8,8 +8,8 @@ use crate::domain::{
 };
 use crate::project::codec::{decode_moka_file, encode_moka_file};
 use crate::project::{
-    AssetChange, AssetFile, ByteRange, CreateProject, OpenProject, PackageReport, ProjectError,
-    ProjectStore, SaveResult, StagedAsset,
+    AssetChange, AssetFile, ByteRange, CreateProject, OpenProject, PackageReport, PackageScope,
+    ProjectError, ProjectStore, SaveResult, StagedAsset,
 };
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -668,6 +668,7 @@ impl ProjectStore for FsProjectStore {
         &self,
         destination: Option<&Path>,
         allow_incomplete: bool,
+        scope: PackageScope,
     ) -> Result<PackageReport, ProjectError> {
         let (root, moka) = {
             let guard = self.state.lock().expect("store poisoned");
@@ -694,6 +695,7 @@ impl ProjectStore for FsProjectStore {
             &destination,
             &self.config.limits,
             allow_incomplete,
+            scope,
         )
     }
 

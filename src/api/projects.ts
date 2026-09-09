@@ -33,6 +33,10 @@ export interface PackageReport {
 export interface ExportOptions {
   destination?: string;
   allowIncomplete?: boolean;
+  /** Carry this machine's own record of past runs along with the work. */
+  includePersonalHistory?: boolean;
+  /** Leave out assets no node points at. */
+  onlyReferencedAssets?: boolean;
 }
 
 export const projectsApi = {

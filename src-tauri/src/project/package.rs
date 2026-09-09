@@ -4,9 +4,10 @@ use crate::domain::{MokaFile, PACKAGE_MANIFEST_VERSION};
 use crate::metadata::crypto;
 use crate::metadata::docs;
 use crate::project::store::normalize_relative;
-use crate::project::{PackageReport, ProjectError};
+use crate::project::{PackageReport, PackageScope, ProjectError};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,19 @@ pub struct PackageManifestEntry {
     pub sha256: String,
 }
 
+/// What a rule kept out of a package, counted as the walk went past it.
+///
+/// Collected rather than declared: a list of patterns stating what a package
+/// never carries is a claim nobody checks, and the reason to name the skips at
+/// all is that a receiver can hold them against what arrived.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageSkip {
+    pub pattern: String,
+    pub files: u64,
+    pub bytes: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageManifest {
@@ -27,7 +41,15 @@ pub struct PackageManifest {
     pub project_id: String,
     pub project_name: String,
     pub incomplete: bool,
-    pub exclusions: Vec<String>,
+    /// Whether the records of the runs that made this project travelled with it.
+    ///
+    /// Said outright rather than left to be noticed in the entries: a package
+    /// carrying them carries the prompts they were asked with and the names of
+    /// the models that answered, which is a thing the receiver is owed.
+    #[serde(default)]
+    pub personal_history: bool,
+    #[serde(default)]
+    pub skipped: Vec<PackageSkip>,
     pub entries: Vec<PackageManifestEntry>,
 }
 
@@ -41,6 +63,13 @@ const OS_JUNK: [&str; 3] = [".DS_Store", "Thumbs.db", "desktop.ini"];
 /// addressed by a handle the far end issued, which a package opened somewhere
 /// else could not ask after even if it were allowed to carry one.
 const JOB_RECORDS: &str = "history/jobs/";
+
+/// Where the record of each run this project made is kept.
+///
+/// Unlike a job, a record is finished and readable — it is also about this
+/// machine's use of the project rather than about the project, so it travels
+/// only in a package asked to carry it.
+const RUN_RECORDS: &str = "history/runs/";
 
 /// Application-level metadata documents that sit at the project root only.
 /// Matching the whole relative path keeps an asset that happens to share a
@@ -58,57 +87,160 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// Credential material, at any depth: nothing in a project tree has a
-/// legitimate reason to carry these names.
-fn is_metadata(relative: &str) -> bool {
-    let name = relative.rsplit('/').next().unwrap_or(relative);
-    if name == docs::SECRETS_DOC || name == crypto::MASTER_KEY_FILE || name.contains(".corrupt.") {
-        return true;
-    }
-    METADATA_DOCUMENTS.contains(&relative)
+/// Which rule kept a path out of a package.
+///
+/// A rule rather than a pattern string, so the walk can total what each one cost
+/// and the manifest can state it afterwards. Ordered only so that a manifest
+/// lists the same rules in the same order every time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Skip {
+    /// Scratch space, holding whatever a half-finished write left behind.
+    Scratch,
+    /// A job a provider on this machine is still running.
+    Job,
+    /// The record of a run this machine made.
+    Run,
+    /// A credential, at any depth: nothing in a project tree has a legitimate
+    /// reason to carry one.
+    Secret,
+    /// The key the credentials are sealed with, at any depth.
+    MasterKey,
+    /// A document this app put aside as unreadable.
+    Corrupt,
+    /// An application-level document, which belongs at a project root only.
+    /// Matched on the whole relative path, so an asset that happens to share a
+    /// name — a project may well contain its own `meta.json` — still ships.
+    ApplicationDocument(&'static str),
+    /// What an operating system leaves in a directory it was shown.
+    SystemJunk(&'static str),
 }
 
-fn is_excluded(relative: &str) -> bool {
-    if relative.starts_with("tmp/") || relative == "tmp" {
-        return true;
+impl Skip {
+    /// The rule stated as a path pattern, which is how a manifest names it.
+    fn pattern(&self) -> String {
+        match self {
+            Self::Scratch => "tmp/**".into(),
+            Self::Job => format!("{JOB_RECORDS}**"),
+            Self::Run => format!("{RUN_RECORDS}**"),
+            Self::Secret => format!("**/{}", docs::SECRETS_DOC),
+            Self::MasterKey => format!("**/{}", crypto::MASTER_KEY_FILE),
+            Self::Corrupt => "**/*.corrupt.*".into(),
+            Self::ApplicationDocument(document) => (*document).to_string(),
+            Self::SystemJunk(name) => format!("**/{name}"),
+        }
+    }
+}
+
+fn skipped(relative: &str, scope: &PackageScope) -> Option<Skip> {
+    if relative == "tmp" || relative.starts_with("tmp/") {
+        return Some(Skip::Scratch);
     }
     if relative.starts_with(JOB_RECORDS) {
-        return true;
+        return Some(Skip::Job);
     }
-    if is_metadata(relative) {
-        return true;
+    if !scope.personal_history && relative.starts_with(RUN_RECORDS) {
+        return Some(Skip::Run);
     }
-    relative
-        .rsplit('/')
-        .next()
-        .map(|name| OS_JUNK.contains(&name))
-        .unwrap_or(false)
+    let name = relative.rsplit('/').next().unwrap_or(relative);
+    if name == docs::SECRETS_DOC {
+        return Some(Skip::Secret);
+    }
+    if name == crypto::MASTER_KEY_FILE {
+        return Some(Skip::MasterKey);
+    }
+    if name.contains(".corrupt.") {
+        return Some(Skip::Corrupt);
+    }
+    if let Some(document) = METADATA_DOCUMENTS
+        .iter()
+        .copied()
+        .find(|one| *one == relative)
+    {
+        return Some(Skip::ApplicationDocument(document));
+    }
+    OS_JUNK
+        .iter()
+        .copied()
+        .find(|one| *one == name)
+        .map(Skip::SystemJunk)
 }
 
-fn collect_files(root: &Path) -> Result<Vec<PathBuf>, ProjectError> {
-    let mut files = Vec::new();
+/// A path as the package would name it, which is always with forward slashes.
+fn relative_to(root: &Path, path: &Path) -> Result<String, ProjectError> {
+    Ok(path
+        .strip_prefix(root)
+        .map_err(|_| ProjectError::domain("INTERNAL", "Path outside root"))?
+        .to_string_lossy()
+        .replace('\\', "/"))
+}
+
+/// How many files a path holds and what they add up to, without reading them.
+///
+/// A directory left out whole still has a size, and a manifest that reported
+/// only the paths the walk itself reached would understate every one of them.
+fn measure(path: &Path) -> (u64, u64) {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return (0, 0);
+    };
+    if meta.is_file() {
+        return (1, meta.len());
+    }
+    let mut files = 0;
+    let mut bytes = 0;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = std::fs::metadata(&path) else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(path);
+            } else {
+                files += 1;
+                bytes += meta.len();
+            }
+        }
+    }
+    (files, bytes)
+}
+
+/// What the walk of a project tree found, and what keeping the rest out cost.
+struct Collected {
+    files: Vec<PathBuf>,
+    skips: BTreeMap<Skip, (u64, u64)>,
+}
+
+fn collect_files(root: &Path, scope: &PackageScope) -> Result<Collected, ProjectError> {
+    let mut collected = Collected {
+        files: Vec::new(),
+        skips: BTreeMap::new(),
+    };
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|_| ProjectError::domain("INTERNAL", "Path outside root"))?
-                .to_string_lossy()
-                .replace('\\', "/");
-            if is_excluded(&relative) {
+            let relative = relative_to(root, &path)?;
+            if let Some(rule) = skipped(&relative, scope) {
+                let (files, bytes) = measure(&path);
+                let total = collected.skips.entry(rule).or_default();
+                total.0 += files;
+                total.1 += bytes;
                 continue;
             }
             if path.is_dir() {
                 stack.push(path);
             } else if path.is_file() {
-                files.push(path);
+                collected.files.push(path);
             }
         }
     }
-    files.sort();
-    Ok(files)
+    collected.files.sort();
+    Ok(collected)
 }
 
 pub fn export_project(
@@ -117,8 +249,9 @@ pub fn export_project(
     destination: &Path,
     limits: &LimitsConfig,
     allow_incomplete: bool,
+    scope: PackageScope,
 ) -> Result<PackageReport, ProjectError> {
-    let files = collect_files(root)?;
+    let collected = collect_files(root, &scope)?;
 
     // Completeness: every referenced resource must exist on disk.
     let mut missing = Vec::new();
@@ -138,12 +271,8 @@ pub fn export_project(
     }
 
     let mut entries = Vec::new();
-    for file in &files {
-        let relative = file
-            .strip_prefix(root)
-            .map_err(|_| ProjectError::domain("INTERNAL", "Path outside root"))?
-            .to_string_lossy()
-            .replace('\\', "/");
+    for file in &collected.files {
+        let relative = relative_to(root, file)?;
         let bytes = std::fs::read(file)?;
         entries.push(PackageManifestEntry {
             path: relative,
@@ -172,20 +301,19 @@ pub fn export_project(
         project_id: moka.metadata.id.clone(),
         project_name: moka.metadata.name.clone(),
         incomplete: !missing.is_empty(),
-        exclusions: [
-            vec!["tmp/**".into(), format!("{JOB_RECORDS}**")],
-            METADATA_DOCUMENTS
-                .iter()
-                .map(|document| document.to_string())
-                .collect(),
-            vec![
-                format!("**/{}", docs::SECRETS_DOC),
-                format!("**/{}", crypto::MASTER_KEY_FILE),
-                "**/*.corrupt.*".into(),
-            ],
-            OS_JUNK.iter().map(|name| name.to_string()).collect(),
-        ]
-        .concat(),
+        personal_history: scope.personal_history,
+        // A rule that found nothing to keep out has nothing to say: which kind
+        // of package this is is the flag above, not a row of zeroes.
+        skipped: collected
+            .skips
+            .into_iter()
+            .filter(|(_, (files, _))| *files > 0)
+            .map(|(rule, (files, bytes))| PackageSkip {
+                pattern: rule.pattern(),
+                files,
+                bytes,
+            })
+            .collect(),
         entries,
     };
 
@@ -322,12 +450,16 @@ pub fn import_project(
                 "Package has no moka-package.json manifest",
             )
         })?;
-        if manifest.format_version != PACKAGE_MANIFEST_VERSION {
+        // A range rather than an equality: a package made by an earlier build is
+        // still a package, and refusing it would refuse work somebody has on
+        // disk. What an older one may carry that a newer one may not is dealt
+        // with below, not by turning it away at the door.
+        if manifest.format_version == 0 || manifest.format_version > PACKAGE_MANIFEST_VERSION {
             return Err(ProjectError::domain(
                 "MOKA_VERSION_UNSUPPORTED",
                 format!(
-                    "Package format {} is not supported",
-                    manifest.format_version
+                    "Package format {} is not supported: this build reads 1 to {}",
+                    manifest.format_version, PACKAGE_MANIFEST_VERSION
                 ),
             ));
         }
@@ -386,6 +518,22 @@ pub fn asset_categories() -> &'static [&'static str] {
 mod tests {
     use super::*;
 
+    /// The package an export makes unless it is asked for more.
+    const WORK: PackageScope = PackageScope {
+        personal_history: false,
+        referenced_assets_only: false,
+    };
+
+    /// The package a user asks for when moving their own project elsewhere.
+    const BACKUP: PackageScope = PackageScope {
+        personal_history: true,
+        referenced_assets_only: false,
+    };
+
+    fn ships(relative: &str, scope: &PackageScope) -> bool {
+        skipped(relative, scope).is_none()
+    }
+
     #[test]
     fn application_metadata_is_never_collected() {
         for relative in [
@@ -399,7 +547,11 @@ mod tests {
             "nested/master.key",
             "recent-projects.corrupt.20260101T000000Z.json",
         ] {
-            assert!(is_excluded(relative), "{relative} must not be packaged");
+            // Under either kind of package: a credential is not this machine's
+            // history to carry, and asking for that history does not ask for one.
+            for scope in [&WORK, &BACKUP] {
+                assert!(!ships(relative, scope), "{relative} must not be packaged");
+            }
         }
     }
 
@@ -412,7 +564,7 @@ mod tests {
             "assets/providers.json",
             "notes/sources.json",
         ] {
-            assert!(!is_excluded(relative), "{relative} is project content");
+            assert!(ships(relative, &WORK), "{relative} is project content");
         }
     }
 
@@ -425,19 +577,23 @@ mod tests {
             "assets/.DS_Store",
             "Thumbs.db",
         ] {
-            assert!(is_excluded(relative), "{relative} must not be packaged");
+            assert!(!ships(relative, &WORK), "{relative} must not be packaged");
         }
     }
 
     #[test]
-    fn a_job_still_running_somewhere_else_is_not_part_of_the_work() {
-        assert!(is_excluded(
-            "history/jobs/0192b7d4-0000-7000-8000-000000000000.json"
-        ));
-        // The run history beside it ships: a record of what a project did is
-        // part of the project, and it names no handle but this app's own.
-        assert!(!is_excluded(
-            "history/runs/0192b7d4-0000-7000-8000-000000000000.json"
-        ));
+    fn a_run_this_machine_made_travels_only_in_a_package_that_asked_for_it() {
+        let record = "history/runs/0192b7d4-0000-7000-8000-000000000000.json";
+        assert_eq!(skipped(record, &WORK), Some(Skip::Run));
+        assert!(ships(record, &BACKUP), "a backup carries its own history");
+        // A job is a handle on a provider only this machine could ask after, so
+        // it stays behind whichever way the package was asked for.
+        assert_eq!(
+            skipped(
+                "history/jobs/0192b7d4-0000-7000-8000-000000000000.json",
+                &BACKUP
+            ),
+            Some(Skip::Job)
+        );
     }
 }

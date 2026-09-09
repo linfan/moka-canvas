@@ -605,7 +605,7 @@ pub struct MokaFile {
 
 pub const MOKA_FILE_VERSION: &str = "v1";
 pub const CANVAS_SCHEMA_VERSION: i32 = 2;
-pub const PACKAGE_MANIFEST_VERSION: u32 = 1;
+pub const PACKAGE_MANIFEST_VERSION: u32 = 2;
 
 impl MokaFile {
     pub fn canvas(&self, canvas_id: &str) -> Option<&CanvasDocument> {

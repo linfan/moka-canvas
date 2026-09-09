@@ -412,3 +412,92 @@ async fn export_blocks_missing_assets_until_explicitly_allowed() {
     let manifest: Value = serde_json::from_slice(&manifest.1).unwrap();
     assert_eq!(manifest["incomplete"], true);
 }
+
+fn manifest_of(entries: &[(String, Vec<u8>)]) -> Value {
+    let (_, bytes) = entries
+        .iter()
+        .find(|(name, _)| name == "moka-package.json")
+        .expect("a package carries a manifest");
+    serde_json::from_slice(bytes).unwrap()
+}
+
+/// A run this machine made is a fact about this machine: the work is what a
+/// package is for, and the record of having done it here travels only when
+/// somebody asks for the whole thing.
+#[tokio::test]
+async fn a_run_record_travels_only_in_a_package_that_asked_for_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let created = create_project(&app, &temp.path().join("projects"), "Ledger").await;
+    let root = PathBuf::from(created["root"].as_str().unwrap());
+
+    let record_name = "history/runs/0192b7d4-1111-7000-8000-000000000001.json";
+    let record = root.join(record_name);
+    std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+    let record_bytes = serde_json::to_vec_pretty(&json!({
+        "id": "0192b7d4-1111-7000-8000-000000000001",
+        "projectId": created["moka"]["metadata"]["id"],
+        "canvasId": created["moka"]["canvas"][0]["id"],
+        "requestedNodeIds": [],
+        "status": "succeeded",
+        "executorKey": "graph",
+        "graphHash": "0".repeat(64),
+        "parameters": { "model": "a-model" },
+        "steps": [],
+        "cancelRequested": false,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:01Z",
+    }))
+    .unwrap();
+    std::fs::write(&record, &record_bytes).unwrap();
+
+    let work = temp.path().join("work.mokapkg.zip");
+    export_open_project(&app, json!({ "destination": work.to_string_lossy() })).await;
+    let entries = read_zip_entries(&work);
+    assert!(
+        entries.iter().all(|(name, _)| name != record_name),
+        "a package of the work carries no record of the runs made here"
+    );
+    let manifest = manifest_of(&entries);
+    assert_eq!(manifest["formatVersion"], 2);
+    assert_eq!(manifest["personalHistory"], false);
+    let runs = manifest["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["pattern"] == "history/runs/**")
+        .expect("the manifest names the rule that kept the runs out");
+    assert_eq!(runs["files"], 1);
+    assert_eq!(runs["bytes"], record_bytes.len() as u64);
+
+    let backup = temp.path().join("backup.mokapkg.zip");
+    export_open_project(
+        &app,
+        json!({
+            "destination": backup.to_string_lossy(),
+            "includePersonalHistory": true,
+        }),
+    )
+    .await;
+    let entries = read_zip_entries(&backup);
+    assert!(
+        entries
+            .iter()
+            .any(|(name, bytes)| name == record_name && *bytes == record_bytes),
+        "a full backup carries the run record intact"
+    );
+    let manifest = manifest_of(&entries);
+    assert_eq!(manifest["personalHistory"], true);
+    assert!(
+        manifest["skipped"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["pattern"] != "history/runs/**"),
+        "a rule that kept nothing out has nothing to say"
+    );
+
+    let imports = temp.path().join("imports");
+    let (status, _) = try_import(&app, &work, &imports).await;
+    assert_eq!(status, StatusCode::CREATED);
+}

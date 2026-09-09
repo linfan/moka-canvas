@@ -15,7 +15,9 @@ use crate::generate::{
     ProviderError, TaskState,
 };
 use crate::metadata::RecentProject;
-use crate::project::{ByteRange, CreateProject, OpenProject, ProjectStore, StagedAsset};
+use crate::project::{
+    ByteRange, CreateProject, OpenProject, PackageScope, ProjectStore, StagedAsset,
+};
 use crate::workflow::events::RunEvent;
 use axum::{
     body::Body,
@@ -534,6 +536,10 @@ pub async fn export_package(
         .export_package(
             request.destination.as_deref().map(FsPath::new),
             request.allow_incomplete,
+            PackageScope {
+                personal_history: request.include_personal_history,
+                referenced_assets_only: request.only_referenced_assets,
+            },
         )
         .await?;
     Ok(Json(PackageResponse {

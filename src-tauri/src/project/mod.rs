@@ -91,6 +91,22 @@ pub struct PackageReport {
     pub incomplete: bool,
 }
 
+/// What a package carries beyond the work itself.
+///
+/// The default is a package of the work: the canvases, the assets, and the asks
+/// that made them, which is what somebody else could pick up and keep making
+/// with. What this machine did to the project, and material nobody has placed on
+/// a canvas, are both left out unless they are asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PackageScope {
+    /// The records of the runs this machine made, which carry the prompts they
+    /// were asked with and the names of the models that answered. For moving
+    /// one's own project to another machine, not for handing it over.
+    pub personal_history: bool,
+    /// Only the assets a canvas points at, leaving out material nobody placed.
+    pub referenced_assets_only: bool,
+}
+
 #[async_trait::async_trait]
 pub trait ProjectStore: Send + Sync {
     async fn create_project(
@@ -121,6 +137,7 @@ pub trait ProjectStore: Send + Sync {
         &self,
         destination: Option<&Path>,
         allow_incomplete: bool,
+        scope: PackageScope,
     ) -> Result<PackageReport, ProjectError>;
     async fn import_package(
         &self,

@@ -93,12 +93,22 @@ pub struct PreviewInput {
     pub missing: bool,
 }
 
+/// What a package is asked to carry beyond the work itself.
+///
+/// Both choices are off by default: a package made without saying is a package
+/// of the work, which is the kind that gets handed to somebody else.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportRequest {
     pub destination: Option<String>,
     #[serde(default)]
     pub allow_incomplete: bool,
+    /// The records of the runs this machine made, and the prompts they carried.
+    #[serde(default)]
+    pub include_personal_history: bool,
+    /// Only the assets a canvas points at, leaving the rest of the library out.
+    #[serde(default)]
+    pub only_referenced_assets: bool,
 }
 
 #[derive(Debug, Serialize)]

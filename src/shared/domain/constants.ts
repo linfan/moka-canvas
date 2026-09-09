@@ -3,7 +3,7 @@ import type { DataType, NodeKind, PortDefinition } from "./types";
 export const MOKA_MAGIC = [0x4d, 0x4f, 0x4b, 0x41] as const;
 export const MOKA_FILE_VERSION = "v1" as const;
 export const CANVAS_SCHEMA_VERSION = 2;
-export const PACKAGE_FORMAT_VERSION = 1;
+export const PACKAGE_FORMAT_VERSION = 2;
 
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 5.0;
