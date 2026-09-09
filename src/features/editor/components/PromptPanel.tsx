@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { runsApi, type GenerationPreview } from "../../../api";
 import {
   CAPABILITY_LABELS,
@@ -8,12 +8,15 @@ import {
   findNode,
   generationCapabilityFor,
   mentionNodeIds,
+  mentionSpans,
   nowIso,
+  type AssetId,
   type Capability,
   type GenerationMode,
   type GenerationSpec,
   type NodeId,
   type Rect,
+  type ResourceEntry,
   type RunStatus,
   type WorkflowNode,
 } from "../../../shared/domain";
@@ -23,6 +26,7 @@ import {
   useProviderStore,
 } from "../../settings/providerStore";
 import { worldToClient } from "../canvas/canvasControl";
+import { buildIssueIndex, buildResourceIndex } from "../canvas/mediaCards";
 import { setNodeGeneration } from "../interactions/actions";
 import {
   GENERATION_UNAVAILABLE,
@@ -34,6 +38,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useLatestRunForNode, useRunStore } from "../stores/runStore";
 import { GenerationParams, type ParamValue } from "./GenerationParams";
 import { InputPreview } from "./InputPreview";
+import { MentionField } from "./MentionField";
 
 const PANEL_WIDTH = 320;
 const PANEL_HEIGHT = 220;
@@ -43,6 +48,10 @@ const PANEL_HEIGHT_PARAMS = 360;
 const PANEL_HEIGHT_COUNT = 22;
 /** What the panel grows by once it is showing what a node will send. */
 const PANEL_HEIGHT_PREVIEW = 200;
+/** What the panel grows by while the prompt field is offering candidates. */
+const PANEL_HEIGHT_OFFER = 180;
+/** What the panel grows by for each row the prompt's mentions are drawn in. */
+const PANEL_HEIGHT_CHIPS = 28;
 /** Gap left between the panel and the node, and between it and a canvas edge. */
 const GAP = 8;
 
@@ -148,6 +157,7 @@ export function PromptPanel() {
   const selected = useEditorStore((state) => state.selection.nodeIds);
   const camera = useEditorStore((state) => state.camera);
   const moka = useProjectStore((state) => state.moka);
+  const selfCheck = useProjectStore((state) => state.selfCheck);
   const activeCanvasId = useProjectStore((state) => state.activeCanvasId);
   const generationOn = useGenerationAvailable();
   const providers = useProviderStore((state) => state.view);
@@ -161,6 +171,16 @@ export function PromptPanel() {
   const [preview, setPreview] = useState<GenerationPreview | null>(null);
   const [reading, setReading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [offering, setOffering] = useState(false);
+
+  // Built once per document rather than once per keystroke: a project may hold
+  // thousands of assets and the field asks after every one of them.
+  const resources = useMemo(
+    () => (moka ? buildResourceIndex(moka) : new Map<AssetId, ResourceEntry>()),
+    [moka],
+  );
+  const issues = useMemo(() => buildIssueIndex(selfCheck), [selfCheck]);
+  const chips = mentionSpans(prompt).length;
 
   const canvas =
     moka?.canvas.find((entry) => entry.id === activeCanvasId) ??
@@ -351,6 +371,21 @@ export function PromptPanel() {
   };
 
   /**
+   * Takes the words as they are typed, and writes through the one thing about
+   * them that is a choice rather than a draft of one.
+   *
+   * A mention reaches a provider only where the ask takes its context from the
+   * prompt, so leaving the mode on upstream would let the field draw a reference
+   * that nothing will send — the disagreement this panel exists to prevent.
+   */
+  const changePrompt = (next: string) => {
+    setPrompt(next);
+    if (spec.inputMode === "mentions") return;
+    if (mentionSpans(next).length <= mentionSpans(prompt).length) return;
+    commit({ inputMode: "mentions", prompt: next });
+  };
+
+  /**
    * Opens or folds away the disclosure of what this node will send.
    *
    * Opening saves what is typed first and waits for it to land. The preview is
@@ -423,7 +458,9 @@ export function PromptPanel() {
     (paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT) +
     (previewOpen ? PANEL_HEIGHT_PREVIEW : 0) +
     (counted ? PANEL_HEIGHT_COUNT : 0) +
-    (dangling ? PANEL_HEIGHT_COUNT : 0);
+    (dangling ? PANEL_HEIGHT_COUNT : 0) +
+    (offering ? PANEL_HEIGHT_OFFER : 0) +
+    Math.ceil(chips / 2) * PANEL_HEIGHT_CHIPS;
   const style: React.CSSProperties = {
     left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${
       PANEL_WIDTH + GAP
@@ -488,23 +525,20 @@ export function PromptPanel() {
         />
       )}
 
-      <textarea
-        aria-label={`Prompt for ${node.title}`}
-        className="prompt-panel-input"
-        onBlur={commitPrompt}
-        onChange={(event) => setPrompt(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-            void ask();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            dismiss();
-          }
-        }}
+      <MentionField
+        canvas={canvas}
+        inputRef={areaRef}
+        issues={issues}
+        key={`prompt-${node.id}`}
+        label={`Prompt for ${node.title}`}
+        node={node}
+        onChange={changePrompt}
+        onCommit={commitPrompt}
+        onDismiss={dismiss}
+        onOffer={setOffering}
+        onSubmit={() => void ask()}
         placeholder="What should this node make?"
-        ref={areaRef}
-        rows={3}
+        resources={resources}
         value={prompt}
       />
 

@@ -279,17 +279,44 @@ export function findResource(
   return allResources(moka).find((r) => r.id === assetId);
 }
 
-export function mentionNodeIds(prompt: string): string[] {
-  const ids: string[] = [];
-  const pattern = /@\[node:([^\]]+)\]/g;
-  for (
-    let match = pattern.exec(prompt);
-    match !== null;
-    match = pattern.exec(prompt)
-  ) {
-    ids.push(match[1]);
+/** The opening of a mention, and the whole of the token it starts. */
+const MENTION_PREFIX = "@[node:";
+
+export interface MentionSpan {
+  start: number;
+  end: number;
+  nodeId: string;
+}
+
+/**
+ * Every `@[node:<id>]` mention in a prompt, in the order they appear, with the
+ * span the whole token occupies so a caller can replace exactly that much and
+ * leave the prose around it alone.
+ *
+ * A token with no closing bracket ends the scan: what follows is prose that
+ * happens to contain the opening, not a reference. A token naming nothing
+ * (`@[node:]`) is still a token, and what to make of it is the caller's
+ * business.
+ */
+export function mentionSpans(prompt: string): MentionSpan[] {
+  const found: MentionSpan[] = [];
+  let cursor = 0;
+  for (;;) {
+    const start = prompt.indexOf(MENTION_PREFIX, cursor);
+    if (start < 0) break;
+    const body = start + MENTION_PREFIX.length;
+    const close = prompt.indexOf("]", body);
+    if (close < 0) break;
+    found.push({ start, end: close + 1, nodeId: prompt.slice(body, close) });
+    cursor = close + 1;
   }
-  return ids;
+  return found;
+}
+
+export function mentionNodeIds(prompt: string): string[] {
+  return mentionSpans(prompt)
+    .map((span) => span.nodeId)
+    .filter((nodeId) => nodeId !== "");
 }
 
 export function modelReferenceShaped(model: string): boolean {

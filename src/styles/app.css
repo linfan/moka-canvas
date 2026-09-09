@@ -1378,6 +1378,170 @@ button.danger:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+.mention-field {
+  display: grid;
+  gap: 6px;
+  position: relative;
+}
+
+/* Hung under the field rather than laid out in it: a list that pushed the
+   prompt down would move the caret while it was being read. */
+.mention-offer {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 1px;
+  left: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 40;
+}
+
+.mention-offer-label {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  margin: 4px 2px 2px;
+  text-transform: uppercase;
+}
+
+.mention-offer button {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  display: grid;
+  gap: 0 6px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 4px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.mention-offer button.is-active {
+  background: var(--surface);
+}
+
+.mention-offer-thumb {
+  border-radius: 4px;
+  grid-row: 1 / -1;
+  height: 24px;
+  object-fit: cover;
+  width: 24px;
+}
+
+.mention-offer-name {
+  font-size: 12px;
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-offer-summary {
+  color: var(--muted);
+  font-size: 10px;
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mention-chip {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 4px 2px 2px;
+  position: relative;
+}
+
+/* A mention of a card that is gone still has to be readable as one, and still
+   has to be possible to take out. */
+.mention-chip.is-gone {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.mention-chip-thumb {
+  border-radius: 999px;
+  flex: none;
+  height: 18px;
+  object-fit: cover;
+  width: 18px;
+}
+
+.mention-chip-name {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-chip-drop {
+  border-radius: 999px;
+  color: var(--muted);
+  flex: none;
+  font-size: 10px;
+  padding: 1px 4px;
+}
+
+/* What a chip summons when it is hovered, or held by the keyboard. */
+.mention-look {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  bottom: calc(100% + 6px);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 4px;
+  left: 0;
+  max-width: 240px;
+  padding: 6px;
+  position: absolute;
+  z-index: 41;
+}
+
+.mention-look-picture {
+  border-radius: 6px;
+  display: block;
+  max-height: 160px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.mention-look-words {
+  color: var(--ink);
+  font-size: 11px;
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+}
+
+.mention-look-label {
+  color: var(--muted);
+  font-size: 10px;
+  margin: 0;
+}
+
 /* Why an ask did not finish, held beside the card that says so. It takes no
    pointer events: swallowing the hover that summoned it would blink it away. */
 

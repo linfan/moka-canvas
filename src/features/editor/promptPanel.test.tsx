@@ -1094,3 +1094,33 @@ describe("a mention that points at nothing", () => {
     expect(ask()).toHaveProperty("disabled", false);
   });
 });
+
+describe("a prompt that points at other nodes", () => {
+  function prompt() {
+    return within(panel()).getByRole("textbox");
+  }
+
+  it("takes the ask out of the upstream when a mention is written into it", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    type("A heron at dawn");
+    fireEvent.blur(prompt());
+    await settle();
+    expect(specOf(ids.image)?.inputMode).toBe("upstream");
+
+    // A mention reaches a provider only where the ask takes its context from
+    // the prompt, so writing one carries the node into that mode with it.
+    type(`Paint over @[node:${ids.text}]`);
+    await settle();
+    expect(specOf(ids.image)?.inputMode).toBe("mentions");
+    expect(specOf(ids.image)?.prompt).toContain(`@[node:${ids.text}]`);
+
+    // Taking the mention back out does not take the choice with it. The mode
+    // is written where it can be read, so moving it on its own would pull the
+    // inputs out from under whoever is looking at them.
+    type("Paint over the lake");
+    await settle();
+    expect(specOf(ids.image)?.inputMode).toBe("mentions");
+  });
+});
