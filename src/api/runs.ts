@@ -1,4 +1,6 @@
+import type { InputRole } from "./generate";
 import type {
+  AssetId,
   CanvasId,
   NodeId,
   RunId,
@@ -6,6 +8,45 @@ import type {
   RunStatus,
 } from "../shared/domain";
 import { http } from "./client";
+
+/**
+ * One reference a node will send, described from what the project recorded
+ * about the asset rather than from anything the client believes about it.
+ */
+export interface PreviewInput {
+  role: InputRole;
+  /** The card this reference is, which is how a reader gets back to the canvas. */
+  nodeId: NodeId;
+  assetId: AssetId;
+  name: string | null;
+  mime: string | null;
+  bytes: number | null;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  /**
+   * Set when the asset this names is not there. Nothing is sent for one, and
+   * saying so here beats a run tripping over it later.
+   */
+  missing: boolean;
+}
+
+/**
+ * What one node will send, answered by the same resolver a run uses.
+ *
+ * The editor holds the document and could walk the graph itself, but then there
+ * would be two answers to what a node feeds the model — the one on screen and
+ * the one sent. So the walking happens on the server and this only renders it.
+ */
+export interface GenerationPreview {
+  /** The prompt as a run will send it, upstream text folded in behind labels. */
+  prompt: string;
+  inputs: PreviewInput[];
+  /** Characters cut off the contributing text to stay inside the prompt cap. */
+  truncatedChars: number;
+  /** Ids named by a mention this canvas has no node for. */
+  unresolved: NodeId[];
+}
 
 /** Words a run said about one of its nodes as they arrived. */
 export interface RunWords {
@@ -102,6 +143,18 @@ export const runsApi = {
     return http.request<RunRecord>(
       `/api/v1/projects/current/runs/${id}/retry`,
       { method: "POST" },
+    );
+  },
+
+  /** What one node will send, resolved the way a run resolves it. */
+  preview(
+    canvasId: CanvasId,
+    nodeId: NodeId,
+    signal?: AbortSignal,
+  ): Promise<GenerationPreview> {
+    return http.request<GenerationPreview>(
+      "/api/v1/projects/current/generate/preview",
+      { method: "POST", body: { canvasId, nodeId }, signal },
     );
   },
 

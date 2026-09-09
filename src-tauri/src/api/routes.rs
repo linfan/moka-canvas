@@ -1,16 +1,18 @@
 use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, ChannelKeyRequest,
-    CreateProjectRequest, DefaultsPatch, ExportRequest, GenerateResponse, ImportChannelRequest,
-    ImportProjectRequest, ModelListResponse, OpenProjectRequest, OpenProjectResponse,
-    PackageResponse, PreferencesPatch, PublicConfigResponse, RevisionQuery, RunStreamQuery,
-    SaveResponse, StartRunRequest, UpsertChannelRequest,
+    CreateProjectRequest, DefaultsPatch, ExportRequest, GenerateResponse, GenerationPreviewRequest,
+    GenerationPreviewResponse, ImportChannelRequest, ImportProjectRequest, ModelListResponse,
+    OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput,
+    PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse, StartRunRequest,
+    UpsertChannelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
-use crate::domain::{now_iso, DocumentCommand, RunRecord, RunStatus};
+use crate::domain::{now_iso, DocumentCommand, ResourceRegistry, RunRecord, RunStatus};
 use crate::generate::providers::{ChannelImport, ProbeReport, ProvidersView};
 use crate::generate::{
-    Cancel, DeltaSink, GenerateRequest, GenerateResult, ProviderError, TaskState,
+    collect_generation_inputs, Cancel, DeltaSink, GenerateInput, GenerateRequest, GenerateResult,
+    ProviderError, TaskState,
 };
 use crate::metadata::RecentProject;
 use crate::project::{ByteRange, CreateProject, OpenProject, ProjectStore, StagedAsset};
@@ -72,15 +74,19 @@ async fn upsert_recent(state: &ApiState, opened: &OpenProject) {
     }
 }
 
+fn project_not_open() -> Problem {
+    Problem::new(
+        StatusCode::CONFLICT,
+        "PROJECT_NOT_OPEN",
+        "No project is open",
+    )
+}
+
 async fn current_root(state: &ApiState) -> Result<PathBuf, Problem> {
     let current = state.store.current().await?;
-    current.map(|opened| opened.root).ok_or_else(|| {
-        Problem::new(
-            StatusCode::CONFLICT,
-            "PROJECT_NOT_OPEN",
-            "No project is open",
-        )
-    })
+    current
+        .map(|opened| opened.root)
+        .ok_or_else(project_not_open)
 }
 
 pub async fn public_config(State(state): State<ApiState>) -> Json<PublicConfigResponse> {
@@ -724,6 +730,99 @@ pub async fn retry_run(
 ) -> Result<(StatusCode, Json<RunRecord>), Problem> {
     let run = state.runs.retry(&id).await.map_err(start_run_problem)?;
     Ok((StatusCode::CREATED, Json(run)))
+}
+
+/// What one node will send, answered by the same resolver a run uses.
+///
+/// The editor holds the document and could walk the graph itself, but then
+/// there would be two answers to what a node feeds the model — the one on screen
+/// and the one sent — and the disagreement between them is the hardest kind of
+/// bug to find. So the walking happens here and the client only renders it.
+pub async fn preview_generation(
+    State(state): State<ApiState>,
+    json: Result<Json<GenerationPreviewRequest>, JsonRejection>,
+) -> Result<Json<GenerationPreviewResponse>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let opened = state.store.current().await?.ok_or_else(project_not_open)?;
+    let canvas = opened
+        .moka
+        .canvas
+        .iter()
+        .find(|canvas| canvas.id == request.canvas_id)
+        .ok_or_else(|| {
+            Problem::new(
+                StatusCode::NOT_FOUND,
+                "CANVAS_NOT_FOUND",
+                format!("Canvas {} is not in the open project", request.canvas_id),
+            )
+        })?;
+    let node = canvas.node(&request.node_id).ok_or_else(|| {
+        Problem::new(
+            StatusCode::NOT_FOUND,
+            "NODE_NOT_FOUND",
+            format!("Node {} is not on that canvas", request.node_id),
+        )
+    })?;
+    if node.data.generation.is_none() {
+        return Err(Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "GENERATION_SPEC_MISSING",
+            format!("Node \"{}\" has no generation to preview", node.title),
+        ));
+    }
+
+    let resolved = collect_generation_inputs(canvas, node);
+    let mut inputs = Vec::with_capacity(resolved.inputs.len());
+    for (position, input) in resolved.inputs.iter().enumerate() {
+        // Filled in the same pass, so a reference and the card behind it cannot
+        // drift apart; a resolver that gave no source says so with an empty id
+        // rather than borrowing a neighbour's.
+        let source = resolved
+            .input_sources
+            .get(position)
+            .cloned()
+            .unwrap_or_default();
+        inputs.push(preview_input(&state, &opened.moka.resources, input, source).await);
+    }
+
+    Ok(Json(GenerationPreviewResponse {
+        prompt: resolved.prompt,
+        inputs,
+        truncated_chars: resolved.truncated_chars,
+        unresolved: resolved.unresolved,
+    }))
+}
+
+/// One reference, described from what the project recorded about its asset.
+async fn preview_input(
+    state: &ApiState,
+    resources: &ResourceRegistry,
+    input: &GenerateInput,
+    node_id: String,
+) -> PreviewInput {
+    let recorded = resources.find(&input.asset_id);
+    // Asked of the store rather than trusted from the registry: it resolves the
+    // path inside the project root and says whether a file is there, which is
+    // the same answer a run gets when it comes to load the bytes.
+    let reachable = state.store.asset_file(&input.asset_id, None).await.is_ok();
+    let probe = recorded.and_then(|entry| entry.probe.as_ref());
+    PreviewInput {
+        role: input.role,
+        node_id,
+        asset_id: input.asset_id.clone(),
+        name: recorded.map(|entry| entry.name.clone()),
+        // What was measured at upload wins over what the client declared.
+        mime: probe
+            .map(|probe| probe.mime.clone())
+            .or_else(|| recorded.and_then(|entry| entry.mime.clone())),
+        bytes: probe
+            .map(|probe| probe.bytes)
+            .or_else(|| recorded.and_then(|entry| entry.bytes)),
+        width: probe.and_then(|probe| probe.width),
+        height: probe.and_then(|probe| probe.height),
+        duration_ms: probe.and_then(|probe| probe.duration_ms),
+        missing: !reachable,
+    }
 }
 
 /// Every provider write answers with the whole redacted view. The client is

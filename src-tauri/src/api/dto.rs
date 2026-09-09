@@ -1,7 +1,7 @@
 use crate::config::LimitsConfig;
 use crate::domain::{Capability, DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
 use crate::generate::providers::ModelCandidate;
-use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, Usage};
+use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, InputRole, Usage};
 use crate::metadata::{
     AudioPreferences, ChannelDraft, ImagePreferences, Protocol, VideoPreferences,
 };
@@ -41,6 +41,56 @@ pub struct ApplyCommandsRequest {
 pub struct StartRunRequest {
     pub canvas_id: String,
     pub node_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationPreviewRequest {
+    pub canvas_id: String,
+    pub node_id: String,
+}
+
+/// What one node will send, resolved on the server.
+///
+/// The client could walk the graph itself, and then there would be two answers
+/// to "what does this node feed the model": the one on screen and the one sent.
+/// A preview that disagrees with the run is worse than no preview, so the
+/// walking happens here and the client only renders it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationPreviewResponse {
+    /// The prompt as a run will send it: the node's own, with contributing text
+    /// folded in behind the labels that point at it.
+    pub prompt: String,
+    pub inputs: Vec<PreviewInput>,
+    /// Characters cut off the contributing text to stay inside the prompt cap.
+    /// Zero unless something had to go.
+    pub truncated_chars: usize,
+    /// Ids named by a mention this canvas has no node for. Nothing is sent for
+    /// one, so an ask carrying any is one to refuse before it costs anything.
+    pub unresolved: Vec<String>,
+}
+
+/// One reference travelling beside the prompt. The details come from what the
+/// project recorded about the asset, so a reader sees the size and length a
+/// provider will be handed rather than only a name.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewInput {
+    pub role: InputRole,
+    /// The card this reference is, which is how a reader gets from the list back
+    /// to the canvas.
+    pub node_id: String,
+    pub asset_id: String,
+    pub name: Option<String>,
+    pub mime: Option<String>,
+    pub bytes: Option<i64>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub duration_ms: Option<i64>,
+    /// Set when the asset this names is not there. A run would trip over it, so
+    /// the preview says so first.
+    pub missing: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]

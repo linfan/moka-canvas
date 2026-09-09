@@ -124,6 +124,12 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/runs/{id}/retry",
             post(routes::retry_run),
         )
+        // Beside the run routes rather than under /generate: it answers from the
+        // open document, so it belongs where the rest of the document is read.
+        .route(
+            "/api/v1/projects/current/generate/preview",
+            post(routes::preview_generation),
+        )
         .merge(provider_router())
         .merge(generate_router())
 }
