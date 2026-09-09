@@ -3,8 +3,10 @@
 //!
 //! [`executor`] answers the operations that need nothing but the document.
 //! [`provider`] answers the ones that need a channel, and is the only place a
-//! run reaches the gateway.
+//! run reaches the gateway. [`events`] is what a run says while it is going, to
+//! anybody watching.
 
+pub mod events;
 pub mod executor;
 pub mod provider;
 pub mod runner;
@@ -13,7 +15,7 @@ pub mod validate;
 use crate::domain::{
     AssetId, DataType, IsoTimestamp, NodeId, NodeKind, RunId, ValidationIssue, WorkflowNode,
 };
-use crate::generate::{GenerateRequest, GeneratedItem};
+use crate::generate::{DeltaSink, GenerateRequest, GeneratedItem};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -117,6 +119,13 @@ pub struct ExecutionRequest {
     /// read in one place and an executor never needs a canvas to do its job.
     /// `None` for every other step.
     pub generation: Option<GenerateRequest>,
+    /// Where an answer that arrives a piece at a time puts each piece.
+    ///
+    /// Carried by the request rather than handed to `execute` beside the
+    /// progress reporter, because which call streams is the executor's to
+    /// decide and the sink has to travel with the request it belongs to. A
+    /// default one is not watched, which is what makes a provider answer whole.
+    pub deltas: DeltaSink,
 }
 
 /// A step that answers later, in the run's hands.

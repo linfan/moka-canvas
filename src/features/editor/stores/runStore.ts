@@ -29,20 +29,39 @@ interface RunState {
   error: string | null;
   /** Issues from the last rejected run start, for the inspector to show. */
   lastIssues: ValidationIssue[];
+  /**
+   * What each node of a run has said so far, by run and then by node.
+   *
+   * Kept apart by node because a run may ask several, and words typed into
+   * one place would read as an answer none of them gave. Display only, and
+   * only while the run is going: the record replaces it the moment the run
+   * ends, which is why nothing decides from here.
+   */
+  streamText: Record<RunId, Record<NodeId, string>>;
   load: () => Promise<void>;
   start: (canvasId: CanvasId, nodeIds: NodeId[]) => Promise<RunRecord>;
   cancel: (runId: RunId) => Promise<void>;
   retry: (runId: RunId) => Promise<RunRecord>;
   select: (runId: RunId | null) => void;
+  /** Starts listening to what a run says, if nothing already is. */
+  openStream: (runId: RunId) => void;
   reset: () => void;
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let resyncNeeded = false;
 
+/** The runs being listened to, and the way to stop listening to each. */
+const listening = new Map<RunId, () => void>();
+
 function stopPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
+}
+
+function stopListening() {
+  for (const stop of listening.values()) stop();
+  listening.clear();
 }
 
 /** The server wrote run results into canvas.moka; adopt them when idle. */
@@ -103,6 +122,10 @@ export const useRunStore = create<RunState>()((set, get) => {
           failed === 1 ? "Run did not finish" : `${failed} runs did not finish`,
         );
     }
+    for (const run of fresh) {
+      // Idempotent, so the poll that keeps arriving does not keep opening one.
+      if (isActive(run.status)) get().openStream(run.id);
+    }
     if (!hasActiveRuns(fresh)) stopPolling();
   };
 
@@ -118,6 +141,29 @@ export const useRunStore = create<RunState>()((set, get) => {
     }
   };
 
+  /**
+   * Reads the record of a run a listener was told about.
+   *
+   * Always asked, whatever the stream said: a stream only ever hurries a
+   * display along, and the record is what the canvas and the history believe.
+   */
+  const adopt = async (runId: RunId) => {
+    set((state) => {
+      if (!(runId in state.streamText)) return state;
+      const streamText = { ...state.streamText };
+      delete streamText[runId];
+      return { streamText };
+    });
+    try {
+      const record = await runsApi.get(runId);
+      integrate([record, ...get().runs.filter((run) => run.id !== runId)]);
+    } catch {
+      // Unreadable for now. The list poll asks again on its own schedule, so
+      // what is missing here is a moment of the display and nothing else.
+      ensurePolling();
+    }
+  };
+
   const ensurePolling = () => {
     if (pollTimer || !hasActiveRuns(get().runs)) return;
     pollTimer = setInterval(() => void pollOnce(), POLL_INTERVAL_MS);
@@ -130,6 +176,7 @@ export const useRunStore = create<RunState>()((set, get) => {
     starting: false,
     error: null,
     lastIssues: [],
+    streamText: {},
 
     async load() {
       if (get().loading) return;
@@ -154,6 +201,7 @@ export const useRunStore = create<RunState>()((set, get) => {
       try {
         const record = await runsApi.start(canvasId, nodeIds);
         foldIn(record);
+        get().openStream(record.id);
         ensurePolling();
         return record;
       } catch (error) {
@@ -180,8 +228,39 @@ export const useRunStore = create<RunState>()((set, get) => {
     async retry(runId) {
       const record = await runsApi.retry(runId);
       foldIn(record);
+      get().openStream(record.id);
       ensurePolling();
       return record;
+    },
+
+    openStream(runId) {
+      // One listener per run: a second would show the same words twice over.
+      if (listening.has(runId)) return;
+      const stop = runsApi.follow(runId, {
+        onWords: ({ nodeId, text }) =>
+          set((state) => {
+            const said = state.streamText[runId] ?? {};
+            return {
+              streamText: {
+                ...state.streamText,
+                [runId]: { ...said, [nodeId]: (said[nodeId] ?? "") + text },
+              },
+            };
+          }),
+        onEnded: () => {
+          listening.delete(runId);
+          void adopt(runId);
+        },
+        onBroken: () => {
+          listening.delete(runId);
+          // The shortcut is gone rather than the run: keep asking for the
+          // record on a schedule, the way it was asked before there was a
+          // stream to hurry it along.
+          ensurePolling();
+          void adopt(runId);
+        },
+      });
+      listening.set(runId, stop);
     },
 
     select(runId) {
@@ -190,6 +269,7 @@ export const useRunStore = create<RunState>()((set, get) => {
 
     reset() {
       stopPolling();
+      stopListening();
       resyncNeeded = false;
       set({
         runs: [],
@@ -198,6 +278,7 @@ export const useRunStore = create<RunState>()((set, get) => {
         starting: false,
         error: null,
         lastIssues: [],
+        streamText: {},
       });
     },
   };

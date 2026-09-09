@@ -12,7 +12,7 @@ use crate::domain::{
     WorkflowNode,
 };
 use crate::generate::{
-    collect_generation_inputs, context_node_ids, GenerateRequest, ResolvedInputs,
+    collect_generation_inputs, context_node_ids, DeltaSink, GenerateRequest, ResolvedInputs,
 };
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -433,6 +433,9 @@ async fn validate_step(
             .unwrap_or(serde_json::Value::Null),
         inputs: snapshot.resolved_inputs(&node.id),
         generation: snapshot.generation_request(&node.id),
+        // Unwatched: nothing has been asked for yet, so there are no words to
+        // send anywhere and a provider must not be asked to stream them.
+        deltas: DeltaSink::default(),
     };
     if let Err(error) = executor.validate(&request).await {
         issues.extend(error.issues.into_iter().map(|mut item| {

@@ -79,6 +79,56 @@ const api: MockApi = {
   calls: [],
 };
 
+/**
+ * The platform's way of holding a stream open, which jsdom does not have.
+ *
+ * A test says a frame through `say` and breaks the stream through `break`,
+ * which are the two things a real one does that a caller has to cope with.
+ */
+class FakeEventSource {
+  static opened: FakeEventSource[] = [];
+  readonly url: string;
+  closed = false;
+  onerror: (() => void) | null = null;
+  private readonly heard = new Map<string, (event: { data: string }) => void>();
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.opened.push(this);
+  }
+
+  addEventListener(kind: string, handler: (event: { data: string }) => void) {
+    this.heard.set(kind, handler);
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  say(kind: string, body: unknown) {
+    this.heard.get(kind)?.({ data: JSON.stringify(body) });
+  }
+
+  break() {
+    this.onerror?.();
+  }
+}
+
+function streamFor(runId: string): FakeEventSource {
+  const source = FakeEventSource.opened.find((opened) =>
+    opened.url.includes(`runId=${runId}`),
+  );
+  if (!source) throw new Error(`no stream was opened for run ${runId}`);
+  return source;
+}
+
+/** Lets the promises a store action started finish; they are several deep. */
+async function settle() {
+  await act(async () => {
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+  });
+}
+
 function route(url: string, method: string, body: unknown): Response {
   const json = (payload: unknown, status = 200) =>
     new Response(JSON.stringify(payload), {
@@ -112,6 +162,13 @@ function route(url: string, method: string, body: unknown): Response {
   if (url === "/api/v1/projects/current/runs" && method === "POST") {
     const { body: payload, status } = api.startResponse();
     return json(payload, status);
+  }
+  const oneMatch = url.match(/\/runs\/([^/]+)$/);
+  if (oneMatch && method === "GET") {
+    const run = api.runs.find((entry) => entry.id === oneMatch[1]);
+    return run
+      ? json(run)
+      : json({ code: "RUN_NOT_FOUND", message: url, status: 404 }, 404);
   }
   const cancelMatch = url.match(/\/runs\/([^/]+)\/cancel$/);
   if (cancelMatch && method === "POST") {
@@ -153,6 +210,8 @@ beforeEach(() => {
   api.runs = [];
   api.startResponse = () => ({ body: makeRun(), status: 201 });
   api.calls = [];
+  FakeEventSource.opened = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
@@ -317,6 +376,116 @@ describe("runStore", () => {
     expect(retried.retryOfRunId).toBe("run-1");
     expect(useRunStore.getState().runs[0]?.id).toBe("run-2");
     expect(useRunStore.getState().selectedRunId).toBe("run-2");
+  });
+});
+
+describe("run stream", () => {
+  it("shows a run's words as they arrive and reads the record when it ends", async () => {
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+    const source = streamFor("run-1");
+    expect(source.url).toBe("/api/v1/generate/stream?runId=run-1");
+
+    act(() => {
+      source.say("delta", {
+        runId: "run-1",
+        nodeId: ids.text,
+        slotId: "result",
+        text: "A lantern ",
+      });
+      source.say("delta", {
+        runId: "run-1",
+        nodeId: ids.text,
+        slotId: "result",
+        text: "floats.",
+      });
+    });
+    expect(useRunStore.getState().streamText["run-1"]?.[ids.text]).toBe(
+      "A lantern floats.",
+    );
+
+    api.runs = [withStepStatus(makeRun({ status: "succeeded" }), "succeeded")];
+    api.calls = [];
+    act(() => {
+      source.say("done", { runId: "run-1", status: "succeeded" });
+    });
+    await settle();
+
+    // The record is what the store ends up believing, asked for the moment the
+    // run said it was over rather than at the next poll's convenience.
+    expect(
+      api.calls.some(
+        (call) => call.url === "/api/v1/projects/current/runs/run-1",
+      ),
+    ).toBe(true);
+    expect(useRunStore.getState().runs[0]?.status).toBe("succeeded");
+    // And the words it was shown on the way are gone: the run has an answer of
+    // its own now, and keeping both would leave a display to choose.
+    expect(useRunStore.getState().streamText["run-1"]).toBeUndefined();
+    expect(source.closed).toBe(true);
+  });
+
+  it("keeps the words of two nodes in one run apart", async () => {
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+    const source = streamFor("run-1");
+
+    act(() => {
+      source.say("delta", {
+        runId: "run-1",
+        nodeId: ids.text,
+        slotId: "result",
+        text: "the first",
+      });
+      source.say("delta", {
+        runId: "run-1",
+        nodeId: ids.operation,
+        slotId: "result",
+        text: "the second",
+      });
+    });
+
+    // Typed into one place they would read as an answer neither node gave.
+    const said = useRunStore.getState().streamText["run-1"];
+    expect(said?.[ids.text]).toBe("the first");
+    expect(said?.[ids.operation]).toBe("the second");
+  });
+
+  it("falls back to asking for the record when the stream breaks", async () => {
+    // Timers faked before the run is started, so the poll it sets up is one a
+    // test can move along.
+    vi.useFakeTimers();
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+    const source = streamFor("run-1");
+    api.runs = [makeRun({ status: "running" })];
+    api.calls = [];
+
+    act(() => {
+      source.break();
+    });
+    await settle();
+
+    expect(source.closed, "a broken stream is not left to reopen itself").toBe(
+      true,
+    );
+    expect(
+      api.calls.some(
+        (call) => call.url === "/api/v1/projects/current/runs/run-1",
+      ),
+      "the record was asked for at once",
+    ).toBe(true);
+
+    // And on a schedule from here, which is how a run was followed before
+    // there was a stream to hurry the display along.
+    api.calls = [];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+    expect(
+      api.calls.some((call) => call.url === "/api/v1/projects/current/runs"),
+      "the run was asked for again on the poll",
+    ).toBe(true);
   });
 });
 

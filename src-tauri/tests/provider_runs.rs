@@ -8,8 +8,9 @@
 //! below it, that an ask answered several times over is written back onto the
 //! canvas whole, that a cancel arrives at a step already waiting on a
 //! provider, that a shot is written down the moment it is placed rather than
-//! when it answers, and that a run left waiting on one asks after the same job
-//! when the project is opened again.
+//! when it answers, that a run left waiting on one asks after the same job
+//! when the project is opened again, and that a listener hears a run's words
+//! as they arrive and its ending last.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -18,7 +19,8 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::Path as Route;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{header, HeaderMap, Request, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -286,6 +288,50 @@ async fn body_json(response: axum::http::Response<Body>) -> Value {
     serde_json::from_slice(&bytes).expect("the body is JSON")
 }
 
+/// Joins a run's listeners.
+///
+/// The answer comes back as soon as the frames start and the body is left
+/// unread, so a test can be listening before it lets a provider answer.
+async fn follow(harness: &Harness, run_id: &str) -> (StatusCode, HeaderMap, Body) {
+    let response = harness
+        .app
+        .clone()
+        .oneshot(get_request(&format!(
+            "/api/v1/generate/stream?runId={run_id}"
+        )))
+        .await
+        .expect("the request is served");
+    (
+        response.status(),
+        response.headers().clone(),
+        response.into_body(),
+    )
+}
+
+/// Reads a stream to its end, which is where a listener stops, and says what it
+/// heard: the kind of each frame and the body it carried, in order.
+async fn said(body: Body) -> Vec<(String, Value)> {
+    let bytes = to_bytes(body, usize::MAX)
+        .await
+        .expect("the stream is read");
+    let stream = String::from_utf8(bytes.to_vec()).expect("the frames are text");
+    stream
+        .split("\n\n")
+        .filter_map(|frame| {
+            // A comment line keeps a stream alive and says nothing, so it is
+            // not a frame and a test that counted one would see a run talking
+            // when it was only breathing.
+            let mut lines = frame.lines();
+            let kind = lines.next()?.strip_prefix("event: ")?.to_string();
+            let body = lines.next()?.strip_prefix("data: ")?;
+            Some((
+                kind,
+                serde_json::from_str(body).expect("a frame carries JSON"),
+            ))
+        })
+        .collect()
+}
+
 /// Starts a throwaway provider and returns the address a channel would carry.
 async fn serve(routes: Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -353,6 +399,26 @@ impl Recorded {
     }
 }
 
+/// A written answer sent a piece at a time, in the frames the endpoint that
+/// streams one uses.
+///
+/// The totals arrive with the event that closes it, which is why what is stored
+/// is the whole answer rather than the pieces it was shown as.
+fn pieces(answer: &[&str]) -> Response {
+    let mut stream = String::new();
+    for piece in answer {
+        stream.push_str(&format!(
+            "data: {{\"type\":\"response.output_text.delta\",\"delta\":{}}}\n\n",
+            json!(piece)
+        ));
+    }
+    stream.push_str(
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}}\n\n",
+    );
+    stream.push_str("data: [DONE]\n\n");
+    ([(header::CONTENT_TYPE, "text/event-stream")], stream).into_response()
+}
+
 /// A provider that answers both capabilities, so one channel can serve a chain.
 fn answering(recorded: Recorded) -> Router {
     let writing = recorded.clone();
@@ -362,11 +428,21 @@ fn answering(recorded: Recorded) -> Router {
             post(move |body: Bytes| {
                 let recorded = writing.clone();
                 async move {
+                    // Answered in the shape it was asked for: a run being
+                    // listened to asks for a stream, and a mock that sent a
+                    // document either way could not be talked to by one.
+                    let streaming = serde_json::from_slice::<Value>(&body)
+                        .map(|asked| asked["stream"] == json!(true))
+                        .unwrap_or(false);
                     recorded.note(&body);
+                    if streaming {
+                        return pieces(&[SENTENCE]);
+                    }
                     Json(json!({
                         "output_text": SENTENCE,
                         "usage": { "input_tokens": 4, "output_tokens": 2 },
                     }))
+                    .into_response()
                 }
             }),
         )
@@ -394,6 +470,28 @@ fn hesitant(recorded: Recorded, gate: Arc<Notify>) -> Router {
                 recorded.note(&body);
                 gate.notified().await;
                 painted()
+            }
+        }),
+    )
+}
+
+/// A provider that holds a written answer until the test lets it go, then sends
+/// it a piece at a time.
+///
+/// Held so that a listener can be in place before the first word arrives, which
+/// is the only way to tell a stream from a record read after the fact.
+fn writing(recorded: Recorded, gate: Arc<Notify>, answer: &[&str]) -> Router {
+    let answer: Vec<String> = answer.iter().map(|piece| (*piece).to_string()).collect();
+    Router::new().route(
+        "/v1/responses",
+        post(move |body: Bytes| {
+            let recorded = recorded.clone();
+            let answer = answer.clone();
+            let gate = Arc::clone(&gate);
+            async move {
+                recorded.note(&body);
+                gate.notified().await;
+                pieces(&answer.iter().map(String::as_str).collect::<Vec<&str>>())
             }
         }),
     )
@@ -1168,4 +1266,161 @@ async fn a_run_left_waiting_on_a_shot_asks_after_the_same_one_when_the_project_r
         "a job that answered leaves nothing behind to be asked after again"
     );
     assert_eq!(files_in(&root, "videos"), 1);
+}
+
+// ---------------------------------------------------------------- what a run says
+
+/// A display's reason to listen: the words of an answer as they arrive, before
+/// the ending that tells it to stop reading — and the record behind them the
+/// same as it would have been unheard.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_listener_hears_a_runs_words_before_it_hears_the_ending() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let gate = Arc::new(Notify::new());
+    let base_url = serve(writing(
+        recorded.clone(),
+        Arc::clone(&gate),
+        &["A paper ", "lantern ", "drifts over ", "a quiet lake."],
+    ))
+    .await;
+    harness
+        .configure(&base_url, &[(WRITER, Capability::Text)])
+        .await;
+    let (canvas_id, _root) = harness.project("Notes").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-words", NodeKind::Text, "Notes", &reference(WRITER),
+                "say something about a lantern", None) },
+        ]))
+        .await;
+
+    let run_id = harness.start(&canvas_id, json!(["n-words"])).await;
+    // Listening before the answer is let go, so what arrives arrives while the
+    // run is going rather than being read off a record afterwards.
+    until_asked(&recorded).await;
+    let (status, headers, body) = follow(&harness, &run_id).await;
+    gate.notify_one();
+    let frames = said(body).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "text/event-stream");
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+
+    let kinds: Vec<&str> = frames.iter().map(|(kind, _)| kind.as_str()).collect();
+    assert_eq!(
+        kinds.first(),
+        Some(&"progress"),
+        "a step says how far it has got: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.last(),
+        Some(&"done"),
+        "and the ending is the last thing it says: {kinds:?}"
+    );
+    // The point of the whole arrangement: the words came before the ending, so
+    // a listener that stops reading there has already seen them.
+    let first_word = kinds
+        .iter()
+        .position(|kind| *kind == "delta")
+        .unwrap_or_else(|| panic!("words were said: {kinds:?}"));
+    assert!(first_word < kinds.len() - 1, "{kinds:?}");
+
+    let said: String = frames
+        .iter()
+        .filter(|(kind, _)| kind == "delta")
+        .map(|(_, body)| {
+            body["text"]
+                .as_str()
+                .expect("a delta carries words")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(said, SENTENCE, "nothing was lost on the way");
+
+    // Named for the run, the node and the slot it is going to land in, so a
+    // canvas can show the words where they will end up.
+    let (_, words) = &frames[first_word];
+    assert_eq!(words["runId"], json!(run_id));
+    assert_eq!(words["nodeId"], "n-words");
+    assert_eq!(words["slotId"], "result");
+
+    let (_, done) = frames.last().expect("the stream ends");
+    assert_eq!(done["status"], "succeeded");
+    assert!(
+        done.get("error").is_none(),
+        "a run that went well says nothing"
+    );
+
+    // And the record is what it would have been unheard, because a stream only
+    // ever hurries a display along.
+    let finished = harness.run(&run_id).await;
+    assert_eq!(finished["status"], "succeeded");
+    assert_eq!(finished["steps"][0]["outputText"], json!(SENTENCE));
+    assert_eq!(
+        finished["steps"][0]["progress"],
+        json!(1.0),
+        "how far the step got is written down as well as said"
+    );
+}
+
+/// A listener that joins after the fact is told where the run ended up rather
+/// than left waiting on words that already went by.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_run_that_is_already_over_says_so_once_and_closes_its_stream() {
+    let harness = harness();
+    let base_url = serve(answering(Recorded::default())).await;
+    harness
+        .configure(&base_url, &[(PAINTER, Capability::Image)])
+        .await;
+    let (canvas_id, _root) = harness.project("Poster").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "a paper lantern over a quiet lake", None) },
+        ]))
+        .await;
+
+    let run_id = harness.start(&canvas_id, json!(["n-poster"])).await;
+    assert_eq!(harness.settled(&run_id).await["status"], "succeeded");
+
+    let (status, headers, body) = follow(&harness, &run_id).await;
+    let frames = said(body).await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the stream opens for a finished run"
+    );
+    assert_eq!(headers[header::CONTENT_TYPE], "text/event-stream");
+    assert_eq!(frames.len(), 1, "{frames:?}");
+    let (kind, done) = &frames[0];
+    assert_eq!(kind, "done");
+    assert_eq!(done["runId"], json!(run_id));
+    assert_eq!(done["status"], "succeeded");
+    assert!(done.get("error").is_none());
+}
+
+/// Following a run that is not there is a question the server can answer, not a
+/// stream it can open: a listener reads the status before it has read anything.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stream_for_a_run_nobody_has_heard_of_is_a_problem_rather_than_a_stream() {
+    let harness = harness();
+    harness.project("Poster").await;
+
+    let response = harness
+        .app
+        .clone()
+        .oneshot(get_request("/api/v1/generate/stream?runId=no-such-run"))
+        .await
+        .expect("the request is served");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_ne!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/event-stream",
+        "nothing was opened to be listened to"
+    );
+    assert_eq!(body_json(response).await["code"], "RUN_NOT_FOUND");
 }

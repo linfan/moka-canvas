@@ -4,6 +4,7 @@
 //! requests arrive through an in-memory flag the driver observes between and
 //! during steps.
 
+use super::events::{streamed_words, RunEvent, RunEvents};
 use super::validate::{validate_run, RunSnapshot};
 use super::{
     data_type_for, executor_key_for, operation_type_for, ExecutionError, ExecutionOutput,
@@ -13,9 +14,9 @@ use super::{
 use crate::domain::commands::make_node;
 use crate::domain::validate::MAX_TITLE_LENGTH;
 use crate::domain::{
-    new_id, now_iso, AssetId, CanvasDocument, DataType, DocumentCommand, MokaFile, NodeId,
-    NodeKind, NodePatch, PortDirection, ResultSlot, ResultSlotStatus, RunId, RunRecord, RunStatus,
-    RunStepRecord, ValidationIssue, WorkflowNode,
+    new_id, now_iso, AssetId, CanvasDocument, Capability, DataType, DocumentCommand, MokaFile,
+    NodeId, NodeKind, NodePatch, PortDirection, ResultSlot, ResultSlotStatus, RunId, RunRecord,
+    RunStatus, RunStepRecord, ValidationIssue, WorkflowNode,
 };
 use crate::generate::{ingest_generated, GenerateResult};
 use crate::project::store::FsProjectStore;
@@ -31,6 +32,8 @@ pub struct RunManager {
     /// Serializes status transitions between the driver and cancel requests.
     transitions: tokio::sync::Mutex<()>,
     cancel_requests: Mutex<HashSet<RunId>>,
+    /// What the runs being driven are saying, to anybody listening.
+    events: RunEvents,
 }
 
 #[derive(Debug)]
@@ -282,7 +285,59 @@ impl RunManager {
             gate: tokio::sync::Mutex::new(()),
             transitions: tokio::sync::Mutex::new(()),
             cancel_requests: Mutex::new(HashSet::new()),
+            events: RunEvents::default(),
         })
+    }
+
+    /// What the runs being driven are saying.
+    ///
+    /// Handed out rather than served from inside, because the listener is a
+    /// route and a route reads the run record as well: the two have to be the
+    /// same bus for the record to arrive where the words were going.
+    pub fn events(&self) -> RunEvents {
+        self.events.clone()
+    }
+
+    /// What one step says about how far along it is.
+    ///
+    /// Published to whoever is listening and kept for the record, because a run
+    /// that ends before the next write still says how far it got — which is the
+    /// difference between "it stopped" and "it stopped three quarters in".
+    fn reporter(
+        &self,
+        run_id: &RunId,
+        node_id: &NodeId,
+        reached: Arc<Mutex<Option<f64>>>,
+    ) -> ProgressReporter {
+        let events = self.events.clone();
+        let run_id = run_id.clone();
+        let node_id = node_id.clone();
+        ProgressReporter::new(Arc::new(move |fraction| {
+            *reached
+                .lock()
+                .expect("a step's progress is not held across a call") = Some(fraction);
+            events.publish(RunEvent::progress(
+                run_id.clone(),
+                node_id.clone(),
+                fraction,
+            ));
+        }))
+    }
+
+    /// Says a run has ended and stops its channel.
+    ///
+    /// Both, because a listener that is told nothing waits for a record that is
+    /// already written, and a channel left open is a stream left hanging.
+    async fn ended(&self, run: &RunRecord) {
+        // The last read of an answer is still buffered when the step that
+        // produced it returns, and a listener stops reading at an ending.
+        self.events.settle(&run.id).await;
+        self.events.publish(RunEvent::done(
+            run.id.clone(),
+            run.status,
+            run.error.clone(),
+        ));
+        self.events.close(&run.id);
     }
 
     /// Validates the request against the current document, persists the
@@ -490,8 +545,9 @@ impl RunManager {
             }
         }
         run.updated_at = now_iso();
-        if let Err(error) = self.store.update_run(run).await {
-            tracing::warn!("run {run_id}: could not be ended: {error}");
+        match self.store.update_run(run).await {
+            Ok(run) => self.ended(&run).await,
+            Err(error) => tracing::warn!("run {run_id}: could not be ended: {error}"),
         }
     }
 
@@ -509,7 +565,11 @@ impl RunManager {
                     }
                 }
                 run.updated_at = now_iso();
-                self.store.update_run(run).await
+                // Ended here rather than by a driver, and so said here: a run
+                // cancelled before it started has nobody else to speak for it.
+                let run = self.store.update_run(run).await?;
+                self.ended(&run).await;
+                Ok(run)
             }
             RunStatus::Running => {
                 let owned = run_id.to_string();
@@ -559,8 +619,17 @@ impl RunManager {
                 // recorded as running, so picking it up is walking the steps it
                 // had not reached rather than starting over.
                 Ok(run) if run.status == RunStatus::Running => run,
-                // Cancelled while waiting for the gate; nothing to do.
-                _ => return,
+                // Ended while waiting for the gate, or unreadable. Either way
+                // there is nothing to drive, and a listener is told so rather
+                // than left waiting on a driver that is not coming.
+                Ok(run) => {
+                    self.ended(&run).await;
+                    return;
+                }
+                Err(error) => {
+                    tracing::warn!("run {run_id}: could not be read back: {error}");
+                    return;
+                }
             }
         };
 
@@ -695,8 +764,14 @@ impl RunManager {
                 run.cancel_requested = true;
             }
             run.updated_at = now_iso();
-            if let Err(error) = self.store.update_run(run).await {
-                tracing::warn!("run {run_id}: could not persist final state: {error}");
+            match self.store.update_run(run).await {
+                // Said after the write rather than before: a listener that
+                // hears the ending is about to ask for the record, and it has
+                // to be there.
+                Ok(run) => self.ended(&run).await,
+                Err(error) => {
+                    tracing::warn!("run {run_id}: could not persist final state: {error}")
+                }
             }
         }
         self.cancel_requests
@@ -789,6 +864,24 @@ impl RunManager {
                 // reading of the graph builds the request and stamps the answer
                 // that comes back, so the two cannot disagree about what fed it.
                 .map(|spec| snapshot.generation_inputs(&node.id).request_for(spec)),
+            // Words are the only answer that arrives a piece at a time, so the
+            // only one worth a stream of its own. Where they will land is known
+            // now, and saying so lets a listener show them there rather than
+            // somewhere it has to move them from later.
+            deltas: node
+                .data
+                .generation
+                .as_ref()
+                .filter(|spec| spec.capability == Capability::Text)
+                .map(|_| {
+                    streamed_words(
+                        self.events.clone(),
+                        run.id.clone(),
+                        node.id.clone(),
+                        slot_id(0),
+                    )
+                })
+                .unwrap_or_default(),
         };
         Ok(StepPlan::Scheduled {
             executor: Arc::clone(executor),
@@ -815,6 +908,17 @@ impl RunManager {
         match plan {
             StepPlan::Passthrough(value, artifacts) => Ok((value, artifacts)),
             StepPlan::Scheduled { executor, request } => {
+                // Kept beside the reporter rather than asked of it: a reporter
+                // is a callback with no way to answer a question, and the
+                // record has to say how far the step got even when the next
+                // thing it did was fail.
+                let reached = Arc::new(Mutex::new(None));
+                let progress = self.reporter(&run.id, &node_id, Arc::clone(&reached));
+                let how_far = || {
+                    *reached
+                        .lock()
+                        .expect("a step's progress is not held across a call")
+                };
                 let job = match placed {
                     // A job a previous process placed is waited out rather than
                     // placed again: it survived, and so did the answer it is
@@ -823,10 +927,9 @@ impl RunManager {
                     None => {
                         let Some(job) = executor.place_job(request.clone()).await? else {
                             // Nothing to wait for, so nothing to write down.
-                            let output = executor
-                                .execute(request, ProgressReporter::default())
-                                .await?;
-                            return self.finish_step(run, snapshot, &node_id, output).await;
+                            let outcome = executor.execute(request, progress).await;
+                            run.steps[position].progress = how_far();
+                            return self.finish_step(run, snapshot, &node_id, outcome?).await;
                         };
                         run.steps[position].task_id = Some(job.task_id.clone());
                         run.steps[position].task_created_at = Some(job.created_at.clone());
@@ -840,11 +943,10 @@ impl RunManager {
                         job
                     }
                 };
-                let output = executor
-                    .wait_job(job.clone(), ProgressReporter::default())
-                    .await?;
+                let outcome = executor.wait_job(job.clone(), progress).await;
+                run.steps[position].progress = how_far();
                 let (value, mut artifacts) =
-                    self.finish_step(run, snapshot, &node_id, output).await?;
+                    self.finish_step(run, snapshot, &node_id, outcome?).await?;
                 // Reported with the artifacts as well, so a step waited out in
                 // one call and one waited out in two leave the same record.
                 artifacts.task = Some(job);

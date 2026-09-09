@@ -148,14 +148,14 @@ fn asked_for(request: &ExecutionRequest) -> Result<GenerateRequest, ExecutionErr
 async fn answered(
     gateway: &Gateway,
     request: &GenerateRequest,
+    deltas: &DeltaSink,
     cancel: &Cancel,
 ) -> Result<GenerateResult, ProviderError> {
     match request.capability {
-        Capability::Text => {
-            gateway
-                .text(request.clone(), &DeltaSink::default(), cancel)
-                .await
-        }
+        // Words are the only answer that arrives a piece at a time. Whether a
+        // provider is asked for a stream at all is the sink's business, so one
+        // nobody is watching costs nothing here.
+        Capability::Text => gateway.text(request.clone(), deltas, cancel).await,
         Capability::Image => gateway.image(request.clone(), cancel).await,
         Capability::Audio => gateway.audio(request.clone(), cancel).await,
         // A shot is started and then waited out, and starting one here would be
@@ -263,7 +263,7 @@ impl WorkflowExecutor for ProviderExecutor {
         let generation = asked_for(&request)?;
         progress.report(0.0);
         let cancel = self.in_flight.flag(&request.run_id);
-        let outcome = answered(&self.gateway, &generation, &cancel).await;
+        let outcome = answered(&self.gateway, &generation, &request.deltas, &cancel).await;
         self.in_flight.release(&request.run_id);
         let result = outcome.map_err(step_error)?;
         // Checked on the way out as well as on the way in: a cancel that landed
@@ -348,6 +348,7 @@ mod tests {
             operation_type: operation_type.to_string(),
             parameters: serde_json::Value::Null,
             inputs: BTreeMap::new(),
+            deltas: DeltaSink::default(),
             generation: Some(GenerateRequest {
                 capability: Capability::Image,
                 prompt: prompt.to_string(),

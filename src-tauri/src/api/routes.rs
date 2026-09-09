@@ -2,18 +2,19 @@ use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, ChannelKeyRequest,
     CreateProjectRequest, DefaultsPatch, ExportRequest, GenerateResponse, ImportChannelRequest,
     ImportProjectRequest, ModelListResponse, OpenProjectRequest, OpenProjectResponse,
-    PackageResponse, PreferencesPatch, PublicConfigResponse, RevisionQuery, SaveResponse,
-    StartRunRequest, UpsertChannelRequest,
+    PackageResponse, PreferencesPatch, PublicConfigResponse, RevisionQuery, RunStreamQuery,
+    SaveResponse, StartRunRequest, UpsertChannelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
-use crate::domain::{now_iso, DocumentCommand, RunRecord};
+use crate::domain::{now_iso, DocumentCommand, RunRecord, RunStatus};
 use crate::generate::providers::{ChannelImport, ProbeReport, ProvidersView};
 use crate::generate::{
     Cancel, DeltaSink, GenerateRequest, GenerateResult, ProviderError, TaskState,
 };
 use crate::metadata::RecentProject;
 use crate::project::{ByteRange, CreateProject, OpenProject, ProjectStore, StagedAsset};
+use crate::workflow::events::RunEvent;
 use axum::{
     body::Body,
     extract::{rejection::JsonRejection, FromRequest, Multipart, Path, Query, Request, State},
@@ -23,8 +24,9 @@ use axum::{
 };
 use std::path::Path as FsPath;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio_util::io::ReaderStream;
 
 fn problem_from_io(error: std::io::Error) -> Problem {
@@ -955,6 +957,128 @@ pub async fn poll_generation_task(
             ProviderError::Rejected(message)
         })),
     }
+}
+
+/// How often a quiet stream says it is still there, and how often it looks at
+/// the record to check the run still is.
+///
+/// The comment is for anything sitting between the two that would otherwise
+/// drop a connection with nothing on it. The look is for a run whose driver
+/// stopped without saying so: a stream that never ends is worse than one that
+/// ends a quarter of a minute late.
+const FOLLOW_INTERVAL: Duration = Duration::from_secs(15);
+
+/// A comment rather than an event, which is what the format calls the traffic
+/// a listener is not meant to see.
+const KEEP_ALIVE: &str = ": keep-alive\n\n";
+
+/// What a run is doing, while it is doing it.
+///
+/// A shortcut to the record rather than a second copy of it. The frames say
+/// which words have arrived and how far along a step is; when the run ends the
+/// stream says so and closes, and the listener goes and reads the record it
+/// should have been reading all along. A client that never connects, or one
+/// that drops half way, loses the typewriter and nothing else.
+pub async fn stream_run_events(
+    State(state): State<ApiState>,
+    Query(query): Query<RunStreamQuery>,
+) -> Response {
+    let run_id = query.run_id.trim().to_string();
+    // Joined before the record is read, so an ending cannot slip through the
+    // gap between the two: a run that ends after this point says so on a
+    // channel this listener is already on.
+    let mut listener = state.runs.events().follow(&run_id);
+    let run = match state.store.get_run(&run_id).await {
+        Ok(run) => run,
+        Err(error) => {
+            // Closed only when there is no such run: a channel belonging to one
+            // that is going would cut off every other listener joined to it,
+            // and an unreadable store says nothing about whether it is.
+            if error.code() == "RUN_NOT_FOUND" {
+                state.runs.events().close(&run_id);
+            }
+            return Problem::from(error).into_response();
+        }
+    };
+
+    let (mut writer, reader) = tokio::io::duplex(STREAM_BUFFER_BYTES);
+    let store = state.store.clone();
+    let following = run_id.clone();
+
+    tokio::spawn(async move {
+        // Already over, so already said everything it was going to: the frame
+        // is built from the record, which is where the listener reads next.
+        if !is_going(run.status) {
+            let _ = frame(&mut writer, "done", &ending(&run)).await;
+            return;
+        }
+        let mut ticker = tokio::time::interval(FOLLOW_INTERVAL);
+        // The first tick is immediate, and spent here so the loop's are spaced.
+        ticker.tick().await;
+        loop {
+            tokio::select! {
+                event = listener.recv() => match event {
+                    Ok(event) => {
+                        let (name, body) = event.as_frame();
+                        let last = event.is_done();
+                        if frame(&mut writer, name, &body).await.is_err() {
+                            // The listener has gone; nothing to say it to.
+                            return;
+                        }
+                        if last {
+                            return;
+                        }
+                    }
+                    // Further behind than the channel holds. A display may lose
+                    // a frame and catch up from the record, which is cheaper
+                    // than keeping words for a listener that stopped reading.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    // Closed with nothing said, so the run ended without this
+                    // stream hearing how: the record is asked instead.
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                _ = ticker.tick() => match store.get_run(&following).await {
+                    Ok(run) if is_going(run.status) => {
+                        if writer.write_all(KEEP_ALIVE.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                    Ok(run) => {
+                        let _ = frame(&mut writer, "done", &ending(&run)).await;
+                        return;
+                    }
+                    // Gone, which is an ending of a sort and nothing left to
+                    // say about it.
+                    Err(_) => return,
+                },
+            }
+        }
+        if let Ok(run) = store.get_run(&following).await {
+            let _ = frame(&mut writer, "done", &ending(&run)).await;
+        }
+    });
+
+    (
+        [
+            (header::CONTENT_TYPE, "text/event-stream"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Body::from_stream(ReaderStream::new(reader)),
+    )
+        .into_response()
+}
+
+/// Whether a run still has something left to say.
+fn is_going(status: RunStatus) -> bool {
+    matches!(status, RunStatus::Queued | RunStatus::Running)
+}
+
+/// The frame that ends a run's stream, built from the record rather than from
+/// what a driver remembered saying, so the two cannot disagree.
+fn ending(run: &RunRecord) -> serde_json::Value {
+    RunEvent::done(run.id.clone(), run.status, run.error.clone())
+        .as_frame()
+        .1
 }
 
 /// A text answer sent as it arrives.

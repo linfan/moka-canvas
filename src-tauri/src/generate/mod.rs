@@ -324,6 +324,17 @@ impl DeltaSink {
     }
 }
 
+impl std::fmt::Debug for DeltaSink {
+    /// Whether anybody is listening, which is all a sink can say about itself:
+    /// what it holds is a callback, and a callback has no readable shape.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DeltaSink")
+            .field("streaming", &self.is_streaming())
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

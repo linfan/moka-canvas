@@ -813,8 +813,8 @@ async fn unknown_run_is_not_found() {
 }
 
 /// A step that waits on an upstream job records the handle and how far along it
-/// is; a step that was waited out leaves both keys out of the file rather than
-/// writing nulls.
+/// is; a step that was waited out leaves the handle out of the file rather than
+/// writing a null, and so does a step whose executor never said how far it got.
 ///
 /// The second half matters more than the first. `list_runs` skips a record it
 /// cannot parse, so a shape only a newer build understands would not error — it
@@ -847,8 +847,16 @@ async fn a_step_records_the_job_it_is_waiting_on() {
         serde_json::from_str(&std::fs::read_to_string(&record_path).unwrap()).unwrap();
     for step in written["steps"].as_array().unwrap() {
         assert!(
-            step.get("taskId").is_none() && step.get("progress").is_none(),
+            step.get("taskId").is_none(),
             "a step nobody gave a job to names none: {step}"
+        );
+        // How far a step got is a fraction or nothing at all: an executor that
+        // never said leaves the key out, and a null would be a third shape for
+        // a build reading this file to make sense of.
+        assert!(
+            step.get("progress")
+                .is_none_or(|reached| reached.is_number()),
+            "how far a step got is a fraction or absent: {step}"
         );
     }
 

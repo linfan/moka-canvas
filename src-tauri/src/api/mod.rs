@@ -145,6 +145,7 @@ fn generate_router() -> axum::Router<ApiState> {
             "/api/v1/generate/tasks/{id}",
             get(routes::poll_generation_task),
         )
+        .route("/api/v1/generate/stream", get(routes::stream_run_events))
         .route_layer(DefaultBodyLimit::max(MAX_GENERATE_BODY_BYTES))
 }
 

@@ -193,6 +193,13 @@ pub struct RevisionQuery {
     pub revision: Option<u64>,
 }
 
+/// Which run a stream follows. One, because a listener is watching one.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunStreamQuery {
+    pub run_id: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelListResponse {
