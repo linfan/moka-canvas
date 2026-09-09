@@ -795,6 +795,21 @@ pub struct RunStepRecord {
     pub output_asset_ids: Option<Vec<AssetId>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_text: Option<String>,
+    /// The handle a step that runs as an upstream job is polled by. Absent for
+    /// a step that was waited out, which is most of them.
+    ///
+    /// This is the handle this process issued, not the provider's own; the
+    /// channel that created the job is recovered from the node's model
+    /// reference, so a poll cannot be pointed somewhere else by editing this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_created_at: Option<IsoTimestamp>,
+    /// How much of the step has happened, 0 to 1. Absent means nobody has
+    /// said, which is not the same as "nothing yet": a provider that reports no
+    /// progress leaves this unset rather than claiming zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

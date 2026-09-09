@@ -123,6 +123,9 @@ impl RunManager {
                     error: None,
                     output_asset_ids: None,
                     output_text: None,
+                    task_id: None,
+                    task_created_at: None,
+                    progress: None,
                 })
                 .collect(),
             error: None,

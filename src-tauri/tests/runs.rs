@@ -778,3 +778,84 @@ async fn unknown_run_is_not_found() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// A step that waits on an upstream job records the handle and how far along it
+/// is; a step that was waited out leaves both keys out of the file rather than
+/// writing nulls.
+///
+/// The second half matters more than the first. `list_runs` skips a record it
+/// cannot parse, so a shape only a newer build understands would not error — it
+/// would quietly drop that run from the history.
+#[tokio::test]
+async fn a_step_records_the_job_it_is_waiting_on() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let created = create_project(&app, &temp.path().join("projects"), "Runs").await;
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let root = created["root"].as_str().unwrap().to_string();
+    build_text_flow(&app, &canvas_id, json!({})).await;
+
+    let response = start_run(&app, &canvas_id, json!(["n-op"])).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let run_id = body_json(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for_terminal(&app, &run_id).await;
+
+    let record_path = Path::new(&root)
+        .join("history")
+        .join("runs")
+        .join(format!("{run_id}.json"));
+    let written: Value =
+        serde_json::from_str(&std::fs::read_to_string(&record_path).unwrap()).unwrap();
+    for step in written["steps"].as_array().unwrap() {
+        assert!(
+            step.get("taskId").is_none() && step.get("progress").is_none(),
+            "a step nobody gave a job to names none: {step}"
+        );
+    }
+
+    // The same file, edited to look like a step still waiting on a shot.
+    let mut resumed = written;
+    let step = &mut resumed["steps"].as_array_mut().unwrap()[1];
+    step["status"] = json!("running");
+    step["taskId"] = json!("0197c8a2-1111-7222-8333-444444444444");
+    step["taskCreatedAt"] = json!("2026-09-09T10:00:00Z");
+    step["progress"] = json!(0.25);
+    std::fs::write(&record_path, serde_json::to_vec(&resumed).unwrap()).unwrap();
+
+    let read = run_state(&app, &run_id).await;
+    assert_eq!(
+        read["steps"][1]["taskId"],
+        json!("0197c8a2-1111-7222-8333-444444444444")
+    );
+    assert_eq!(
+        read["steps"][1]["taskCreatedAt"],
+        json!("2026-09-09T10:00:00Z")
+    );
+    assert_eq!(read["steps"][1]["progress"], json!(0.25));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/projects/current/runs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let listed = body_json(response).await;
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|run| run["id"] == json!(run_id)),
+        "a record carrying the newer fields is still listed: {listed}"
+    );
+}

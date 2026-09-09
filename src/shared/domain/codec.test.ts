@@ -9,6 +9,8 @@ import {
   buildLegacyV1MokaFile,
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
+import { derivePorts } from "./factories";
+import type { MediaNodeData } from "./types";
 
 const FIXTURE_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -162,6 +164,60 @@ describe("moka codec", () => {
   it("round-trips generation specs", () => {
     const golden = buildGenerationMokaFile();
     const decoded = decodeMokaFile(encodeMokaFile(golden));
+    expect(normalize(decoded)).toEqual(normalize(golden));
+  });
+
+  /**
+   * A media kind has no whitelist entry of its own for the child nodes holding
+   * results past the first, so this is what keeps the encoder's shared tail
+   * from losing them.
+   */
+  it("round-trips the extra results a generation leaves on child nodes", () => {
+    const golden = buildGenerationMokaFile();
+    const canvas = golden.canvas[0];
+    const asked = canvas.nodes[1];
+    const childId = "00000000-0000-7000-8000-0000000000f1";
+    const firstAsset = "00000000-0000-7000-8000-0000000000e1";
+    const secondAsset = "00000000-0000-7000-8000-0000000000e2";
+
+    const askedData = asked.data as MediaNodeData;
+    askedData.assetId = firstAsset;
+    askedData.resultSlots = [
+      {
+        id: "slot-first",
+        status: "succeeded",
+        assetId: firstAsset,
+        isPrimary: true,
+      },
+      {
+        id: "slot-second",
+        status: "succeeded",
+        assetId: secondAsset,
+        isPrimary: false,
+      },
+    ];
+    askedData.resultNodeIds = [childId];
+
+    canvas.nodes.push({
+      id: childId,
+      kind: "image",
+      title: "Poster (2)",
+      bounds: { x: 320, y: 240, width: 280, height: 220 },
+      zIndex: 2,
+      ports: derivePorts("image"),
+      data: { assetId: secondAsset },
+      createdAt: asked.createdAt,
+      updatedAt: asked.updatedAt,
+    });
+
+    const decoded = decodeMokaFile(encodeMokaFile(golden));
+    const decodedAsked = decoded.canvas[0].nodes[1].data as MediaNodeData;
+    expect(decodedAsked.resultNodeIds).toEqual([childId]);
+    expect(decodedAsked.resultSlots?.map((slot) => slot.assetId)).toEqual([
+      firstAsset,
+      secondAsset,
+    ]);
+    expect(decoded.canvas[0].nodes[2].id).toBe(childId);
     expect(normalize(decoded)).toEqual(normalize(golden));
   });
 

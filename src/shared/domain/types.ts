@@ -158,6 +158,11 @@ export interface MediaNodeData {
   posterAssetId?: AssetId;
   audioCategory?: "music" | "voice";
   resultSlots?: ResultSlot[];
+  /**
+   * Child nodes holding the results past the first, when one generation asked
+   * for several. This node keeps the primary result itself.
+   */
+  resultNodeIds?: NodeId[];
   metadata?: Record<string, unknown>;
   generation?: GenerationSpec;
 }
@@ -286,6 +291,14 @@ export interface RunStepRecord {
   error?: string;
   outputAssetIds?: AssetId[];
   outputText?: string;
+  /**
+   * The handle a step that runs as an upstream job is polled by. This process
+   * issued it, so it names no provider.
+   */
+  taskId?: string;
+  taskCreatedAt?: IsoTimestamp;
+  /** 0 to 1. Absent means nobody reported one, which is not the same as 0. */
+  progress?: number;
 }
 
 export interface RunRecord {
