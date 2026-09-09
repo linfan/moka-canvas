@@ -1,0 +1,654 @@
+//! Placing one generation with whoever answers.
+//!
+//! An adapter knows how to speak to a provider; this module knows which
+//! provider to speak to, what to say, and what to do when the first answer is
+//! not the last. It is the only place that reads the configuration, the only
+//! place that decides between answering at once and starting a job, and the
+//! only place a retry happens — so nothing above it has to know that a
+//! settings dialog exists, and nothing below it has to know that a node does.
+//!
+//! One call per capability, because a caller knows what it wants and should
+//! not have to say it twice: the endpoint a request arrived on decides the
+//! capability, and a body that disagrees is a client bug rather than an
+//! instruction.
+
+use std::future::Future;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde_json::{Map, Value};
+
+use crate::config::GenerateConfig;
+use crate::domain::Capability;
+use crate::metadata::Preferences;
+use crate::project::ProjectStore;
+
+use super::adapters::{for_protocol, ChannelCall};
+use super::error::ProviderError;
+use super::jobs::TaskRegistry;
+use super::media::{load_inputs, MediaInput};
+use super::providers::{resolve_within, ProviderRepo, ResolvedModel};
+use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskState};
+
+/// One generation, resolved and ready to send.
+///
+/// Holds the plaintext credential for as long as it is alive, which is why it
+/// is built at the last moment before a request and dropped when the attempts
+/// are over.
+struct Placement {
+    call: ChannelCall,
+    request: GenerateRequest,
+    inputs: Vec<MediaInput>,
+}
+
+/// Places generations with the channels the user configured.
+pub struct Gateway {
+    providers: Arc<ProviderRepo>,
+    assets: Arc<dyn ProjectStore>,
+    budgets: GenerateConfig,
+    tasks: TaskRegistry,
+}
+
+impl Gateway {
+    pub fn new(
+        providers: Arc<ProviderRepo>,
+        assets: Arc<dyn ProjectStore>,
+        budgets: GenerateConfig,
+    ) -> Self {
+        Self {
+            providers,
+            assets,
+            budgets,
+            tasks: TaskRegistry::new(),
+        }
+    }
+
+    /// Written text.
+    ///
+    /// `sink` is where the answer goes as it arrives, and passing one that
+    /// somebody is watching is what asks a provider for a stream at all. What
+    /// comes back is the whole answer either way, because the whole answer is
+    /// what gets stored.
+    pub async fn text(
+        &self,
+        request: GenerateRequest,
+        sink: &DeltaSink,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        self.answer(stamped(request, Capability::Text), sink, cancel)
+            .await
+    }
+
+    /// A picture, with or without something to edit or imitate.
+    pub async fn image(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        self.answer(
+            stamped(request, Capability::Image),
+            &DeltaSink::default(),
+            cancel,
+        )
+        .await
+    }
+
+    /// Speech.
+    pub async fn audio(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        self.answer(
+            stamped(request, Capability::Audio),
+            &DeltaSink::default(),
+            cancel,
+        )
+        .await
+    }
+
+    /// A shot, started rather than waited out.
+    ///
+    /// Video is always a job: one takes minutes, and holding a request open
+    /// that long would tie the caller's connection to a provider's queue. The
+    /// handle comes back at once and is polled through [`Gateway::poll`].
+    pub async fn video(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<AsyncTask, ProviderError> {
+        let placement = self
+            .place(stamped(request, Capability::Video), cancel)
+            .await?;
+        let adapter = for_protocol(placement.call.protocol);
+        let task = self
+            .retried(
+                cancel,
+                || async {
+                    adapter
+                        .create_task(
+                            &placement.call,
+                            &placement.request,
+                            &placement.inputs,
+                            cancel,
+                        )
+                        .await
+                },
+                waitable,
+            )
+            .await?;
+        // Tracked before the handle is handed back: a client that polls at
+        // once must not find it missing.
+        self.tasks.register(task.clone());
+        Ok(task)
+    }
+
+    /// One look at a job started here.
+    pub async fn poll(&self, task: &str, cancel: &Cancel) -> Result<TaskState, ProviderError> {
+        let tracked = self.tasks.get(task)?;
+        cancel.check()?;
+        // The job stays with the channel that started it. Polling through
+        // whatever the default is now would ask one provider about a handle
+        // another issued.
+        let snapshot = self.providers.snapshot().await?;
+        let resolved = resolve_within(&snapshot, &tracked.model, tracked.capability)?;
+        let call = self.address(&resolved).await?;
+        let state = for_protocol(tracked.protocol)
+            .poll_task(&call, &tracked, cancel)
+            .await;
+        match &state {
+            Ok(TaskState::Pending { .. }) => {}
+            // A job that answered is done with, and one the provider has
+            // forgotten cannot answer again: keeping either handle would only
+            // grow the table.
+            Ok(TaskState::Succeeded(_) | TaskState::Failed { .. }) => self.tasks.forget(task),
+            Err(ProviderError::TaskExpired { .. }) => self.tasks.forget(task),
+            // Anything else is this process failing to look rather than the
+            // job ending, and dropping the handle would lose a shot the
+            // provider is still making.
+            Err(_) => {}
+        }
+        state
+    }
+
+    /// The jobs being tracked.
+    pub fn tasks(&self) -> &TaskRegistry {
+        &self.tasks
+    }
+
+    /// One answer, waited out or read as it arrives.
+    async fn answer(
+        &self,
+        request: GenerateRequest,
+        sink: &DeltaSink,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        let placement = self.place(request, cancel).await?;
+        let (forwarded, watching) = counting(sink);
+        let streaming = watching.is_streaming();
+        let adapter = for_protocol(placement.call.protocol);
+        let result = self
+            .retried(
+                cancel,
+                || async {
+                    if streaming {
+                        adapter
+                            .generate_stream(
+                                &placement.call,
+                                &placement.request,
+                                &placement.inputs,
+                                &watching,
+                                cancel,
+                            )
+                            .await
+                    } else {
+                        adapter
+                            .generate(
+                                &placement.call,
+                                &placement.request,
+                                &placement.inputs,
+                                cancel,
+                            )
+                            .await
+                    }
+                },
+                // A stream that already showed something cannot be started
+                // again: a second attempt would put the same words on screen
+                // twice, and a caller has no way to unsee the first lot.
+                |error| waitable(error) && forwarded.load(Ordering::SeqCst) == 0,
+            )
+            .await?;
+        // Applied once here rather than in every adapter, so that an answer
+        // with nothing in it means the same thing whichever protocol gave it.
+        settled(normalize(result))
+    }
+
+    /// Resolves a request into one channel, one set of parameters, and the
+    /// references it carries.
+    ///
+    /// The configuration comes from a single in-memory snapshot and the
+    /// credential from the store's own cache, so the only disk access on the
+    /// way to a provider is the reference media itself.
+    async fn place(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<Placement, ProviderError> {
+        cancel.check()?;
+        let snapshot = self.providers.snapshot().await?;
+        let capability = request.capability;
+        let request = merged(request, &snapshot.preferences);
+        let resolved = resolve_within(&snapshot, &request.model, capability)?;
+        let inputs = load_inputs(self.assets.as_ref(), &request, &self.budgets).await?;
+        let call = self.address(&resolved).await?;
+        Ok(Placement {
+            call,
+            request,
+            inputs,
+        })
+    }
+
+    /// Addresses one channel, fetching the credential at the moment the
+    /// request goes out and not before.
+    async fn address(&self, resolved: &ResolvedModel) -> Result<ChannelCall, ProviderError> {
+        let api_key = self.providers.credential(&resolved.channel_id).await?;
+        ChannelCall::new(resolved, api_key, self.budgets.clone())
+    }
+
+    /// Asks again after a failure waiting can fix, until the budget for
+    /// attempts runs out.
+    ///
+    /// Shared by every kind of call, so that a generation and the start of a
+    /// job cannot drift apart in how they behave under a busy provider.
+    async fn retried<T, F, Fut>(
+        &self,
+        cancel: &Cancel,
+        mut ask: F,
+        again: impl Fn(&ProviderError) -> bool,
+    ) -> Result<T, ProviderError>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<T, ProviderError>>,
+    {
+        let mut attempt = 0u32;
+        loop {
+            cancel.check()?;
+            match ask().await {
+                Ok(value) => return Ok(value),
+                Err(error) if again(&error) && attempt + 1 < self.budgets.max_attempts => {
+                    attempt += 1;
+                    // A wait that ends at once on cancellation rather than
+                    // running out a backoff against a client that has gone.
+                    cancel.wait(backoff(&error, attempt, &self.budgets)).await?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+/// The parameters one request goes out with: what the caller said, over what
+/// the user set globally, over what the project starts with.
+///
+/// Merged here rather than in an adapter so that no protocol has to know a
+/// settings dialog exists, and so a parameter means the same thing whichever
+/// provider answers.
+fn merged(mut request: GenerateRequest, preferences: &Preferences) -> GenerateRequest {
+    let capability = request.capability;
+    // A global instruction frames a written answer. Speech has a direction of
+    // its own below, and a persona meant for text would replace it rather than
+    // join it.
+    if capability == Capability::Text && request.system.is_none() {
+        let instruction = preferences.system_prompt.trim();
+        if !instruction.is_empty() {
+            request.system = Some(instruction.to_string());
+        }
+    }
+    let params = &mut request.params;
+    match capability {
+        Capability::Text => {
+            offer(params, "reasoningEffort", &preferences.reasoning_effort);
+        }
+        Capability::Image => {
+            offer(params, "size", &preferences.image.size);
+            offer(params, "quality", &preferences.image.quality);
+            offer(params, "background", &preferences.image.background);
+            offer_value(params, "count", preferences.image.count);
+        }
+        Capability::Audio => {
+            offer(params, "voice", &preferences.audio.voice);
+            offer(params, "format", &preferences.audio.format);
+            offer(params, "instructions", &preferences.audio.instructions);
+            offer_value(params, "speed", preferences.audio.speed);
+        }
+        Capability::Video => {
+            offer(params, "resolution", &preferences.video.resolution);
+            offer(params, "mode", &preferences.video.mode);
+            offer_value(params, "seconds", preferences.video.seconds);
+            offer_value(params, "generateAudio", preferences.video.generate_audio);
+            offer_value(params, "watermark", preferences.video.watermark);
+        }
+    }
+    request
+}
+
+/// A preference fills a gap. It never overwrites what the request said, and
+/// one that says nothing is no preference at all: an empty `background` means
+/// the provider's own choice rather than a background named "".
+fn offer(params: &mut Map<String, Value>, key: &str, value: &str) {
+    let value = value.trim();
+    if value.is_empty() || params.contains_key(key) {
+        return;
+    }
+    params.insert(key.to_string(), Value::String(value.to_string()));
+}
+
+/// The same rule for a value that is not text.
+fn offer_value(params: &mut Map<String, Value>, key: &str, value: impl Into<Value>) {
+    if !params.contains_key(key) {
+        params.insert(key.to_string(), value.into());
+    }
+}
+
+/// One answer, in the shape everything above this module expects.
+fn normalize(mut result: GenerateResult) -> GenerateResult {
+    // A provider can pad an answer, and a text node holding nothing but
+    // whitespace is a blank card on the canvas rather than an answer.
+    result.text = result
+        .text
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string);
+    result
+}
+
+/// A success that carried nothing is a provider failure rather than a blank
+/// answer: there is nothing to store, and handing one back would leave the
+/// caller with an empty node and no reason for it.
+fn settled(result: GenerateResult) -> Result<GenerateResult, ProviderError> {
+    if result.is_empty() {
+        return Err(ProviderError::NoOutput(
+            "the answer carried no text and no media".to_string(),
+        ));
+    }
+    Ok(result)
+}
+
+/// The capability of the call a request arrived through.
+fn stamped(mut request: GenerateRequest, capability: Capability) -> GenerateRequest {
+    request.capability = capability;
+    request
+}
+
+/// Whether a failure is one that waiting can fix.
+///
+/// A timeout is left out on purpose even though asking again might work: it
+/// already ran the whole budget for this capability, and quietly running it
+/// again would double a wait the caller was told to expect. So is anything the
+/// provider refused, which is wrong rather than late and would be refused
+/// again verbatim.
+fn waitable(error: &ProviderError) -> bool {
+    matches!(
+        error,
+        ProviderError::RateLimited { .. } | ProviderError::Unreachable(_)
+    )
+}
+
+/// How long to wait before asking again.
+///
+/// A provider that said when to come back is obeyed: a backoff that ignores it
+/// either hammers a channel that asked for a minute, or waits a minute out
+/// when it asked for a second.
+fn backoff(error: &ProviderError, attempt: u32, budgets: &GenerateConfig) -> Duration {
+    let asked = match error {
+        ProviderError::RateLimited { retry_after, .. } => *retry_after,
+        _ => None,
+    };
+    asked.unwrap_or_else(|| Duration::from_millis(budgets.retry_base_ms) * 2u32.pow(attempt - 1))
+}
+
+/// A sink that forwards to another and counts what it forwarded.
+///
+/// The count answers "has the caller seen anything yet", which is what decides
+/// whether a failure may still be retried.
+fn counting(sink: &DeltaSink) -> (Arc<AtomicUsize>, DeltaSink) {
+    let forwarded = Arc::new(AtomicUsize::new(0));
+    if !sink.is_streaming() {
+        // Nobody is watching, so nothing is forwarded and a retry can repeat
+        // the whole request.
+        return (forwarded, DeltaSink::default());
+    }
+    let counted = Arc::clone(&forwarded);
+    let inner = sink.clone();
+    (
+        forwarded,
+        DeltaSink::new(Arc::new(move |chunk: &str| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            inner.push(chunk);
+        })),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn preferences() -> Preferences {
+        Preferences {
+            system_prompt: "  answer in one sentence  ".into(),
+            reasoning_effort: "high".into(),
+            image: crate::metadata::ImagePreferences {
+                size: "1024x1024".into(),
+                quality: "high".into(),
+                background: String::new(),
+                count: 2,
+            },
+            video: crate::metadata::VideoPreferences {
+                seconds: 8,
+                resolution: "1080".into(),
+                generate_audio: false,
+                watermark: true,
+                mode: "reference".into(),
+            },
+            audio: crate::metadata::AudioPreferences {
+                voice: "nova".into(),
+                format: "wav".into(),
+                speed: 1.25,
+                instructions: "speak slowly".into(),
+            },
+        }
+    }
+
+    fn request(capability: Capability, params: Value) -> GenerateRequest {
+        GenerateRequest {
+            capability,
+            params: params.as_object().cloned().unwrap_or_default(),
+            ..GenerateRequest::default()
+        }
+    }
+
+    #[test]
+    fn a_parameter_the_caller_set_survives_the_global_one() {
+        let merged = merged(
+            request(Capability::Image, json!({ "size": "512x512" })),
+            &preferences(),
+        );
+        assert_eq!(merged.params["size"], "512x512", "the node knows better");
+        assert_eq!(merged.params["quality"], "high", "the rest still applies");
+        assert_eq!(merged.params["count"], 2);
+    }
+
+    #[test]
+    fn a_preference_that_says_nothing_is_not_offered() {
+        let merged = merged(request(Capability::Image, json!({})), &preferences());
+        // An empty background means the provider's own choice; sending "" would
+        // name a background called nothing.
+        assert!(
+            merged.params.get("background").is_none(),
+            "{:?}",
+            merged.params
+        );
+    }
+
+    #[test]
+    fn each_capability_is_given_its_own_parameters() {
+        let video = merged(request(Capability::Video, json!({})), &preferences());
+        assert_eq!(video.params["seconds"], 8);
+        assert_eq!(video.params["resolution"], "1080");
+        assert_eq!(video.params["generateAudio"], false);
+        assert_eq!(video.params["watermark"], true);
+        assert_eq!(video.params["mode"], "reference");
+
+        let audio = merged(request(Capability::Audio, json!({})), &preferences());
+        assert_eq!(audio.params["voice"], "nova");
+        assert_eq!(audio.params["format"], "wav");
+        assert_eq!(audio.params["speed"], 1.25);
+        assert_eq!(audio.params["instructions"], "speak slowly");
+
+        let text = merged(request(Capability::Text, json!({})), &preferences());
+        assert_eq!(text.params["reasoningEffort"], "high");
+        assert_eq!(text.params.len(), 1, "text has one preference of its own");
+    }
+
+    #[test]
+    fn a_global_instruction_frames_a_written_answer_only() {
+        let text = merged(request(Capability::Text, json!({})), &preferences());
+        assert_eq!(text.system.as_deref(), Some("answer in one sentence"));
+
+        // Speech has a direction of its own, and a persona meant for text
+        // would replace it rather than join it.
+        let audio = merged(request(Capability::Audio, json!({})), &preferences());
+        assert_eq!(audio.system, None);
+        assert_eq!(audio.params["instructions"], "speak slowly");
+
+        // A request that brought its own instruction keeps it.
+        let own = merged(
+            GenerateRequest {
+                system: Some("be terse".into()),
+                ..request(Capability::Text, json!({}))
+            },
+            &preferences(),
+        );
+        assert_eq!(own.system.as_deref(), Some("be terse"));
+    }
+
+    #[test]
+    fn an_answer_is_trimmed_and_a_blank_one_is_dropped() {
+        let padded = normalize(GenerateResult {
+            text: Some("  a lantern  ".into()),
+            ..Default::default()
+        });
+        assert_eq!(padded.text.as_deref(), Some("a lantern"));
+
+        let blank = normalize(GenerateResult {
+            text: Some("   \n ".into()),
+            ..Default::default()
+        });
+        assert_eq!(blank.text, None);
+        assert!(blank.is_empty());
+    }
+
+    #[test]
+    fn a_success_that_carried_nothing_is_reported_as_no_output() {
+        let error = settled(GenerateResult::default()).expect_err("there is nothing to store");
+        assert_eq!(error.code(), "PROVIDER_NO_OUTPUT");
+        assert!(
+            !error.retryable(),
+            "asking the same channel again changes nothing"
+        );
+
+        let answered = settled(GenerateResult {
+            text: Some("a lantern".into()),
+            ..Default::default()
+        })
+        .expect("an answer is an answer");
+        assert_eq!(answered.text.as_deref(), Some("a lantern"));
+    }
+
+    #[test]
+    fn the_capability_of_the_call_wins_over_the_one_in_the_body() {
+        let stamped = stamped(request(Capability::Text, json!({})), Capability::Image);
+        assert_eq!(stamped.capability, Capability::Image);
+    }
+
+    #[test]
+    fn only_a_busy_or_unreachable_channel_is_worth_waiting_for() {
+        assert!(waitable(&ProviderError::Unreachable(
+            "nothing answered".into()
+        )));
+        assert!(waitable(&ProviderError::RateLimited {
+            detail: "slow down".into(),
+            retry_after: None,
+        }));
+        // A timeout already ran the whole budget for this capability; running
+        // it again would double a wait the caller was told to expect.
+        assert!(!waitable(&ProviderError::Timeout("too slow".into())));
+        // Wrong is not late: the same request would be refused the same way.
+        assert!(!waitable(&ProviderError::Auth(
+            "the key was rejected".into()
+        )));
+        assert!(!waitable(&ProviderError::Rejected(
+            "the prompt was refused".into()
+        )));
+        assert!(!waitable(&ProviderError::NoOutput("nothing usable".into())));
+        assert!(!waitable(&ProviderError::Cancelled));
+    }
+
+    #[test]
+    fn a_backoff_doubles_and_a_provider_that_asked_for_a_wait_is_obeyed() {
+        let budgets = GenerateConfig {
+            retry_base_ms: 1000,
+            ..GenerateConfig::default()
+        };
+        let unreachable = ProviderError::Unreachable("nothing answered".into());
+        assert_eq!(backoff(&unreachable, 1, &budgets), Duration::from_secs(1));
+        assert_eq!(backoff(&unreachable, 2, &budgets), Duration::from_secs(2));
+        assert_eq!(backoff(&unreachable, 3, &budgets), Duration::from_secs(4));
+
+        // A backoff that ignored this would hammer a channel that asked for a
+        // minute, or wait a minute out when it asked for a second.
+        let asked = ProviderError::RateLimited {
+            detail: "slow down".into(),
+            retry_after: Some(Duration::from_secs(45)),
+        };
+        assert_eq!(backoff(&asked, 1, &budgets), Duration::from_secs(45));
+        assert_eq!(backoff(&asked, 3, &budgets), Duration::from_secs(45));
+    }
+
+    #[test]
+    fn a_sink_nobody_is_watching_forwards_nothing_and_counts_nothing() {
+        let (forwarded, watching) = counting(&DeltaSink::default());
+        assert!(!watching.is_streaming());
+        watching.push("dropped");
+        assert_eq!(forwarded.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_watched_sink_counts_what_the_caller_has_already_seen() {
+        let seen = Arc::new(std::sync::Mutex::new(String::new()));
+        let collected = Arc::clone(&seen);
+        let caller = DeltaSink::new(Arc::new(move |chunk: &str| {
+            collected
+                .lock()
+                .expect("the sink is not held across a call")
+                .push_str(chunk);
+        }));
+
+        let (forwarded, watching) = counting(&caller);
+        assert!(watching.is_streaming());
+        assert_eq!(forwarded.load(Ordering::SeqCst), 0, "nothing shown yet");
+        watching.push("A ");
+        watching.push("lantern.");
+        assert_eq!(
+            seen.lock()
+                .expect("the sink is not held across a call")
+                .as_str(),
+            "A lantern.",
+            "every piece still reached the caller"
+        );
+        assert_eq!(forwarded.load(Ordering::SeqCst), 2);
+    }
+}

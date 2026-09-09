@@ -10,6 +10,12 @@
 //! and where the size and format rules live so that no adapter has to repeat
 //! them.
 //!
+//! [`gateway`] sits above all four and is what the rest of the program calls:
+//! it picks the channel, merges the parameters, decides between answering at
+//! once and starting a job, and asks again when waiting would help. [`jobs`]
+//! keeps the handles a started job is polled by, for as long as polling one
+//! could still mean anything.
+//!
 //! The types below are the whole generation vocabulary that leaves this
 //! module: a request phrased in the project's own terms and a result phrased
 //! as bytes with a mime type. No provider field name appears in either, so
@@ -17,6 +23,8 @@
 
 pub mod adapters;
 pub mod error;
+pub mod gateway;
+pub mod jobs;
 pub mod media;
 pub mod providers;
 
@@ -30,6 +38,8 @@ use crate::domain::{AssetId, Capability, IsoTimestamp};
 use crate::metadata::Protocol;
 
 pub use error::ProviderError;
+pub use gateway::Gateway;
+pub use jobs::TaskRegistry;
 pub use providers::{ProbeReport, ProviderRepo, ResolvedModel};
 
 /// One generation, in the project's words.

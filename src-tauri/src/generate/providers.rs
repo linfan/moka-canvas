@@ -416,10 +416,8 @@ impl ProviderRepo {
         capability: Capability,
     ) -> Result<ResolvedModel, ProviderError> {
         let snapshot = self.metadata.provider_snapshot().await?;
-        let reference = default_for(&snapshot.defaults, capability).ok_or_else(|| {
-            ProviderError::not_configured(capability.as_str(), "no default model is set")
-        })?;
-        resolve_in(&snapshot, reference, capability)
+        // An empty reference is how a caller asks for the default.
+        resolve_within(&snapshot, "", capability)
     }
 
     /// The plaintext credential, fetched as late as possible. A caller must
@@ -754,6 +752,30 @@ fn referencing_capabilities(defaults: &Defaults, channel_id: &str) -> Vec<&'stat
         })
         .map(|(capability, _)| capability.as_str())
         .collect()
+}
+
+/// Resolves what one generation is placed with, from a snapshot already in
+/// hand.
+///
+/// A caller that also needs the preferences reads them from this same
+/// snapshot, so a configuration edited mid-request cannot be half-applied:
+/// the model from before the edit and the parameters from after it. An empty
+/// reference means the caller has no model of its own and wants the default
+/// for the capability.
+pub fn resolve_within(
+    snapshot: &ProviderSnapshot,
+    reference: &str,
+    capability: Capability,
+) -> Result<ResolvedModel, ProviderError> {
+    let named = reference.trim();
+    let reference = if named.is_empty() {
+        default_for(&snapshot.defaults, capability).ok_or_else(|| {
+            ProviderError::not_configured(capability.as_str(), "no default model is set")
+        })?
+    } else {
+        named
+    };
+    resolve_in(snapshot, reference, capability)
 }
 
 fn resolve_in(
