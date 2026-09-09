@@ -2,9 +2,15 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
 use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
+use moka_canvas::domain::{AssetProvenance, MokaFile};
+use moka_canvas::project::codec::decode_moka_file;
+use moka_canvas::project::store::FsProjectStore;
+use moka_canvas::project::{CreateProject, PackageScope, ProjectStore, StagedAsset};
 use serde_json::{json, Value};
+use sha2::Digest;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 fn test_app(root: &Path) -> axum::Router {
@@ -500,4 +506,161 @@ async fn a_run_record_travels_only_in_a_package_that_asked_for_it() {
     let imports = temp.path().join("imports");
     let (status, _) = try_import(&app, &work, &imports).await;
     assert_eq!(status, StatusCode::CREATED);
+}
+
+/// The run that made the fixture's asset.
+const MADE_BY_RUN: &str = "0192b7d4-2222-7000-8000-000000000002";
+
+/// A project holding an asset a run made, built through the store rather than
+/// the API: how an asset came to be is not a thing an upload can claim.
+async fn stage_generated_project(root: &Path) -> (FsProjectStore, PathBuf, String) {
+    let store = FsProjectStore::new(Arc::new(parse_test_config(root)));
+    let created = store
+        .create_project(
+            &root.join("projects"),
+            CreateProject {
+                name: "Made".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let project_root = created.root.clone();
+    let canvas_id = created.moka.canvas[0].id.clone();
+
+    let staged = root.join("staged.png");
+    std::fs::write(&staged, make_test_png()).unwrap();
+    let change = store
+        .add_asset(StagedAsset {
+            name: "made.png".to_string(),
+            tmp_path: staged,
+            declared_mime: None,
+            category_hint: None,
+            provenance: Some(AssetProvenance {
+                run_id: Some(MADE_BY_RUN.to_string()),
+                canvas_id: Some(canvas_id),
+                operation_node_id: Some("node-1".to_string()),
+                input_asset_ids: None,
+                parameter_snapshot: Some(json!({
+                    "model": "a-model",
+                    "prompt": "a lake at dusk",
+                })),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }),
+        })
+        .await
+        .unwrap();
+    (store, project_root, change.entry.id)
+}
+
+fn document_in(archive: &Path) -> MokaFile {
+    let (_, bytes) = read_zip_entries(archive)
+        .into_iter()
+        .find(|(name, _)| name == "canvas.moka")
+        .expect("a package carries the document");
+    decode_moka_file(&bytes).expect("the document a package carries must be readable")
+}
+
+fn provenance_of(document: &MokaFile, asset_id: &str) -> AssetProvenance {
+    document
+        .resources
+        .find(asset_id)
+        .expect("the asset is in the document")
+        .provenance
+        .clone()
+        .expect("the asset knows how it was made")
+}
+
+/// The document a package carries is written rather than copied, so what it
+/// says about an asset is what the receiver gets — and a package handed over
+/// points at no run, because the record of it stayed where it was made.
+#[tokio::test]
+async fn a_package_of_the_work_forgets_the_run_but_keeps_the_asking() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, root, asset_id) = stage_generated_project(temp.path()).await;
+
+    let work = temp.path().join("work.mokapkg.zip");
+    store
+        .export_package(Some(&work), false, PackageScope::default())
+        .await
+        .unwrap();
+
+    let provenance = provenance_of(&document_in(&work), &asset_id);
+    assert_eq!(
+        provenance.run_id, None,
+        "a package of the work points at no run: its record did not travel"
+    );
+    assert_eq!(
+        provenance.operation_node_id.as_deref(),
+        Some("node-1"),
+        "which node asked still resolves inside the package"
+    );
+    assert_eq!(
+        provenance.parameter_snapshot.as_ref().unwrap()["prompt"],
+        "a lake at dusk",
+        "how it was asked for is the reusable part and is kept"
+    );
+
+    // The manifest describes the bytes actually written, not the file on disk.
+    let entries = read_zip_entries(&work);
+    let (_, bytes) = entries
+        .iter()
+        .find(|(name, _)| name == "canvas.moka")
+        .expect("the document is in the package");
+    let manifest = manifest_of(&entries);
+    let row = manifest["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["path"] == "canvas.moka")
+        .expect("the manifest lists the document");
+    assert_eq!(row["bytes"], bytes.len() as u64);
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(bytes);
+    assert_eq!(row["sha256"], hex::encode(hasher.finalize()));
+
+    let held = store.current().await.unwrap().expect("a project is open");
+    assert_eq!(
+        provenance_of(&held.moka, &asset_id).run_id.as_deref(),
+        Some(MADE_BY_RUN),
+        "what this machine knows is not a package's to forget"
+    );
+    let on_disk = decode_moka_file(&std::fs::read(root.join("canvas.moka")).unwrap()).unwrap();
+    assert_eq!(
+        provenance_of(&on_disk, &asset_id).run_id.as_deref(),
+        Some(MADE_BY_RUN),
+        "making a package redacts a copy, not the project"
+    );
+
+    let backup = temp.path().join("backup.mokapkg.zip");
+    store
+        .export_package(
+            Some(&backup),
+            false,
+            PackageScope {
+                personal_history: true,
+                ..PackageScope::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        provenance_of(&document_in(&backup), &asset_id)
+            .run_id
+            .as_deref(),
+        Some(MADE_BY_RUN),
+        "a full backup carries the run with the work"
+    );
+
+    let imported = store
+        .import_package(&work, &temp.path().join("imports").join("Made"))
+        .await
+        .unwrap();
+    assert!(
+        imported.self_check.issues.is_empty(),
+        "the work package opens clean: {:?}",
+        imported.self_check.issues
+    );
+    let provenance = provenance_of(&imported.moka, &asset_id);
+    assert_eq!(provenance.run_id, None);
+    assert_eq!(provenance.operation_node_id.as_deref(), Some("node-1"));
 }

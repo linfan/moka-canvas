@@ -3,6 +3,7 @@ use crate::domain::{now_iso, ASSET_CATEGORIES};
 use crate::domain::{MokaFile, PACKAGE_MANIFEST_VERSION};
 use crate::metadata::crypto;
 use crate::metadata::docs;
+use crate::project::codec::encode_moka_file;
 use crate::project::store::normalize_relative;
 use crate::project::{PackageReport, PackageScope, ProjectError};
 use serde::{Deserialize, Serialize};
@@ -55,6 +56,9 @@ pub struct PackageManifest {
 
 const MANIFEST_NAME: &str = "moka-package.json";
 const OS_JUNK: [&str; 3] = [".DS_Store", "Thumbs.db", "desktop.ini"];
+
+/// The one file a package writes rather than copies.
+const DOCUMENT_NAME: &str = "canvas.moka";
 
 /// Where a job a provider is still running is noted, so the poll that collects
 /// it can be placed again after a restart.
@@ -243,6 +247,45 @@ fn collect_files(root: &Path, scope: &PackageScope) -> Result<Collected, Project
     Ok(collected)
 }
 
+/// The document as a package carries it.
+///
+/// Named field by field rather than found by walking the encoded bytes for
+/// names to strike out: somebody's prompt may well contain the word `runId`,
+/// and what they typed is not this function's to judge.
+///
+/// A full backup is not touched at all. It is one person's project moving to
+/// another of their machines, and how it was made is part of what is moving.
+fn document_for_export(moka: &MokaFile, scope: &PackageScope) -> MokaFile {
+    if scope.personal_history {
+        return moka.clone();
+    }
+    let mut document = moka.clone();
+    for entry in document.resources.all_mut() {
+        if let Some(provenance) = entry.provenance.as_mut() {
+            // The one reference a package cannot honour: the record of the run
+            // stayed on the machine that made it. Which canvas and which node
+            // asked, what was handed over and what came back all still resolve
+            // inside the package, and asking the same way again is built from
+            // them — so only the dangling one goes.
+            provenance.run_id = None;
+        }
+    }
+    document
+}
+
+/// The bytes a package carries for a path.
+///
+/// Everything is read off disk except the document, which is written from the
+/// copy above. The sizes and hashes in the manifest are computed from these
+/// same bytes, so what a package says it carries and what it carries cannot
+/// drift apart.
+fn entry_bytes(root: &Path, relative: &str, document: &[u8]) -> Result<Vec<u8>, ProjectError> {
+    if relative == DOCUMENT_NAME {
+        return Ok(document.to_vec());
+    }
+    Ok(std::fs::read(root.join(relative))?)
+}
+
 pub fn export_project(
     root: &Path,
     moka: &MokaFile,
@@ -271,9 +314,10 @@ pub fn export_project(
     }
 
     let mut entries = Vec::new();
+    let document = encode_moka_file(&document_for_export(moka, &scope), None)?;
     for file in &collected.files {
         let relative = relative_to(root, file)?;
-        let bytes = std::fs::read(file)?;
+        let bytes = entry_bytes(root, &relative, &document)?;
         entries.push(PackageManifestEntry {
             path: relative,
             bytes: bytes.len() as u64,
@@ -332,7 +376,7 @@ pub fn export_project(
         writer.write_all(&manifest_json)?;
         for entry in &manifest.entries {
             writer.start_file(&entry.path, options)?;
-            writer.write_all(&std::fs::read(root.join(&entry.path))?)?;
+            writer.write_all(&entry_bytes(root, &entry.path, &document)?)?;
         }
         writer.finish()?;
         Ok(PackageReport {
@@ -517,6 +561,10 @@ pub fn asset_categories() -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{
+        AssetProvenance, CanvasDocument, ProjectMetadata, ResourceEntry, ResourceRegistry,
+        MOKA_FILE_VERSION,
+    };
 
     /// The package an export makes unless it is asked for more.
     const WORK: PackageScope = PackageScope {
@@ -594,6 +642,178 @@ mod tests {
                 &BACKUP
             ),
             Some(Skip::Job)
+        );
+    }
+
+    /// The run that made one of the fixture's assets.
+    const RUN: &str = "0192b7d4-0000-7000-8000-000000000001";
+
+    fn entry(id: &str, name: &str, provenance: Option<AssetProvenance>) -> ResourceEntry {
+        ResourceEntry {
+            id: id.to_string(),
+            name: name.to_string(),
+            path: format!("assets/{name}"),
+            mime: Some("image/png".to_string()),
+            bytes: Some(12),
+            sha256: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            probe: None,
+            provenance,
+        }
+    }
+
+    /// A project holding an asset a run made and one somebody brought in.
+    fn fixture() -> MokaFile {
+        let made = entry(
+            "asset-made",
+            "made.png",
+            Some(AssetProvenance {
+                run_id: Some(RUN.to_string()),
+                canvas_id: Some("canvas-1".to_string()),
+                operation_node_id: Some("node-1".to_string()),
+                input_asset_ids: Some(vec!["asset-brought".to_string()]),
+                parameter_snapshot: Some(serde_json::json!({
+                    "model": "a-model",
+                    "prompt": "a lake at dusk, exactly as it was typed",
+                })),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }),
+        );
+        let brought = entry("asset-brought", "brought.png", None);
+        let now = now_iso();
+        MokaFile {
+            version: MOKA_FILE_VERSION.to_string(),
+            metadata: ProjectMetadata {
+                id: "project-1".to_string(),
+                name: "Project".to_string(),
+                description: None,
+                cover_path: None,
+                revision: 1,
+                created_at: now.clone(),
+                updated_at: now,
+            },
+            resources: ResourceRegistry {
+                images: vec![made, brought],
+                ..ResourceRegistry::default()
+            },
+            canvas: vec![CanvasDocument::empty(
+                "canvas-1".to_string(),
+                "Canvas 1".to_string(),
+            )],
+        }
+    }
+
+    /// Whether a name reaches the bytes a package writes.
+    ///
+    /// Read off the encoding rather than off the fields: what is not in the
+    /// bytes did not travel, whichever field it might have been hiding in.
+    fn carries(document: &MokaFile, scope: &PackageScope, needle: &str) -> bool {
+        let bytes = encode_moka_file(&document_for_export(document, scope), None).unwrap();
+        bytes
+            .windows(needle.len())
+            .any(|window| window == needle.as_bytes())
+    }
+
+    #[test]
+    fn a_package_of_the_work_keeps_the_making_but_not_the_run() {
+        let fixture = fixture();
+        for (needle, work, backup) in [
+            // The run is the one thing a package cannot point back at: its
+            // record stayed on the machine that made it.
+            ("runId", false, true),
+            (RUN, false, true),
+            // How it was asked for is the reusable part, which is the reason a
+            // package of the work is worth handing over at all.
+            ("parameterSnapshot", true, true),
+            ("a lake at dusk, exactly as it was typed", true, true),
+            ("a-model", true, true),
+            // Which canvas and which node asked both still resolve inside the
+            // package, so asking the same way again survives the move.
+            ("canvasId", true, true),
+            ("operationNodeId", true, true),
+            ("inputAssetIds", true, true),
+            ("asset-brought", true, true),
+            // The work, and the project it belongs to.
+            ("assets/made.png", true, true),
+            ("project-1", true, true),
+        ] {
+            assert_eq!(
+                carries(&fixture, &WORK, needle),
+                work,
+                "{needle} in a package of the work"
+            );
+            assert_eq!(
+                carries(&fixture, &BACKUP, needle),
+                backup,
+                "{needle} in a full backup"
+            );
+        }
+    }
+
+    #[test]
+    fn a_prompt_that_says_the_word_is_not_a_reference_to_strike_out() {
+        let mut fixture = fixture();
+        let provenance = fixture
+            .resources
+            .find_mut("asset-made")
+            .unwrap()
+            .provenance
+            .as_mut()
+            .unwrap();
+        provenance.parameter_snapshot =
+            Some(serde_json::json!({ "prompt": "a sign that reads runId, at dusk" }));
+
+        let redacted = document_for_export(&fixture, &WORK);
+        let snapshot = &redacted
+            .resources
+            .find("asset-made")
+            .unwrap()
+            .provenance
+            .as_ref()
+            .unwrap()
+            .parameter_snapshot;
+        assert_eq!(
+            snapshot.as_ref().and_then(|one| one["prompt"].as_str()),
+            Some("a sign that reads runId, at dusk"),
+            "what somebody typed is not this function's to edit"
+        );
+        assert_eq!(
+            redacted
+                .resources
+                .find("asset-made")
+                .unwrap()
+                .provenance
+                .as_ref()
+                .unwrap()
+                .run_id,
+            None,
+            "the field itself still goes"
+        );
+    }
+
+    #[test]
+    fn a_full_backup_writes_the_document_it_was_given() {
+        let fixture = fixture();
+        assert_eq!(document_for_export(&fixture, &BACKUP), fixture);
+    }
+
+    #[test]
+    fn redacting_a_copy_leaves_the_project_on_this_machine_alone() {
+        let fixture = fixture();
+        let _ = document_for_export(&fixture, &WORK);
+        assert_eq!(
+            fixture
+                .resources
+                .find("asset-made")
+                .unwrap()
+                .provenance
+                .as_ref()
+                .unwrap()
+                .run_id
+                .as_deref(),
+            Some(RUN),
+            "what is known here is not a package's to forget"
         );
     }
 }

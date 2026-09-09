@@ -145,6 +145,18 @@ impl ResourceRegistry {
             .flatten()
     }
 
+    pub fn all_mut(&mut self) -> impl Iterator<Item = &mut ResourceEntry> {
+        [
+            &mut self.images,
+            &mut self.music,
+            &mut self.voice,
+            &mut self.texts,
+            &mut self.videos,
+        ]
+        .into_iter()
+        .flatten()
+    }
+
     pub fn find(&self, id: &str) -> Option<&ResourceEntry> {
         self.all().find(|entry| entry.id == id)
     }
