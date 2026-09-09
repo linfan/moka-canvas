@@ -5,8 +5,11 @@
 //! generation node is scheduled onto the provider executor rather than refused,
 //! that the answer it comes back with is filed in the project bearing the run
 //! it came from, that an answer from earlier in the same run reaches the node
-//! below it, and that a cancel arrives at a step already waiting on a provider.
+//! below it, that an ask answered several times over is written back onto the
+//! canvas whole, and that a cancel arrives at a step already waiting on a
+//! provider.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -337,6 +340,46 @@ fn hesitant(recorded: Recorded, gate: Arc<Notify>) -> Router {
     )
 }
 
+/// A provider that answers one ask with several pictures, each a different size
+/// so three answers cannot be mistaken for one answer three times over.
+fn painting(recorded: Recorded, sizes: &[(u32, u32)]) -> Router {
+    let sizes = sizes.to_vec();
+    Router::new().route(
+        "/v1/images/generations",
+        post(move |body: Bytes| {
+            let recorded = recorded.clone();
+            let sizes = sizes.clone();
+            async move {
+                recorded.note(&body);
+                Json(json!({
+                    "created": 1_700_000_000u64,
+                    "data": sizes
+                        .iter()
+                        .map(|(width, height)| json!({
+                            "b64_json": encoded(&picture(*width, *height)),
+                            "revised_prompt": CAPTION,
+                        }))
+                        .collect::<Vec<Value>>(),
+                }))
+            }
+        }),
+    )
+}
+
+/// A node in a canvas as the API reports it.
+fn node_by_id<'a>(nodes: &'a [Value], id: &str) -> &'a Value {
+    nodes
+        .iter()
+        .find(|node| node["id"] == json!(id))
+        .unwrap_or_else(|| panic!("node {id} is on the canvas"))
+}
+
+fn revision(document: &Value) -> i64 {
+    document["moka"]["metadata"]["revision"]
+        .as_i64()
+        .expect("the document carries a revision")
+}
+
 fn painted() -> Json<Value> {
     Json(json!({
         "created": 1_700_000_000u64,
@@ -573,6 +616,138 @@ async fn an_answer_from_earlier_in_the_run_reaches_the_generation_below_it() {
         posters[0]["provenance"]["inputAssetIds"].is_null(),
         "words folded into a prompt are not media that travelled"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_ask_answered_several_times_over_fills_the_node_and_gives_the_rest_a_card_each() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let base_url = serve(painting(recorded.clone(), &[(8, 6), (9, 6), (10, 6)])).await;
+    harness
+        .configure(&base_url, &[(PAINTER, Capability::Image)])
+        .await;
+    let (canvas_id, _root) = harness.project("Posters").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "a paper lantern over a quiet lake",
+                Some(json!({ "size": "1024x1024", "count": 3 }))) },
+        ]))
+        .await;
+    let before = revision(&harness.document().await);
+
+    let run_id = harness.start(&canvas_id, json!(["n-poster"])).await;
+    let finished = harness.settled(&run_id).await;
+    assert_eq!(finished["status"], "succeeded");
+    assert_eq!(
+        recorded.call(0)["n"],
+        json!(3),
+        "the count reached the provider"
+    );
+
+    let answers: Vec<String> = finished["steps"][0]["outputAssetIds"]
+        .as_array()
+        .expect("the answers were filed")
+        .iter()
+        .map(|id| id.as_str().expect("an asset has an id").to_string())
+        .collect();
+    assert_eq!(answers.len(), 3);
+    assert_eq!(
+        answers.iter().collect::<HashSet<&String>>().len(),
+        3,
+        "three answers, three assets of their own"
+    );
+
+    let document = harness.document().await;
+    // Filing an answer moves the document once each, so three of them move it
+    // three times. What the canvas is left holding — the node, its two cards and
+    // the slots pointing at all three — is one write, so it moves once more.
+    assert_eq!(revision(&document), before + 4);
+
+    let nodes = document["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    assert_eq!(
+        nodes.len(),
+        3,
+        "the node that asked, and a card for each answer past the first"
+    );
+    let poster = node_by_id(nodes, "n-poster");
+    assert_eq!(
+        poster["data"]["assetId"],
+        json!(answers[0]),
+        "the first answer is the node's own"
+    );
+    let slots = poster["data"]["resultSlots"]
+        .as_array()
+        .expect("results are recorded");
+    assert_eq!(slots.len(), 3);
+    for (index, slot) in slots.iter().enumerate() {
+        assert_eq!(slot["status"], "succeeded");
+        assert_eq!(
+            slot["assetId"],
+            json!(answers[index]),
+            "every answer is still named"
+        );
+        assert_eq!(slot["isPrimary"], json!(index == 0));
+    }
+    assert_eq!(
+        slots
+            .iter()
+            .map(|slot| slot["id"].clone())
+            .collect::<Vec<Value>>(),
+        vec![json!("result"), json!("result-2"), json!("result-3")],
+        "an inspector lists them by these, so they cannot all be the same"
+    );
+
+    let cards = poster["data"]["resultNodeIds"]
+        .as_array()
+        .expect("the cards are recorded");
+    assert_eq!(cards.len(), 2);
+    let mut left = 280.0;
+    for (index, card_id) in cards.iter().enumerate() {
+        let card = node_by_id(nodes, card_id.as_str().expect("a card has an id"));
+        assert_eq!(card["kind"], "image", "a card is the same kind of thing");
+        assert_eq!(card["title"], json!(format!("Poster {}", index + 2)));
+        assert_eq!(card["data"]["assetId"], json!(answers[index + 1]));
+        assert!(
+            card["data"].get("generation").is_none(),
+            "a card holds an answer, it does not ask for one"
+        );
+        let card_slots = card["data"]["resultSlots"]
+            .as_array()
+            .expect("a card records what it holds");
+        assert_eq!(card_slots.len(), 1);
+        assert_eq!(card_slots[0]["assetId"], json!(answers[index + 1]));
+        assert_eq!(card_slots[0]["isPrimary"], json!(true));
+        let x = card["bounds"]["x"].as_f64().expect("a card is placed");
+        assert!(
+            x > left,
+            "beside the node that asked, then beside each other: {x}"
+        );
+        assert_eq!(
+            card["bounds"]["y"], poster["bounds"]["y"],
+            "on the same line as it"
+        );
+        left = x + card["bounds"]["width"]
+            .as_f64()
+            .expect("a card has a width");
+    }
+
+    let entries = document["moka"]["resources"]["images"]
+        .as_array()
+        .expect("a registry");
+    assert_eq!(entries.len(), 3);
+    let widths: Vec<i64> = entries
+        .iter()
+        .map(|entry| {
+            entry["probe"]["width"]
+                .as_i64()
+                .expect("a picture was measured")
+        })
+        .collect();
+    assert_eq!(widths, vec![8, 9, 10], "three answers, three sets of bytes");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

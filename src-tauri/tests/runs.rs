@@ -296,12 +296,29 @@ async fn valid_run_succeeds_and_survives_a_restart() {
     let nodes = doc["moka"]["canvas"][0]["nodes"].as_array().unwrap();
     let op = nodes.iter().find(|node| node["id"] == "n-op").unwrap();
     let slots = op["data"]["resultSlots"].as_array().unwrap();
+    assert_eq!(slots.len(), 1, "one answer, one slot");
     assert_eq!(slots[0]["status"], "succeeded");
     assert_eq!(
         slots[0]["text"],
         json!("A lantern floats over a quiet lake.")
     );
     assert_eq!(slots[0]["isPrimary"], true);
+    assert_eq!(
+        op["data"]["resultNodeIds"].as_array().unwrap().len(),
+        0,
+        "one answer needs no card beside the node that made it"
+    );
+    // An operation node has no words of its own: what it made travels in the
+    // slot, and the document carries a content key on a text node only.
+    assert!(op["data"].get("content").is_none(), "{}", op["data"]);
+
+    // The node the answer came from was only read, so a run left nothing on it.
+    let text = nodes.iter().find(|node| node["id"] == "n-text").unwrap();
+    assert!(
+        text["data"].get("resultSlots").is_none(),
+        "{}",
+        text["data"]
+    );
 
     // A brand-new server over the same project sees the finished run. The
     // metadata directory is locked per process, so the restart has to be real.
@@ -632,7 +649,23 @@ async fn failed_run_retries_as_a_new_linked_run() {
     let doc = body_json(current).await;
     let nodes = doc["moka"]["canvas"][0]["nodes"].as_array().unwrap();
     let op = nodes.iter().find(|node| node["id"] == "n-op").unwrap();
-    assert_eq!(op["data"]["resultSlots"][0]["status"], "failed");
+    let slots = op["data"]["resultSlots"].as_array().unwrap();
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0]["status"], "failed");
+    assert!(
+        slots[0]["error"].as_str().unwrap().contains("boom"),
+        "{}",
+        slots[0]
+    );
+    assert!(slots[0]["text"].is_null(), "a failure made nothing to show");
+    // A failed attempt files nothing and takes nothing away: the node upstream
+    // still holds the words it was written with.
+    assert!(op["data"].get("assetId").is_none(), "{}", op["data"]);
+    let text = nodes.iter().find(|node| node["id"] == "n-text").unwrap();
+    assert_eq!(
+        text["data"]["content"],
+        json!("A lantern floats over a quiet lake.")
+    );
 
     // Fix the parameters, then retry: a new run linked to the failed one.
     let current = app
