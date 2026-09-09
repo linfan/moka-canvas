@@ -5,7 +5,10 @@
 //! during steps.
 
 use super::validate::{validate_run, RunSnapshot};
-use super::{ExecutionRequest, ProgressReporter, ValueProvenance, WorkflowExecutor, WorkflowValue};
+use super::{
+    executor_key_for, ExecutionRequest, ProgressReporter, ValueProvenance, WorkflowExecutor,
+    WorkflowValue,
+};
 use crate::domain::{
     new_id, now_iso, AssetId, DocumentCommand, NodeId, NodeKind, NodePatch, PortDirection,
     ResultSlot, ResultSlotStatus, RunId, RunRecord, RunStatus, RunStepRecord, ValidationIssue,
@@ -86,8 +89,9 @@ impl RunManager {
         let executor_key = node_ids
             .first()
             .and_then(|id| snapshot.nodes.get(id))
-            .and_then(|node| node.data.executor_key.clone())
-            .unwrap_or_default();
+            .and_then(executor_key_for)
+            .unwrap_or_default()
+            .to_string();
         let mut parameters = serde_json::Map::new();
         for node_id in &node_ids {
             if let Some(node) = snapshot.nodes.get(node_id) {

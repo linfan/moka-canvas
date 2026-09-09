@@ -5,10 +5,15 @@ pub mod executor;
 pub mod runner;
 pub mod validate;
 
-use crate::domain::{AssetId, DataType, NodeId, RunId, ValidationIssue};
+use crate::domain::{AssetId, DataType, NodeId, NodeKind, RunId, ValidationIssue, WorkflowNode};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+/// The executor every generated answer is handed to. A generation node does not
+/// name its own the way an operation node does: which model answers is the
+/// spec's business, not the node's.
+pub const PROVIDER_EXECUTOR_KEY: &str = "provider";
 
 /// Which node/port produced a value, recorded for audit.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -43,6 +48,37 @@ impl WorkflowValue {
             Self::Media { media_type, .. } => *media_type,
             Self::Artifact { media_type, .. } => media_type.unwrap_or(DataType::Artifact),
         }
+    }
+}
+
+/// The executor a node's step is handed to, or `None` when the node has nothing
+/// a run could do.
+///
+/// An operation node that names no executor still answers here rather than
+/// `None`: which executor it wants is a separate question from whether it can
+/// be run at all, and the two deserve different complaints.
+pub fn executor_key_for(node: &WorkflowNode) -> Option<&str> {
+    match node.kind {
+        NodeKind::Operation => Some(node.data.executor_key.as_deref().unwrap_or_default()),
+        NodeKind::Text | NodeKind::Image | NodeKind::Audio | NodeKind::Video => {
+            node.data.generation.as_ref().map(|_| PROVIDER_EXECUTOR_KEY)
+        }
+        _ => None,
+    }
+}
+
+/// The operation a node's step asks its executor for. An operation node carries
+/// its own; a generation node's is derived from the capability its spec
+/// declares, which is the same word the gateway routes on.
+pub fn operation_type_for(node: &WorkflowNode) -> String {
+    match node.kind {
+        NodeKind::Operation => node.data.operation_type.clone().unwrap_or_default(),
+        _ => node
+            .data
+            .generation
+            .as_ref()
+            .map(|spec| format!("generate.{}", spec.capability.as_str()))
+            .unwrap_or_default(),
     }
 }
 

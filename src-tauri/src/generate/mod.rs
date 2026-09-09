@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{AssetId, Capability, IsoTimestamp};
 use crate::metadata::Protocol;
 
-pub use context::{collect_generation_inputs, ResolvedInputs};
+pub use context::{collect_generation_inputs, context_node_ids, ResolvedInputs};
 pub use error::ProviderError;
 pub use gateway::Gateway;
 pub use jobs::TaskRegistry;

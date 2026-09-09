@@ -2,12 +2,16 @@
 //! against. Edit-time checks live in `domain::validate`; this module adds the
 //! run-specific phases from the execution contract.
 
-use super::{ExecutionRequest, ValueProvenance, WorkflowExecutor, WorkflowValue};
+use super::{
+    executor_key_for, operation_type_for, ExecutionRequest, ValueProvenance, WorkflowExecutor,
+    WorkflowValue,
+};
 use crate::domain::validate::topological_order;
 use crate::domain::{
     CanvasDocument, CanvasId, DataType, MokaFile, NodeId, NodeKind, ValidationIssue, WorkflowEdge,
     WorkflowNode,
 };
+use crate::generate::{collect_generation_inputs, context_node_ids, ResolvedInputs};
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -24,6 +28,12 @@ pub struct RunSnapshot {
     /// input resolution order the contract mandates.
     pub edges: Vec<WorkflowEdge>,
     pub graph_hash: String,
+    /// The canvas a generation step reads its inputs from: the closure, plus
+    /// whatever a node names by hand, names in its prompt, or reaches through a
+    /// group. Those neighbours are not in `nodes`, and deliberately so — every
+    /// node in `order` becomes a step, so widening the closure would turn
+    /// readable neighbours into work nobody asked for.
+    pub readable: CanvasDocument,
 }
 
 impl RunSnapshot {
@@ -67,6 +77,16 @@ impl RunSnapshot {
         self.nodes
             .get(node_id)
             .map(|node| snapshot_value(node, "out"))
+    }
+
+    /// What one scheduled node will ask a provider for. Resolved against the
+    /// readable canvas rather than the closure, which is the only reason the
+    /// readable canvas exists.
+    pub fn generation_inputs(&self, node_id: &str) -> ResolvedInputs {
+        let Some(node) = self.readable.node(node_id) else {
+            return ResolvedInputs::default();
+        };
+        collect_generation_inputs(&self.readable, node)
     }
 }
 
@@ -166,9 +186,13 @@ pub async fn validate_run(
                 Some(node_id.clone()),
                 None,
             )),
-            Some(node) if !executable_kind(node.kind) => issues.push(issue(
+            Some(node) if executor_key_for(node).is_none() => issues.push(issue(
                 "NOT_EXECUTABLE",
-                format!("{} nodes cannot be run", kind_label(node.kind)),
+                format!(
+                    "{} node \"{}\" cannot be run",
+                    kind_label(node.kind),
+                    node.title
+                ),
                 canvas_id,
                 Some(node_id.clone()),
                 None,
@@ -190,26 +214,27 @@ pub async fn validate_run(
             .cmp(&b.created_at)
             .then_with(|| a.id.cmp(&b.id))
     });
-    let snapshot = build_snapshot(canvas_id, &scoped, edges);
+    let snapshot = build_snapshot(canvas_id, canvas, &scoped, &closure, edges);
 
     for node_id in &snapshot.order {
         let node = &snapshot.nodes[node_id];
-        match node.kind {
-            NodeKind::Operation => {
-                validate_operation(
-                    node,
-                    &snapshot,
-                    executors,
-                    enabled_executors,
-                    canvas_id,
-                    &mut issues,
-                )
-                .await;
-            }
-            NodeKind::Image | NodeKind::Audio | NodeKind::Video => {
-                validate_media_node(root, moka, node, canvas_id, &mut issues);
-            }
-            _ => {}
+        if executor_key_for(node).is_some() {
+            validate_step(
+                node,
+                &snapshot,
+                executors,
+                enabled_executors,
+                canvas_id,
+                &mut issues,
+            )
+            .await;
+            continue;
+        }
+        if matches!(
+            node.kind,
+            NodeKind::Image | NodeKind::Audio | NodeKind::Video
+        ) {
+            validate_media_node(root, moka, node, canvas_id, &mut issues);
         }
     }
 
@@ -217,10 +242,6 @@ pub async fn validate_run(
         return Err(issues);
     }
     Ok(snapshot)
-}
-
-fn executable_kind(kind: NodeKind) -> bool {
-    matches!(kind, NodeKind::Operation)
 }
 
 fn kind_label(kind: NodeKind) -> &'static str {
@@ -263,12 +284,24 @@ fn scoped_canvas(canvas: &CanvasDocument, closure: &HashSet<NodeId>) -> CanvasDo
     scoped.edges.retain(|edge| {
         closure.contains(&edge.source.node_id) && closure.contains(&edge.target.node_id)
     });
+    // A membership whose nodes are not all in scope is not in scope either.
+    // Keeping it without them reads as a broken group rather than as a group
+    // the run has no business with.
+    scoped.groups.retain(|group| {
+        closure.contains(&group.group_id)
+            && group
+                .child_node_ids
+                .iter()
+                .all(|child| closure.contains(child))
+    });
     scoped
 }
 
 fn build_snapshot(
     canvas_id: &str,
+    canvas: &CanvasDocument,
     scoped: &CanvasDocument,
+    closure: &HashSet<NodeId>,
     edges: Vec<WorkflowEdge>,
 ) -> RunSnapshot {
     let order: Vec<NodeId> = topological_order(scoped)
@@ -285,16 +318,35 @@ fn build_snapshot(
         "edges": edges,
     });
     let hash = hex::encode(sha2::Sha256::digest(canonical.to_string().as_bytes()));
+    let mut readable = scoped_canvas(canvas, &readable_closure(canvas, closure));
+    // The same edges in the same order, so a resolver reads a node's inputs the
+    // way the run will rather than the way the document happens to list them.
+    readable.edges = edges.clone();
     RunSnapshot {
         canvas_id: canvas_id.to_string(),
         order,
         nodes,
         edges,
         graph_hash: hash,
+        readable,
     }
 }
 
-async fn validate_operation(
+/// The closure plus every node a scheduled generation reads but the wiring
+/// never reaches. Those nodes stay readable and unscheduled: a run only does
+/// what was asked for, and being read is not being asked for.
+fn readable_closure(canvas: &CanvasDocument, closure: &HashSet<NodeId>) -> HashSet<NodeId> {
+    let mut readable = closure.clone();
+    for node_id in closure {
+        let Some(node) = canvas.node(node_id) else {
+            continue;
+        };
+        readable.extend(context_node_ids(canvas, node));
+    }
+    readable
+}
+
+async fn validate_step(
     node: &WorkflowNode,
     snapshot: &RunSnapshot,
     executors: &[Arc<dyn WorkflowExecutor>],
@@ -302,7 +354,7 @@ async fn validate_operation(
     canvas_id: &str,
     issues: &mut Vec<ValidationIssue>,
 ) {
-    let executor_key = node.data.executor_key.clone().unwrap_or_default();
+    let executor_key = executor_key_for(node).unwrap_or_default();
     if executor_key.is_empty() {
         issues.push(issue(
             "EXECUTOR_DISABLED",
@@ -313,7 +365,7 @@ async fn validate_operation(
         ));
         return;
     }
-    if !enabled_executors.contains(&executor_key) {
+    if !enabled_executors.iter().any(|key| key == executor_key) {
         issues.push(issue(
             "EXECUTOR_DISABLED",
             format!("Executor \"{executor_key}\" is disabled in the startup configuration"),
@@ -323,7 +375,7 @@ async fn validate_operation(
         ));
         return;
     }
-    let operation_type = node.data.operation_type.clone().unwrap_or_default();
+    let operation_type = operation_type_for(node);
     let Some(executor) = executors
         .iter()
         .find(|executor| executor.key() == executor_key && executor.supports(&operation_type))
@@ -422,5 +474,264 @@ fn validate_media_node(
             Some(node.id.clone()),
             None,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        derive_ports, now_iso, Capability, GenerationInputMode, GenerationSpec, GroupMembership,
+        NodeData, ProjectMetadata, Rect, ResourceRegistry, RunId, MOKA_FILE_VERSION,
+    };
+    use crate::workflow::{
+        ExecutionError, ExecutionOutput, ExecutionValidationError, ProgressReporter,
+        PROVIDER_EXECUTOR_KEY,
+    };
+    use std::sync::Arc;
+
+    /// Stands in for the provider executor, which lives on the other side of
+    /// the gateway. Scheduling only ever asks an executor whether it takes the
+    /// operation, so that is all this one has to answer.
+    struct StandInProvider;
+
+    #[async_trait::async_trait]
+    impl WorkflowExecutor for StandInProvider {
+        fn key(&self) -> &str {
+            PROVIDER_EXECUTOR_KEY
+        }
+
+        fn supports(&self, operation_type: &str) -> bool {
+            operation_type.starts_with("generate.")
+        }
+
+        async fn validate(
+            &self,
+            _request: &ExecutionRequest,
+        ) -> Result<(), ExecutionValidationError> {
+            Ok(())
+        }
+
+        async fn execute(
+            &self,
+            _request: ExecutionRequest,
+            _progress: ProgressReporter,
+        ) -> Result<ExecutionOutput, ExecutionError> {
+            Ok(ExecutionOutput::default())
+        }
+
+        async fn cancel(&self, _run_id: &RunId) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+    }
+
+    fn id(name: &str) -> NodeId {
+        format!("node-{name}")
+    }
+
+    fn node(kind: NodeKind, name: &str, data: NodeData) -> WorkflowNode {
+        let now = now_iso();
+        WorkflowNode {
+            id: id(name),
+            kind,
+            title: name.to_string(),
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 280.0,
+                height: 200.0,
+            },
+            z_index: 0,
+            ports: derive_ports(kind),
+            data,
+            created_at: now.clone(),
+            updated_at: now,
+        }
+    }
+
+    fn image(name: &str, asset_id: &str) -> WorkflowNode {
+        node(
+            NodeKind::Image,
+            name,
+            NodeData {
+                asset_id: Some(asset_id.to_string()),
+                ..NodeData::default()
+            },
+        )
+    }
+
+    /// The node under test: an image node asking for a poster, with nothing
+    /// generated yet and so no asset of its own.
+    fn asking(mode: GenerationInputMode, prompt: &str) -> WorkflowNode {
+        node(
+            NodeKind::Image,
+            "poster",
+            NodeData {
+                generation: Some(GenerationSpec {
+                    capability: Capability::Image,
+                    input_mode: mode,
+                    prompt: prompt.to_string(),
+                    updated_at: now_iso(),
+                    ..GenerationSpec::default()
+                }),
+                ..NodeData::default()
+            },
+        )
+    }
+
+    fn document(nodes: Vec<WorkflowNode>, groups: Vec<GroupMembership>) -> MokaFile {
+        let mut canvas = CanvasDocument::empty("canvas-1".to_string(), "Canvas 1".to_string());
+        canvas.nodes = nodes;
+        canvas.groups = groups;
+        let now = now_iso();
+        MokaFile {
+            version: MOKA_FILE_VERSION.to_string(),
+            metadata: ProjectMetadata {
+                id: "project-1".to_string(),
+                name: "Project".to_string(),
+                description: None,
+                cover_path: None,
+                revision: 1,
+                created_at: now.clone(),
+                updated_at: now,
+            },
+            resources: ResourceRegistry::default(),
+            canvas: vec![canvas],
+        }
+    }
+
+    async fn schedule(
+        moka: &MokaFile,
+        requested: &[&str],
+        enabled: &[&str],
+    ) -> Result<RunSnapshot, Vec<ValidationIssue>> {
+        let root = tempfile::tempdir().unwrap();
+        let requested: Vec<NodeId> = requested.iter().map(|name| id(name)).collect();
+        let enabled: Vec<String> = enabled.iter().map(|key| key.to_string()).collect();
+        validate_run(
+            root.path(),
+            moka,
+            "canvas-1",
+            &requested,
+            &[Arc::new(StandInProvider)],
+            &enabled,
+        )
+        .await
+    }
+
+    const ON: [&str; 1] = [PROVIDER_EXECUTOR_KEY];
+
+    fn codes(issues: &[ValidationIssue]) -> Vec<&str> {
+        issues.iter().map(|issue| issue.code.as_str()).collect()
+    }
+
+    #[tokio::test]
+    async fn a_node_with_nothing_to_generate_cannot_be_requested() {
+        let written = node(
+            NodeKind::Text,
+            "brief",
+            NodeData {
+                content: Some("a lantern".to_string()),
+                ..NodeData::default()
+            },
+        );
+        let moka = document(vec![written, image("plate", "asset-plate")], vec![]);
+
+        let issues = schedule(&moka, &["brief"], &ON).await.unwrap_err();
+        assert_eq!(codes(&issues), vec!["NOT_EXECUTABLE"]);
+
+        // Having an asset is not the same as having something to run.
+        let issues = schedule(&moka, &["plate"], &ON).await.unwrap_err();
+        assert_eq!(codes(&issues), vec!["NOT_EXECUTABLE"]);
+    }
+
+    #[tokio::test]
+    async fn a_generation_node_needs_no_asset_of_its_own() {
+        let moka = document(
+            vec![asking(GenerationInputMode::Upstream, "a red cube")],
+            vec![],
+        );
+        let snapshot = schedule(&moka, &["poster"], &ON).await.unwrap();
+
+        assert_eq!(snapshot.order, vec![id("poster")]);
+        assert_eq!(
+            snapshot.generation_inputs("node-poster").prompt,
+            "a red cube"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unwired_generation_complains_about_its_prompt_alone() {
+        let moka = document(vec![asking(GenerationInputMode::Upstream, "  ")], vec![]);
+
+        let issues = schedule(&moka, &["poster"], &ON).await.unwrap_err();
+        assert_eq!(codes(&issues), vec!["GENERATION_PROMPT_EMPTY"]);
+    }
+
+    #[tokio::test]
+    async fn a_generation_step_is_refused_while_the_provider_is_off() {
+        let moka = document(
+            vec![asking(GenerationInputMode::Upstream, "a red cube")],
+            vec![],
+        );
+
+        let issues = schedule(&moka, &["poster"], &["deterministic"])
+            .await
+            .unwrap_err();
+        assert_eq!(codes(&issues), vec!["EXECUTOR_DISABLED"]);
+        assert!(issues[0].message.contains(PROVIDER_EXECUTOR_KEY));
+    }
+
+    #[tokio::test]
+    async fn a_node_named_by_hand_is_readable_without_becoming_a_step() {
+        let mut asked = asking(GenerationInputMode::Manual, "a red cube");
+        asked.data.generation.as_mut().unwrap().reference_node_ids = Some(vec![id("plate")]);
+        let moka = document(vec![asked, image("plate", "asset-plate")], vec![]);
+
+        let snapshot = schedule(&moka, &["poster"], &ON).await.unwrap();
+
+        // Read, not scheduled: being an input is not being asked for.
+        assert_eq!(snapshot.order, vec![id("poster")]);
+        assert!(!snapshot.nodes.contains_key("node-plate"));
+        let inputs = snapshot.generation_inputs("node-poster");
+        assert_eq!(
+            inputs
+                .inputs
+                .iter()
+                .map(|input| input.asset_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["asset-plate"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_group_a_generation_names_contributes_its_members() {
+        let mut asked = asking(GenerationInputMode::Manual, "a red cube");
+        asked.data.generation.as_mut().unwrap().reference_node_ids = Some(vec![id("tray")]);
+        let moka = document(
+            vec![
+                asked,
+                node(NodeKind::Group, "tray", NodeData::default()),
+                image("plate", "asset-plate"),
+                image("mask", "asset-mask"),
+            ],
+            vec![GroupMembership {
+                group_id: id("tray"),
+                child_node_ids: vec![id("plate"), id("mask")],
+            }],
+        );
+
+        let snapshot = schedule(&moka, &["poster"], &ON).await.unwrap();
+
+        assert_eq!(snapshot.order, vec![id("poster")]);
+        let inputs = snapshot.generation_inputs("node-poster");
+        assert_eq!(
+            inputs
+                .inputs
+                .iter()
+                .map(|input| input.asset_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["asset-plate", "asset-mask"]
+        );
     }
 }

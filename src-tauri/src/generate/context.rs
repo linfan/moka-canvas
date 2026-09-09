@@ -80,6 +80,40 @@ pub fn collect_generation_inputs(canvas: &CanvasDocument, node: &WorkflowNode) -
     }
 }
 
+/// The nodes [`collect_generation_inputs`] will look up for this node, groups
+/// opened the same way.
+///
+/// A run's edge closure cannot answer this on its own. A reference picked by
+/// hand, a node the prompt names, or a member of a group can sit anywhere on
+/// the canvas, and a resolver that cannot see them resolves to nothing.
+pub fn context_node_ids(canvas: &CanvasDocument, node: &WorkflowNode) -> Vec<NodeId> {
+    let Some(spec) = node.data.generation.as_ref() else {
+        return Vec::new();
+    };
+    let named: Vec<NodeId> = match spec.input_mode {
+        GenerationInputMode::Upstream => canvas
+            .edges
+            .iter()
+            .filter(|edge| edge.target.node_id == node.id)
+            .map(|edge| edge.source.node_id.clone())
+            .collect(),
+        GenerationInputMode::Manual => spec.reference_node_ids.clone().unwrap_or_default(),
+        GenerationInputMode::Mentions => mention_spans(&spec.prompt)
+            .into_iter()
+            .map(|(_, node_id)| node_id)
+            .collect(),
+    };
+    let mut ids = Vec::new();
+    for name in named {
+        // Opening a group looks the group itself up, so it is on the list too.
+        ids.push(name.clone());
+        for source in expand(canvas, &name) {
+            ids.push(source.id.clone());
+        }
+    }
+    ids
+}
+
 /// Everything wired into the node, one edge at a time in document order. The
 /// port an edge lands on says whether its source contributes words or media,
 /// and which role that media travels under.
