@@ -16,12 +16,17 @@
 //! keeps the handles a started job is polled by, for as long as polling one
 //! could still mean anything.
 //!
+//! [`context`] is the other side of the same boundary: where the gateway turns
+//! a request into a call, this turns a node and its place in the graph into
+//! that request.
+//!
 //! The types below are the whole generation vocabulary that leaves this
 //! module: a request phrased in the project's own terms and a result phrased
 //! as bytes with a mime type. No provider field name appears in either, so
 //! nothing above the adapters has to know who answered.
 
 pub mod adapters;
+pub mod context;
 pub mod error;
 pub mod gateway;
 pub mod jobs;
@@ -37,6 +42,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{AssetId, Capability, IsoTimestamp};
 use crate::metadata::Protocol;
 
+pub use context::{collect_generation_inputs, ResolvedInputs};
 pub use error::ProviderError;
 pub use gateway::Gateway;
 pub use jobs::TaskRegistry;
