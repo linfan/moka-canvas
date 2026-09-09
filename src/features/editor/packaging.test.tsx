@@ -366,6 +366,31 @@ describe("unsaved-work guard", () => {
     ).toBe(true);
   });
 
+  it("keeps every way out where the work saved itself while it was open", async () => {
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    makeUnsavedEdit();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to launcher" }));
+    const raised = await screen.findByRole("alertdialog");
+    expect(raised.textContent).toContain("will be lost");
+
+    // Saving is debounced, so what the guard was raised for can be written
+    // while the question is still on screen.
+    act(() => {
+      useProjectStore.setState({ pending: [], saveStatus: "saved" });
+    });
+
+    const asked = screen.getByRole("alertdialog");
+    expect(asked.textContent).toContain("saved while this was open");
+    expect(asked.textContent).not.toContain("will be lost");
+    // A way out that moves is one the reader has to look for again.
+    expect(screen.getByRole("button", { name: "Save and close" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Discard and close" }),
+    ).toBeTruthy();
+  });
+
   it("conflicted state blocks saving but keeps the export escape hatch", async () => {
     await openGolden();
     await screen.findByRole("button", { name: "Canvas 1" });

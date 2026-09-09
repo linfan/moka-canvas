@@ -27,9 +27,14 @@ export function UnsavedWorkDialog({
   onCancel: () => void;
 }) {
   const conflicted = saveStatus === "conflicted";
-  // A run still going is a reason to ask, but there is nothing to lose: offering
-  // to discard or to export work that does not exist would be offering nothing.
   const nothingToLose = pendingCount === 0 && !conflicted;
+  // A run still going is a reason to ask with nothing to lose: offering to
+  // discard or to export work that does not exist would be offering nothing.
+  const onlyRunning = nothingToLose && inFlight > 0;
+  // Saving is debounced, so the work this was raised for can be written while
+  // the question is on screen. What the question says changes then, not what it
+  // offers: a way out that moves is one the reader has to look for again.
+  const savedWhileAsked = nothingToLose && inFlight === 0;
   const one = inFlight === 1;
   return (
     <div className="dialog-backdrop" role="presentation">
@@ -40,7 +45,7 @@ export function UnsavedWorkDialog({
         role="alertdialog"
       >
         <h2 id="unsaved-work-title">
-          {nothingToLose && inFlight > 0 ? "Still running" : "Unsaved changes"}
+          {onlyRunning ? "Still running" : "Unsaved changes"}
         </h2>
         {conflicted ? (
           <p>
@@ -49,6 +54,8 @@ export function UnsavedWorkDialog({
             you reload the project. Exporting keeps a package of the last saved
             revision (without your unsaved changes); discarding drops them.
           </p>
+        ) : savedWhileAsked ? (
+          <p>Your changes were saved while this was open.</p>
         ) : (
           !nothingToLose && (
             <p>
@@ -72,7 +79,7 @@ export function UnsavedWorkDialog({
             {error}
           </p>
         )}
-        {nothingToLose ? (
+        {onlyRunning ? (
           <div className="dialog-actions">
             <button disabled={busy !== null} onClick={onCancel} type="button">
               Cancel
