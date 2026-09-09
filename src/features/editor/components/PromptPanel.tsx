@@ -222,7 +222,13 @@ export function PromptPanel() {
     }
     if (shownFor.current === chosenId) return;
     shownFor.current = chosenId;
-    if (chosenId) useEditorStore.getState().openPromptPanel(chosenId);
+    // Already up on this node means an entry the user chose put it there, and
+    // may have asked for the keyboard with it: bringing it up again would take
+    // that request back without the panel ever having been closed.
+    const shown = useEditorStore.getState().promptPanel;
+    if (chosenId && shown?.nodeId !== chosenId) {
+      useEditorStore.getState().openPromptPanel(chosenId);
+    }
   }, [onSelect, chosenId]);
 
   // The panel is about a selected node, so a selection that has let go of that

@@ -1,9 +1,11 @@
 import {
   CASCADE_DROP_OFFSET,
+  DEFAULT_NODE_WIDTH,
   GROUP_DETACH_THRESHOLD_PX,
   MAX_TEXT_CONTENT_LENGTH,
   createNode,
   findNode,
+  findResource,
   generationCapabilityFor,
   newId,
   nowIso,
@@ -51,6 +53,16 @@ function toastError(message: string) {
 function announce(message: string) {
   useEditorStore.getState().announce(message);
 }
+
+/**
+ * How far a new node sits from the point asked for: centred across it and a
+ * little below its top edge, so the card lands under the pointer rather than
+ * hanging off it.
+ */
+const NODE_DROP_OFFSET: Point = { x: DEFAULT_NODE_WIDTH / 2, y: 40 };
+
+/** Room for the wire between a node and the one made out of it. */
+const BESIDE_GAP_PX = 80;
 
 /** The active canvas document, or null when nothing is open. */
 export function activeCanvas(): CanvasDocument | null {
@@ -618,7 +630,10 @@ async function makeAssetNode(
   else if (category === "videos") kind = "video";
   else if (category === "music" || category === "voice") kind = "audio";
   else kind = "text";
-  const node = createNode(kind, { x: anchor.x - 140, y: anchor.y - 40 });
+  const node = createNode(kind, {
+    x: anchor.x - NODE_DROP_OFFSET.x,
+    y: anchor.y - NODE_DROP_OFFSET.y,
+  });
   node.title = entry.name;
   if (kind === "audio") {
     node.data = {
@@ -687,6 +702,33 @@ export async function addAssetBeside(
     return node.id;
   }
   return null;
+}
+
+/**
+ * Fills a node that is waiting for something with an asset the project already
+ * holds, which is the other way to fill one: nothing is asked for, so nothing
+ * is spent, and the node stops being an ask and becomes the thing itself.
+ */
+export function linkAsset(nodeId: NodeId, assetId: AssetId) {
+  const canvas = activeCanvas();
+  const { moka } = useProjectStore.getState();
+  const node = canvas ? findNode(canvas, nodeId) : undefined;
+  if (!canvas || !node || !moka) return;
+  const entry = findResource(moka, assetId);
+  if (!entry) return;
+  const data = { ...(node.data as Record<string, unknown>), assetId };
+  if (
+    execute("Link an asset", [
+      {
+        type: "updateNode",
+        canvasId: canvas.id,
+        nodeId,
+        patch: { data: data as NodeData },
+      },
+    ])
+  ) {
+    announce(`Linked ${entry.name}`);
+  }
 }
 
 /**
@@ -778,10 +820,13 @@ export function addNodeAt(
   kind: NodeKind,
   connectFrom: PortRef | null,
   textContent?: string,
-) {
+): NodeId | null {
   const canvas = activeCanvas();
-  if (!canvas) return;
-  const node = createNode(kind, { x: world.x - 140, y: world.y - 40 });
+  if (!canvas) return null;
+  const node = createNode(kind, {
+    x: world.x - NODE_DROP_OFFSET.x,
+    y: world.y - NODE_DROP_OFFSET.y,
+  });
   if (textContent !== undefined && node.kind === "text") {
     node.data = { ...node.data, content: textContent };
   }
@@ -815,10 +860,39 @@ export function addNodeAt(
       connected = true;
     }
   }
-  if (execute(connected ? "Add connected node" : "Add node", commands)) {
-    useEditorStore.getState().selectOnly(node.id);
-    announce(`Added ${node.title}${connected ? " (connected)" : ""}`);
+  if (!execute(connected ? "Add connected node" : "Add node", commands)) {
+    return null;
   }
+  useEditorStore.getState().selectOnly(node.id);
+  announce(`Added ${node.title}${connected ? " (connected)" : ""}`);
+  return node.id;
+}
+
+/**
+ * Makes a node that asks for what `kind` produces, beside the node it is made
+ * out of and fed by it, and opens the panel where the ask is written.
+ *
+ * Nothing is asked for. The run is one press away in the panel that opens, so
+ * picking from a menu cannot spend anything on a provider by accident, and what
+ * arrives is written where it can be read before it is sent.
+ */
+export function generateFrom(sourceNodeId: NodeId, kind: NodeKind) {
+  const canvas = activeCanvas();
+  const source = canvas ? findNode(canvas, sourceNodeId) : undefined;
+  if (!source) return;
+  const made = addNodeAt(
+    {
+      x:
+        source.bounds.x +
+        source.bounds.width +
+        BESIDE_GAP_PX +
+        NODE_DROP_OFFSET.x,
+      y: source.bounds.y + NODE_DROP_OFFSET.y,
+    },
+    kind,
+    { nodeId: source.id, portId: "out" },
+  );
+  if (made) useEditorStore.getState().openPromptPanel(made, true);
 }
 
 export function renameNode(nodeId: NodeId, title: string) {

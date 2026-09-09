@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import {
   findNode,
   generationCapabilityFor,
@@ -13,6 +13,7 @@ import {
   deleteSelection,
   duplicateSelection,
   fitViewAction,
+  generateFrom,
   groupSelection,
   pasteAt,
   selectAll,
@@ -25,6 +26,8 @@ import { useClampedMenuPosition } from "./useClampedMenuPosition";
 
 interface Item {
   label: string;
+  /** A heading for the item and the ones under it that share its subject. */
+  title?: string;
   disabled?: boolean;
   action: () => void;
 }
@@ -86,6 +89,32 @@ export function ContextMenu() {
         label: "Generate…",
         action: () => editor.openPromptPanel(targetId, true),
       });
+    }
+    // Words are a place to start from rather than only a thing to ask about:
+    // what is made of them sits beside them and is fed by them, with its own
+    // panel opened and nothing asked for yet.
+    const words = (targetNode?.data as { content?: string } | undefined)
+      ?.content;
+    if (targetNode?.kind === "text" && words && words.trim() !== "") {
+      items.push(
+        {
+          title: "Generate",
+          label: "Image from these words",
+          action: () => generateFrom(targetId, "image"),
+        },
+        {
+          label: "Video from these words",
+          action: () => generateFrom(targetId, "video"),
+        },
+        {
+          label: "Audio from these words",
+          action: () => generateFrom(targetId, "audio"),
+        },
+        {
+          label: "Rewrite these words",
+          action: () => generateFrom(targetId, "text"),
+        },
+      );
     }
     // Read at the moment the menu is opened rather than watched: it is not on
     // screen long enough for a record arriving while it is open to matter.
@@ -196,15 +225,17 @@ export function ContextMenu() {
       style={{ left: pos.x, top: pos.y }}
     >
       {items.map((item) => (
-        <button
-          disabled={item.disabled}
-          key={item.label}
-          onClick={() => run(item)}
-          role="menuitem"
-          type="button"
-        >
-          {item.label}
-        </button>
+        <Fragment key={item.label}>
+          {item.title && <p className="menu-title">{item.title}</p>}
+          <button
+            disabled={item.disabled}
+            onClick={() => run(item)}
+            role="menuitem"
+            type="button"
+          >
+            {item.label}
+          </button>
+        </Fragment>
       ))}
     </div>
   );

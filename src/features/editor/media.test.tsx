@@ -29,6 +29,7 @@ import {
 import { undo } from "./commands/execute";
 import {
   addAssetNode,
+  addNodeAt,
   confirmDeleteAsset,
   editTextContent,
   pickSourceCandidates,
@@ -571,5 +572,39 @@ describe("editor shell integration", () => {
     const row = screen.getByText("lake.png").closest(".resource-row");
     expect(row?.textContent).toContain("2.0 KB");
     expect(row?.textContent).toContain("1 use");
+  });
+
+  it("fills a waiting node from what the project already holds", async () => {
+    const ids = goldenNodeIds();
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    act(() => {
+      addNodeAt({ x: 0, y: 0 }, "image", null);
+    });
+    const waiting = useEditorStore.getState().selection.nodeIds[0];
+    const inspector = screen.getByRole("complementary", {
+      name: "Inspector",
+    });
+    expect(inspector.textContent).toContain("No asset linked");
+
+    // The other way to fill a node that is waiting: nothing is asked for, so
+    // nothing is spent on a provider to get the picture into it.
+    fireEvent.change(
+      screen.getByLabelText<HTMLSelectElement>(/Link an asset to/),
+      { target: { value: ids.assetImage } },
+    );
+
+    const dataOf = (nodeId: string) => {
+      const canvas = useProjectStore.getState().moka!.canvas[0];
+      const node = canvas.nodes.find((entry) => entry.id === nodeId);
+      return node?.data as { assetId?: string } | undefined;
+    };
+    expect(dataOf(waiting)?.assetId).toBe(ids.assetImage);
+    expect(inspector.textContent).toContain("lake.png");
+    expect(useEditorStore.getState().announcement).toBe("Linked lake.png");
+
+    // One step of history, so the node goes back to waiting as it was.
+    undo();
+    expect(dataOf(waiting)?.assetId).toBeUndefined();
   });
 });

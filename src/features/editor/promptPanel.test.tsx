@@ -27,6 +27,7 @@ import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
 import { useRunStore } from "./stores/runStore";
 import { useProviderStore } from "../settings/providerStore";
+import { undo } from "./commands/execute";
 import { enterIntent } from "./interactions/keyboard";
 
 const ids = goldenNodeIds();
@@ -1173,5 +1174,85 @@ describe("what a node is given", () => {
     await settle();
     const canvas = useProjectStore.getState().moka?.canvas[0];
     expect(canvas?.edges.map((edge) => edge.id)).not.toContain("edge-fed");
+  });
+});
+
+describe("making something out of a node's words", () => {
+  /** Points the menu at a node the way the canvas does when one is clicked. */
+  function menuOn(nodeId: string) {
+    act(() => {
+      useEditorStore.getState().openContextMenu({
+        x: 40,
+        y: 40,
+        target: { kind: "node", nodeId },
+      });
+    });
+  }
+
+  function nodes() {
+    return useProjectStore.getState().moka?.canvas[0].nodes ?? [];
+  }
+
+  it("makes a node beside the words, fed by them, and asks for nothing", async () => {
+    await openEditor();
+    const before = nodes().map((node) => node.id);
+    menuOn(ids.text);
+
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Image from these words" }),
+    );
+    await settle();
+
+    const made = nodes().find((node) => !before.includes(node.id));
+    const words = nodes().find((node) => node.id === ids.text);
+    if (!made || !words) throw new Error("the menu made a node");
+    expect(made.kind).toBe("image");
+    // Beside the words rather than over them, so the wire between the two can
+    // be seen to be why the new node has anything to ask for.
+    expect(made.bounds.x).toBeGreaterThan(words.bounds.x + words.bounds.width);
+    expect(
+      useProjectStore
+        .getState()
+        .moka?.canvas[0].edges.some(
+          (edge) =>
+            edge.source.nodeId === ids.text &&
+            edge.source.portId === "out" &&
+            edge.target.nodeId === made.id &&
+            edge.target.portId === "prompt",
+        ),
+    ).toBe(true);
+
+    // The panel comes up on its own, since the ask is what was meant; the ask
+    // itself waits for one more press, so a menu cannot spend anything.
+    expect(useEditorStore.getState().promptPanel).toEqual({
+      nodeId: made.id,
+      focus: true,
+    });
+    expect(
+      api.calls.some(
+        (call) => call.url.endsWith("/runs") && call.method === "POST",
+      ),
+    ).toBe(false);
+
+    // One step of history: the node and the wire feeding it go back together.
+    undo();
+    await settle();
+    expect(nodes().map((node) => node.id)).toEqual(before);
+  });
+
+  it("offers nothing to make out of words that are not there", async () => {
+    const empty = buildGoldenMokaFile();
+    const brief = empty.canvas[0].nodes.find((node) => node.id === ids.text);
+    (brief?.data as { content: string }).content = "   ";
+    api.moka = () => empty;
+    await openEditor();
+    menuOn(ids.text);
+
+    await screen.findByRole("menu", { name: "Context menu" });
+    expect(
+      screen.queryByRole("menuitem", { name: /from these words/ }),
+    ).toBeNull();
+    // The node's own ask is still on offer; it is the making that needs words.
+    expect(screen.queryByRole("menuitem", { name: "Generate…" })).toBeTruthy();
   });
 });

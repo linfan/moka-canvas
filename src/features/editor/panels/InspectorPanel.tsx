@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  AssetCategory,
   AssetId,
   CanvasDocument,
   GenerationSpec,
+  MokaFile,
+  NodeKind,
   ResourceEntry,
   ResultSlot,
   RunStatus,
@@ -45,6 +48,7 @@ import {
   choosableResults,
   deleteSelection,
   disconnectEdge,
+  linkAsset,
   renameNode,
   requestDeleteAsset,
   setNodeGeneration,
@@ -90,6 +94,25 @@ function TitleField({ node }: { node: WorkflowNode }) {
   );
 }
 
+/** Where the assets a node of each kind holds are filed in a project. */
+const FILED_UNDER: Partial<Record<NodeKind, readonly AssetCategory[]>> = {
+  image: ["images"],
+  audio: ["music", "voice"],
+  video: ["videos"],
+};
+
+/**
+ * The project's own assets that could fill this node.
+ *
+ * Linking one is the other way to fill a node that is waiting: nothing is asked
+ * for, so nothing is spent on a provider to get it.
+ */
+function linkable(moka: MokaFile | null, kind: NodeKind): ResourceEntry[] {
+  const filed = FILED_UNDER[kind];
+  if (!moka || !filed) return [];
+  return filed.flatMap((category) => moka.resources[category] ?? []);
+}
+
 /** Preview + metadata + provenance + file actions for a media node's asset. */
 function MediaAssetSection({ node }: { node: WorkflowNode }) {
   const moka = useProjectStore((state) => state.moka);
@@ -109,10 +132,27 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
   }
   const data = node.data as { assetId?: AssetId };
   if (!data.assetId) {
+    const offers = linkable(moka, node.kind);
     return (
       <section className="inspector-section">
         <h3>Asset</h3>
         <p className="inspector-empty">No asset linked</p>
+        {offers.length > 0 && (
+          <select
+            aria-label={`Link an asset to ${node.title}`}
+            onChange={(event) => {
+              if (event.target.value) linkAsset(node.id, event.target.value);
+            }}
+            value=""
+          >
+            <option value="">Link an asset…</option>
+            {offers.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        )}
       </section>
     );
   }
