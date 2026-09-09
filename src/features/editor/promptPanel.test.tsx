@@ -20,7 +20,7 @@ import {
 } from "../../shared/domain";
 import type { GenerationSpec, MokaFile, RunRecord } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
-import type { ProvidersView } from "../../api";
+import type { GenerationPreview, ProvidersView } from "../../api";
 import { GENERATION_UNAVAILABLE, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
@@ -87,6 +87,8 @@ interface MockApi {
   providers: ProvidersView;
   /** The runs the server is holding, which the editor reads when it opens. */
   runs: RunRecord[];
+  /** What a node will send, or null for a node the server has no ask for yet. */
+  preview: GenerationPreview | null;
   moka: () => MokaFile;
 }
 
@@ -95,8 +97,35 @@ const api: MockApi = {
   executors: [PROVIDER_EXECUTOR_KEY],
   providers: providers([PAINTER]),
   runs: [],
+  preview: null,
   moka: () => buildGoldenMokaFile(),
 };
+
+/** What the server says a node will send, once it has folded the graph. */
+function makePreview(
+  overrides: Partial<GenerationPreview> = {},
+): GenerationPreview {
+  return {
+    prompt: "[Text 1]\nA lantern floats over a quiet lake at dusk.",
+    inputs: [
+      {
+        role: "reference",
+        nodeId: ids.text,
+        assetId: ids.assetImage,
+        name: "lantern.png",
+        mime: "image/png",
+        bytes: 20480,
+        width: 512,
+        height: 512,
+        durationMs: null,
+        missing: false,
+      },
+    ],
+    truncatedChars: 0,
+    unresolved: [],
+    ...overrides,
+  };
+}
 
 function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
@@ -171,6 +200,22 @@ function route(url: string, method: string, body: unknown): Response {
   if (url === "/api/v1/projects/current/runs/run-1/retry") {
     return json(makeRun({ id: "run-2", retryOfRunId: "run-1" }));
   }
+  if (
+    url === "/api/v1/projects/current/generate/preview" &&
+    method === "POST"
+  ) {
+    if (!api.preview) {
+      return json(
+        {
+          code: "GENERATION_SPEC_MISSING",
+          message: "This node has not been asked for anything yet",
+          status: 422,
+        },
+        422,
+      );
+    }
+    return json(api.preview);
+  }
   return json({ code: "NOT_FOUND", message: url, status: 404 }, 404);
 }
 
@@ -215,6 +260,7 @@ beforeEach(() => {
   api.executors = [PROVIDER_EXECUTOR_KEY];
   api.providers = providers([PAINTER]);
   api.runs = [];
+  api.preview = makePreview();
   api.moka = () => buildGoldenMokaFile();
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal(
@@ -917,5 +963,134 @@ describe("driving one node's run", () => {
       }),
     );
     expect(ask()).toHaveProperty("textContent", "Run");
+  });
+});
+
+describe("what a node will send", () => {
+  function disclosure() {
+    return screen.getByTestId("input-preview");
+  }
+
+  function unfold() {
+    return within(panel()).getByRole("button", { name: "Preview" });
+  }
+
+  /** Opens the panel on the image node and unfolds the disclosure. */
+  async function opened() {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    fireEvent.click(unfold());
+    await settle();
+  }
+
+  it("is folded away until it is asked for", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    expect(screen.queryByTestId("input-preview")).toBeNull();
+    // Nothing is asked of the server on behalf of a disclosure nobody opened.
+    expect(
+      api.calls.some((call) => call.url.endsWith("/generate/preview")),
+    ).toBe(false);
+    expect(unfold()).toHaveProperty("ariaExpanded", "false");
+  });
+
+  it("shows the words and the references the server folded together", async () => {
+    await opened();
+    const shown = disclosure();
+    expect(shown.textContent).toContain(
+      "[Text 1]\nA lantern floats over a quiet lake at dusk.",
+    );
+    expect(shown.textContent).toContain("1 reference will be sent");
+    expect(shown.textContent).toContain("lantern.png");
+    expect(shown.textContent).toContain("Reference");
+    expect(shown.textContent).toContain("image/png");
+    expect(shown.textContent).toContain("512×512");
+    expect(shown.textContent).toContain("20.0 KB");
+    // Named by the card it came from, which is the way back to the canvas.
+    expect(shown.textContent).toContain("from Brief");
+    expect(unfold()).toHaveProperty("ariaExpanded", "true");
+
+    const asked = api.calls.find((call) =>
+      call.url.endsWith("/generate/preview"),
+    );
+    expect(asked?.body).toEqual({
+      canvasId: ids.canvasMain,
+      nodeId: ids.image,
+    });
+  });
+
+  it("saves what is typed before reading what will be sent", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    type("A heron at dawn");
+    fireEvent.click(unfold());
+    await settle();
+    // The disclosure is read off the document on disk, so what is typed has to
+    // be in it first or the answer is about the ask before this one.
+    expect(specOf(ids.image)?.prompt).toBe("A heron at dawn");
+    expect(disclosure()).toBeTruthy();
+  });
+
+  it("says what will not travel with the ask", async () => {
+    const [reference] = makePreview().inputs;
+    api.preview = makePreview({
+      inputs: [{ ...reference, name: "gone.png", missing: true }],
+      truncatedChars: 320,
+      unresolved: ["n-deleted"],
+    });
+    await opened();
+    const shown = disclosure();
+    expect(shown.textContent).toContain("A mention names a node");
+    expect(shown.textContent).toContain("gone.png is not there any more");
+    expect(shown.textContent).toContain("cut by 320 characters");
+    // A reference that will not be sent is not counted as one that will.
+    expect(shown.textContent).toContain("No references will be sent");
+  });
+
+  it("folds away again", async () => {
+    await opened();
+    fireEvent.click(unfold());
+    await settle();
+    expect(screen.queryByTestId("input-preview")).toBeNull();
+    expect(unfold()).toHaveProperty("ariaExpanded", "false");
+  });
+
+  it("shows a refusal from the server as words rather than as nothing", async () => {
+    api.preview = null;
+    await opened();
+    expect(disclosure().textContent).toContain(
+      "This node has not been asked for anything yet",
+    );
+  });
+});
+
+describe("a mention that points at nothing", () => {
+  it("stops the ask and says why beside the prompt", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    type("Paint this over");
+    await settle();
+    expect(ask()).toHaveProperty("disabled", false);
+
+    type("Paint this over @[node:n-gone]");
+    await settle();
+    expect(ask()).toHaveProperty("disabled", true);
+    expect(ask()).toHaveProperty(
+      "title",
+      "A mention names a node that is not on this canvas",
+    );
+    // Said where it can be read, not only on a control that stopped working.
+    expect(panel().textContent).toContain(
+      "A mention names a node that is not on this canvas.",
+    );
+
+    // A mention of a node that is there is not a reason to refuse.
+    type(`Paint this over @[node:${ids.text}]`);
+    await settle();
+    expect(ask()).toHaveProperty("disabled", false);
   });
 });

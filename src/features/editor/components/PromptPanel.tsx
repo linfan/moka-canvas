@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { runsApi, type GenerationPreview } from "../../../api";
 import {
   CAPABILITY_LABELS,
   MAX_PROMPT_LENGTH,
@@ -6,6 +7,7 @@ import {
   defaultGenerationSpec,
   findNode,
   generationCapabilityFor,
+  mentionNodeIds,
   nowIso,
   type Capability,
   type GenerationMode,
@@ -31,6 +33,7 @@ import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useLatestRunForNode, useRunStore } from "../stores/runStore";
 import { GenerationParams, type ParamValue } from "./GenerationParams";
+import { InputPreview } from "./InputPreview";
 
 const PANEL_WIDTH = 320;
 const PANEL_HEIGHT = 220;
@@ -38,6 +41,8 @@ const PANEL_HEIGHT = 220;
 const PANEL_HEIGHT_PARAMS = 360;
 /** What the panel grows by once it is counting a prompt out loud. */
 const PANEL_HEIGHT_COUNT = 22;
+/** What the panel grows by once it is showing what a node will send. */
+const PANEL_HEIGHT_PREVIEW = 200;
 /** Gap left between the panel and the node, and between it and a canvas edge. */
 const GAP = 8;
 
@@ -99,12 +104,17 @@ function refusalFor(asked: {
   noModel: boolean;
   capability: Capability;
   prompt: string;
+  /** The prompt names a node this canvas has none of. */
+  dangling: boolean;
   fedFromUpstream: boolean;
 }): string | null {
   if (!asked.available) return GENERATION_UNAVAILABLE;
   if (asked.noModel) {
     const kind = CAPABILITY_LABELS[asked.capability].toLowerCase();
     return `No ${kind} model is configured yet`;
+  }
+  if (asked.dangling) {
+    return "A mention names a node that is not on this canvas";
   }
   if (asked.prompt.trim() === "" && !asked.fedFromUpstream) {
     return "Nothing to ask for yet: write a prompt, or connect one";
@@ -147,6 +157,10 @@ export function PromptPanel() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [preview, setPreview] = useState<GenerationPreview | null>(null);
+  const [reading, setReading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const canvas =
     moka?.canvas.find((entry) => entry.id === activeCanvasId) ??
@@ -155,6 +169,9 @@ export function PromptPanel() {
   const node = open && canvas ? findNode(canvas, open.nodeId) : null;
   const capability = node ? generationCapabilityFor(node.kind) : null;
   const nodeId = node && capability ? node.id : null;
+  const canvasId = canvas?.id ?? null;
+  /** The document's own word for "it moved", which is when an answer goes stale. */
+  const revision = moka?.metadata.revision ?? 0;
   const chosen =
     selected.length === 1 && canvas ? findNode(canvas, selected[0]) : undefined;
   const chosenId =
@@ -203,6 +220,45 @@ export function PromptPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  /**
+   * Reads what this node will send, while the disclosure is open and again
+   * whenever the document moves.
+   *
+   * Asked of the server rather than worked out here a second time: the same pass
+   * that folds a graph into one prompt is the one a run takes, and a copy of it
+   * in the panel would be a second thing free to disagree with the first.
+   */
+  useEffect(() => {
+    if (!previewOpen || !canvasId || !nodeId) return;
+    const asked = new AbortController();
+    let abandoned = false;
+    setReading(true);
+    runsApi
+      .preview(canvasId, nodeId, asked.signal)
+      .then((answer) => {
+        if (abandoned) return;
+        setPreview(answer);
+        setPreviewError(null);
+      })
+      .catch((error) => {
+        if (abandoned) return;
+        setPreviewError(
+          error instanceof Error
+            ? error.message
+            : "What this node will send could not be read",
+        );
+      })
+      .finally(() => {
+        if (!abandoned) setReading(false);
+      });
+    return () => {
+      abandoned = true;
+      asked.abort();
+    };
+    // The revision is not read here: it is what makes this ask again, since a
+    // preview of the document as it was is a preview of something else.
+  }, [previewOpen, canvasId, nodeId, revision]);
+
   if (!node || !canvas || !capability) return null;
 
   const stored = (node.data as { generation?: GenerationSpec }).generation;
@@ -241,11 +297,16 @@ export function PromptPanel() {
       (edge) =>
         edge.target.nodeId === node.id && edge.target.portId === "prompt",
     );
+  // A mention of a node that is not there sends nothing for itself, and a run
+  // that answers anyway reads as a provider ignoring the reference rather than
+  // as a pointer that has come loose.
+  const dangling = mentionNodeIds(prompt).some((id) => !findNode(canvas, id));
   const refusal = refusalFor({
     available: generationOn,
     noModel,
     capability,
     prompt,
+    dangling,
     fedFromUpstream,
   });
   const over = prompt.length - MAX_PROMPT_LENGTH;
@@ -287,6 +348,25 @@ export function PromptPanel() {
   const commitPrompt = () => {
     if (!stored && prompt.trim() === "") return;
     commit({ prompt });
+  };
+
+  /**
+   * Opens or folds away the disclosure of what this node will send.
+   *
+   * Opening saves what is typed first and waits for it to land. The preview is
+   * read off the document on disk, so asking for it straight after a keystroke
+   * would answer for the ask before this one — and then answer again, differently,
+   * once the save caught up.
+   */
+  const togglePreview = async () => {
+    if (previewOpen) {
+      setPreviewOpen(false);
+      return;
+    }
+    setPreviewError(null);
+    commitPrompt();
+    await useProjectStore.getState().flush();
+    setPreviewOpen(true);
   };
 
   /**
@@ -341,7 +421,9 @@ export function PromptPanel() {
   });
   const tall =
     (paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT) +
-    (counted ? PANEL_HEIGHT_COUNT : 0);
+    (previewOpen ? PANEL_HEIGHT_PREVIEW : 0) +
+    (counted ? PANEL_HEIGHT_COUNT : 0) +
+    (dangling ? PANEL_HEIGHT_COUNT : 0);
   const style: React.CSSProperties = {
     left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${
       PANEL_WIDTH + GAP
@@ -426,6 +508,12 @@ export function PromptPanel() {
         value={prompt}
       />
 
+      {dangling && (
+        <p className="prompt-panel-warn" role="alert">
+          A mention names a node that is not on this canvas.
+        </p>
+      )}
+
       {counted && (
         <p
           className={
@@ -447,15 +535,34 @@ export function PromptPanel() {
         />
       )}
 
+      {previewOpen && (
+        <InputPreview
+          error={previewError}
+          preview={preview}
+          reading={reading}
+          titleOf={(id) => findNode(canvas, id)?.title ?? id}
+        />
+      )}
+
       <div className="prompt-panel-actions">
-        <button
-          aria-expanded={paramsOpen}
-          onClick={() => setParamsOpen((shown) => !shown)}
-          title="What this node's own ask carries, over the defaults set in settings"
-          type="button"
-        >
-          Parameters
-        </button>
+        <div className="prompt-panel-toggles">
+          <button
+            aria-expanded={paramsOpen}
+            onClick={() => setParamsOpen((shown) => !shown)}
+            title="What this node's own ask carries, over the defaults set in settings"
+            type="button"
+          >
+            Parameters
+          </button>
+          <button
+            aria-expanded={previewOpen}
+            onClick={() => void togglePreview()}
+            title="What a run of this node would actually hand over"
+            type="button"
+          >
+            Preview
+          </button>
+        </div>
         {going ? (
           <button
             className="primary"

@@ -1294,6 +1294,90 @@ button.danger:hover:not(:disabled) {
   font-weight: 600;
 }
 
+.prompt-panel-toggles {
+  display: flex;
+  gap: 6px;
+}
+
+/* Something that will not travel with the ask, said where the ask is made. */
+.prompt-panel-warn {
+  color: var(--danger);
+  font-size: 11px;
+  margin: 0;
+}
+
+.prompt-panel-preview {
+  border-top: 1px solid var(--stroke);
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.prompt-panel-preview-label {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Bounded, and scrolling inside that bound: a preview long enough to push the
+   panel past the canvas would be the one thing it must never do. */
+.prompt-panel-preview-text {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  font-size: 11px;
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prompt-panel-preview-list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+  padding: 0;
+}
+
+.prompt-panel-preview-list li {
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  display: grid;
+  font-size: 11px;
+  gap: 1px 6px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 4px 6px;
+}
+
+.prompt-panel-preview-role {
+  align-self: start;
+  color: var(--muted);
+  grid-row: 1 / -1;
+}
+
+.prompt-panel-preview-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-panel-preview-detail,
+.prompt-panel-preview-from {
+  color: var(--muted);
+  font-size: 10px;
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Why an ask did not finish, held beside the card that says so. It takes no
    pointer events: swallowing the hover that summoned it would blink it away. */
 
