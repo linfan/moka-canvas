@@ -490,7 +490,7 @@ impl ProjectStore for FsProjectStore {
             created_at: now.clone(),
             updated_at: now,
             probe: Some(analysis.probe),
-            provenance: None,
+            provenance: staged.provenance,
         };
 
         let mut guard = self.state.lock().expect("store poisoned");

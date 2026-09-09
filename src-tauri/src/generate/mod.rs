@@ -20,6 +20,9 @@
 //! a request into a call, this turns a node and its place in the graph into
 //! that request.
 //!
+//! [`ingest`] is the last step of the journey: an answer becomes files in the
+//! project, each carrying a record of the run and the node it came out of.
+//!
 //! The types below are the whole generation vocabulary that leaves this
 //! module: a request phrased in the project's own terms and a result phrased
 //! as bytes with a mime type. No provider field name appears in either, so
@@ -29,6 +32,7 @@ pub mod adapters;
 pub mod context;
 pub mod error;
 pub mod gateway;
+pub mod ingest;
 pub mod jobs;
 pub mod media;
 pub mod providers;
@@ -45,6 +49,7 @@ use crate::metadata::Protocol;
 pub use context::{collect_generation_inputs, context_node_ids, ResolvedInputs};
 pub use error::ProviderError;
 pub use gateway::Gateway;
+pub use ingest::ingest_generated;
 pub use jobs::TaskRegistry;
 pub use providers::{ProbeReport, ProviderRepo, ResolvedModel};
 

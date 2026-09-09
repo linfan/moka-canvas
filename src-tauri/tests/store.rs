@@ -221,6 +221,7 @@ async fn asset_upload_registers_and_streams_back() {
             tmp_path: staging,
             declared_mime: Some("image/png".into()),
             category_hint: None,
+            provenance: None,
         })
         .await
         .unwrap()
@@ -275,6 +276,7 @@ async fn wav_upload_records_audio_probe_metadata() {
             tmp_path: staging,
             declared_mime: Some("audio/wav".into()),
             category_hint: Some("voice".into()),
+            provenance: None,
         })
         .await
         .unwrap()
@@ -298,6 +300,7 @@ async fn invalid_upload_leaves_no_orphans() {
             tmp_path: staging,
             declared_mime: Some("image/png".into()),
             category_hint: None,
+            provenance: None,
         })
         .await;
     assert_eq!(result.unwrap_err().code(), "ASSET_INVALID");
@@ -329,6 +332,7 @@ async fn removing_a_referenced_asset_is_rejected() {
             tmp_path: staging,
             declared_mime: None,
             category_hint: None,
+            provenance: None,
         })
         .await
         .unwrap()
@@ -360,6 +364,7 @@ async fn self_check_reports_missing_and_changed_files() {
             tmp_path: staging,
             declared_mime: None,
             category_hint: None,
+            provenance: None,
         })
         .await
         .unwrap()
@@ -398,6 +403,7 @@ async fn replace_asset_bytes_clears_missing_state() {
             tmp_path: staging,
             declared_mime: None,
             category_hint: None,
+            provenance: None,
         })
         .await
         .unwrap()
@@ -414,6 +420,7 @@ async fn replace_asset_bytes_clears_missing_state() {
                 tmp_path: staging2,
                 declared_mime: None,
                 category_hint: None,
+                provenance: None,
             },
         )
         .await

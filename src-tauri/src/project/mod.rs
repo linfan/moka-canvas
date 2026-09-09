@@ -2,7 +2,7 @@ pub mod codec;
 pub mod package;
 pub mod store;
 
-use crate::domain::{MokaFile, ResourceEntry, SelfCheckReport};
+use crate::domain::{AssetProvenance, MokaFile, ResourceEntry, SelfCheckReport};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -72,6 +72,10 @@ pub struct StagedAsset {
     pub tmp_path: PathBuf,
     pub declared_mime: Option<String>,
     pub category_hint: Option<String>,
+    /// Where the asset came from, for the ones that were made rather than
+    /// imported. Only `add_asset` reads it: replacing an existing asset's bytes
+    /// keeps the provenance that entry already carries.
+    pub provenance: Option<AssetProvenance>,
 }
 
 pub struct AssetFile {

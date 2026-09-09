@@ -295,6 +295,7 @@ pub async fn upload_asset(
             tmp_path: upload.tmp_path,
             declared_mime: upload.declared_mime,
             category_hint: upload.category_hint,
+            provenance: None,
         })
         .await?;
     Ok((
@@ -324,6 +325,7 @@ pub async fn replace_asset(
                 tmp_path: upload.tmp_path,
                 declared_mime: upload.declared_mime,
                 category_hint: upload.category_hint,
+                provenance: None,
             },
         )
         .await?;

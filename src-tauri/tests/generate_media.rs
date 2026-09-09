@@ -47,6 +47,7 @@ async fn upload(
             tmp_path: staging,
             declared_mime: Some(mime.into()),
             category_hint: None,
+            provenance: None,
         })
         .await
         .expect("the asset is accepted")
