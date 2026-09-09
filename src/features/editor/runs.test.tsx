@@ -5,6 +5,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
 } from "@testing-library/react";
 import App from "../../App";
@@ -25,7 +26,13 @@ import { GENERATION_UNAVAILABLE, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
-import { useRunStore } from "./stores/runStore";
+import {
+  useLatestRunForNode,
+  useNodeRunProgress,
+  useNodeRunStatus,
+  useNodeStreamText,
+  useRunStore,
+} from "./stores/runStore";
 
 const ids = goldenNodeIds();
 const generated = generationNodeIds();
@@ -508,6 +515,120 @@ describe("run stream", () => {
       api.calls.some((call) => call.url === "/api/v1/projects/current/runs"),
       "the run was asked for again on the poll",
     ).toBe(true);
+  });
+});
+
+describe("reading one node's run", () => {
+  it("indexes the runs each node was asked in, newest first", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-2",
+        status: "succeeded",
+        steps: [{ nodeId: ids.image, status: "succeeded" }],
+      }),
+      makeRun({
+        id: "run-1",
+        status: "failed",
+        steps: [
+          { nodeId: ids.text, status: "failed" },
+          { nodeId: ids.image, status: "failed" },
+        ],
+      }),
+    ];
+    await useRunStore.getState().load();
+
+    const asked = useRunStore.getState().byNode;
+    expect(asked.get(ids.image)?.map((entry) => entry.run.id)).toEqual([
+      "run-2",
+      "run-1",
+    ]);
+    expect(asked.get(ids.text)?.map((entry) => entry.run.id)).toEqual([
+      "run-1",
+    ]);
+    // A node no run mentioned is absent rather than listed against nothing.
+    expect(asked.has(ids.export)).toBe(false);
+  });
+
+  it("reads a node through the run still going, not the newest one", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-2",
+        status: "succeeded",
+        steps: [{ nodeId: ids.text, status: "succeeded" }],
+      }),
+      makeRun({
+        id: "run-1",
+        status: "running",
+        steps: [{ nodeId: ids.text, status: "running", progress: 0.5 }],
+      }),
+    ];
+    await useRunStore.getState().load();
+
+    const { result } = renderHook(() => ({
+      run: useLatestRunForNode(ids.text),
+      status: useNodeRunStatus(ids.text),
+      progress: useNodeRunProgress(ids.text),
+    }));
+    expect(result.current.run?.id).toBe("run-1");
+    expect(result.current.status).toBe("running");
+    expect(result.current.progress).toBe(0.5);
+  });
+
+  it("says nothing about a node no run has asked", () => {
+    const { result } = renderHook(() => ({
+      run: useLatestRunForNode(ids.export),
+      status: useNodeRunStatus(ids.export),
+      progress: useNodeRunProgress(ids.export),
+    }));
+    expect(result.current.run).toBeNull();
+    expect(result.current.status).toBeNull();
+    expect(result.current.progress).toBeNull();
+  });
+
+  it("reads the words a run has said for one node so far", async () => {
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+    const source = streamFor("run-1");
+    const { result } = renderHook(() => ({
+      text: useNodeStreamText(ids.text),
+      operation: useNodeStreamText(ids.operation),
+    }));
+    expect(result.current.text).toBe("");
+
+    act(() => {
+      source.say("delta", {
+        runId: "run-1",
+        nodeId: ids.text,
+        slotId: "result",
+        text: "A lantern ",
+      });
+      source.say("delta", {
+        runId: "run-1",
+        nodeId: ids.text,
+        slotId: "result",
+        text: "floats.",
+      });
+    });
+    expect(result.current.text).toBe("A lantern floats.");
+    // Said to one node, it is not read out as an answer the other gave.
+    expect(result.current.operation).toBe("");
+
+    api.runs = [withStepStatus(makeRun({ status: "succeeded" }), "succeeded")];
+    act(() => {
+      source.say("done", { runId: "run-1", status: "succeeded" });
+    });
+    await settle();
+    // The record has an answer of its own now, so the words on the way go.
+    expect(result.current.text).toBe("");
+  });
+
+  it("forgets every node's run when the store is reset", async () => {
+    api.runs = [makeRun({ status: "succeeded" })];
+    await useRunStore.getState().load();
+    expect(useRunStore.getState().byNode.size).toBeGreaterThan(0);
+
+    useRunStore.getState().reset();
+    expect(useRunStore.getState().byNode.size).toBe(0);
   });
 });
 

@@ -29,6 +29,7 @@ import {
   useNodeGenerationAssets,
   useNodeRunError,
   useNodeRunProgress,
+  useNodeStreamText,
   useRunStore,
 } from "../stores/runStore";
 import {
@@ -441,11 +442,7 @@ function RunSection({
   const progress = useNodeRunProgress(node.id);
   const failure = useNodeRunError(node.id);
   const active = run?.status === "queued" || run?.status === "running";
-  // What this node has said so far in a run that is still going. The store keeps
-  // the words of each node apart, so a run holding several shows each its own.
-  const said = useRunStore((state) =>
-    run && active ? (state.streamText[run.id]?.[node.id] ?? "") : "",
-  );
+  const said = useNodeStreamText(node.id);
   const step = run?.steps.find((entry) => entry.nodeId === node.id);
   const slots = (node.data as { resultSlots?: ResultSlot[] }).resultSlots ?? [];
   const relevantIssues = issues.filter(

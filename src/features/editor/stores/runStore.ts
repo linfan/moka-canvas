@@ -24,8 +24,38 @@ function hasActiveRuns(runs: RunRecord[]): boolean {
   return runs.some((run) => isActive(run.status));
 }
 
+/** One node's part in one run. */
+interface NodeRun {
+  run: RunRecord;
+  step: RunStepRecord;
+}
+
+/**
+ * The runs each node was asked in, newest first.
+ *
+ * Built when the list of runs changes rather than when a node is read. Every
+ * node on a canvas asks what it is doing whenever anything in this store moves,
+ * and words arriving from a run move it too, so reading from the list instead
+ * walks every step of every run once per node per word.
+ */
+type RunsByNode = Map<NodeId, NodeRun[]>;
+
+function indexRuns(runs: RunRecord[]): RunsByNode {
+  const byNode: RunsByNode = new Map();
+  for (const run of runs) {
+    for (const step of run.steps) {
+      const asked = byNode.get(step.nodeId);
+      if (asked) asked.push({ run, step });
+      else byNode.set(step.nodeId, [{ run, step }]);
+    }
+  }
+  return byNode;
+}
+
 interface RunState {
   runs: RunRecord[];
+  /** Derived from `runs`, and rebuilt only when that list changes. */
+  byNode: RunsByNode;
   selectedRunId: RunId | null;
   loading: boolean;
   starting: boolean;
@@ -82,12 +112,12 @@ function adoptServerState() {
 export const useRunStore = create<RunState>()((set, get) => {
   const foldIn = (record: RunRecord) => {
     set((state) => {
-      const index = state.runs.findIndex((run) => run.id === record.id);
+      const at = state.runs.findIndex((run) => run.id === record.id);
       const runs =
-        index === -1
+        at === -1
           ? [record, ...state.runs]
           : state.runs.map((run) => (run.id === record.id ? record : run));
-      return { runs, selectedRunId: record.id };
+      return { runs, byNode: indexRuns(runs), selectedRunId: record.id };
     });
   };
 
@@ -96,6 +126,7 @@ export const useRunStore = create<RunState>()((set, get) => {
     const previous = new Map(get().runs.map((run) => [run.id, run.status]));
     set((state) => ({
       runs: fresh,
+      byNode: indexRuns(fresh),
       selectedRunId:
         state.selectedRunId &&
         fresh.some((run) => run.id === state.selectedRunId)
@@ -174,6 +205,7 @@ export const useRunStore = create<RunState>()((set, get) => {
 
   return {
     runs: [],
+    byNode: new Map(),
     selectedRunId: null,
     loading: false,
     starting: false,
@@ -276,6 +308,7 @@ export const useRunStore = create<RunState>()((set, get) => {
       resyncNeeded = false;
       set({
         runs: [],
+        byNode: new Map(),
         selectedRunId: null,
         loading: false,
         starting: false,
@@ -310,32 +343,24 @@ export function useSelectedRun(): RunRecord | null {
  * since two runs may drive at once the newest record for a node is not always
  * the one that has anything left to say about it.
  */
-function runFor(
-  runs: RunRecord[],
-  nodeId: NodeId,
-): { run: RunRecord; step: RunStepRecord } | null {
-  let fallback: { run: RunRecord; step: RunStepRecord } | null = null;
-  for (const run of runs) {
-    const step = run.steps.find((entry) => entry.nodeId === nodeId);
-    if (!step) continue;
-    if (isActive(run.status)) return { run, step };
-    fallback ??= { run, step };
-  }
-  return fallback;
+function runFor(byNode: RunsByNode, nodeId: NodeId): NodeRun | null {
+  const asked = byNode.get(nodeId);
+  if (!asked || asked.length === 0) return null;
+  return asked.find((entry) => isActive(entry.run.status)) ?? asked[0];
 }
 
-function stepOf(runs: RunRecord[], nodeId: NodeId): RunStepRecord | null {
-  return runFor(runs, nodeId)?.step ?? null;
+function stepOf(byNode: RunsByNode, nodeId: NodeId): RunStepRecord | null {
+  return runFor(byNode, nodeId)?.step ?? null;
 }
 
 /** The most recent run that included this node, if any. */
 export function useLatestRunForNode(nodeId: NodeId): RunRecord | null {
-  return useRunStore((state) => runFor(state.runs, nodeId)?.run ?? null);
+  return useRunStore((state) => runFor(state.byNode, nodeId)?.run ?? null);
 }
 
 /** Latest run step status for a node, preferring runs that are still active. */
 export function useNodeRunStatus(nodeId: NodeId): RunStatus | null {
-  return useRunStore((state) => stepOf(state.runs, nodeId)?.status ?? null);
+  return useRunStore((state) => stepOf(state.byNode, nodeId)?.status ?? null);
 }
 
 /**
@@ -346,12 +371,27 @@ export function useNodeRunStatus(nodeId: NodeId): RunStatus | null {
  * bar drawn at empty would say the first of those.
  */
 export function useNodeRunProgress(nodeId: NodeId): number | null {
-  return useRunStore((state) => stepOf(state.runs, nodeId)?.progress ?? null);
+  return useRunStore((state) => stepOf(state.byNode, nodeId)?.progress ?? null);
 }
 
 /** What a node's step last said went wrong, if anything. */
 export function useNodeRunError(nodeId: NodeId): string | null {
-  return useRunStore((state) => stepOf(state.runs, nodeId)?.error ?? null);
+  return useRunStore((state) => stepOf(state.byNode, nodeId)?.error ?? null);
+}
+
+/**
+ * What the run a node is in has said for that node so far.
+ *
+ * Empty once the run is over: the record replaces the words, and a run holding
+ * several nodes keeps each one's apart so what is typed here reads as an answer
+ * this node gave rather than one any of them did.
+ */
+export function useNodeStreamText(nodeId: NodeId): string {
+  return useRunStore((state) => {
+    const found = runFor(state.byNode, nodeId);
+    if (!found || !isActive(found.run.status)) return "";
+    return state.streamText[found.run.id]?.[nodeId] ?? "";
+  });
 }
 
 const NO_ASSETS: ResourceEntry[] = [];
