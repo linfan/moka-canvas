@@ -345,8 +345,27 @@ export function useSelectedRun(): RunRecord | null {
  */
 function runFor(byNode: RunsByNode, nodeId: NodeId): NodeRun | null {
   const asked = byNode.get(nodeId);
-  if (!asked || asked.length === 0) return null;
-  return asked.find((entry) => isActive(entry.run.status)) ?? asked[0];
+  return asked ? current(asked) : null;
+}
+
+function current(asked: NodeRun[]): NodeRun | null {
+  return asked.find((entry) => isActive(entry.run.status)) ?? asked[0] ?? null;
+}
+
+/**
+ * The status each node's own run gives it, for a reader asking about every node
+ * at once rather than one of them.
+ *
+ * Answered from the index rather than from the list of runs: the canvas asks
+ * whenever anything moves, and moving includes every word a run says.
+ */
+export function nodeRunStatuses(): ReadonlyMap<NodeId, RunStatus> {
+  const statuses = new Map<NodeId, RunStatus>();
+  for (const [nodeId, asked] of useRunStore.getState().byNode) {
+    const found = current(asked);
+    if (found) statuses.set(nodeId, found.step.status);
+  }
+  return statuses;
 }
 
 function stepOf(byNode: RunsByNode, nodeId: NodeId): RunStepRecord | null {

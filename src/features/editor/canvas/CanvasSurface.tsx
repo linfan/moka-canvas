@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { CanvasDocument, NodeId, RunStatus } from "../../../shared/domain";
+import type { CanvasDocument } from "../../../shared/domain";
 import type {
   ControllerCallbacks,
   HitTarget,
@@ -19,7 +19,7 @@ import {
 } from "../interactions/actions";
 import { useEditorStore, type ContextMenuTarget } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
-import { useRunStore } from "../stores/runStore";
+import { nodeRunStatuses, useRunStore } from "../stores/runStore";
 import { buildIssueIndex, buildResourceIndex } from "./mediaCards";
 
 function activeCanvas(): CanvasDocument | null {
@@ -30,18 +30,6 @@ function activeCanvas(): CanvasDocument | null {
     moka.canvas[0] ??
     null
   );
-}
-
-/** Latest run step status per node, preferring steps of still-active runs. */
-function runStatusByNode(): ReadonlyMap<NodeId, RunStatus> {
-  const map = new Map<NodeId, RunStatus>();
-  for (const run of [...useRunStore.getState().runs].reverse()) {
-    const active = run.status === "queued" || run.status === "running";
-    for (const step of run.steps) {
-      if (active || !map.has(step.nodeId)) map.set(step.nodeId, step.status);
-    }
-  }
-  return map;
 }
 
 /** Controller callbacks bound to the host element for screen→client offsets. */
@@ -218,7 +206,7 @@ export function CanvasSurface() {
                 candidates: pickSourceCandidates(canvas, editor.inputPick),
               }
             : null,
-          runStatus: runStatusByNode(),
+          runStatus: nodeRunStatuses(),
         });
       };
 

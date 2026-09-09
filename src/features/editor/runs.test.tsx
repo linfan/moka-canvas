@@ -27,6 +27,7 @@ import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
 import {
+  nodeRunStatuses,
   useLatestRunForNode,
   useNodeRunProgress,
   useNodeRunStatus,
@@ -572,6 +573,31 @@ describe("reading one node's run", () => {
     expect(result.current.run?.id).toBe("run-1");
     expect(result.current.status).toBe("running");
     expect(result.current.progress).toBe(0.5);
+  });
+
+  it("says what every node is doing at once, by the same rule", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-2",
+        status: "succeeded",
+        steps: [
+          { nodeId: ids.text, status: "succeeded" },
+          { nodeId: ids.operation, status: "succeeded" },
+        ],
+      }),
+      makeRun({
+        id: "run-1",
+        status: "running",
+        steps: [{ nodeId: ids.text, status: "running" }],
+      }),
+    ];
+    await useRunStore.getState().load();
+
+    const statuses = nodeRunStatuses();
+    // Still going, so it keeps the node even past a newer finished run.
+    expect(statuses.get(ids.text)).toBe("running");
+    expect(statuses.get(ids.operation)).toBe("succeeded");
+    expect(statuses.has(ids.export)).toBe(false);
   });
 
   it("says nothing about a node no run has asked", () => {
