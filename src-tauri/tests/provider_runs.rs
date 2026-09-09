@@ -5,8 +5,9 @@
 //! generation node is scheduled onto the provider executor rather than refused,
 //! that the answer it comes back with is filed in the project bearing the run
 //! it came from, that an answer from earlier in the same run reaches the node
-//! below it, that an ask answered several times over is written back onto the
-//! canvas whole, that a cancel arrives at a step already waiting on a
+//! below it, that what the panel showed before a run is what the provider was
+//! handed during it, that an ask answered several times over is written back
+//! onto the canvas whole, that a cancel arrives at a step already waiting on a
 //! provider, that a shot is written down the moment it is placed rather than
 //! when it answers, that a run left waiting on one asks after the same job
 //! when the project is opened again, that a listener hears a run's words
@@ -25,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::{to_bytes, Body, Bytes};
-use axum::extract::Path as Route;
+use axum::extract::{Multipart, Path as Route};
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -207,6 +208,35 @@ impl Harness {
             .await
     }
 
+    /// Files an asset in the open project the way a drop on the canvas does, and
+    /// answers with the id it was filed under.
+    async fn upload(&self, filename: &str, bytes: &[u8]) -> String {
+        let filed = self
+            .send_json(
+                multipart_request("/api/v1/projects/current/assets", filename, bytes),
+                StatusCode::CREATED,
+            )
+            .await;
+        filed["entry"]["id"]
+            .as_str()
+            .expect("an uploaded asset is answered with its id")
+            .to_string()
+    }
+
+    /// What a node will send, asked of the server before anything is sent: the
+    /// very answer the panel renders for whoever is about to press the button.
+    async fn preview(&self, canvas_id: &str, node_id: &str) -> Value {
+        self.send_json(
+            json_request(
+                "POST",
+                "/api/v1/projects/current/generate/preview",
+                json!({ "canvasId": canvas_id, "nodeId": node_id }),
+            ),
+            StatusCode::OK,
+        )
+        .await
+    }
+
     /// Starts a run and returns its id, which is all a caller can follow it by.
     async fn start(&self, canvas_id: &str, node_ids: Value) -> String {
         let run = self
@@ -302,6 +332,29 @@ fn json_request(method: &str, uri: &str, payload: Value) -> Request<Body> {
         .expect("a request is built")
 }
 
+/// A file dropped on the canvas, sent the way the editor sends one.
+fn multipart_request(uri: &str, filename: &str, bytes: &[u8]) -> Request<Body> {
+    let boundary = "X-MOKA-RUN-TEST";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .expect("a request is built")
+}
+
 async fn body_json(response: axum::http::Response<Body>) -> Value {
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
@@ -375,6 +428,13 @@ struct Recorded {
     /// often as it takes, and a test that could not tell the two apart could not
     /// see one placed twice.
     looks: Arc<Mutex<Vec<String>>>,
+    /// The references an ask carried, by the name each was sent under and in the
+    /// order they were sent.
+    ///
+    /// Kept apart from the asks because an ask that carries a reference travels
+    /// as fields and files rather than as JSON, so there is no body for it to be
+    /// read out of afterwards.
+    files: Arc<Mutex<Vec<String>>>,
 }
 
 impl Recorded {
@@ -383,6 +443,27 @@ impl Recorded {
             .lock()
             .expect("the recorder is not poisoned")
             .push(serde_json::from_slice(body).expect("a generation is sent as JSON"));
+    }
+
+    /// Notes an ask that came as fields and files. The words are kept with the
+    /// asks, so a test reads the prompt of a call without caring which of the two
+    /// endpoints it went to.
+    fn noted_edit(&self, prompt: &str, references: Vec<String>) {
+        self.asks
+            .lock()
+            .expect("the recorder is not poisoned")
+            .push(json!({ "prompt": prompt }));
+        self.files
+            .lock()
+            .expect("the recorder is not poisoned")
+            .extend(references);
+    }
+
+    fn files(&self) -> Vec<String> {
+        self.files
+            .lock()
+            .expect("the recorder is not poisoned")
+            .clone()
     }
 
     fn calls(&self) -> usize {
@@ -440,9 +521,11 @@ fn pieces(answer: &[&str]) -> Response {
     ([(header::CONTENT_TYPE, "text/event-stream")], stream).into_response()
 }
 
-/// A provider that answers both capabilities, so one channel can serve a chain.
+/// A provider that answers both capabilities, so one channel can serve a chain,
+/// and takes a reference as readily as it paints from nothing.
 fn answering(recorded: Recorded) -> Router {
     let writing = recorded.clone();
+    let editing = recorded.clone();
     Router::new()
         .route(
             "/v1/responses",
@@ -473,6 +556,31 @@ fn answering(recorded: Recorded) -> Router {
                 let recorded = recorded.clone();
                 async move {
                     recorded.note(&body);
+                    painted()
+                }
+            }),
+        )
+        .route(
+            "/v1/images/edits",
+            post(move |mut fields: Multipart| {
+                let recorded = editing.clone();
+                async move {
+                    // Every part is read, because a part left unread is a part a
+                    // test cannot compare with what the panel showed.
+                    let mut prompt = String::new();
+                    let mut references = Vec::new();
+                    while let Some(field) = fields.next_field().await.expect("a part reads") {
+                        let sent_under = field.file_name().map(str::to_string);
+                        let is_prompt = field.name() == Some("prompt");
+                        if let Some(name) = sent_under {
+                            references.push(name);
+                        } else if is_prompt {
+                            prompt = field.text().await.expect("the words read");
+                        } else {
+                            let _ = field.bytes().await.expect("the part reads");
+                        }
+                    }
+                    recorded.noted_edit(&prompt, references);
                     painted()
                 }
             }),
@@ -648,6 +756,23 @@ fn picture(width: u32, height: u32) -> Vec<u8> {
 /// its models. An empty one means the default the user set for the capability.
 fn reference(model: &str) -> String {
     format!("{CHANNEL}::{model}")
+}
+
+/// A node that already says something. There is nothing to run for it, which is
+/// what makes it upstream of a node that asks: only words for the ask to fold in.
+fn saying(id: &str, content: &str) -> Value {
+    let mut node = make_node(NodeKind::Text, "Brief".into(), 0.0, 0.0);
+    node.id = id.to_string();
+    node.data.content = Some(content.to_string());
+    serde_json::to_value(&node).expect("a node is sent as it is stored")
+}
+
+/// A node that already shows something, filed in the project before any run.
+fn holding(id: &str, title: &str, asset_id: &str) -> Value {
+    let mut node = make_node(NodeKind::Image, title.into(), 0.0, 0.0);
+    node.id = id.to_string();
+    node.data.asset_id = Some(asset_id.to_string());
+    serde_json::to_value(&node).expect("a node is sent as it is stored")
 }
 
 /// A node that asks a provider for something, built the way the editor builds
@@ -965,6 +1090,77 @@ async fn an_answer_from_earlier_in_the_run_reaches_the_generation_below_it() {
     .expect("the answer is on disk");
     assert_eq!(script["data"]["content"], json!(filed));
     assert_eq!(script["data"]["content"], json!(SENTENCE));
+}
+
+/// What the panel shows is what reaches the provider, read back from the far end.
+///
+/// Both are answered by the one resolver, so today this cannot disagree with
+/// itself; the test is here for the day something resolves a second time. A panel
+/// listing two references while the request carries one is the failure nobody can
+/// see from either side alone — the panel looks right, the answer looks wrong,
+/// and nothing in between says which of the two lied.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn what_the_panel_shows_is_what_reaches_the_provider() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let base_url = serve(answering(recorded.clone())).await;
+    harness
+        .configure(&base_url, &[(PAINTER, Capability::Image)])
+        .await;
+    let (canvas_id, _) = harness.project("Shown").await;
+    // Two references rather than one, so that a request that dropped one is a
+    // failure here instead of a list that happened to be the same length.
+    let lantern = harness.upload("lantern.png", &picture(8, 6)).await;
+    let stencil = harness.upload("stencil.png", &picture(6, 8)).await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id,
+              "node": saying("n-brief", "A lantern over a quiet lake.") },
+            { "type": "addNode", "canvasId": canvas_id,
+              "node": holding("n-lantern", "Lantern", &lantern) },
+            { "type": "addNode", "canvasId": canvas_id,
+              "node": holding("n-stencil", "Stencil", &stencil) },
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "Paint it as a poster.", None) },
+            { "type": "addEdge", "canvasId": canvas_id,
+              "edge": edge("e-words", ("n-brief", "out"), ("n-poster", "prompt")) },
+            { "type": "addEdge", "canvasId": canvas_id,
+              "edge": edge("e-lantern", ("n-lantern", "out"), ("n-poster", "images")) },
+            { "type": "addEdge", "canvasId": canvas_id,
+              "edge": edge("e-stencil", ("n-stencil", "out"), ("n-poster", "images")) },
+        ]))
+        .await;
+
+    let shown = harness.preview(&canvas_id, "n-poster").await;
+    assert_eq!(
+        shown["prompt"], "Paint it as a poster.\n\n[Text 1]\nA lantern over a quiet lake.",
+        "the words a run sends, not the ones the node holds"
+    );
+    let listed = shown["inputs"].as_array().expect("references are listed");
+    assert_eq!(listed.len(), 2);
+    let names: Vec<&str> = listed
+        .iter()
+        .map(|one| one["name"].as_str().expect("a reference is named"))
+        .collect();
+    assert_eq!(
+        names,
+        ["lantern.png", "stencil.png"],
+        "in the order the wires were drawn, which is the order they count for"
+    );
+
+    // Nothing above the poster asks for anything, so the run is one step and the
+    // one call it makes is the call the preview was describing.
+    let run_id = harness.start(&canvas_id, json!(["n-poster"])).await;
+    assert_eq!(harness.settled(&run_id).await["status"], "succeeded");
+    assert_eq!(recorded.calls(), 1, "one step, one call");
+
+    assert_eq!(recorded.call(0)["prompt"], shown["prompt"]);
+    assert_eq!(
+        recorded.files(),
+        names,
+        "both references travelled, in the order they were listed"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
