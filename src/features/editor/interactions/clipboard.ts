@@ -3,15 +3,18 @@ import {
   MAX_TEXT_CONTENT_LENGTH,
   MOKA_FRAGMENT_MIME,
   findResource,
+  mentionSpans,
   newId,
   type AssetId,
   type CanvasDocument,
+  type GenerationSpec,
   type MokaFile,
   type NodeId,
   type Point,
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../../shared/domain";
+import { mentionToken } from "../canvas/mentions";
 
 /**
  * In-app fragment clipboard. Copy/paste between canvases and across project
@@ -158,6 +161,38 @@ export interface FragmentInstantiation {
 }
 
 /**
+ * The ask a copy carries, pointed at the copies beside it.
+ *
+ * Only what the fragment carried is moved: a mention of a node left behind
+ * still names the node left behind, which is what whoever copied it meant, and
+ * the panel says so when that node is not where it can be reached.
+ *
+ * The mentions are rewritten back through the prompt so the offsets ahead of
+ * each one are still the ones the scan reported.
+ */
+function carriedSpec(
+  spec: GenerationSpec,
+  idMap: ReadonlyMap<NodeId, NodeId>,
+): GenerationSpec {
+  let prompt = spec.prompt;
+  for (const span of [...mentionSpans(prompt)].reverse()) {
+    const carried = idMap.get(span.nodeId);
+    if (!carried) continue;
+    prompt =
+      prompt.slice(0, span.start) +
+      mentionToken(carried) +
+      prompt.slice(span.end);
+  }
+  return {
+    ...spec,
+    prompt,
+    referenceNodeIds: spec.referenceNodeIds.map(
+      (nodeId) => idMap.get(nodeId) ?? nodeId,
+    ),
+  };
+}
+
+/**
  * Clones fragment nodes/edges with fresh IDs at the target anchor, keeping
  * asset references that exist in the target project's registry and stripping
  * (counting) the rest.
@@ -182,6 +217,8 @@ export function instantiateFragment(
         missingAssets += 1;
       }
     }
+    const spec = data.generation as GenerationSpec | undefined;
+    if (spec) data.generation = carriedSpec(spec, idMap);
     return {
       ...node,
       id: idMap.get(node.id)!,
