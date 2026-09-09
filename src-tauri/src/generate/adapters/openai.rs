@@ -15,8 +15,9 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use super::{
-    answer, exchange, open_stream, provider_error, read_stream, succeeded, ChannelCall, Opened,
-    ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES, MODEL_LIST_TIMEOUT,
+    answer, exchange, image_item, media_item, open_stream, provider_error, read_stream, succeeded,
+    usage_of, ChannelCall, Opened, ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES,
+    MODEL_LIST_TIMEOUT,
 };
 use crate::domain::{new_id, now_iso, Capability};
 use crate::generate::error::ProviderError;
@@ -301,7 +302,7 @@ async fn attempt(
     cancel.check().map_err(Tried::Failed)?;
 
     if sink.is_streaming() {
-        return match open_stream(call, endpoint.path, &body)
+        return match open_stream(call, call.post(endpoint.path).json(&body))
             .await
             .map_err(Tried::Failed)?
         {
@@ -341,7 +342,7 @@ fn refusal(reply: Reply, api_key: &str) -> Tried {
 
 fn answers_body(call: &ChannelCall, request: &GenerateRequest, streaming: bool) -> Value {
     let mut body = opening(call, "input", request);
-    if let Some(system) = instruction(request) {
+    if let Some(system) = request.instruction() {
         body.insert("instructions".into(), json!(system));
     }
     if streaming {
@@ -421,7 +422,7 @@ fn answer_parts(payload: &Value) -> Option<String> {
 
 fn chat_body(call: &ChannelCall, request: &GenerateRequest, streaming: bool) -> Value {
     let mut messages = Vec::new();
-    if let Some(system) = instruction(request) {
+    if let Some(system) = request.instruction() {
         messages.push(json!({ "role": "system", "content": system }));
     }
     messages.push(json!({ "role": "user", "content": request.prompt }));
@@ -472,30 +473,9 @@ fn chat_result(payload: Value) -> GenerateResult {
     }
 }
 
-/// The instruction that frames a prompt. Speech names it as a parameter of its
-/// own, and a request that carries both means the same thing twice.
-fn instruction(request: &GenerateRequest) -> Option<&str> {
-    request
-        .system
-        .as_deref()
-        .or_else(|| request.text_param("instructions"))
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-}
-
-/// The token totals of an answer, under whichever names the endpoint uses.
+/// The token totals of an answer, under the names this protocol's endpoints use.
 fn tokens(payload: &Value, input: &str, output: &str) -> Option<Usage> {
-    let counted = payload.get("usage")?;
-    let read = |key: &str| counted.get(key).and_then(Value::as_u64);
-    let usage = Usage {
-        input_tokens: read(input),
-        output_tokens: read(output),
-        images: None,
-        seconds: None,
-    };
-    // A provider that reports neither total reported nothing; an all-empty
-    // struct would still show up as a row of zeroes.
-    (usage.input_tokens.is_some() || usage.output_tokens.is_some()).then_some(usage)
+    usage_of(payload.get("usage"), input, output)
 }
 
 /// The two fields every body here starts with: the model this channel resolved,
@@ -644,38 +624,6 @@ async fn download(call: &ChannelCall, address: &str) -> Result<GeneratedItem, Pr
     image_item(reply.body)
 }
 
-/// An image item with its mime sniffed and its size read from the header.
-///
-/// Neither is taken from the request: a provider that answers in a format it
-/// was not asked for is answering, and storing that under the requested mime
-/// would produce an asset the canvas cannot open.
-fn image_item(bytes: Vec<u8>) -> Result<GeneratedItem, ProviderError> {
-    let mime = infer::get(&bytes)
-        .map(|kind| kind.mime_type().to_string())
-        .filter(|mime| mime.starts_with("image/"))
-        .ok_or_else(|| {
-            ProviderError::Rejected("the answer carried no recognisable image".to_string())
-        })?;
-    let (width, height) = dimensions(&bytes).unzip();
-    Ok(GeneratedItem {
-        bytes,
-        mime,
-        kind: Capability::Image,
-        width,
-        height,
-        duration_ms: None,
-    })
-}
-
-/// The size from the header alone: decoding a whole image to learn two numbers
-/// would cost more than the request that produced it.
-fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .ok()?;
-    reader.into_dimensions().ok()
-}
-
 async fn speech(
     call: &ChannelCall,
     request: &GenerateRequest,
@@ -688,33 +636,16 @@ async fn speech(
         Capability::Audio,
     )
     .await?;
-    if reply.body.is_empty() {
-        return Err(ProviderError::NoOutput(
-            "the answer carried no audio".to_string(),
-        ));
-    }
-    let mime = match reply.content_type() {
-        Some(mime) if mime.starts_with("audio/") => mime,
-        // Nothing said, so the bytes are read as the commonest answer.
-        None => FALLBACK_AUDIO_MIME.to_string(),
-        // Something else answered with a success, and storing it as audio
-        // would produce an asset that cannot be played.
-        Some(mime) => {
-            return Err(ProviderError::Rejected(format!(
-                "the answer was {mime}, not audio"
-            )))
-        }
-    };
+    let mime = reply.content_type();
+    let item = media_item(
+        reply.body,
+        mime.as_deref(),
+        Capability::Audio,
+        FALLBACK_AUDIO_MIME,
+    )?;
     Ok(GenerateResult {
         text: None,
-        items: vec![GeneratedItem {
-            bytes: reply.body,
-            mime,
-            kind: Capability::Audio,
-            width: None,
-            height: None,
-            duration_ms: None,
-        }],
+        items: vec![item],
         usage: None,
     })
 }
@@ -729,7 +660,7 @@ fn speech_body(call: &ChannelCall, request: &GenerateRequest) -> Value {
     if let Some(speed) = request.float_param("speed") {
         body.insert("speed".into(), json!(speed));
     }
-    if let Some(instructions) = instruction(request) {
+    if let Some(instructions) = request.instruction() {
         body.insert("instructions".into(), json!(instructions));
     }
     Value::Object(body)
@@ -783,20 +714,16 @@ async fn collect(call: &ChannelCall, task: &AsyncTask) -> Result<TaskState, Prov
         Capability::Video,
     )
     .await?;
-    let mime = reply
-        .content_type()
-        .filter(|mime| mime.starts_with("video/"))
-        .unwrap_or_else(|| FALLBACK_VIDEO_MIME.to_string());
+    let mime = reply.content_type();
+    let item = media_item(
+        reply.body,
+        mime.as_deref(),
+        Capability::Video,
+        FALLBACK_VIDEO_MIME,
+    )?;
     Ok(TaskState::Succeeded(GenerateResult {
         text: None,
-        items: vec![GeneratedItem {
-            bytes: reply.body,
-            mime,
-            kind: Capability::Video,
-            width: None,
-            height: None,
-            duration_ms: None,
-        }],
+        items: vec![item],
         usage: None,
     }))
 }
@@ -1178,39 +1105,5 @@ mod tests {
                 retryable: false,
             }
         );
-    }
-
-    /// A real encoded image, so a test can assert on what sniffing and the
-    /// header read find rather than on a mime somebody claimed.
-    fn png(width: u32, height: u32) -> Vec<u8> {
-        let picture = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-            width,
-            height,
-            image::Rgba([12, 34, 56, 255]),
-        ));
-        let mut encoded = Vec::new();
-        picture
-            .write_to(
-                &mut std::io::Cursor::new(&mut encoded),
-                image::ImageFormat::Png,
-            )
-            .expect("a png encodes");
-        encoded
-    }
-
-    #[test]
-    fn an_image_is_read_from_its_bytes_rather_than_from_the_request() {
-        // A provider that answers in a format it was not asked for is still
-        // answering, and storing that under the requested mime would produce an
-        // asset the canvas cannot open.
-        let item = image_item(png(3, 2)).expect("the bytes are an image");
-        assert_eq!(item.mime, "image/png");
-        assert_eq!(item.kind, Capability::Image);
-        assert_eq!((item.width, item.height), (Some(3), Some(2)));
-
-        let error = image_item(b"<html>not an image</html>".to_vec())
-            .expect_err("the bytes are not an image");
-        assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
-        assert!(!error.retryable(), "{error} will not improve on a retry");
     }
 }

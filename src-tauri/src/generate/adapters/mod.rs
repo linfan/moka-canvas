@@ -21,7 +21,9 @@ use crate::metadata::Protocol;
 use super::error::ProviderError;
 use super::media::MediaInput;
 use super::providers::{join_url, ResolvedModel};
-use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskState, Usage};
+use super::{
+    AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
+};
 
 /// A model list is a small request, and a provider that cannot answer one in
 /// this long is not about to finish a generation.
@@ -50,6 +52,10 @@ const API_KEY_HEADER: HeaderName = HeaderName::from_static("x-goog-api-key");
 
 /// The sentinel that ends a server-sent stream.
 const STREAM_DONE: &str = "[DONE]";
+
+/// The mime that says nothing. An answer carrying it did not name what it sent,
+/// which is a different case from one that named something else.
+const UNSPECIFIED_MIME: &str = "application/octet-stream";
 
 /// What the reserved protocol answers to everything. Kept in one place so
 /// configuring such a channel and generating through it explain themselves the
@@ -217,13 +223,12 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
-/// The adapter for a protocol, or none where a protocol can be configured and
-/// listed but has no generation behind it.
-pub fn for_protocol(protocol: Protocol) -> Option<&'static dyn ProviderAdapter> {
+/// The adapter that speaks a protocol.
+pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
     match protocol {
-        Protocol::Openai => Some(&openai::ADAPTER),
-        Protocol::Custom => Some(&custom::ADAPTER),
-        Protocol::Gemini => None,
+        Protocol::Openai => &openai::ADAPTER,
+        Protocol::Gemini => &gemini::ADAPTER,
+        Protocol::Custom => &custom::ADAPTER,
     }
 }
 
@@ -376,12 +381,15 @@ enum Opened {
 }
 
 /// Places a request whose answer arrives in pieces and stops at the headers.
+///
+/// The request is prepared by the caller: one protocol asks for a stream on
+/// another endpoint, the other on the same endpoint with a query that changes
+/// the shape of the answer.
 async fn open_stream(
     call: &ChannelCall,
-    path: &str,
-    body: &serde_json::Value,
+    request: reqwest::RequestBuilder,
 ) -> Result<Opened, ProviderError> {
-    let response = open(call.post(path).json(body)).await?;
+    let response = open(request).await?;
     if succeeded(response.status().as_u16()) {
         return Ok(Opened::Streaming(response));
     }
@@ -529,6 +537,99 @@ where
     }
 }
 
+/// The token totals of an answer, read from the field that carries them under
+/// whichever names the protocol uses.
+///
+/// An answer that reported neither total reported nothing: an all-empty struct
+/// would still show up in the interface as a row of zeroes.
+fn usage_of(counted: Option<&serde_json::Value>, input: &str, output: &str) -> Option<Usage> {
+    let counted = counted?;
+    let read = |key: &str| counted.get(key).and_then(serde_json::Value::as_u64);
+    let usage = Usage {
+        input_tokens: read(input),
+        output_tokens: read(output),
+        images: None,
+        seconds: None,
+    };
+    (usage.input_tokens.is_some() || usage.output_tokens.is_some()).then_some(usage)
+}
+
+/// An image item with its mime sniffed and its size read from the header.
+///
+/// Neither is taken from the request: a provider that answers in a format it
+/// was not asked for is answering, and storing that under the requested mime
+/// would produce an asset the canvas cannot open.
+fn image_item(bytes: Vec<u8>) -> Result<GeneratedItem, ProviderError> {
+    let mime = infer::get(&bytes)
+        .map(|kind| kind.mime_type().to_string())
+        .filter(|mime| mime.starts_with("image/"))
+        .ok_or_else(|| {
+            ProviderError::Rejected("the answer carried no recognisable image".to_string())
+        })?;
+    let (width, height) = dimensions(&bytes).unzip();
+    Ok(GeneratedItem {
+        bytes,
+        mime,
+        kind: Capability::Image,
+        width,
+        height,
+        duration_ms: None,
+    })
+}
+
+/// The size from the header alone: decoding a whole image to learn two numbers
+/// would cost more than the request that produced it.
+fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    reader.into_dimensions().ok()
+}
+
+/// An item whose bytes are the whole answer: audio and video, which arrive as
+/// neither a document nor a field of one.
+///
+/// What the bytes are wins over what the provider called them, because a
+/// container's name is not always one a file can be stored under. A success
+/// that carried a different family is refused rather than stored: an asset that
+/// cannot be played is worse than an error that says why.
+fn media_item(
+    bytes: Vec<u8>,
+    claimed: Option<&str>,
+    kind: Capability,
+    fallback: &str,
+) -> Result<GeneratedItem, ProviderError> {
+    if bytes.is_empty() {
+        return Err(ProviderError::NoOutput(format!(
+            "the answer carried no {}",
+            kind.as_str()
+        )));
+    }
+    let named = infer::get(&bytes)
+        .map(|sniffed| sniffed.mime_type().to_string())
+        .or_else(|| claimed.map(str::to_string))
+        .filter(|mime| mime != UNSPECIFIED_MIME);
+    let family = format!("{}/", kind.as_str());
+    let mime = match named {
+        Some(mime) if mime.starts_with(&family) => mime,
+        Some(mime) => {
+            return Err(ProviderError::Rejected(format!(
+                "the answer was {mime}, not {}",
+                kind.as_str()
+            )))
+        }
+        None => fallback.to_string(),
+    };
+    Ok(GeneratedItem {
+        bytes,
+        mime,
+        kind,
+        width: None,
+        height: None,
+        duration_ms: None,
+    })
+}
+
 fn transport(error: reqwest::Error) -> ProviderError {
     if error.is_timeout() {
         ProviderError::Timeout("the channel did not answer in time".to_string())
@@ -617,7 +718,7 @@ fn origin_of(address: &str) -> Option<String> {
 mod tests {
     use super::*;
     use reqwest::header::HeaderValue;
-    use serde_json::Value;
+    use serde_json::{json, Value};
     use std::sync::{Arc, Mutex};
 
     /// A sink that records what it was shown, so a test can assert on the
@@ -866,13 +967,118 @@ mod tests {
 
     #[test]
     fn a_protocol_answers_with_the_adapter_that_speaks_it() {
-        for protocol in [Protocol::Openai, Protocol::Custom] {
-            let adapter = for_protocol(protocol).expect("an adapter speaks it");
-            assert_eq!(adapter.protocol(), protocol);
+        for protocol in [Protocol::Openai, Protocol::Gemini, Protocol::Custom] {
+            assert_eq!(for_protocol(protocol).protocol(), protocol);
         }
-        // A channel speaking this protocol can be configured and asked what it
-        // offers; claiming a generation behind it would send a request nothing
-        // answers.
-        assert!(for_protocol(Protocol::Gemini).is_none());
+    }
+
+    /// A real encoded image, so a test can assert on what sniffing and the
+    /// header read find rather than on a mime somebody claimed.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let picture = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            width,
+            height,
+            image::Rgba([12, 34, 56, 255]),
+        ));
+        let mut encoded = Vec::new();
+        picture
+            .write_to(
+                &mut std::io::Cursor::new(&mut encoded),
+                image::ImageFormat::Png,
+            )
+            .expect("a png encodes");
+        encoded
+    }
+
+    #[test]
+    fn an_image_is_read_from_its_bytes_rather_than_from_the_request() {
+        // A provider that answers in a format it was not asked for is still
+        // answering, and storing that under the requested mime would produce an
+        // asset the canvas cannot open.
+        let item = image_item(png(3, 2)).expect("the bytes are an image");
+        assert_eq!(item.mime, "image/png");
+        assert_eq!(item.kind, Capability::Image);
+        assert_eq!((item.width, item.height), (Some(3), Some(2)));
+
+        let error = image_item(b"<html>not an image</html>".to_vec())
+            .expect_err("the bytes are not an image");
+        assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+        assert!(!error.retryable(), "{error} will not improve on a retry");
+    }
+
+    #[test]
+    fn media_is_named_by_what_it_is_rather_than_by_what_it_arrived_as() {
+        // The header of a wave file, which is what the bytes are however a
+        // provider spells the container it put them in.
+        let bytes = b"RIFF\x24\x00\x00\x00WAVEfmt ".to_vec();
+        let item = media_item(
+            bytes,
+            Some("audio/L16;codec=pcm"),
+            Capability::Audio,
+            "audio/mpeg",
+        )
+        .expect("the bytes are audio");
+        assert_eq!(item.mime, "audio/x-wav");
+        assert_eq!(item.kind, Capability::Audio);
+
+        // Nothing recognised and nothing claimed: the answer is stored as the
+        // mime such media usually arrives under, rather than refused.
+        let item = media_item(vec![1, 2, 3], None, Capability::Video, "video/mp4")
+            .expect("the bytes are kept");
+        assert_eq!(item.mime, "video/mp4");
+
+        // A mime that says nothing is the same as no mime at all.
+        let item = media_item(
+            vec![1, 2, 3],
+            Some(UNSPECIFIED_MIME),
+            Capability::Audio,
+            "audio/mpeg",
+        )
+        .expect("the bytes are kept");
+        assert_eq!(item.mime, "audio/mpeg");
+    }
+
+    #[test]
+    fn a_success_that_carried_something_else_is_refused_rather_than_stored() {
+        // Storing it would produce an asset that cannot be played, and the
+        // provider's own complaint would never be read.
+        let error = media_item(
+            br#"{"error":{"message":"that voice is not on this key"}}"#.to_vec(),
+            Some("application/json"),
+            Capability::Audio,
+            "audio/mpeg",
+        )
+        .expect_err("the answer is not audio");
+        assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+        assert!(error.to_string().contains("application/json"), "{error}");
+        assert!(!error.retryable(), "{error} will not improve on a retry");
+    }
+
+    #[test]
+    fn an_answer_with_no_bytes_carried_no_media() {
+        let error = media_item(
+            Vec::new(),
+            Some("audio/mpeg"),
+            Capability::Audio,
+            "audio/mpeg",
+        )
+        .expect_err("there is nothing to store");
+        assert_eq!(error.code(), "PROVIDER_NO_OUTPUT");
+    }
+
+    #[test]
+    fn totals_that_reported_nothing_are_not_reported_as_zeroes() {
+        // An all-empty struct would still show up in the interface as a row of
+        // zeroes, which reads as a measurement rather than as an absence.
+        assert_eq!(usage_of(Some(&json!({})), "in", "out"), None);
+        assert_eq!(usage_of(None, "in", "out"), None);
+        assert_eq!(
+            usage_of(Some(&json!({ "in": 4, "out": 2 })), "in", "out"),
+            Some(Usage {
+                input_tokens: Some(4),
+                output_tokens: Some(2),
+                ..Usage::default()
+            })
+        );
     }
 }

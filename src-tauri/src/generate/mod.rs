@@ -95,6 +95,20 @@ impl GenerateRequest {
         self.bool_param("stream").unwrap_or(false)
     }
 
+    /// The instruction that frames the prompt rather than forming part of it.
+    ///
+    /// A parameter can carry the same meaning as the field, and a request with
+    /// both means it twice; the field wins. An instruction of nothing but
+    /// whitespace is no instruction, and sending one would ask a model to obey
+    /// a blank page.
+    pub fn instruction(&self) -> Option<&str> {
+        self.system
+            .as_deref()
+            .or_else(|| self.text_param("instructions"))
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    }
+
     pub fn inputs_in(&self, role: InputRole) -> impl Iterator<Item = &GenerateInput> {
         self.inputs.iter().filter(move |input| input.role == role)
     }

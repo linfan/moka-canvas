@@ -114,20 +114,37 @@ async fn serve(routes: Router) -> String {
 
 /// A channel resolved to one model on a throwaway provider.
 fn channel(base_url: &str, model_id: &str, capability: Capability) -> ChannelCall {
+    speaking(Protocol::Openai, base_url, model_id, capability)
+}
+
+fn gemini_channel(base_url: &str, model_id: &str, capability: Capability) -> ChannelCall {
+    speaking(Protocol::Gemini, base_url, model_id, capability)
+}
+
+fn speaking(
+    protocol: Protocol,
+    base_url: &str,
+    model_id: &str,
+    capability: Capability,
+) -> ChannelCall {
     let resolved = ResolvedModel {
         reference: format!("channel-1::{model_id}"),
         channel_id: "channel-1".into(),
         model_id: model_id.into(),
         capability,
-        protocol: Protocol::Openai,
+        protocol,
         base_url: base_url.to_string(),
     };
     ChannelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
         .expect("a client builds")
 }
 
-fn adapter() -> &'static dyn ProviderAdapter {
-    for_protocol(Protocol::Openai).expect("an adapter speaks this protocol")
+fn openai_adapter() -> &'static dyn ProviderAdapter {
+    for_protocol(Protocol::Openai)
+}
+
+fn gemini_adapter() -> &'static dyn ProviderAdapter {
+    for_protocol(Protocol::Gemini)
 }
 
 fn generation(capability: Capability, prompt: &str, params: Value) -> GenerateRequest {
@@ -198,6 +215,19 @@ async fn refuse(status: StatusCode, body: Value) -> Response {
 /// type is declared so that reaching it can be a bare panic.
 async fn not_for_an_edit() -> Response {
     panic!("an edit must not be sent to the endpoint for a new image")
+}
+
+/// The address a request reached this provider on.
+///
+/// A route cannot know the ephemeral port it was bound to, so the only way for
+/// an answer to name a second endpoint on the same provider is to read the one
+/// it was asked on.
+fn reached_on(headers: &HeaderMap) -> String {
+    headers
+        .get("host")
+        .and_then(|value| value.to_str().ok())
+        .expect("a request names the host it asked for")
+        .to_string()
 }
 
 // ---------------------------------------------------------------- listing
@@ -440,12 +470,15 @@ async fn a_protocol_with_no_implementation_says_so_rather_than_dialling() {
 // ------------------------------------------------------------------- text
 
 /// An answer that arrives in pieces, as the endpoint that produces it sends it.
+///
+/// Only the pieces named here are sent: a provider that ends a stream with a
+/// word of its own has to say so, and one that simply stops has to be tested
+/// stopping.
 fn stream(events: &[&str]) -> Response {
     let mut body = String::new();
     for event in events {
         body.push_str(&format!("data: {event}\n\n"));
     }
-    body.push_str("data: [DONE]\n\n");
     (
         [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
         body,
@@ -468,6 +501,7 @@ async fn a_streamed_text_generation_is_aggregated_before_it_is_stored() {
                     r#"{"type":"response.output_text.delta","delta":"A "}"#,
                     r#"{"type":"response.output_text.delta","delta":"lantern."}"#,
                     r#"{"type":"response.completed","response":{"output_text":"A lantern.","usage":{"input_tokens":4,"output_tokens":2}}}"#,
+                    "[DONE]",
                 ])
             }
         }),
@@ -482,7 +516,7 @@ async fn a_streamed_text_generation_is_aggregated_before_it_is_stored() {
     );
     let (sink, seen) = watching();
 
-    let result = adapter()
+    let result = openai_adapter()
         .generate_stream(&call, &request, &[], &sink, &Cancel::new())
         .await
         .expect("the stream is read to its end");
@@ -539,7 +573,7 @@ async fn a_gateway_without_the_newer_text_endpoint_is_asked_on_the_older_one() {
 
     let call = channel(&base_url, "gpt-5.5", Capability::Text);
     let request = generation(Capability::Text, "describe a lantern", json!({}));
-    let result = adapter()
+    let result = openai_adapter()
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect("a listing gateway is not obliged to have every endpoint");
@@ -593,7 +627,7 @@ async fn a_request_a_provider_refused_is_not_repeated_on_another_endpoint() {
 
     let call = channel(&base_url, "gpt-5.5", Capability::Text);
     let request = generation(Capability::Text, "describe a lantern", json!({}));
-    let error = adapter()
+    let error = openai_adapter()
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect_err("the provider understood and refused the request");
@@ -629,7 +663,7 @@ async fn a_model_nobody_recognises_goes_straight_to_the_endpoint_everyone_has() 
     // Only the older endpoint is routed, so trying the newer one first would
     // have to fall back to reach this answer at all.
     let call = channel(&base_url, "llama-3.3", Capability::Text);
-    let result = adapter()
+    let result = openai_adapter()
         .generate(
             &call,
             &generation(Capability::Text, "say nothing", json!({})),
@@ -676,7 +710,7 @@ async fn an_image_generation_arrives_inline_with_its_size_read_from_the_bytes() 
         "a cat",
         json!({ "size": "1024x1024", "count": 1 }),
     );
-    let result = adapter()
+    let result = openai_adapter()
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect("the image arrives");
@@ -718,11 +752,7 @@ async fn an_image_left_on_the_channels_own_host_is_fetched_with_the_credential()
                     async move {
                         // The route does not know its own port, so the address
                         // is named from the one it was reached on.
-                        let host = headers
-                            .get("host")
-                            .and_then(|value| value.to_str().ok())
-                            .expect("a request names the host it asked for")
-                            .to_string();
+                        let host = reached_on(&headers);
                         recorded.note("generations", &headers, None);
                         Json(json!({ "data": [{ "url": format!("http://{host}/made/cat.png") }] }))
                     }
@@ -743,7 +773,7 @@ async fn an_image_left_on_the_channels_own_host_is_fetched_with_the_credential()
     .await;
 
     let call = channel(&base_url, "gpt-image-2", Capability::Image);
-    let result = adapter()
+    let result = openai_adapter()
         .generate(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -796,7 +826,7 @@ async fn an_image_left_on_another_host_is_fetched_without_the_credential() {
     .await;
 
     let call = channel(&base_url, "gpt-image-2", Capability::Image);
-    let result = adapter()
+    let result = openai_adapter()
         .generate(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -860,7 +890,7 @@ async fn references_turn_an_image_generation_into_a_multipart_edit() {
         reference("second", InputRole::Reference),
         reference("mask", InputRole::Mask),
     ];
-    let result = adapter()
+    let result = openai_adapter()
         .generate(
             &call,
             &generation(
@@ -921,7 +951,7 @@ async fn audio_arrives_as_the_bytes_the_provider_answered_with() {
         "read this aloud",
         json!({ "voice": "alloy", "format": "wav" }),
     );
-    let result = adapter()
+    let result = openai_adapter()
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect("the audio arrives");
@@ -955,7 +985,7 @@ async fn an_audio_answer_that_is_not_audio_is_refused_rather_than_stored() {
     .await;
 
     let call = channel(&base_url, "a-voice", Capability::Audio);
-    let error = adapter()
+    let error = openai_adapter()
         .generate(
             &call,
             &generation(Capability::Audio, "read this", json!({})),
@@ -1040,7 +1070,7 @@ async fn a_video_generation_is_started_polled_and_collected() {
         "a slow pan",
         json!({ "seconds": 6, "ratio": "16:9" }),
     );
-    let task = adapter()
+    let task = openai_adapter()
         .create_task(&call, &request, &inputs, &cancel)
         .await
         .expect("the job starts");
@@ -1064,13 +1094,13 @@ async fn a_video_generation_is_started_polled_and_collected() {
     );
     assert!(sent["last_frame"].is_string(), "{sent}");
 
-    match adapter().poll_task(&call, &task, &cancel).await {
+    match openai_adapter().poll_task(&call, &task, &cancel).await {
         Ok(TaskState::Pending { retry_after_ms }) => {
             assert!(retry_after_ms > 0, "a poll is worth waiting for")
         }
         other => panic!("expected a job still running, got {other:?}"),
     }
-    match adapter()
+    match openai_adapter()
         .poll_task(&call, &task, &cancel)
         .await
         .expect("the job is collected")
@@ -1110,7 +1140,7 @@ async fn a_job_the_provider_has_forgotten_ends_the_polling() {
         created_at: "2026-01-01T00:00:00Z".into(),
     };
 
-    let error = adapter()
+    let error = openai_adapter()
         .poll_task(&call, &task, &Cancel::new())
         .await
         .expect_err("the job is gone");
@@ -1145,7 +1175,7 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
         created_at: "2026-01-01T00:00:00Z".into(),
     };
 
-    match adapter()
+    match openai_adapter()
         .poll_task(&call, &task, &Cancel::new())
         .await
         .expect("the job answered")
@@ -1161,7 +1191,7 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_capability_with_no_job_is_not_started_as_one() {
     let call = channel("http://127.0.0.1:1", "gpt-image-2", Capability::Image);
-    let error = adapter()
+    let error = openai_adapter()
         .create_task(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -1197,7 +1227,7 @@ async fn a_cancelled_generation_is_not_sent() {
     let cancel = Cancel::new();
     cancel.cancel();
     let call = channel(&base_url, "gpt-image-2", Capability::Image);
-    let error = adapter()
+    let error = openai_adapter()
         .generate(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -1212,4 +1242,378 @@ async fn a_cancelled_generation_is_not_sent() {
         recorded.asked().is_empty(),
         "nothing was sent to a caller who is gone"
     );
+}
+
+// ----------------------------------------------------------------- gemini
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_gemini_generation_is_asked_on_the_models_own_address() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/gemini-2.5-flash:generateContent",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("generate", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "candidates": [{
+                        "content": { "role": "model", "parts": [{ "text": "A lantern, lit." }] }
+                    }],
+                    "usageMetadata": { "promptTokenCount": 4, "candidatesTokenCount": 2 },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "gemini-2.5-flash", Capability::Text);
+    let result = gemini_adapter()
+        .generate(
+            &call,
+            &generation(
+                Capability::Text,
+                "describe a lantern",
+                json!({ "instructions": "one sentence", "maxTokens": 200 }),
+            ),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern, lit."));
+    assert!(result.items.is_empty(), "words alone left nothing to store");
+    let usage = result.usage.expect("the totals were counted");
+    assert_eq!(usage.input_tokens, Some(4));
+    assert_eq!(usage.output_tokens, Some(2));
+
+    // This protocol carries its credential in a header of its own: a URL is
+    // quoted back in logs and in error messages, and a header is neither.
+    let headers = recorded.headers();
+    assert_eq!(headers.api_key.as_deref(), Some(API_KEY));
+    assert_eq!(headers.authorization, None);
+    assert_eq!(headers.query, None);
+
+    let sent = recorded.body(0);
+    assert_eq!(sent["contents"][0]["role"], "user");
+    assert_eq!(
+        sent["contents"][0]["parts"][0]["text"],
+        "describe a lantern"
+    );
+    assert_eq!(
+        sent["systemInstruction"]["parts"][0]["text"], "one sentence",
+        "an instruction frames the prompt rather than joining it"
+    );
+    assert_eq!(sent["generationConfig"]["maxOutputTokens"], 200);
+    // The model is named in the address. Naming it again in a body would leave
+    // two places for the two to disagree.
+    assert!(sent.get("model").is_none(), "{sent}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_image_a_gemini_model_made_arrives_inside_its_answer() {
+    // A shape of its own: the reference this request carries is 4x3, and an
+    // answer that echoed it back would otherwise look like one that was read.
+    let picture = png(6, 5);
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let encoded = base64(&picture);
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/an-image-model:generateContent",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            let encoded = encoded.clone();
+            async move {
+                recorded.note("generate", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "candidates": [{
+                        "content": { "parts": [
+                            { "text": "a cat, asleep" },
+                            { "inlineData": { "mimeType": "image/png", "data": encoded } },
+                        ] }
+                    }],
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "an-image-model", Capability::Image);
+    let inputs = [reference("style", InputRole::Reference)];
+    let result = gemini_adapter()
+        .generate(
+            &call,
+            &generation(
+                Capability::Image,
+                "a cat",
+                json!({ "size": "1024x1536", "count": 2 }),
+            ),
+            &inputs,
+            &Cancel::new(),
+        )
+        .await
+        .expect("the answer arrives");
+
+    // Words beside a picture are worth keeping: this protocol answers both in
+    // one document, and dropping the caption would lose what the model said.
+    assert_eq!(result.text.as_deref(), Some("a cat, asleep"));
+    assert_eq!(result.items.len(), 1);
+    let item = &result.items[0];
+    assert_eq!(item.mime, "image/png");
+    assert_eq!(item.kind, Capability::Image);
+    assert_eq!(item.bytes, picture);
+    assert_eq!(
+        (item.width, item.height),
+        (Some(6), Some(5)),
+        "the shape is read off the bytes rather than off the request"
+    );
+
+    let sent = recorded.body(0);
+    assert_eq!(
+        sent["generationConfig"]["responseModalities"],
+        json!(["TEXT", "IMAGE"]),
+        "words alone are the default, so a picture has to be asked for"
+    );
+    assert_eq!(
+        sent["generationConfig"]["imageConfig"]["aspectRatio"], "2:3",
+        "a size describes a shape, which is what this protocol can be told"
+    );
+    assert_eq!(sent["generationConfig"]["candidateCount"], 2);
+    // A reference travels inside the request: there is no upload here to point
+    // at, and no field of its own for one.
+    assert_eq!(
+        sent["contents"][0]["parts"][1]["inlineData"]["mimeType"],
+        "image/png"
+    );
+    assert_eq!(
+        sent["contents"][0]["parts"][1]["inlineData"]["data"],
+        base64(&png(4, 3))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_streamed_gemini_answer_is_asked_for_as_events_and_aggregated() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/gemini-2.5-flash:streamGenerateContent",
+        post(
+            move |RawQuery(query): RawQuery, headers: HeaderMap, body: Bytes| {
+                let recorded = answering.clone();
+                async move {
+                    recorded.note("stream", &headers, query);
+                    recorded.note_body(&body);
+                    // Each piece is a whole answer document carrying only what
+                    // was written since the last one, and the stream simply
+                    // stops: there is no closing word to wait for.
+                    stream(&[
+                        r#"{"candidates":[{"content":{"parts":[{"text":"A "}]}}]}"#,
+                        r#"{"candidates":[{"content":{"parts":[{"text":"lantern."}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2}}"#,
+                    ])
+                }
+            },
+        ),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "gemini-2.5-flash", Capability::Text);
+    let request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "stream": true }),
+    );
+    let (sink, seen) = watching();
+    let result = gemini_adapter()
+        .generate_stream(&call, &request, &[], &sink, &Cancel::new())
+        .await
+        .expect("the stream is read to its end");
+
+    assert_eq!(shown(&seen), "A lantern.", "every piece reached the caller");
+    assert_eq!(result.text.as_deref(), Some("A lantern."));
+    assert_eq!(
+        result.usage.and_then(|usage| usage.output_tokens),
+        Some(2),
+        "the totals arrived with the last piece"
+    );
+    assert_eq!(
+        recorded.headers().query.as_deref(),
+        Some("alt=sse"),
+        "a stream is asked for in the query rather than in the body"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_prompt_a_gemini_model_blocked_is_explained_rather_than_reported_as_empty() {
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/gemini-2.5-flash:generateContent",
+        post(|| async {
+            // A refusal can arrive as a success, so reading only the status
+            // would report an answer that said nothing.
+            Json(json!({ "promptFeedback": { "blockReason": "SAFETY" } }))
+        }),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "gemini-2.5-flash", Capability::Text);
+    let error = gemini_adapter()
+        .generate(
+            &call,
+            &generation(Capability::Text, "something refused", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the prompt was blocked");
+
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(error.to_string().contains("SAFETY"), "{error}");
+    assert!(!error.retryable(), "{error} would be refused again");
+}
+
+/// A provider that starts a job, answers one look with work still to do, and
+/// the next with the addresses the finished shot was left at.
+async fn gemini_video_provider(recorded: Recorded) -> String {
+    let started = recorded.clone();
+    let polled = recorded.clone();
+    let collected = recorded.clone();
+    serve(
+        Router::new()
+            .route(
+                "/v1beta/models/a-video-model:predictLongRunning",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = started.clone();
+                    async move {
+                        recorded.note("predict", &headers, None);
+                        recorded.note_body(&body);
+                        Json(json!({
+                            "name": "models/a-video-model/operations/job-1",
+                            "done": false,
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/v1beta/models/a-video-model/operations/job-1",
+                get(move |headers: HeaderMap| {
+                    let recorded = polled.clone();
+                    async move {
+                        recorded.note("operation", &headers, None);
+                        if recorded.next_poll() == 0 {
+                            return Json(json!({ "done": false, "progressPercent": 40 }));
+                        }
+                        // A finished job names where to collect from, and it
+                        // can only name this provider by the address it was
+                        // reached on.
+                        let host = reached_on(&headers);
+                        Json(json!({
+                            "done": true,
+                            "response": { "generateVideoResponse": { "generatedSamples": [
+                                { "video": {
+                                    "uri": format!("http://{host}/v1beta/files/shot:download"),
+                                } },
+                            ] } },
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/v1beta/files/shot:download",
+                get(move |headers: HeaderMap| {
+                    let recorded = collected.clone();
+                    async move {
+                        recorded.note("download", &headers, None);
+                        Response::builder()
+                            .header(axum::http::header::CONTENT_TYPE, "video/mp4")
+                            .body(Body::from(b"mp4-bytes".to_vec()))
+                            .expect("a response builds")
+                    }
+                }),
+            ),
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_gemini_video_job_is_started_polled_and_collected() {
+    let recorded = Recorded::default();
+    let base_url = gemini_video_provider(recorded.clone()).await;
+    let call = gemini_channel(&base_url, "a-video-model", Capability::Video);
+    let cancel = Cancel::new();
+
+    // A shot does not answer in one call: waiting one out would hold a
+    // connection open for minutes, so it is started as a job instead.
+    let request = generation(
+        Capability::Video,
+        "a slow pan",
+        json!({ "seconds": 6, "ratio": "16:9" }),
+    );
+    let refused = gemini_adapter()
+        .generate(&call, &request, &[], &cancel)
+        .await
+        .expect_err("a shot is a job rather than an answer");
+    assert_eq!(refused.code(), "VALIDATION_FAILED");
+
+    let inputs = [
+        reference("opening", InputRole::FirstFrame),
+        reference("closing", InputRole::LastFrame),
+    ];
+    let task = gemini_adapter()
+        .create_task(&call, &request, &inputs, &cancel)
+        .await
+        .expect("the job starts");
+
+    assert!(!task.id.is_empty());
+    assert_ne!(
+        task.id, task.reference,
+        "the handle a client polls with is ours"
+    );
+    assert_eq!(task.reference, "models/a-video-model/operations/job-1");
+    assert_eq!(task.protocol, Protocol::Gemini);
+    assert_eq!(task.capability, Capability::Video);
+    assert_eq!(task.model, "channel-1::a-video-model");
+
+    let sent = recorded.body(0);
+    assert_eq!(sent["instances"][0]["prompt"], "a slow pan");
+    assert!(
+        sent["instances"][0]["image"]["bytesBase64Encoded"].is_string(),
+        "the opening frame was named: {sent}"
+    );
+    assert!(
+        sent["instances"][0]["lastFrame"]["bytesBase64Encoded"].is_string(),
+        "and so was the closing one: {sent}"
+    );
+    assert_eq!(sent["parameters"]["durationSeconds"], 6);
+    assert_eq!(sent["parameters"]["aspectRatio"], "16:9");
+    assert!(sent.get("model").is_none(), "{sent}");
+
+    match gemini_adapter().poll_task(&call, &task, &cancel).await {
+        Ok(TaskState::Pending { retry_after_ms }) => {
+            assert!(retry_after_ms > 0, "another look is worth waiting for")
+        }
+        other => panic!("expected a job still running, got {other:?}"),
+    }
+    match gemini_adapter()
+        .poll_task(&call, &task, &cancel)
+        .await
+        .expect("the job is collected")
+    {
+        TaskState::Succeeded(result) => {
+            assert_eq!(result.items.len(), 1);
+            assert_eq!(result.items[0].mime, "video/mp4");
+            assert_eq!(result.items[0].kind, Capability::Video);
+            assert_eq!(result.items[0].bytes, b"mp4-bytes");
+        }
+        other => panic!("expected the finished shot, got {other:?}"),
+    }
+
+    assert_eq!(
+        recorded.asked(),
+        ["predict", "operation", "operation", "download"]
+    );
+    // The shot was left on the channel's own host, which will only answer a
+    // request for it when the credential came along.
+    assert_eq!(recorded.headers().api_key.as_deref(), Some(API_KEY));
 }
