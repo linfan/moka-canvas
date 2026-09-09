@@ -439,10 +439,18 @@ export function PromptPanel() {
   /**
    * Opens or folds away the disclosure of what this node will send.
    *
-   * Opening saves what is typed first and waits for it to land. The preview is
-   * read off the document on disk, so asking for it straight after a keystroke
-   * would answer for the ask before this one — and then answer again, differently,
-   * once the save caught up.
+   * Opening saves what the panel holds first and waits for it to land. The
+   * preview is read off the document on disk, so asking for it straight after a
+   * keystroke would answer for the ask before this one — and then answer again,
+   * differently, once the save caught up.
+   *
+   * Saved whole, since a node the panel has just come up on holds no ask at all
+   * and may still have one to show: its words can be arriving on a wire rather
+   * than typed here. Where nothing could be asked for yet, nothing is written
+   * for it — a spec gained by opening a disclosure would make a node look asked
+   * when the panel itself is still saying why it cannot be. An ask already in
+   * the document is left alone by the command layer, so this costs a step of
+   * history only the first time.
    */
   const togglePreview = async () => {
     if (previewOpen) {
@@ -450,7 +458,7 @@ export function PromptPanel() {
       return;
     }
     setPreviewError(null);
-    commitPrompt();
+    if (refusal === null) commit();
     await useProjectStore.getState().flush();
     setPreviewOpen(true);
   };

@@ -1035,6 +1035,29 @@ describe("what a node will send", () => {
     expect(disclosure()).toBeTruthy();
   });
 
+  it("writes the ask of a node fed from upstream before reading it", async () => {
+    const fed = withFedNode();
+    await openEditor();
+    selectNode(fed);
+    await settle();
+    expect(specOf(fed), "a node nobody has asked yet holds no ask").toBe(
+      undefined,
+    );
+
+    fireEvent.click(unfold());
+    await settle();
+
+    // Its words arrive on a wire rather than being typed here, so saving only
+    // what is typed would leave the document holding nothing for the server to
+    // read, and the disclosure would answer that there is nothing to show from
+    // inside the thing that had just offered to show it.
+    expect(specOf(fed), "the ask is written whole").toBeTruthy();
+    expect(specOf(fed)?.prompt, "the words are not the panel's to invent").toBe(
+      "",
+    );
+    expect(disclosure().textContent).toContain("[Text 1]");
+  });
+
   it("says what will not travel with the ask", async () => {
     const [reference] = makePreview().inputs;
     api.preview = makePreview({
@@ -1065,6 +1088,9 @@ describe("what a node will send", () => {
     expect(disclosure().textContent).toContain(
       "This node has not been asked for anything yet",
     );
+    // A node with nothing to ask for gains no ask from opening the disclosure:
+    // the refusal is the answer to it, not something to write around.
+    expect(specOf(ids.image)).toBe(undefined);
   });
 });
 

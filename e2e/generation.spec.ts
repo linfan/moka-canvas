@@ -479,3 +479,95 @@ test("a node is asked from the panel under it, and one of several answers shown"
   expect(calls).toHaveLength(1);
   expect(calls[0].count, "the panel's own parameter travelled").toBe(3);
 });
+
+/** What the text node says before anything is asked of it. */
+const BRIEF = "A lantern drifts over a quiet lake at dusk.";
+
+test("what the preview shows is what the provider is handed", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureChannel();
+
+  const name = "Shown To The Provider";
+  await page.goto("/");
+  await createProject(
+    page,
+    join(projectHome("generation-shown"), "project"),
+    name,
+  );
+  await addNode(page, "Text");
+  await page.keyboard.press("Escape");
+  await expect
+    .poll(() => persistedNodeCount(page), { timeout: 10_000 })
+    .toBe(1);
+
+  // The words are written through the command endpoint rather than typed, so
+  // what is proved starts from a document that exists.
+  const before = await served();
+  const canvas = before.moka.canvas[0];
+  const words = canvas.nodes[0];
+  await json(`${APP}/api/v1/projects/current/commands`, "writing the words", {
+    method: "POST",
+    body: {
+      expectedRevision: before.moka.metadata.revision,
+      commands: [
+        {
+          type: "updateNode",
+          canvasId: canvas.id,
+          nodeId: words.id,
+          patch: { data: { ...words.data, content: BRIEF } },
+        },
+      ],
+    },
+  });
+
+  await page.reload();
+  await openRecent(page, name);
+  await expect(
+    page.getByRole("banner").getByText(name, { exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+
+  // The canvas is a Leafer surface with nothing a locator can point at. One node
+  // is on it, so selecting all selects it, and fitting the selection puts it
+  // where a click can reach it.
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Shift+1");
+  const surface = await page.getByTestId("canvas-surface").boundingBox();
+  expect(surface).not.toBeNull();
+  const middle = {
+    x: surface!.x + surface!.width / 2,
+    y: surface!.y + surface!.height / 2,
+  };
+  await page.mouse.click(middle.x, middle.y, { button: "right" });
+
+  // Words are a place to start from: what is made of them is fed by them and
+  // comes up with its own panel, and nothing has been asked for yet.
+  await page.getByRole("menuitem", { name: "Image from these words" }).click();
+  const panel = page.getByTestId("prompt-panel");
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  await expect(
+    (await providerCalls()).length,
+    "a choice from a menu spends nothing",
+  ).toBe(0);
+
+  await panel.getByRole("button", { name: "Preview" }).click();
+  const shown = panel.getByTestId("input-preview");
+  await expect(shown).toContainText("[Text 1]", { timeout: 10_000 });
+  await expect(shown).toContainText(BRIEF);
+  const previewed =
+    (await shown.locator(".prompt-panel-preview-text").textContent()) ?? "";
+  expect(previewed, "the words upstream are folded in").toContain(BRIEF);
+
+  await panel.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(page.getByText("Filed under Images (1)")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  // The whole point of the preview: what it showed is what left the building,
+  // character for character, with nothing added or dropped on the way.
+  const calls = await providerCalls();
+  expect(calls).toHaveLength(1);
+  expect(calls[0].path).toBe("/v1/images/generations");
+  expect(calls[0].prompt).toBe(previewed);
+});

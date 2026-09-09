@@ -101,6 +101,40 @@ npm run test:e2e  # Playwright: critical path, provider settings, and a
     undo step. Finally leave the project and switch canvas with a run
     still going: both say how many are going, neither stops one, and
     what it makes is in the project when it is opened again.
+12. Give a node something to work from, which is the half of an ask that
+    decides what a provider is handed. Wire a text node into an image
+    node and open **Preview**: the words arrive as a run will send them,
+    with the upstream text folded in under a `[Text 1]` heading of its
+    own, and each reference is listed with its mime type, dimensions,
+    size and the card it came from. Run it and confirm that is what the
+    provider was handed — the automated equivalent is
+    `cargo test --test provider_runs what_the_panel_shows`, with the
+    panel, the bar and the mention field covered by `npm test`. Switch
+    the bar to **By hand**, point at two nodes, drag one above the
+    other, and confirm the preview lists them in the new order rather
+    than in the order the wires were drawn. Switch to **In the prompt**,
+    type `@`, and confirm what is offered is the nodes this one could
+    mean, that a picture is offered by its thumbnail and a text by its
+    first words, that what is chosen is written as `@[node:<id>]` with a
+    chip under the field, and that the chip can be looked at, taken out
+    whole, and followed back to the card it names. Delete the node a
+    mention names and confirm the chip says so and the button refuses
+    rather than sending an ask that quietly means something else. Drop
+    an asset from the resource panel onto the bar in each of the two
+    modes that take one and confirm it is wired in beside the node in
+    one and listed by it in the other; confirm the bar is not a place to
+    leave one in the mode where the prompt decides. Move a wired-in
+    reference onto the mask or the first frame of the node taking it and
+    confirm the preview lists it under that role. Fill an upstream text
+    past the prompt limit and confirm the preview says by how much it was
+    cut; remove an asset's file from under the project and confirm its
+    reference is listed as one that will not travel rather than dropped
+    from the list. Copy a node whose prompt mentions another and paste
+    it: the copy's mention names the copy. Choose **Image from these
+    words** on a text node and confirm a node appears to its right,
+    wired to it, with its panel open and nothing asked for yet. Finally
+    link an asset the project already holds to an empty image node from
+    the inspector and confirm the node stops waiting without a run.
 
 ## macOS (`make package-macos`)
 
