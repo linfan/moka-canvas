@@ -54,3 +54,32 @@ export function fitBounds(bounds: Rect) {
 export function focusNode(nodeId: string) {
   active?.focusNode(nodeId);
 }
+
+/**
+ * Collapses a burst of calls into one per interval.
+ *
+ * The call lands at the end of each window, so what is drawn is the last state
+ * of the burst rather than the first. Words arriving from a run move the store
+ * once per word, and a scene redrawn per word is redrawn hundreds of times a
+ * second for something no reader can tell from ten times a second.
+ */
+export function coalescing(
+  intervalMs: number,
+  act: () => void,
+): { fire: () => void; stop: () => void } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    fire() {
+      if (timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        act();
+      }, intervalMs);
+    },
+    stop() {
+      if (timer === null) return;
+      clearTimeout(timer);
+      timer = null;
+    },
+  };
+}

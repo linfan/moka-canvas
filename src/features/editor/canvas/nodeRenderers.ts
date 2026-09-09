@@ -1,10 +1,11 @@
-import { Ellipse, Group, Rect, Text } from "leafer-ui";
+import { Ellipse, Group, Line, Rect, Text } from "leafer-ui";
 import type {
   NodeKind,
   Point,
-  RunStatus,
+  ResultSlot,
   WorkflowNode,
 } from "../../../shared/domain";
+import type { NodeRunView } from "../stores/runStore";
 import { NODE_HEADER_HEIGHT, PORT_RADIUS, canvasTheme } from "./theme";
 import { layoutPorts, type PortView } from "./portLayout";
 import {
@@ -21,8 +22,8 @@ export interface NodeVisualState {
   lowDetail: boolean;
   /** Related-highlight is active and this node is outside the chain. */
   dimmed: boolean;
-  /** Latest run step status for this node, if any. */
-  runStatus: RunStatus | null;
+  /** What this node's own run says about it; null while no run covers it. */
+  run: NodeRunView | null;
 }
 
 export interface NodeView {
@@ -36,12 +37,62 @@ export interface NodeView {
   visual: NodeVisualState;
   /** Run-status dot in the header corner; null while no run covers the node. */
   statusDot: Ellipse | null;
+  /** The mark standing in for the dot where a run gave up: circle and its "!". */
+  failMark: Group | null;
+  /**
+   * How far a run has got, across the top of the card; null while none is. The
+   * stripe stands in for the bar where nobody has measured a fraction of it.
+   */
+  progress: { track: Rect; fill: Rect; stripes: Line } | null;
+  /** How many results the last ask made, where it made more than one. */
+  resultCount: Text | null;
   media: {
     signature: string;
     thumb: Rect | null;
     badge: Text | null;
     bars: Rect[];
   };
+}
+
+/** How far in from each edge the measure of a run is drawn. */
+const PROGRESS_INSET = 12;
+const PROGRESS_HEIGHT = 3;
+/** How far below the card's top edge that measure sits. */
+const PROGRESS_TOP = 2;
+/** The dot, and the mark that replaces it where a run gave up. */
+const DOT_SIZE = 9;
+const FAIL_SIZE = 13;
+/** The right edge every mark in the header is set back from. */
+const MARK_EDGE = 12;
+/** The count of results, and the gap keeping it clear of the dot. */
+const COUNT_WIDTH = 26;
+const COUNT_HEIGHT = 14;
+const COUNT_GAP = 6;
+
+/**
+ * Whether two readings of a node's run are the same reading.
+ *
+ * Field by field rather than by identity: the reading is built fresh on every
+ * push, so identity would say "changed" to every card a run covers on every
+ * word it says, which is the redraw this comparison exists to avoid.
+ */
+export function sameRun(
+  one: NodeRunView | null,
+  other: NodeRunView | null,
+): boolean {
+  if (one === null || other === null) return one === other;
+  return (
+    one.status === other.status &&
+    one.progress === other.progress &&
+    one.error === other.error &&
+    one.said === other.said
+  );
+}
+
+/** How many results the node's last ask made, counting the one it keeps. */
+function resultCount(node: WorkflowNode): number {
+  const slots = (node.data as { resultSlots?: ResultSlot[] }).resultSlots;
+  return slots?.length ?? 0;
 }
 
 const KIND_GLYPH: Record<NodeKind, string> = {
@@ -78,6 +129,20 @@ function summarize(node: WorkflowNode): string {
     case "export":
       return String(data.format ?? "export").toUpperCase();
   }
+}
+
+/**
+ * What the card's one line of body text says.
+ *
+ * A text answer arrives in pieces, and the card shows the pieces that have
+ * landed rather than waiting for the whole of them: the node reads as working,
+ * and the words themselves are the proof.
+ */
+function wordsFor(node: WorkflowNode, run: NodeRunView | null): string {
+  if (node.kind === "text" && run && run.said.trim() !== "") {
+    return run.said.slice(0, 120);
+  }
+  return summarize(node);
 }
 
 /** Card body area below the header, inset from the frame. */
@@ -248,7 +313,7 @@ export function createNodeView(
     y: NODE_HEADER_HEIGHT + 12,
     width: node.bounds.width - 28,
     height: node.bounds.height - NODE_HEADER_HEIGHT - 20,
-    text: summarize(node),
+    text: wordsFor(node, visual.run),
     fontSize: 12,
     fill: canvasTheme.nodeMuted,
     fontFamily: canvasTheme.fontFamily,
@@ -270,6 +335,9 @@ export function createNodeView(
     node,
     visual,
     statusDot: null,
+    failMark: null,
+    progress: null,
+    resultCount: null,
     media: { signature: "", thumb: null, badge: null, bars: [] },
   };
   syncMedia(view, node, media);
@@ -312,29 +380,188 @@ function syncPorts(view: NodeView, node: WorkflowNode) {
   }
 }
 
-function syncStatusDot(view: NodeView, status: RunStatus | null) {
-  if (!status) {
-    if (view.statusDot) {
-      view.statusDot.remove();
-      view.statusDot = null;
-    }
-    return;
-  }
-  if (!view.statusDot) {
-    view.statusDot = new Ellipse({
-      width: 9,
-      height: 9,
-      stroke: canvasTheme.nodeFill,
-      strokeWidth: 1.5,
-      hittable: false,
-    });
-    view.group.add(view.statusDot);
-  }
-  view.statusDot.set({
-    x: view.node.bounds.width - 21,
-    y: (NODE_HEADER_HEIGHT - 9) / 2,
-    fill: canvasTheme.runStatus[status] ?? canvasTheme.nodeMuted,
+/** Where a mark of this size sits in the header's right-hand corner. */
+function markSlot(width: number, size: number) {
+  return { x: width - MARK_EDGE - size, y: (NODE_HEADER_HEIGHT - size) / 2 };
+}
+
+/** Where the measure of a run starts, and how far it may go. */
+function measureSpan(width: number) {
+  return { x: PROGRESS_INSET, span: Math.max(0, width - PROGRESS_INSET * 2) };
+}
+
+/** Where the count of results sits, clear of the mark beside it. */
+function countSlot(width: number) {
+  return {
+    x: width - MARK_EDGE - DOT_SIZE - COUNT_GAP - COUNT_WIDTH,
+    y: (NODE_HEADER_HEIGHT - COUNT_HEIGHT) / 2,
+  };
+}
+
+/**
+ * Places the measure of a run across a card this wide.
+ *
+ * The bar reaches as far as anybody has measured, and never less than its own
+ * height: a run that has begun has begun, however little of it is known. Where
+ * nobody has measured a fraction at all, the stripe stands in for the bar.
+ */
+function placeMeasure(
+  measure: { track: Rect; fill: Rect; stripes: Line },
+  width: number,
+  measured: number | null,
+) {
+  const { x, span } = measureSpan(width);
+  const band = PROGRESS_TOP + PROGRESS_HEIGHT / 2;
+  measure.track.set({ x, width: span });
+  measure.stripes.set({ points: [x, band, x + span, band] });
+  measure.fill.set({
+    x,
+    width: Math.max(
+      PROGRESS_HEIGHT,
+      span * Math.min(1, Math.max(0, measured ?? 0)),
+    ),
   });
+}
+
+/**
+ * Everything the card says about its node's own run.
+ *
+ * Each mark is made only while it is wanted and taken away the moment it is
+ * not, so a card nobody has ever asked carries nothing at all, and one whose
+ * run has ended keeps only the count of what it made.
+ */
+function syncRunMarks(
+  view: NodeView,
+  node: WorkflowNode,
+  visual: NodeVisualState,
+) {
+  const run = visual.run;
+  const status = run?.status ?? null;
+  const failed = status === "failed";
+  const going = status === "queued" || status === "running";
+  const measured = going ? (run?.progress ?? null) : null;
+  const width = node.bounds.width;
+  const color = canvasTheme.runStatus[status ?? ""] ?? canvasTheme.nodeMuted;
+
+  // A run that gave up is said by the mark below, which is louder: the two
+  // never stand in the same corner at once.
+  if (status === null || failed) {
+    view.statusDot?.remove();
+    view.statusDot = null;
+  } else {
+    if (!view.statusDot) {
+      view.statusDot = new Ellipse({
+        width: DOT_SIZE,
+        height: DOT_SIZE,
+        stroke: canvasTheme.nodeFill,
+        strokeWidth: 1.5,
+        hittable: false,
+      });
+      view.group.add(view.statusDot);
+    }
+    view.statusDot.set({ ...markSlot(width, DOT_SIZE), fill: color });
+  }
+
+  if (failed) {
+    if (!view.failMark) {
+      const mark = new Group({ hittable: false });
+      mark.add(
+        new Ellipse({
+          width: FAIL_SIZE,
+          height: FAIL_SIZE,
+          fill: canvasTheme.runStatus.failed ?? canvasTheme.portRejected,
+          hittable: false,
+        }),
+      );
+      mark.add(
+        new Text({
+          width: FAIL_SIZE,
+          height: FAIL_SIZE,
+          text: "!",
+          fontSize: 10,
+          fontWeight: 700,
+          fill: canvasTheme.nodeFill,
+          fontFamily: canvasTheme.fontFamily,
+          textAlign: "center",
+          verticalAlign: "middle",
+          hittable: false,
+        }),
+      );
+      view.group.add(mark);
+      view.failMark = mark;
+    }
+    view.failMark.set(markSlot(width, FAIL_SIZE));
+  } else {
+    view.failMark?.remove();
+    view.failMark = null;
+  }
+
+  if (going) {
+    if (!view.progress) {
+      const track = new Rect({
+        y: PROGRESS_TOP,
+        height: PROGRESS_HEIGHT,
+        cornerRadius: PROGRESS_HEIGHT / 2,
+        fill: "#ffffff14",
+        hittable: false,
+      });
+      const fill = new Rect({
+        y: PROGRESS_TOP,
+        height: PROGRESS_HEIGHT,
+        cornerRadius: PROGRESS_HEIGHT / 2,
+        fill: color,
+        hittable: false,
+      });
+      const stripes = new Line({
+        strokeWidth: PROGRESS_HEIGHT,
+        stroke: color,
+        dashPattern: [9, 7],
+        opacity: 0.75,
+        hittable: false,
+      });
+      view.group.add(track);
+      view.group.add(fill);
+      view.group.add(stripes);
+      view.progress = { track, fill, stripes };
+    }
+    placeMeasure(view.progress, width, measured);
+  } else {
+    view.progress?.track.remove();
+    view.progress?.fill.remove();
+    view.progress?.stripes.remove();
+    view.progress = null;
+  }
+
+  const made = resultCount(node);
+  if (made > 1) {
+    if (!view.resultCount) {
+      view.resultCount = new Text({
+        width: COUNT_WIDTH,
+        height: COUNT_HEIGHT,
+        fontSize: 10,
+        fill: canvasTheme.nodeMuted,
+        fontFamily: canvasTheme.fontFamily,
+        textAlign: "right",
+        verticalAlign: "middle",
+        hittable: false,
+      });
+      view.group.add(view.resultCount);
+    }
+    view.resultCount.set({ ...countSlot(width), text: `×${made}` });
+  } else {
+    view.resultCount?.remove();
+    view.resultCount = null;
+  }
+
+  const shown = !visual.lowDetail;
+  if (view.statusDot) view.statusDot.visible = shown;
+  if (view.failMark) view.failMark.visible = shown;
+  if (view.resultCount) view.resultCount.visible = shown;
+  if (view.progress) {
+    view.progress.track.visible = shown;
+    view.progress.fill.visible = shown && measured !== null;
+    view.progress.stripes.visible = shown && measured === null;
+  }
 }
 
 function applyVisual(view: NodeView, visual: NodeVisualState) {
@@ -354,8 +581,7 @@ function applyVisual(view: NodeView, visual: NodeVisualState) {
   for (const port of view.ports.values()) {
     port.dot.visible = !visual.lowDetail;
   }
-  syncStatusDot(view, visual.runStatus);
-  if (view.statusDot) view.statusDot.visible = !visual.lowDetail;
+  syncRunMarks(view, view.node, visual);
   group.opacity = visual.dimmed ? 0.35 : 1;
 }
 
@@ -381,7 +607,7 @@ export function updateNodeView(
     y: NODE_HEADER_HEIGHT + 12,
     width: node.bounds.width - 28,
     height: node.bounds.height - NODE_HEADER_HEIGHT - 20,
-    text: summarize(node),
+    text: wordsFor(node, visual.run),
   });
   syncMedia(view, node, media);
   layoutMedia(view, node.bounds);
@@ -408,7 +634,16 @@ export function previewNodeBounds(
   view.frame.set({ width: bounds.width, height: bounds.height });
   view.accent.set({ height: bounds.height });
   view.title.set({ width: bounds.width - 52 });
-  view.statusDot?.set({ x: bounds.width - 21 });
+  view.statusDot?.set(markSlot(bounds.width, DOT_SIZE));
+  view.failMark?.set(markSlot(bounds.width, FAIL_SIZE));
+  view.resultCount?.set(countSlot(bounds.width));
+  if (view.progress) {
+    placeMeasure(
+      view.progress,
+      bounds.width,
+      view.visual.run?.progress ?? null,
+    );
+  }
   view.summary.set({
     width: bounds.width - 28,
     height: bounds.height - NODE_HEADER_HEIGHT - 20,

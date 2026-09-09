@@ -5,7 +5,7 @@ import type {
   HitTarget,
   LeaferEditorController,
 } from "./controller";
-import { registerController } from "./canvasControl";
+import { coalescing, registerController } from "./canvasControl";
 import {
   checkConnection,
   connectPorts,
@@ -19,8 +19,11 @@ import {
 } from "../interactions/actions";
 import { useEditorStore, type ContextMenuTarget } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
-import { nodeRunStatuses, useRunStore } from "../stores/runStore";
+import { nodeRunViews, useRunStore } from "../stores/runStore";
 import { buildIssueIndex, buildResourceIndex } from "./mediaCards";
+
+/** How often words arriving from a run may redraw the scene, at the most. */
+const RUN_REDRAW_MS = 100;
 
 function activeCanvas(): CanvasDocument | null {
   const { moka, activeCanvasId } = useProjectStore.getState();
@@ -206,17 +209,22 @@ export function CanvasSurface() {
                 candidates: pickSourceCandidates(canvas, editor.inputPick),
               }
             : null,
-          runStatus: nodeRunStatuses(),
+          runViews: nodeRunViews(),
         });
       };
 
+      // Words arriving from a run move the store once per word. The document and
+      // the pointer redraw at once, since a hand waiting on its own click is a
+      // hand that clicks again; the words may wait for the end of their frame.
+      const words = coalescing(RUN_REDRAW_MS, push);
       const unsubscribeProject = useProjectStore.subscribe(push);
       const unsubscribeEditor = useEditorStore.subscribe(push);
-      const unsubscribeRuns = useRunStore.subscribe(push);
+      const unsubscribeRuns = useRunStore.subscribe(words.fire);
       unsubscribe = () => {
         unsubscribeProject();
         unsubscribeEditor();
         unsubscribeRuns();
+        words.stop();
       };
       push();
     };

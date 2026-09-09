@@ -151,13 +151,22 @@ export async function startMockProvider(): Promise<MockProvider> {
     } catch {
       return send(400, { error: { message: "the request was not JSON" } });
     }
+    const prompt = String(body.prompt ?? "") || lastMessage(body);
     calls.push({
       path,
       model: String(body.model ?? ""),
-      prompt: String(body.prompt ?? "") || lastMessage(body),
+      prompt,
       count: Number(body.n ?? 1),
       credentialed: Boolean(request.headers.authorization),
     });
+
+    // A marker word in a prompt is a direction to the stand-in rather than part
+    // of it: refuse, so that a run which gave up exists to be looked at.
+    if (prompt.includes("[refuse]")) {
+      return send(500, {
+        error: { message: "the stand-in will not paint that" },
+      });
+    }
 
     if (path === "/v1/images/generations") {
       const count = Math.max(1, Number(body.n ?? 1));

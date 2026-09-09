@@ -416,20 +416,42 @@ function current(asked: NodeRun[]): NodeRun | null {
   return asked.find((entry) => isActive(entry.run.status)) ?? asked[0] ?? null;
 }
 
+/** What one node's own run has to say about it, as a card draws it. */
+export interface NodeRunView {
+  status: RunStatus;
+  /** How far the step got, where anybody measured one; null where nobody has. */
+  progress: number | null;
+  /** What the step last said went wrong. */
+  error: string | null;
+  /** The words the run is still typing for this node, and nothing once it ends. */
+  said: string;
+}
+
 /**
- * The status each node's own run gives it, for a reader asking about every node
+ * What every node's own run says about it, for a reader asking about all of them
  * at once rather than one of them.
  *
  * Answered from the index rather than from the list of runs: the canvas asks
- * whenever anything moves, and moving includes every word a run says.
+ * whenever anything moves, and moving includes every word a run says. One walk
+ * answers the whole canvas, so a card draws from this rather than reaching back
+ * into the runs for each of the four things it shows.
  */
-export function nodeRunStatuses(): ReadonlyMap<NodeId, RunStatus> {
-  const statuses = new Map<NodeId, RunStatus>();
-  for (const [nodeId, asked] of useRunStore.getState().byNode) {
+export function nodeRunViews(): ReadonlyMap<NodeId, NodeRunView> {
+  const state = useRunStore.getState();
+  const views = new Map<NodeId, NodeRunView>();
+  for (const [nodeId, asked] of state.byNode) {
     const found = current(asked);
-    if (found) statuses.set(nodeId, found.step.status);
+    if (!found) continue;
+    views.set(nodeId, {
+      status: found.step.status,
+      progress: found.step.progress ?? null,
+      error: found.step.error ?? null,
+      said: isActive(found.run.status)
+        ? (state.streamText[found.run.id]?.[nodeId] ?? "")
+        : "",
+    });
   }
-  return statuses;
+  return views;
 }
 
 function stepOf(byNode: RunsByNode, nodeId: NodeId): RunStepRecord | null {
@@ -466,8 +488,10 @@ export function useNodeRunProgress(nodeId: NodeId): number | null {
 }
 
 /** What a node's step last said went wrong, if anything. */
-export function useNodeRunError(nodeId: NodeId): string | null {
-  return useRunStore((state) => stepOf(state.byNode, nodeId)?.error ?? null);
+export function useNodeRunError(nodeId: NodeId | null): string | null {
+  return useRunStore((state) =>
+    nodeId === null ? null : (stepOf(state.byNode, nodeId)?.error ?? null),
+  );
 }
 
 /**

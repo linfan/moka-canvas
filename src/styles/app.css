@@ -1279,6 +1279,38 @@ button.danger:hover:not(:disabled) {
   font-weight: 600;
 }
 
+/* Why an ask did not finish, held beside the card that says so. It takes no
+   pointer events: swallowing the hover that summoned it would blink it away. */
+
+.run-note {
+  backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--surface-glass);
+  border: 1px solid var(--stroke);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  z-index: 28;
+}
+
+.run-note-head {
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.run-note-why {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .sr-only {
   height: 1px;
   overflow: hidden;

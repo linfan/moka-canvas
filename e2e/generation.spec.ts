@@ -256,7 +256,11 @@ test("an image node asks the provider and files the answer as its own asset", as
   await page
     .getByRole("button", { name: "Run this node", exact: false })
     .click();
-  await expect(page.getByText("Run finished")).toBeVisible({ timeout: 20_000 });
+  // The toast names the shelf the answer landed on, which it can only do once
+  // the asset is in the registry: waiting on it waits on the whole of the filing.
+  await expect(page.getByText("Filed under Images (1)")).toBeVisible({
+    timeout: 20_000,
+  });
 
   // The answer is a resource of the project, and the panel says which node made
   // it — the link back that makes a generated asset navigable.
@@ -332,7 +336,11 @@ test("a text node keeps what the provider said, word for word", async ({
   await page
     .getByRole("button", { name: "Run this node", exact: false })
     .click();
-  await expect(page.getByText("Run finished")).toBeVisible({ timeout: 20_000 });
+  // The words are filed like any other answer, and the toast says which shelf
+  // they went to.
+  await expect(page.getByText("Filed under Texts (1)")).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(excerptUnder(page, "Content")).toContainText(SENTENCE, {
     timeout: 10_000,
   });
@@ -356,4 +364,45 @@ test("a text node keeps what the provider said, word for word", async ({
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe(STORYTELLER);
   expect(calls[0].credentialed).toBe(true);
+});
+
+test("a run that gave up leaves its mark, and its reason where pointed at", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureChannel();
+
+  await openWithASpec(
+    page,
+    "Refused Image",
+    join(projectHome("generation-refused"), "project"),
+    "Image",
+    {
+      capability: "image",
+      mode: "generate",
+      model: `${CHANNEL}::${PAINTER}`,
+      prompt: "Something the stand-in will not paint. [refuse]",
+      inputMode: "manual",
+      params: { size: "1024x1024", count: 1 },
+      referenceNodeIds: [],
+    },
+  );
+
+  await page
+    .getByRole("button", { name: "Run this node", exact: false })
+    .click();
+  await expect(page.getByText("Run did not finish")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  // The card keeps what it held and gains a mark in its corner. The mark is too
+  // small to carry the reason, so pointing at the card asks for it.
+  const surface = await page.getByTestId("canvas-surface").boundingBox();
+  await page.mouse.move(
+    surface!.x + surface!.width * 0.55,
+    surface!.y + surface!.height * 0.5,
+  );
+  const note = page.getByTestId("run-note");
+  await expect(note).toBeVisible({ timeout: 10_000 });
+  await expect(note).toContainText("the stand-in will not paint that");
 });

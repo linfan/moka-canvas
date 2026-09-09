@@ -16,11 +16,11 @@ import {
   type Point,
   type Rect as WorldRect,
   type ResourceEntry,
-  type RunStatus,
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../../shared/domain";
 import type { ActiveGesture, PortRef, Selection } from "../stores/editorStore";
+import type { NodeRunView } from "../stores/runStore";
 import {
   centerOn,
   clampZoom,
@@ -38,6 +38,7 @@ import {
   createNodeView,
   portAnchorWorld,
   previewNodeBounds,
+  sameRun,
   setPortHighlight,
   updateNodeView,
   type NodeView,
@@ -122,8 +123,8 @@ export interface SceneState {
     portId: string;
     candidates: ReadonlySet<NodeId>;
   } | null;
-  /** Latest run step status per node id; absent when no run covers the node. */
-  runStatus: ReadonlyMap<NodeId, RunStatus>;
+  /** What each node's own run says about it; absent when no run covers it. */
+  runViews: ReadonlyMap<NodeId, NodeRunView>;
 }
 
 interface EdgeRecord {
@@ -338,7 +339,7 @@ export class LeaferEditorController {
           (relatedNodes !== null &&
             !relatedNodes.has(node.id) &&
             scene.pick === null),
-        runStatus: scene.runStatus.get(node.id) ?? null,
+        run: scene.runViews.get(node.id) ?? null,
       };
       let view = this.nodeViews.get(node.id);
       const media = mediaInfoForNode(node, scene.resources, scene.issues);
@@ -355,7 +356,7 @@ export class LeaferEditorController {
         view.visual.hovered !== visual.hovered ||
         view.visual.lowDetail !== visual.lowDetail ||
         view.visual.dimmed !== visual.dimmed ||
-        view.visual.runStatus !== visual.runStatus
+        !sameRun(view.visual.run, visual.run)
       ) {
         updateNodeView(view, node, visual, media);
         this.stats.nodeUpdates += 1;

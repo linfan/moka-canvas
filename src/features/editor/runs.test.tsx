@@ -29,7 +29,7 @@ import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
 import {
-  nodeRunStatuses,
+  nodeRunViews,
   useLatestRunForNode,
   useNodeRunProgress,
   useNodeRunStatus,
@@ -675,11 +675,78 @@ describe("reading one node's run", () => {
     ];
     await useRunStore.getState().load();
 
-    const statuses = nodeRunStatuses();
+    const views = nodeRunViews();
     // Still going, so it keeps the node even past a newer finished run.
-    expect(statuses.get(ids.text)).toBe("running");
-    expect(statuses.get(ids.operation)).toBe("succeeded");
-    expect(statuses.has(ids.export)).toBe(false);
+    expect(views.get(ids.text)?.status).toBe("running");
+    expect(views.get(ids.operation)?.status).toBe("succeeded");
+    expect(views.has(ids.export)).toBe(false);
+  });
+
+  it("says how far a run has got, and nothing where nobody measured it", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-1",
+        status: "running",
+        steps: [
+          { nodeId: ids.text, status: "running", progress: 0.25 },
+          { nodeId: ids.operation, status: "running" },
+        ],
+      }),
+    ];
+    await useRunStore.getState().load();
+
+    const views = nodeRunViews();
+    expect(views.get(ids.text)?.progress).toBe(0.25);
+    // A step that has said nothing about how far it got is not at the start:
+    // the card draws a stripe the length of itself rather than an empty bar.
+    expect(views.get(ids.operation)?.progress).toBeNull();
+  });
+
+  it("carries why a run gave up, for the card to be asked about", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-1",
+        status: "failed",
+        steps: [
+          {
+            nodeId: ids.image,
+            status: "failed",
+            error: "The provider would not say what it made.",
+          },
+        ],
+      }),
+    ];
+    await useRunStore.getState().load();
+
+    const view = nodeRunViews().get(ids.image);
+    expect(view?.status).toBe("failed");
+    expect(view?.error).toBe("The provider would not say what it made.");
+    // Nothing is on its way any more, so there are no words on the card.
+    expect(view?.said).toBe("");
+  });
+
+  it("reads a node the words on their way to it, and drops them at the end", async () => {
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+    const source = streamFor("run-1");
+
+    act(() => {
+      source.say("delta", {
+        runId: "run-1",
+        nodeId: ids.text,
+        slotId: "result",
+        text: "A lantern ",
+      });
+    });
+    expect(nodeRunViews().get(ids.text)?.said).toBe("A lantern ");
+
+    api.runs = [withStepStatus(makeRun({ status: "succeeded" }), "succeeded")];
+    act(() => {
+      source.say("done", { runId: "run-1", status: "succeeded" });
+    });
+    await settle();
+    // The answer belongs to the document now; the words on the way are not kept.
+    expect(nodeRunViews().get(ids.text)?.said).toBe("");
   });
 
   it("says nothing about a node no run has asked", () => {
@@ -764,6 +831,42 @@ describe("run UI", () => {
       canvasId: ids.canvasMain,
       nodeIds: [ids.operation],
     });
+  });
+
+  it("says why an ask did not finish beside the card that shows it", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-1",
+        status: "failed",
+        steps: [
+          {
+            nodeId: ids.image,
+            status: "failed",
+            error: "The provider would not say what it made.",
+          },
+          { nodeId: ids.text, status: "succeeded" },
+        ],
+      }),
+    ];
+    await openEditor();
+
+    // Nothing is being pointed at yet, so nothing is said.
+    expect(screen.queryByTestId("run-note")).toBeNull();
+
+    act(() => {
+      useEditorStore.getState().setHoveredNode(ids.image);
+    });
+    const note = await screen.findByTestId("run-note");
+    expect(note.getAttribute("role")).toBe("tooltip");
+    expect(note.textContent).toContain(
+      "The provider would not say what it made.",
+    );
+
+    // A card whose ask went through carries no mark, so it needs no note.
+    act(() => {
+      useEditorStore.getState().setHoveredNode(ids.text);
+    });
+    expect(screen.queryByTestId("run-note")).toBeNull();
   });
 
   it("shows validation issues in the inspector after a rejected start", async () => {

@@ -36,6 +36,7 @@ import { ExportBlockedDialog } from "./components/ExportBlockedDialog";
 import { RenameOverlay } from "./components/RenameOverlay";
 import { TextEditOverlay } from "./components/TextEditOverlay";
 import { PromptPanel } from "./components/PromptPanel";
+import { RunHint } from "./components/RunHint";
 
 const SAVE_LABEL: Record<string, string> = {
   saved: "Saved",
@@ -329,6 +330,7 @@ export function EditorPage() {
           <RenameOverlay />
           <TextEditOverlay />
           <PromptPanel />
+          <RunHint />
           <p className="editor-canvas-hint">
             {activeCanvas
               ? `${activeCanvas.nodes.length} nodes · ${activeCanvas.edges.length} edges`
