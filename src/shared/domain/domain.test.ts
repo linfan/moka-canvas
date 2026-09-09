@@ -3,10 +3,16 @@ import { applyCommands, CommandError } from "./commands";
 import {
   MAX_PROMPT_LENGTH,
   MAX_RESULT_SLOTS,
+  PROVIDER_EXECUTOR_KEY,
   type Capability,
 } from "./constants";
 import { buildGoldenMokaFile, goldenNodeIds } from "./fixtures";
-import { createCanvas, createNode } from "./factories";
+import {
+  createCanvas,
+  createNode,
+  executorKeyForNode,
+  generationSpecFromSnapshot,
+} from "./factories";
 import { newId } from "./ids";
 import type {
   CanvasDocument,
@@ -515,5 +521,76 @@ describe("document commands", () => {
         }),
       ),
     ).toBe("GROUP_INVALID");
+  });
+});
+
+describe("which executor a node runs on", () => {
+  it("sends a node carrying a spec to the provider", () => {
+    const node = createNode("image", { x: 0, y: 0 }, { generate: true });
+    expect(executorKeyForNode(node)).toBe(PROVIDER_EXECUTOR_KEY);
+  });
+
+  it("sends an operation node to the executor it names", () => {
+    const node = createNode("operation", { x: 0, y: 0 });
+    expect(executorKeyForNode(node)).toBe("deterministic");
+  });
+
+  it("sends nothing for a node a run could not drive", () => {
+    expect(executorKeyForNode(createNode("image", { x: 0, y: 0 }))).toBeNull();
+    expect(executorKeyForNode(createNode("group", { x: 0, y: 0 }))).toBeNull();
+    expect(executorKeyForNode(createNode("export", { x: 0, y: 0 }))).toBeNull();
+  });
+});
+
+describe("a spec rebuilt from what an asset recorded", () => {
+  const asked = {
+    capability: "image",
+    mode: "edit",
+    model: "demo::painter",
+    prompt: "Redraw the lake at night",
+    inputMode: "mentions",
+    params: { size: "1:1", count: 2 },
+    referenceNodeIds: ["node-one", "node-two"],
+  };
+
+  it("asks again for what the snapshot says", () => {
+    const spec = generationSpecFromSnapshot(asked, "image");
+    expect(spec?.capability).toBe("image");
+    expect(spec?.mode).toBe("edit");
+    expect(spec?.model).toBe("demo::painter");
+    expect(spec?.prompt).toBe("Redraw the lake at night");
+    expect(spec?.inputMode).toBe("mentions");
+    expect(spec?.params).toEqual({ size: "1:1", count: 2 });
+    expect(spec?.referenceNodeIds).toEqual(["node-one", "node-two"]);
+    // A snapshot records what to ask for, not when it was asked for.
+    expect(spec?.updatedAt).not.toBe("");
+  });
+
+  it("refuses a snapshot that belongs to another kind of node", () => {
+    expect(generationSpecFromSnapshot(asked, "text")).toBeNull();
+    expect(generationSpecFromSnapshot(asked, "operation")).toBeNull();
+    expect(generationSpecFromSnapshot(undefined, "image")).toBeNull();
+  });
+
+  it("refuses a snapshot with no prompt to ask for", () => {
+    expect(
+      generationSpecFromSnapshot({ ...asked, prompt: 7 }, "image"),
+    ).toBeNull();
+  });
+
+  it("falls back on the parts a hand-edited document got wrong", () => {
+    const spec = generationSpecFromSnapshot(
+      {
+        ...asked,
+        mode: "sideways",
+        params: "large",
+        referenceNodeIds: ["node-one", 3],
+      },
+      "image",
+    );
+    expect(spec?.mode).toBe("generate");
+    expect(spec?.inputMode).toBe("mentions");
+    expect(spec?.params).toEqual({});
+    expect(spec?.referenceNodeIds).toEqual(["node-one"]);
   });
 });

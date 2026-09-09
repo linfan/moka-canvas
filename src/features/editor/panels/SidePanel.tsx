@@ -1,5 +1,11 @@
 import { useMemo, useRef, useState } from "react";
-import type { AssetCategory, ResourceEntry } from "../../../shared/domain";
+import type {
+  AssetCategory,
+  MokaFile,
+  NodeId,
+  ResourceEntry,
+  WorkflowNode,
+} from "../../../shared/domain";
 import { buildIssueIndex, formatBytes } from "../canvas/mediaCards";
 import {
   ASSET_DRAG_MIME,
@@ -25,6 +31,22 @@ interface ImportJob {
   status: "uploading" | "done" | "error";
 }
 
+/** Selects nodes by id, switching canvas when they are not on the active one. */
+function focusNodes(nodeIds: NodeId[]) {
+  const project = useProjectStore.getState();
+  const active = project.moka?.canvas.find(
+    (canvas) => canvas.id === project.activeCanvasId,
+  );
+  if (!active?.nodes.some((node) => nodeIds.includes(node.id))) {
+    const holder = project.moka?.canvas.find((canvas) =>
+      canvas.nodes.some((node) => nodeIds.includes(node.id)),
+    );
+    if (holder) project.switchCanvas(holder.id);
+  }
+  useEditorStore.getState().setSelection({ nodeIds, edgeIds: [] });
+  fitSelectionAction();
+}
+
 /** Selects every node referencing the asset, switching canvas if needed. */
 function focusAssetReferences(assetId: string) {
   const nodeIds = assetReferencingNodeIds(assetId);
@@ -33,22 +55,26 @@ function focusAssetReferences(assetId: string) {
     editor.announce("No nodes reference this asset");
     return;
   }
-  const project = useProjectStore.getState();
-  const activeId = project.activeCanvasId;
-  const onActive = project.moka?.canvas
-    .find((canvas) => canvas.id === activeId)
-    ?.nodes.some((node) => nodeIds.includes(node.id));
-  if (!onActive) {
-    const target = project.moka?.canvas.find((canvas) =>
-      canvas.nodes.some((node) => nodeIds.includes(node.id)),
-    );
-    if (target) project.switchCanvas(target.id);
-  }
-  editor.setSelection({ nodeIds, edgeIds: [] });
-  fitSelectionAction();
+  focusNodes(nodeIds);
   editor.announce(
     `Selected ${nodeIds.length} node${nodeIds.length === 1 ? "" : "s"} using this asset`,
   );
+}
+
+/** Selects the node a generated asset came from, wherever it sits. */
+function focusGeneratingNode(nodeId: NodeId) {
+  focusNodes([nodeId]);
+  useEditorStore.getState().announce("Selected the node that made this asset");
+}
+
+/** The node that made an asset, on whichever canvas it is. */
+function makerOf(moka: MokaFile | null, nodeId?: NodeId): WorkflowNode | null {
+  if (!moka || !nodeId) return null;
+  for (const canvas of moka.canvas) {
+    const maker = canvas.nodes.find((node) => node.id === nodeId);
+    if (maker) return maker;
+  }
+  return null;
 }
 
 function ResourceRow({
@@ -59,7 +85,9 @@ function ResourceRow({
   broken: boolean;
 }) {
   const openPreview = useEditorStore((state) => state.openPreview);
+  const moka = useProjectStore((state) => state.moka);
   const uses = assetReferencingNodeIds(entry.id).length;
+  const maker = makerOf(moka, entry.provenance?.operationNodeId);
   return (
     <li
       className="resource-row"
@@ -82,6 +110,17 @@ function ResourceRow({
           {uses > 0 ? ` · ${uses} use${uses === 1 ? "" : "s"}` : ""}
         </span>
       </button>
+      {maker && (
+        <button
+          aria-label={`Go to ${maker.title}, which made ${entry.name}`}
+          className="resource-origin"
+          onClick={() => focusGeneratingNode(maker.id)}
+          title={`Made by ${maker.title}`}
+          type="button"
+        >
+          Made by {maker.title}
+        </button>
+      )}
       <button
         aria-label={`Preview ${entry.name}`}
         className="resource-action"

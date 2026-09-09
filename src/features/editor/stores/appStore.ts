@@ -4,6 +4,7 @@ import {
   fetchPublicConfig,
   type PublicConfig,
 } from "../../../api";
+import { PROVIDER_EXECUTOR_KEY } from "../../../shared/domain";
 
 export type AppPhase = "booting" | "launcher" | "opening" | "editing" | "error";
 
@@ -62,3 +63,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
   },
 }));
+
+/**
+ * Whether this deployment will drive a generation node at all.
+ *
+ * Read from the executor list the server publishes rather than from an offline
+ * switch of the client's own: the server validates a run against that same list,
+ * so a control offered here and refused there is a click whose only product is
+ * an error. Nothing known yet reads as available, because a control that is dead
+ * until the config arrives fails for no reason a user can see.
+ */
+export function useGenerationAvailable(): boolean {
+  return useAppStore(
+    (state) =>
+      state.config === null ||
+      state.config.capabilities.executors.includes(PROVIDER_EXECUTOR_KEY),
+  );
+}
+
+/** Why a generation control is dead where nothing can reach a provider. */
+export const GENERATION_UNAVAILABLE =
+  "This deployment is offline, so nothing can be generated";

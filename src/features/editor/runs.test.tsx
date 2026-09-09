@@ -9,17 +9,26 @@ import {
 } from "@testing-library/react";
 import App from "../../App";
 import {
+  buildGenerationMokaFile,
   buildGoldenMokaFile,
+  generationNodeIds,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
-import type { RunRecord, RunStatus } from "../../shared/domain";
-import { useAppStore } from "./stores/appStore";
+import type {
+  GenerationSpec,
+  MokaFile,
+  RunRecord,
+  RunStatus,
+} from "../../shared/domain";
+import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
+import { GENERATION_UNAVAILABLE, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
 import { useRunStore } from "./stores/runStore";
 
 const ids = goldenNodeIds();
+const generated = generationNodeIds();
 
 const CONFIG = {
   productName: "Moka Canvas",
@@ -34,7 +43,6 @@ const CONFIG = {
   },
   capabilities: {
     mode: "web",
-    executors: ["deterministic"],
     assetCategories: [],
   },
 };
@@ -71,12 +79,18 @@ interface MockApi {
   runs: RunRecord[];
   startResponse: () => { body: unknown; status: number };
   calls: { url: string; method: string; body?: unknown }[];
+  /** The executors the deployment publishes, which is what gates a generation. */
+  executors: string[];
+  /** The document the project endpoints serve. */
+  moka: () => MokaFile;
 }
 
 const api: MockApi = {
   runs: [],
   startResponse: () => ({ body: makeRun(), status: 201 }),
   calls: [],
+  executors: ["deterministic"],
+  moka: () => buildGoldenMokaFile(),
 };
 
 /**
@@ -136,20 +150,25 @@ function route(url: string, method: string, body: unknown): Response {
       headers: { "Content-Type": "application/json" },
     });
   api.calls.push({ url, method, body });
-  if (url === "/api/v1/config") return json(CONFIG);
+  if (url === "/api/v1/config") {
+    return json({
+      ...CONFIG,
+      capabilities: { ...CONFIG.capabilities, executors: api.executors },
+    });
+  }
   if (url === "/api/health") return json({ status: "ok" });
   if (url === "/api/v1/recent-projects") return json([]);
   if (url === "/api/v1/projects/open") {
     return json({
       root: "/tmp/golden",
-      moka: buildGoldenMokaFile(),
+      moka: api.moka(),
       selfCheck: { ok: true, issues: [] },
     });
   }
   if (url === "/api/v1/projects/current") {
     return json({
       root: "/tmp/golden",
-      moka: buildGoldenMokaFile(),
+      moka: api.moka(),
       selfCheck: { ok: true, issues: [] },
     });
   }
@@ -187,13 +206,14 @@ function route(url: string, method: string, body: unknown): Response {
   return json({ code: "NOT_FOUND", message: url, status: 404 }, 404);
 }
 
-function selectOperationNode() {
+function selectNode(nodeId: string) {
   act(() => {
-    useEditorStore.getState().setSelection({
-      nodeIds: [ids.operation],
-      edgeIds: [],
-    });
+    useEditorStore.getState().setSelection({ nodeIds: [nodeId], edgeIds: [] });
   });
+}
+
+function selectOperationNode() {
+  selectNode(ids.operation);
 }
 
 async function openEditor() {
@@ -210,6 +230,8 @@ beforeEach(() => {
   api.runs = [];
   api.startResponse = () => ({ body: makeRun(), status: 201 });
   api.calls = [];
+  api.executors = ["deterministic"];
+  api.moka = () => buildGoldenMokaFile();
   FakeEventSource.opened = [];
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal(
@@ -571,5 +593,223 @@ describe("run UI", () => {
     expect(
       api.calls.some((call) => call.url.endsWith("/runs/run-1/retry")),
     ).toBe(true);
+  });
+});
+
+const T0 = "2026-01-01T00:00:00.000Z";
+const T1 = "2026-01-01T00:00:01.000Z";
+const PLATE_ID = "00000000-0000-7000-8000-0000000000a1";
+const POSTER_ID = "00000000-0000-7000-8000-0000000000a2";
+
+/** A run driving the generation fixture's image node. */
+function generationRun(overrides: Partial<RunRecord> = {}): RunRecord {
+  return makeRun({
+    id: "run-gen",
+    projectId: generated.project,
+    canvasId: generated.canvas,
+    requestedNodeIds: [generated.image],
+    executorKey: PROVIDER_EXECUTOR_KEY,
+    steps: [{ nodeId: generated.image, status: "queued" }],
+    ...overrides,
+  });
+}
+
+/**
+ * The generation document as an exported package would carry it: the poster its
+ * image node made, with what was asked for recorded on the asset and no run id
+ * left to point back at.
+ */
+function buildGeneratedMokaFile(): MokaFile {
+  const moka = buildGenerationMokaFile();
+  const asked = (
+    moka.canvas[0]?.nodes.find((node) => node.id === generated.image)?.data as
+      { generation?: GenerationSpec } | undefined
+  )?.generation;
+  moka.resources.images = [
+    {
+      id: PLATE_ID,
+      name: "plate.png",
+      path: "assets/images/plate.png",
+      mime: "image/png",
+      bytes: 1024,
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    {
+      id: POSTER_ID,
+      name: "poster.png",
+      path: "assets/images/poster.png",
+      mime: "image/png",
+      bytes: 8192,
+      createdAt: T0,
+      updatedAt: T0,
+      provenance: {
+        canvasId: generated.canvas,
+        operationNodeId: generated.image,
+        inputAssetIds: [PLATE_ID],
+        parameterSnapshot: {
+          ...asked,
+          // Not the prompt the node carries now: asking again has to ask for
+          // what the asset says was asked for, which is the whole point of it.
+          prompt: "Paint the lake at night as a poster.",
+        },
+        createdAt: T1,
+      },
+    },
+  ];
+  return moka;
+}
+
+/** The value the inspector shows beside a label, or "" when it shows none. */
+function inspected(label: string): string {
+  const row = [...document.querySelectorAll(".inspector-row")].find(
+    (entry) => entry.firstElementChild?.textContent === label,
+  );
+  return row?.lastElementChild?.textContent ?? "";
+}
+
+/** What a write of one node's data looks like on the wire. */
+interface NodeWrite {
+  commands: {
+    type: string;
+    nodeId: string;
+    patch: { data: { generation: GenerationSpec } };
+  }[];
+}
+
+describe("generation UI", () => {
+  beforeEach(() => {
+    api.executors = ["deterministic", PROVIDER_EXECUTOR_KEY];
+    api.moka = () => buildGenerationMokaFile();
+  });
+
+  it("offers a run for a generation node and shows what it would ask for", async () => {
+    await openEditor();
+    selectNode(generated.image);
+
+    await screen.findByRole("button", { name: "▶ Run this node" });
+    expect(inspected("Capability")).toBe("Image");
+    expect(inspected("Mode")).toBe("generate");
+    expect(inspected("Model")).toBe("demo::painter");
+    expect(inspected("Inputs from")).toBe("mentions");
+    expect(screen.getByText(/as a poster\./)).toBeTruthy();
+    expect(screen.getByText(/"count": 2/)).toBeTruthy();
+  });
+
+  it("says why nothing can be generated where no provider is published", async () => {
+    api.executors = ["deterministic"];
+    await openEditor();
+    selectNode(generated.image);
+
+    const inInspector = await screen.findByRole("button", {
+      name: "▶ Run this node",
+    });
+    expect(inInspector).toHaveProperty("disabled", true);
+    expect(inInspector).toHaveProperty("title", GENERATION_UNAVAILABLE);
+    expect(screen.getByText(GENERATION_UNAVAILABLE)).toBeTruthy();
+
+    // The topbar says the same on its control rather than failing on the click.
+    const inTopbar = screen.getByRole("button", { name: "▶ Run" });
+    expect(inTopbar).toHaveProperty("disabled", true);
+    expect(inTopbar).toHaveProperty("title", GENERATION_UNAVAILABLE);
+  });
+
+  it("asks again under what an asset recorded, as a new run", async () => {
+    api.moka = () => buildGeneratedMokaFile();
+    await openEditor();
+    selectNode(generated.image);
+
+    const again = await screen.findByRole("button", {
+      name: "Run again with the parameters of the last generation",
+    });
+    expect(inspected("Inputs")).toBe("plate.png");
+
+    api.calls = [];
+    api.startResponse = () => ({
+      body: generationRun({ status: "running" }),
+      status: 201,
+    });
+    fireEvent.click(again);
+    await settle();
+
+    const wroteAt = api.calls.findIndex(
+      (call) => call.url.endsWith("/commands") && call.method === "POST",
+    );
+    const startedAt = api.calls.findIndex(
+      (call) => call.url.endsWith("/runs") && call.method === "POST",
+    );
+    expect(wroteAt, "the recorded spec went back first").toBeGreaterThanOrEqual(
+      0,
+    );
+    // A run is served from the document on disk, so what it is to ask for has
+    // to be there before the run is asked for.
+    expect(startedAt).toBeGreaterThan(wroteAt);
+
+    const written = api.calls[wroteAt]?.body as NodeWrite | undefined;
+    const patch = written?.commands[0];
+    expect(patch?.type).toBe("updateNode");
+    expect(patch?.nodeId).toBe(generated.image);
+    expect(patch?.patch.data.generation.prompt).toBe(
+      "Paint the lake at night as a poster.",
+    );
+    expect(patch?.patch.data.generation.model).toBe("demo::painter");
+    expect(api.calls[startedAt]?.body).toEqual({
+      canvasId: generated.canvas,
+      nodeIds: [generated.image],
+    });
+    // Never a retry: the package this came from carries no run to retry.
+    expect(api.calls.some((call) => call.url.includes("/retry"))).toBe(false);
+  });
+
+  it("shows how far a generation has got and what it has said so far", async () => {
+    api.startResponse = () => ({
+      body: generationRun({
+        status: "running",
+        steps: [{ nodeId: generated.image, status: "running", progress: 0.4 }],
+      }),
+      status: 201,
+    });
+    await openEditor();
+    selectNode(generated.image);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "▶ Run this node" }),
+    );
+    await settle();
+
+    const bar = await screen.findByRole("progressbar", {
+      name: "How far this node's run has got",
+    });
+    expect(bar).toHaveProperty("value", 0.4);
+
+    act(() => {
+      streamFor("run-gen").say("delta", {
+        runId: "run-gen",
+        nodeId: generated.image,
+        slotId: "result",
+        text: "A lake at night.",
+      });
+    });
+    await settle();
+    expect(document.querySelector(".inspector-run-output")?.textContent).toBe(
+      "A lake at night.",
+    );
+  });
+
+  it("shows which node made an asset and selects it", async () => {
+    api.moka = () => buildGeneratedMokaFile();
+    await openEditor();
+
+    const badge = await screen.findByRole("button", {
+      name: "Go to Poster, which made poster.png",
+    });
+    fireEvent.click(badge);
+    await settle();
+
+    expect(useEditorStore.getState().selection.nodeIds).toEqual([
+      generated.image,
+    ]);
+    expect(useEditorStore.getState().announcement).toBe(
+      "Selected the node that made this asset",
+    );
   });
 });

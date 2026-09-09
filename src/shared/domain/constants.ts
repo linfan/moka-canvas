@@ -55,6 +55,9 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
 export const PROVIDER_PROTOCOLS = ["openai", "gemini", "custom"] as const;
 export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
 
+/** The executor a generation node's step is handed to. */
+export const PROVIDER_EXECUTOR_KEY = "provider";
+
 export const MAX_CHANNEL_ID_LENGTH = 96;
 export const MAX_CHANNEL_NAME_LENGTH = 120;
 export const MAX_IMAGES_PER_RUN = 10;

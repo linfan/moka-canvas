@@ -229,11 +229,22 @@ export function buildLegacyV1MokaFile(): MokaFile {
   };
 }
 
+export function generationNodeIds() {
+  return {
+    project: fixtureId(119),
+    canvas: fixtureId(122),
+    text: fixtureId(120),
+    image: fixtureId(121),
+    edge: fixtureId(123),
+  };
+}
+
 /** A v2 document whose generative nodes carry specs, for 05/06 to reuse. */
 export function buildGenerationMokaFile(): MokaFile {
-  const textId = fixtureId(120);
-  const imageId = fixtureId(121);
-  const canvasId = fixtureId(122);
+  const ids = generationNodeIds();
+  const textId = ids.text;
+  const imageId = ids.image;
+  const canvasId = ids.canvas;
 
   const textNode: WorkflowNode = {
     id: textId,
@@ -283,7 +294,7 @@ export function buildGenerationMokaFile(): MokaFile {
   };
 
   const edge: WorkflowEdge = {
-    id: fixtureId(123),
+    id: ids.edge,
     source: { nodeId: textId, portId: "out" },
     target: { nodeId: imageId, portId: "prompt" },
     createdAt: T0,
@@ -292,7 +303,7 @@ export function buildGenerationMokaFile(): MokaFile {
   return {
     version: MOKA_FILE_VERSION,
     metadata: {
-      id: fixtureId(119),
+      id: ids.project,
       name: "Generation Fixture",
       revision: 1,
       createdAt: T0,

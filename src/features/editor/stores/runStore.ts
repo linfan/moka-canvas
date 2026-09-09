@@ -1,11 +1,14 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import { isApiError, runsApi } from "../../../api";
 import type {
   CanvasId,
   NodeId,
+  ResourceEntry,
   RunId,
   RunRecord,
   RunStatus,
+  RunStepRecord,
   ValidationIssue,
 } from "../../../shared/domain";
 import { useAppStore } from "./appStore";
@@ -299,26 +302,75 @@ export function useSelectedRun(): RunRecord | null {
   );
 }
 
-/** Latest run step status for a node, preferring runs that are still active. */
-export function useNodeRunStatus(nodeId: NodeId): RunStatus | null {
-  return useRunStore((state) => {
-    let fallback: RunStatus | null = null;
-    for (const run of state.runs) {
-      const step = run.steps.find((entry) => entry.nodeId === nodeId);
-      if (!step) continue;
-      if (isActive(run.status)) return step.status;
-      fallback ??= step.status;
-    }
-    return fallback;
-  });
+/**
+ * The run a node is read through, and its step in it: one still going if there
+ * is one, otherwise the newest that mentioned the node.
+ *
+ * Going wins over newest because a reader is asking what the node is doing, and
+ * since two runs may drive at once the newest record for a node is not always
+ * the one that has anything left to say about it.
+ */
+function runFor(
+  runs: RunRecord[],
+  nodeId: NodeId,
+): { run: RunRecord; step: RunStepRecord } | null {
+  let fallback: { run: RunRecord; step: RunStepRecord } | null = null;
+  for (const run of runs) {
+    const step = run.steps.find((entry) => entry.nodeId === nodeId);
+    if (!step) continue;
+    if (isActive(run.status)) return { run, step };
+    fallback ??= { run, step };
+  }
+  return fallback;
+}
+
+function stepOf(runs: RunRecord[], nodeId: NodeId): RunStepRecord | null {
+  return runFor(runs, nodeId)?.step ?? null;
 }
 
 /** The most recent run that included this node, if any. */
 export function useLatestRunForNode(nodeId: NodeId): RunRecord | null {
-  return useRunStore(
-    (state) =>
-      state.runs.find((run) =>
-        run.steps.some((step) => step.nodeId === nodeId),
-      ) ?? null,
-  );
+  return useRunStore((state) => runFor(state.runs, nodeId)?.run ?? null);
+}
+
+/** Latest run step status for a node, preferring runs that are still active. */
+export function useNodeRunStatus(nodeId: NodeId): RunStatus | null {
+  return useRunStore((state) => stepOf(state.runs, nodeId)?.status ?? null);
+}
+
+/**
+ * How far along a node's step says it is, from 0 to 1.
+ *
+ * Null rather than 0 when nobody reported one: a step that has not been
+ * measured yet has not made no progress, it has made an unknown amount, and a
+ * bar drawn at empty would say the first of those.
+ */
+export function useNodeRunProgress(nodeId: NodeId): number | null {
+  return useRunStore((state) => stepOf(state.runs, nodeId)?.progress ?? null);
+}
+
+/** What a node's step last said went wrong, if anything. */
+export function useNodeRunError(nodeId: NodeId): string | null {
+  return useRunStore((state) => stepOf(state.runs, nodeId)?.error ?? null);
+}
+
+const NO_ASSETS: ResourceEntry[] = [];
+
+/**
+ * The assets a node's generation produced.
+ *
+ * Read off the assets' own provenance rather than off the node's result slots:
+ * provenance travels with the file into an exported package, where the run that
+ * made it does not, and it names the node that made it rather than only what
+ * the node ended up pointing at.
+ */
+export function useNodeGenerationAssets(nodeId: NodeId): ResourceEntry[] {
+  const moka = useProjectStore((state) => state.moka);
+  return useMemo(() => {
+    if (!moka) return NO_ASSETS;
+    const made = Object.values(moka.resources)
+      .flat()
+      .filter((entry) => entry.provenance?.operationNodeId === nodeId);
+    return made.length === 0 ? NO_ASSETS : made;
+  }, [moka, nodeId]);
 }

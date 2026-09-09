@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { isApiError, projectsApi } from "../../api";
+import { PROVIDER_EXECUTOR_KEY, executorKeyForNode } from "../../shared/domain";
 import { useProviderStore } from "../settings/providerStore";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
@@ -11,7 +12,11 @@ import {
   importFiles,
 } from "./interactions/actions";
 import { useEditorKeyboard } from "./interactions/keyboard";
-import { useAppStore } from "./stores/appStore";
+import {
+  GENERATION_UNAVAILABLE,
+  useAppStore,
+  useGenerationAvailable,
+} from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { useHistoryStore, isBoundary } from "./stores/historyStore";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
@@ -65,12 +70,23 @@ export function EditorPage() {
       (run) => run.status === "queued" || run.status === "running",
     ),
   );
-  const runnableIds = useEditorStore((state) => state.selection.nodeIds).filter(
-    (id) =>
-      activeCanvas?.nodes.some(
-        (node) => node.id === id && node.kind === "operation",
-      ) ?? false,
-  );
+  const selectedIds = useEditorStore((state) => state.selection.nodeIds);
+  // The nodes a run could drive: an operation node, or one carrying a generation
+  // spec. Anything else is a run the server would only refuse.
+  const runnable = selectedIds.flatMap((id) => {
+    const node = activeCanvas?.nodes.find((entry) => entry.id === id);
+    return node && executorKeyForNode(node) !== null ? [node] : [];
+  });
+  const runnableIds = runnable.map((node) => node.id);
+  // Only a generation run can be refused by the deployment rather than by the
+  // document, and it says so on the control instead of on the click.
+  const generationOn = useGenerationAvailable();
+  const waitingOnProvider =
+    !generationOn &&
+    runnable.length > 0 &&
+    runnable.every(
+      (node) => executorKeyForNode(node) === PROVIDER_EXECUTOR_KEY,
+    );
   useEditorKeyboard();
 
   useEffect(() => {
@@ -247,12 +263,19 @@ export function EditorPage() {
         </button>
         <button
           className="run-button"
-          disabled={runnableIds.length === 0 || starting || runActive}
+          disabled={
+            runnableIds.length === 0 ||
+            starting ||
+            runActive ||
+            waitingOnProvider
+          }
           onClick={() => void startRun()}
           title={
-            runnableIds.length === 0
-              ? "Select an operation node to run"
-              : `Run ${runnableIds.length} operation${runnableIds.length === 1 ? "" : "s"}`
+            waitingOnProvider
+              ? GENERATION_UNAVAILABLE
+              : runnableIds.length === 0
+                ? "Select a node a run can drive"
+                : `Run ${runnableIds.length} node${runnableIds.length === 1 ? "" : "s"}`
           }
           type="button"
         >

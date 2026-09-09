@@ -740,6 +740,22 @@ export function editTextContent(nodeId: NodeId, content: string) {
 }
 
 /**
+ * Whether two specs ask for the same thing.
+ *
+ * The timestamp says when a spec was written rather than what it asks for, so
+ * two differing only in it are one request: writing the second would cost a
+ * save, a revision, and a history entry with nothing having changed.
+ */
+function asksTheSame(
+  a: GenerationSpec | null,
+  b: GenerationSpec | null,
+): boolean {
+  const asked = (spec: GenerationSpec | null) =>
+    spec === null ? null : { ...spec, updatedAt: "" };
+  return JSON.stringify(asked(a)) === JSON.stringify(asked(b));
+}
+
+/**
  * Writes or clears a node's generation spec in one undoable step. Addressed by
  * canvas id rather than the active canvas, so a background canvas can be
  * prepared while another one is on screen.
@@ -759,8 +775,7 @@ export function setNodeGeneration(
   if (generation && generationCapabilityFor(node.kind) === null) return;
 
   const data = node.data as { generation?: GenerationSpec };
-  const current = data.generation ?? null;
-  if (JSON.stringify(current) === JSON.stringify(generation)) return;
+  if (asksTheSame(data.generation ?? null, generation)) return;
 
   const next = { ...data } as Record<string, unknown>;
   if (generation === null) delete next.generation;

@@ -736,6 +736,17 @@ h2 {
   padding: 4px 7px;
 }
 
+.resource-origin {
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  max-width: 45%;
+  overflow: hidden;
+  padding: 4px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .side-import-jobs {
   display: grid;
   gap: 6px;
@@ -1021,6 +1032,23 @@ h2 {
   padding: 8px 10px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.inspector-json {
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inspector-progress {
+  width: 100%;
 }
 
 .preview-dialog {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   AssetId,
   CanvasDocument,
+  GenerationSpec,
   ResourceEntry,
   ResultSlot,
   RunRecord,
@@ -9,11 +10,27 @@ import type {
   WorkflowEdge,
   WorkflowNode,
 } from "../../../shared/domain";
+import {
+  CAPABILITY_LABELS,
+  PROVIDER_EXECUTOR_KEY,
+  executorKeyForNode,
+  generationSpecFromSnapshot,
+} from "../../../shared/domain";
 import { assetsApi, assetUrl } from "../../../api";
-import { useAppStore } from "../stores/appStore";
+import {
+  GENERATION_UNAVAILABLE,
+  useAppStore,
+  useGenerationAvailable,
+} from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
-import { useLatestRunForNode, useRunStore } from "../stores/runStore";
+import {
+  useLatestRunForNode,
+  useNodeGenerationAssets,
+  useNodeRunError,
+  useNodeRunProgress,
+  useRunStore,
+} from "../stores/runStore";
 import {
   buildIssueIndex,
   buildResourceIndex,
@@ -26,6 +43,7 @@ import {
   disconnectEdge,
   renameNode,
   requestDeleteAsset,
+  setNodeGeneration,
 } from "../interactions/actions";
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -304,6 +322,110 @@ function formatTime(iso?: string): string {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString();
 }
 
+/** What a node asks a provider to make, as it stands now. */
+function GenerationSection({ node }: { node: WorkflowNode }) {
+  const spec = (node.data as { generation?: GenerationSpec }).generation;
+  if (!spec) return null;
+  return (
+    <section className="inspector-section">
+      <h3>Generation</h3>
+      <Row label="Capability" value={CAPABILITY_LABELS[spec.capability]} />
+      <Row label="Mode" value={spec.mode} />
+      <Row label="Model" value={spec.model || "Provider default"} />
+      <Row label="Inputs from" value={spec.inputMode} />
+      <h3>Prompt</h3>
+      <p className="inspector-text-excerpt">
+        {spec.prompt.trim() ? spec.prompt : "Empty"}
+      </p>
+      {Object.keys(spec.params).length > 0 && (
+        <pre className="inspector-json">
+          {JSON.stringify(spec.params, null, 2)}
+        </pre>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What the last answer this node produced was asked for, and the way to ask for
+ * it again.
+ *
+ * Taken from the assets rather than from a run record: an exported package
+ * carries its assets and their provenance but no runs, so a control that needed
+ * the run it came from would be dead in every document that arrived from
+ * somewhere else. Asking again is therefore a new run under the snapshot's own
+ * spec, and never a retry of a run that may not exist here to retry.
+ */
+function LastGeneration({
+  canvas,
+  node,
+}: {
+  canvas: CanvasDocument;
+  node: WorkflowNode;
+}) {
+  const moka = useProjectStore((state) => state.moka);
+  const made = useNodeGenerationAssets(node.id);
+  const starting = useRunStore((state) => state.starting);
+  const generationOn = useGenerationAvailable();
+  const [busy, setBusy] = useState(false);
+  const recorded = made
+    .map((entry) => entry.provenance)
+    .find((provenance) => provenance?.parameterSnapshot);
+  const spec = generationSpecFromSnapshot(
+    recorded?.parameterSnapshot,
+    node.kind,
+  );
+  const inputs = useMemo(() => {
+    const wanted = recorded?.inputAssetIds;
+    if (!moka || !wanted) return "";
+    const resources = buildResourceIndex(moka);
+    return wanted.map((id) => resources.get(id)?.name ?? id).join(", ");
+  }, [moka, recorded]);
+
+  if (!recorded || !spec) return null;
+
+  const askAgain = async () => {
+    setBusy(true);
+    try {
+      // A run is served from the document on disk, so a spec this control has
+      // to put back is saved before the run is asked for.
+      setNodeGeneration(canvas.id, node.id, spec);
+      await useProjectStore.getState().flush();
+      await useRunStore.getState().start(canvas.id, [node.id]);
+    } catch (error) {
+      useAppStore
+        .getState()
+        .pushToast(
+          "error",
+          error instanceof Error ? error.message : "Run failed to start",
+        );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <h3>Last generation</h3>
+      <Row label="Inputs" value={inputs} />
+      <pre className="inspector-json">
+        {JSON.stringify(recorded.parameterSnapshot, null, 2)}
+      </pre>
+      <div className="inspector-actions">
+        <button
+          aria-label="Run again with the parameters of the last generation"
+          disabled={busy || starting || !generationOn}
+          onClick={() => void askAgain()}
+          title={generationOn ? undefined : GENERATION_UNAVAILABLE}
+          type="button"
+        >
+          {busy ? "Starting…" : "Run again"}
+        </button>
+      </div>
+    </>
+  );
+}
+
 /** Run controls, latest run state, and result slots for the selected node. */
 function RunSection({
   canvas,
@@ -315,14 +437,26 @@ function RunSection({
   const run = useLatestRunForNode(node.id);
   const starting = useRunStore((state) => state.starting);
   const issues = useRunStore((state) => state.lastIssues);
+  const generationOn = useGenerationAvailable();
+  const progress = useNodeRunProgress(node.id);
+  const failure = useNodeRunError(node.id);
+  const active = run?.status === "queued" || run?.status === "running";
+  // What this node has said so far in a run that is still going. The store keeps
+  // the words of each node apart, so a run holding several shows each its own.
+  const said = useRunStore((state) =>
+    run && active ? (state.streamText[run.id]?.[node.id] ?? "") : "",
+  );
   const step = run?.steps.find((entry) => entry.nodeId === node.id);
   const slots = (node.data as { resultSlots?: ResultSlot[] }).resultSlots ?? [];
   const relevantIssues = issues.filter(
     (issue) => !issue.nodeId || issue.nodeId === node.id,
   );
-  const active = run && (run.status === "queued" || run.status === "running");
-  const retryable =
-    run && (run.status === "failed" || run.status === "cancelled");
+  // Which executor a step would go to, rather than which kind of node this is:
+  // a generation node is as runnable as an operation one, and a node neither
+  // executor would take has no business offering a control at all.
+  const executor = executorKeyForNode(node);
+  const offline = executor === PROVIDER_EXECUTOR_KEY && !generationOn;
+  const retryable = run?.status === "failed" || run?.status === "cancelled";
 
   const start = async () => {
     try {
@@ -348,11 +482,12 @@ function RunSection({
   return (
     <section className="inspector-section">
       <h3>Run</h3>
-      {node.kind === "operation" && (
+      {executor !== null && (
         <div className="inspector-actions">
           <button
-            disabled={starting}
+            disabled={starting || offline}
             onClick={() => void start()}
+            title={offline ? GENERATION_UNAVAILABLE : undefined}
             type="button"
           >
             {starting ? "Starting…" : "▶ Run this node"}
@@ -373,6 +508,7 @@ function RunSection({
           )}
         </div>
       )}
+      {offline && <p className="inspector-empty">{GENERATION_UNAVAILABLE}</p>}
       {relevantIssues.length > 0 && (
         <ul className="inspector-issues" role="alert">
           {relevantIssues.map((issue, index) => (
@@ -391,20 +527,33 @@ function RunSection({
               {run.cancelRequested && active ? " · cancelling" : ""}
             </span>
           </div>
+          {active && progress !== null && (
+            <progress
+              aria-label="How far this node's run has got"
+              className="inspector-progress"
+              max={1}
+              value={progress}
+            />
+          )}
           <Row
             label="Started"
             value={formatTime(step.startedAt ?? run.createdAt)}
           />
           <Row label="Finished" value={formatTime(step.finishedAt)} />
-          {step.error && <p className="inspector-run-error">{step.error}</p>}
-          {!step.error && run.error && !active && (
+          {failure && <p className="inspector-run-error">{failure}</p>}
+          {!failure && run.error && !active && (
             <p className="inspector-run-error">{run.error}</p>
           )}
-          {step.outputText && (
-            <p className="inspector-run-output">{step.outputText}</p>
+          {said ? (
+            <p className="inspector-run-output">{said}</p>
+          ) : (
+            step.outputText && (
+              <p className="inspector-run-output">{step.outputText}</p>
+            )
           )}
         </>
       )}
+      <LastGeneration canvas={canvas} node={node} />
       {slots.length > 0 && (
         <>
           <h3>Results</h3>
@@ -423,7 +572,7 @@ function RunSection({
           )}
         </>
       )}
-      {!run && node.kind === "operation" && relevantIssues.length === 0 && (
+      {!run && executor !== null && relevantIssues.length === 0 && (
         <p className="inspector-empty">No runs yet</p>
       )}
     </section>
@@ -459,6 +608,7 @@ function NodeInspector({
           <span>{(node.data as { format?: string }).format ?? ""}</span>
         </div>
       )}
+      <GenerationSection node={node} />
       <MediaAssetSection node={node} />
       <InputChips canvas={canvas} node={node} />
       <RunSection canvas={canvas} node={node} />

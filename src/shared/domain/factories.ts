@@ -5,12 +5,16 @@ import {
   DEFAULT_NODE_WIDTH,
   MOKA_FILE_VERSION,
   NODE_PORTS,
+  PROVIDER_EXECUTOR_KEY,
 } from "./constants";
 import type { Capability } from "./constants";
 import type {
   CanvasDocument,
+  GenerationInputMode,
+  GenerationMode,
   GenerationSpec,
   MokaFile,
+  NodeId,
   NodeKind,
   PortDefinition,
   ResourceRegistry,
@@ -121,6 +125,95 @@ export function defaultGenerationSpec(kind: NodeKind): GenerationSpec | null {
     inputMode: "upstream",
     params: {},
     referenceNodeIds: [],
+    updatedAt: nowIso(),
+  };
+}
+
+/**
+ * The executor a node's step would be handed to, or null when a run could do
+ * nothing with it.
+ *
+ * The server answers this from the same rule. Asking it here too is what keeps
+ * a Run button from being offered for a node the server would only refuse.
+ */
+export function executorKeyForNode(node: WorkflowNode): string | null {
+  const data = node.data as {
+    executorKey?: string;
+    generation?: GenerationSpec;
+  };
+  switch (node.kind) {
+    case "operation":
+      return data.executorKey ?? "";
+    case "text":
+    case "image":
+    case "audio":
+    case "video":
+      return data.generation ? PROVIDER_EXECUTOR_KEY : null;
+    default:
+      return null;
+  }
+}
+
+const GENERATION_MODES: readonly GenerationMode[] = [
+  "generate",
+  "edit",
+  "extend",
+  "question",
+];
+
+const GENERATION_INPUT_MODES: readonly GenerationInputMode[] = [
+  "upstream",
+  "manual",
+  "mentions",
+];
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  or: T,
+): T {
+  return allowed.includes(value as T) ? (value as T) : or;
+}
+
+function words(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function identifiers(value: unknown): NodeId[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is NodeId => typeof entry === "string")
+    : [];
+}
+
+/**
+ * The spec a snapshot says was asked for, or null when it does not describe one
+ * for this kind of node.
+ *
+ * A snapshot comes out of a document, which another version may have written or
+ * a hand may have edited, so what it says is read rather than cast: a spec
+ * carrying a capability that is not one would sit on the node looking sound and
+ * only be refused once a run reached it. Asking again is then the snapshot whole
+ * plus a fresh timestamp, since a snapshot records what to ask for and not when
+ * it was asked for.
+ */
+export function generationSpecFromSnapshot(
+  snapshot: Record<string, unknown> | undefined,
+  kind: NodeKind,
+): GenerationSpec | null {
+  const capability = generationCapabilityFor(kind);
+  if (!capability || !snapshot || snapshot.capability !== capability)
+    return null;
+  if (typeof snapshot.prompt !== "string") return null;
+  return {
+    capability,
+    mode: oneOf(snapshot.mode, GENERATION_MODES, "generate"),
+    model: typeof snapshot.model === "string" ? snapshot.model : "",
+    prompt: snapshot.prompt,
+    inputMode: oneOf(snapshot.inputMode, GENERATION_INPUT_MODES, "upstream"),
+    params: words(snapshot.params),
+    referenceNodeIds: identifiers(snapshot.referenceNodeIds),
     updatedAt: nowIso(),
   };
 }
