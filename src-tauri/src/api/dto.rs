@@ -1,9 +1,11 @@
 use crate::config::LimitsConfig;
-use crate::domain::{DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
+use crate::domain::{Capability, DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
 use crate::generate::providers::ModelCandidate;
+use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, Usage};
 use crate::metadata::{
     AudioPreferences, ChannelDraft, ImagePreferences, Protocol, VideoPreferences,
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +197,110 @@ pub struct RevisionQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ModelListResponse {
     pub models: Vec<ModelCandidate>,
+}
+
+/// One answer to a generation request.
+///
+/// `status` is `pending` only for a capability that runs as an upstream job,
+/// where `task` carries the handle and `outputs` is empty; every other answer
+/// is complete by the time it arrives.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateResponse {
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    pub outputs: Vec<GeneratedOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TaskHandle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+}
+
+impl GenerateResponse {
+    pub fn succeeded(result: GenerateResult) -> Self {
+        Self {
+            status: "succeeded",
+            outputs: result.items.iter().map(GeneratedOutput::from).collect(),
+            text: result.text,
+            task: None,
+            usage: result.usage,
+        }
+    }
+
+    /// A job that has started and is not finished. `retry_after` is what the
+    /// provider asked for; absent means poll at the caller's own pace.
+    pub fn started(task: &AsyncTask, retry_after: Option<u64>) -> Self {
+        Self {
+            status: "pending",
+            text: None,
+            outputs: Vec::new(),
+            task: Some(TaskHandle::from(task, retry_after)),
+            usage: None,
+        }
+    }
+}
+
+/// One thing a provider made.
+///
+/// The bytes travel encoded because a generation answer has nowhere else to
+/// go: nothing is stored until a run adopts it, and a client that received
+/// only a size could not show what it had just asked for.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedOutput {
+    pub kind: Capability,
+    pub mime: String,
+    pub bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    pub data: String,
+}
+
+impl From<&GeneratedItem> for GeneratedOutput {
+    fn from(item: &GeneratedItem) -> Self {
+        Self {
+            kind: item.kind,
+            mime: item.mime.clone(),
+            bytes: item.bytes.len() as u64,
+            width: item.width,
+            height: item.height,
+            duration_ms: item.duration_ms,
+            data: base64::engine::general_purpose::STANDARD.encode(&item.bytes),
+        }
+    }
+}
+
+/// The handle a job is polled with.
+///
+/// The provider's own identifier for the job is deliberately absent: it is
+/// credential-adjacent in some protocols, and a client has no use for it that
+/// this handle does not already serve.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskHandle {
+    pub id: String,
+    pub capability: Capability,
+    pub model: String,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
+}
+
+impl TaskHandle {
+    fn from(task: &AsyncTask, retry_after: Option<u64>) -> Self {
+        Self {
+            id: task.id.clone(),
+            capability: task.capability,
+            model: task.model.clone(),
+            created_at: task.created_at.clone(),
+            retry_after_ms: retry_after,
+        }
+    }
 }
 
 /// Tells "the field was left out" from "the field was sent as null", which

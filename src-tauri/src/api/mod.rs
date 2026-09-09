@@ -1,7 +1,8 @@
 use crate::config::{AppConfig, RuntimeMode};
-use crate::generate::ProviderRepo;
+use crate::generate::{Gateway, ProviderRepo};
 use crate::metadata::{self, MetadataStore};
 use crate::project::store::FsProjectStore;
+use crate::project::ProjectStore;
 use crate::workflow::executor::DeterministicExecutor;
 use crate::workflow::runner::RunManager;
 use crate::workflow::WorkflowExecutor;
@@ -19,6 +20,7 @@ pub struct ApiState {
     pub store: Arc<FsProjectStore>,
     pub metadata: Arc<dyn MetadataStore>,
     pub providers: Arc<ProviderRepo>,
+    pub gateway: Arc<Gateway>,
     pub runs: Arc<RunManager>,
 }
 
@@ -44,6 +46,11 @@ impl ApiState {
         let config = Arc::new(config);
         let store = Arc::new(FsProjectStore::new(Arc::clone(&config)));
         let providers = Arc::new(ProviderRepo::new(Arc::clone(&metadata)));
+        let gateway = Arc::new(Gateway::new(
+            Arc::clone(&providers),
+            Arc::clone(&store) as Arc<dyn ProjectStore>,
+            config.generate.clone(),
+        ));
         let executors: Vec<Arc<dyn WorkflowExecutor>> =
             vec![Arc::new(DeterministicExecutor::new())];
         let runs = RunManager::new(
@@ -56,6 +63,7 @@ impl ApiState {
             store,
             metadata,
             providers,
+            gateway,
             config,
             runs,
         }
@@ -113,6 +121,28 @@ pub fn router() -> axum::Router<ApiState> {
             post(routes::retry_run),
         )
         .merge(provider_router())
+        .merge(generate_router())
+}
+
+/// A generation request carries a prompt and references to assets already in
+/// the project, never the assets themselves, so it gets the same tight ceiling
+/// as a channel write rather than the one an upload needs.
+fn generate_router() -> axum::Router<ApiState> {
+    use axum::extract::DefaultBodyLimit;
+    use axum::routing::{get, post};
+
+    const MAX_GENERATE_BODY_BYTES: usize = 1024 * 1024;
+
+    axum::Router::new()
+        .route("/api/v1/generate/text", post(routes::generate_text))
+        .route("/api/v1/generate/image", post(routes::generate_image))
+        .route("/api/v1/generate/audio", post(routes::generate_audio))
+        .route("/api/v1/generate/video", post(routes::generate_video))
+        .route(
+            "/api/v1/generate/tasks/{id}",
+            get(routes::poll_generation_task),
+        )
+        .route_layer(DefaultBodyLimit::max(MAX_GENERATE_BODY_BYTES))
 }
 
 /// Provider configuration carries a credential in the request body, and a

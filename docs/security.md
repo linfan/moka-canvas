@@ -91,6 +91,26 @@ Rotation replaces the entry for a channel and updates `rotatedAt`. Previous
 ciphertext is not retained, so an old copy of `secrets.json` cannot be used to
 recover a superseded key.
 
+### Where a key is allowed to travel
+
+A generation request is the only place a plaintext key leaves this process, and
+the rules around it are deliberately narrow:
+
+- The plaintext is decrypted at send time and lives only inside that one
+  in-flight request. Configuration holds ciphertext, the gateway decrypts once
+  per call, and the task registry holds no credential at all — polling a video
+  job resolves and decrypts afresh rather than reusing the key that started it.
+- It is sent only to the channel's own host. That includes an address a provider
+  hands back for a finished file: it is fetched with the credential only when it
+  resolves to the same origin, and without one otherwise, because an image left
+  on a third-party CDN is public by nature and a key following it would not be.
+- The channel's protocol decides which header carries it. It is never a query
+  parameter, so it cannot survive in a proxy log or a browser history.
+- A provider's failure is reduced to its message: the envelope around it is
+  dropped, a credential the message echoes back is replaced with the masked
+  form, and what remains is truncated. Some providers repeat parts of a request
+  in a failure, and a response must not become a way of reading a key out.
+
 ## Exported packages
 
 A project package (`.moka`, a ZIP) can never contain application metadata:

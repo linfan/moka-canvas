@@ -1,25 +1,30 @@
 use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, ChannelKeyRequest,
-    CreateProjectRequest, DefaultsPatch, ExportRequest, ImportChannelRequest, ImportProjectRequest,
-    ModelListResponse, OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch,
-    PublicConfigResponse, RevisionQuery, SaveResponse, StartRunRequest, UpsertChannelRequest,
+    CreateProjectRequest, DefaultsPatch, ExportRequest, GenerateResponse, ImportChannelRequest,
+    ImportProjectRequest, ModelListResponse, OpenProjectRequest, OpenProjectResponse,
+    PackageResponse, PreferencesPatch, PublicConfigResponse, RevisionQuery, SaveResponse,
+    StartRunRequest, UpsertChannelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
 use crate::domain::{now_iso, DocumentCommand, RunRecord};
 use crate::generate::providers::{ChannelImport, ProbeReport, ProvidersView};
+use crate::generate::{
+    Cancel, DeltaSink, GenerateRequest, GenerateResult, ProviderError, TaskState,
+};
 use crate::metadata::RecentProject;
 use crate::project::{ByteRange, CreateProject, OpenProject, ProjectStore, StagedAsset};
 use axum::{
     body::Body,
     extract::{rejection::JsonRejection, FromRequest, Multipart, Path, Query, Request, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
-    response::Response,
+    response::{IntoResponse, Response},
     Json,
 };
 use std::path::Path as FsPath;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::mpsc;
 use tokio_util::io::ReaderStream;
 
 fn problem_from_io(error: std::io::Error) -> Problem {
@@ -855,4 +860,180 @@ pub async fn import_channel(
         })
         .await?;
     providers_view(&state).await
+}
+
+// ---------------------------------------------------------------- generation
+
+/// How much of a stream is buffered before the writer waits for the reader.
+/// Small enough that a client which stops reading cannot turn an answer into
+/// memory, large enough that a fast provider is not stalled by one frame.
+const STREAM_BUFFER_BYTES: usize = 64 * 1024;
+
+/// Written text, sent whole or as it arrives.
+///
+/// The two paths answer differently — a document or a stream — so the return
+/// type is the response itself rather than a result the router unwraps.
+pub async fn generate_text(
+    State(state): State<ApiState>,
+    json: Result<Json<GenerateRequest>, JsonRejection>,
+) -> Response {
+    let request = match json_or_problem(json) {
+        Ok(Json(request)) => request,
+        Err(problem) => return problem.into_response(),
+    };
+    if request.wants_stream() {
+        return stream_text(&state, request);
+    }
+    match state
+        .gateway
+        .text(request, &DeltaSink::default(), &Cancel::new())
+        .await
+    {
+        Ok(result) => Json(GenerateResponse::succeeded(result)).into_response(),
+        Err(error) => Problem::from(error).into_response(),
+    }
+}
+
+pub async fn generate_image(
+    State(state): State<ApiState>,
+    json: Result<Json<GenerateRequest>, JsonRejection>,
+) -> Result<Json<GenerateResponse>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let result = state.gateway.image(request, &Cancel::new()).await?;
+    Ok(Json(GenerateResponse::succeeded(result)))
+}
+
+pub async fn generate_audio(
+    State(state): State<ApiState>,
+    json: Result<Json<GenerateRequest>, JsonRejection>,
+) -> Result<Json<GenerateResponse>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let result = state.gateway.audio(request, &Cancel::new()).await?;
+    Ok(Json(GenerateResponse::succeeded(result)))
+}
+
+/// A shot, started rather than waited out: the handle comes back at once and
+/// is polled until the job ends.
+pub async fn generate_video(
+    State(state): State<ApiState>,
+    json: Result<Json<GenerateRequest>, JsonRejection>,
+) -> Result<Json<GenerateResponse>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let task = state.gateway.video(request, &Cancel::new()).await?;
+    Ok(Json(GenerateResponse::started(&task, None)))
+}
+
+/// One look at a job this server started.
+pub async fn poll_generation_task(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<GenerateResponse>, Problem> {
+    match state.gateway.poll(&id, &Cancel::new()).await? {
+        TaskState::Pending { retry_after_ms } => {
+            // Still tracked, because a job that is running is the only kind
+            // that answers with a wait; looked up here rather than up front so
+            // a finished job does not pay for a handle it will not report.
+            let tracked = state.gateway.tasks().get(&id)?;
+            Ok(Json(GenerateResponse::started(
+                &tracked,
+                Some(retry_after_ms),
+            )))
+        }
+        TaskState::Succeeded(result) => Ok(Json(GenerateResponse::succeeded(result))),
+        // The job ended badly rather than this request failing, but the two
+        // carry the same information and a client reads one shape either way:
+        // what went wrong, and whether waiting could fix it.
+        TaskState::Failed { message, retryable } => Err(Problem::from(if retryable {
+            ProviderError::Unreachable(message)
+        } else {
+            ProviderError::Rejected(message)
+        })),
+    }
+}
+
+/// A text answer sent as it arrives.
+///
+/// The frames are written into one end of a pipe and served from the other,
+/// which is where a delta callback that cannot wait meets a response body that
+/// is a stream of bytes.
+fn stream_text(state: &ApiState, request: GenerateRequest) -> Response {
+    let (mut writer, reader) = tokio::io::duplex(STREAM_BUFFER_BYTES);
+    let (deltas, mut received) = mpsc::unbounded_channel::<String>();
+    let sink = DeltaSink::new(std::sync::Arc::new(move |chunk: &str| {
+        // A send that fails means the writer has gone, which the task notices
+        // when it tries the next frame.
+        let _ = deltas.send(chunk.to_string());
+    }));
+    let cancel = Cancel::new();
+    let watching = cancel.clone();
+    let gateway = state.gateway.clone();
+
+    tokio::spawn(async move {
+        let mut pending = Box::pin(gateway.text(request, &sink, &watching));
+        let outcome = loop {
+            tokio::select! {
+                Some(chunk) = received.recv() => {
+                    if frame(&mut writer, "delta", &serde_json::json!({ "text": chunk }))
+                        .await
+                        .is_err()
+                    {
+                        watching.cancel();
+                        return;
+                    }
+                }
+                answered = &mut pending => break answered,
+            }
+        };
+        // An answer can land with deltas still queued behind it, and the frame
+        // that ends the stream has to be the last thing a caller reads.
+        drop(pending);
+        drop(sink);
+        while let Some(chunk) = received.recv().await {
+            if frame(&mut writer, "delta", &serde_json::json!({ "text": chunk }))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+        let _ = frame(&mut writer, "done", &closing(outcome)).await;
+    });
+
+    (
+        [
+            (header::CONTENT_TYPE, "text/event-stream"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Body::from_stream(ReaderStream::new(reader)),
+    )
+        .into_response()
+}
+
+/// The frame that ends a stream.
+///
+/// A failure travels inside it rather than as a problem body: the status line
+/// went out with the first delta, and there is no second one to send.
+fn closing(outcome: Result<GenerateResult, ProviderError>) -> serde_json::Value {
+    match outcome {
+        Ok(result) => serde_json::to_value(GenerateResponse::succeeded(result)).unwrap_or_default(),
+        Err(error) => serde_json::json!({
+            "error": {
+                "code": error.code(),
+                "message": error.to_string(),
+                "retryable": error.retryable(),
+            }
+        }),
+    }
+}
+
+/// One server-sent event. The body is compact JSON, which is what the format
+/// needs: a raw newline would end the frame before the data did.
+async fn frame(
+    writer: &mut tokio::io::DuplexStream,
+    event: &str,
+    body: &serde_json::Value,
+) -> std::io::Result<()> {
+    writer
+        .write_all(format!("event: {event}\ndata: {body}\n\n").as_bytes())
+        .await
 }
