@@ -9,7 +9,8 @@ Automated coverage (run these first, they gate the release):
 ```sh
 make check        # build + format + lint + typecheck + vitest + cargo tests
 npm run test:e2e  # Playwright: critical path, provider settings, and a
-                  # generation driven against a stand-in provider
+                  # generation asked from the panel under a node and
+                  # driven against a stand-in provider
 ```
 
 ## Web (`make package-web`)
@@ -52,8 +53,9 @@ npm run test:e2e  # Playwright: critical path, provider settings, and a
    no credential anywhere in it. The automated equivalent is
    `cargo test --test generate_api`.
 10. Generate from a node rather than from the API, which is the path a
-    canvas takes. Give an image node a spec and run it: the answer
-    appears on the node, in the resource panel behind a badge naming the
+    canvas takes. Write a spec on an image node in the panel under it
+    (item 11) and run it: the answer appears on the node, in the
+    resource panel behind a badge naming the
     node that made it, and under `assets/images/` with provenance
     carrying the run, the node, the inputs that travelled, and the
     parameters it was asked with. Search the project directory and an
@@ -70,6 +72,35 @@ npm run test:e2e  # Playwright: critical path, provider settings, and a
     a new run starts under the snapshot's parameters rather than a retry
     of a run this project has never heard of. The automated equivalents
     are `cargo test --test provider_runs` and `npm run test:e2e`.
+11. Ask a node from the editor's own interface, which is how a canvas is
+    driven. Select an empty image node and confirm a panel comes up
+    under it; reach the same panel through **Generate…** on the node's
+    menu and through `Enter`, and confirm `Enter` on a text node that
+    already has words edits them instead. Turn the **Prompt** toggle in
+    the footer off and confirm selecting a node no longer raises it.
+    Type a prompt and confirm nothing is written until focus leaves the
+    field — one undo step, not one per keystroke — then open
+    **Parameters** and confirm only the parameters that capability has
+    are offered, that each says what the global default is on the choice
+    that leaves it out, and that choosing a shape reshapes a node that
+    is still empty while leaving one that holds something alone. Empty
+    the prompt with nothing connected to it, remove the channel's model
+    for that capability, and boot a deployment without the provider
+    executor: each says why on the button instead of failing on the
+    click. Ask for three images, stop a run part way, and ask a failed
+    run again from both the panel and the node's menu. While a run is
+    going confirm the card shows how far it has got, or a band that says
+    only that it is going, and that a text node shows the words as they
+    arrive; after one that failed confirm the mark and the reason where
+    the card is pointed at, with what it held before still in place, and
+    after one that brought several answers confirm the count on the
+    card. In the inspector confirm every ask the node has had is listed
+    rather than only the newest, that the result the node shows is named
+    as such, and that making another of them the one shown — from there
+    or from the menu of a card holding one answer of a batch — is one
+    undo step. Finally leave the project and switch canvas with a run
+    still going: both say how many are going, neither stops one, and
+    what it makes is in the project when it is opened again.
 
 ## macOS (`make package-macos`)
 

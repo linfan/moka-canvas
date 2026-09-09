@@ -128,9 +128,9 @@ async function providerCalls(): Promise<ProviderCall[]> {
 /**
  * Writes a spec onto the project's only node.
  *
- * Through the command endpoint rather than through the page: a node arrives from
- * the quick-add menu with nothing to ask for, and authoring a spec is a later
- * plan's interface. What this proves starts from a spec that exists.
+ * Through the command endpoint rather than through the page, so what a test
+ * proves starts from a spec that exists rather than from the typing of one. The
+ * panel that writes a spec is driven in its own test below.
  */
 async function giveTheNodeASpec(
   spec: Record<string, unknown>,
@@ -405,4 +405,77 @@ test("a run that gave up leaves its mark, and its reason where pointed at", asyn
   const note = page.getByTestId("run-note");
   await expect(note).toBeVisible({ timeout: 10_000 });
   await expect(note).toContainText("the stand-in will not paint that");
+});
+
+test("a node is asked from the panel under it, and one of several answers shown", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureChannel();
+
+  await page.goto("/");
+  await createProject(
+    page,
+    join(projectHome("generation-panel"), "project"),
+    "Asked From The Panel",
+  );
+  await addNode(page, "Image");
+
+  // A node arrives from the quick-add menu selected and holding nothing, which
+  // is the state the panel comes up in: what it holds becomes the whole ask.
+  const panel = page.getByTestId("prompt-panel");
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  await panel.getByLabel("Prompt for Image").fill("Three lanterns on a lake.");
+
+  await panel.getByRole("button", { name: "Parameters" }).click();
+  const asked = panel.getByLabel("Images");
+  await asked.fill("3");
+  // A number is a choice when focus leaves the field, not while it is typed.
+  await asked.press("Enter");
+
+  await panel.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(page.getByText("Filed under Images (3)")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  const after = await served();
+  expect(after.moka.resources.images).toHaveLength(3);
+  const nodes = after.moka.canvas[0].nodes;
+  expect(nodes, "an answer past the first is given a card each").toHaveLength(
+    3,
+  );
+
+  const holder = nodes.find(
+    (one) => (one.data.resultNodeIds as string[] | undefined)?.length === 2,
+  );
+  expect(holder, "one node holds the batch").toBeTruthy();
+  const slots = holder!.data.resultSlots as {
+    assetId?: string;
+    isPrimary?: boolean;
+  }[];
+  expect(slots).toHaveLength(3);
+  expect(
+    slots.filter((slot) => slot.isPrimary),
+    "one of them is the one shown",
+  ).toHaveLength(1);
+  expect(holder!.data.assetId).toBe(slots[0].assetId);
+
+  // Which of the three the node shows is a choice, and taking it writes the
+  // document rather than only the view of it.
+  await page
+    .getByRole("button", { name: "Show result 3", exact: true })
+    .click();
+  await expect
+    .poll(
+      async () =>
+        (await served()).moka.canvas[0].nodes.find(
+          (one) => one.id === holder!.id,
+        )?.data.assetId,
+      { timeout: 10_000 },
+    )
+    .toBe(slots[2].assetId);
+
+  const calls = await providerCalls();
+  expect(calls).toHaveLength(1);
+  expect(calls[0].count, "the panel's own parameter travelled").toBe(3);
 });
