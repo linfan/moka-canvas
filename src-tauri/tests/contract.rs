@@ -1,6 +1,6 @@
 use moka_canvas::domain::validate::{
-    mention_node_ids, model_reference_shaped, resource_path_valid, topological_order,
-    validate_canvas, validate_moka_file, MAX_PROMPT_LENGTH, MAX_RESULT_SLOTS,
+    mention_node_ids, mention_spans, model_reference_shaped, resource_path_valid,
+    topological_order, validate_canvas, validate_moka_file, MAX_PROMPT_LENGTH, MAX_RESULT_SLOTS,
 };
 use moka_canvas::domain::{
     CanvasDocument, Capability, EdgeEndpoint, GenerationInputMode, GenerationMode, GenerationSpec,
@@ -291,4 +291,25 @@ fn mention_and_model_shapes() {
     assert!(!model_reference_shaped("::painter"));
     assert!(!model_reference_shaped("main::"));
     assert!(!model_reference_shaped("painter"));
+}
+
+#[test]
+fn a_mention_reports_the_span_it_occupies() {
+    let prompt = "Paint @[node:a] beside @[node:b]";
+    let spans = mention_spans(prompt);
+    assert_eq!(spans.len(), 2);
+    assert_eq!(&prompt[spans[0].0.clone()], "@[node:a]");
+    assert_eq!(spans[0].1, "a");
+    assert_eq!(&prompt[spans[1].0.clone()], "@[node:b]");
+    assert_eq!(spans[1].1, "b");
+
+    assert_eq!(
+        mention_spans("@[node:]")
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect::<Vec<_>>(),
+        vec![""]
+    );
+    assert!(mention_spans("Paint @[node:a").is_empty());
+    assert_eq!(mention_spans("@[node:a] then @[node:b").len(), 1);
 }

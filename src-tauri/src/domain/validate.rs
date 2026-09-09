@@ -42,19 +42,38 @@ pub fn resource_path_valid(path: &str) -> bool {
 
 const MENTION_PREFIX: &str = "@[node:";
 
+/// Every `@[node:<id>]` mention in a prompt, in order of appearance, with the
+/// span the whole token occupies so a caller can replace exactly that much and
+/// leave the prose around it alone.
+///
+/// A token with no closing bracket ends the scan: what follows is prose that
+/// happens to contain the opening, not a reference. A token naming nothing
+/// (`@[node:]`) is still a token, and replacing it is the caller's business.
+pub fn mention_spans(prompt: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    let mut found = Vec::new();
+    let mut cursor = 0;
+    while let Some(offset) = prompt[cursor..].find(MENTION_PREFIX) {
+        let start = cursor + offset;
+        let body = start + MENTION_PREFIX.len();
+        let Some(close) = prompt[body..].find(']') else {
+            break;
+        };
+        found.push((
+            start..body + close + 1,
+            prompt[body..body + close].to_string(),
+        ));
+        cursor = body + close + 1;
+    }
+    found
+}
+
 /// Node ids referenced by `@[node:<id>]` mentions inside a prompt.
 pub fn mention_node_ids(prompt: &str) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut rest = prompt;
-    while let Some(start) = rest.find(MENTION_PREFIX) {
-        rest = &rest[start + MENTION_PREFIX.len()..];
-        let Some(end) = rest.find(']') else { break };
-        if end > 0 {
-            ids.push(rest[..end].to_string());
-        }
-        rest = &rest[end + 1..];
-    }
-    ids
+    mention_spans(prompt)
+        .into_iter()
+        .map(|(_, node_id)| node_id)
+        .filter(|node_id| !node_id.is_empty())
+        .collect()
 }
 
 /// True when `model` carries both sides of a `channelId::modelId` reference.

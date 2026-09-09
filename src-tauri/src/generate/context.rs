@@ -15,15 +15,13 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
+use crate::domain::validate::mention_spans;
 use crate::domain::{
     AssetId, CanvasDocument, GenerationInputMode, GenerationSpec, NodeId, NodeKind,
     ResultSlotStatus, WorkflowNode,
 };
 
 use super::{GenerateInput, InputRole};
-
-/// How a prompt names a node: `@[node:<id>]`.
-const MENTION_OPEN: &str = "@[node:";
 
 /// A prompt with its upstream text folded in, the media travelling beside it,
 /// and which nodes contributed.
@@ -134,7 +132,7 @@ fn from_mentions(canvas: &CanvasDocument, spec: &GenerationSpec) -> ResolvedInpu
     let mut taken = HashSet::new();
     let mut contributions = Vec::new();
     let mut tokens: Vec<(Range<usize>, Vec<NodeId>)> = Vec::new();
-    for (span, node_id) in mentions(&spec.prompt) {
+    for (span, node_id) in mention_spans(&spec.prompt) {
         let sources = expand(canvas, &node_id);
         tokens.push((span, sources.iter().map(|node| node.id.clone()).collect()));
         for source in sources {
@@ -337,27 +335,6 @@ fn label_word(kind: NodeKind) -> &'static str {
         NodeKind::Video => "Video",
         _ => "Node",
     }
-}
-
-/// Every mention in a prompt, in order of appearance, with the span the token
-/// itself occupies. A token with no closing bracket ends the scan: the rest is
-/// prose that happens to contain the opening, not a reference.
-fn mentions(prompt: &str) -> Vec<(Range<usize>, String)> {
-    let mut found = Vec::new();
-    let mut cursor = 0;
-    while let Some(offset) = prompt[cursor..].find(MENTION_OPEN) {
-        let start = cursor + offset;
-        let body = start + MENTION_OPEN.len();
-        let Some(close) = prompt[body..].find(']') else {
-            break;
-        };
-        found.push((
-            start..body + close + 1,
-            prompt[body..body + close].to_string(),
-        ));
-        cursor = body + close + 1;
-    }
-    found
 }
 
 #[cfg(test)]
