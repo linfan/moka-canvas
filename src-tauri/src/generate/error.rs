@@ -12,6 +12,17 @@ pub enum ProviderError {
     #[error(transparent)]
     Storage(#[from] MetadataError),
 
+    /// Anything the project layer reported: a reference that is not in the
+    /// open project, or no project open at all. Carried rather than translated
+    /// so those codes keep the meanings every other route gives them.
+    #[error(transparent)]
+    Project(#[from] crate::project::ProjectError),
+
+    /// A disk read that failed after the asset was known to be there, which
+    /// is the machine's problem rather than the request's.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
     /// A reference names something that is not there. Reported as a missing
     /// configuration rather than a missing record because the fix is in
     /// Settings, not in a retry.
@@ -95,6 +106,8 @@ impl ProviderError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Storage(error) => error.code(),
+            Self::Project(error) => error.code(),
+            Self::Io(_) => "INTERNAL",
             Self::NotConfigured { .. } | Self::KeyMissing { .. } => "PROVIDER_NOT_CONFIGURED",
             Self::CapabilityMismatch { .. } => "MODEL_CAPABILITY_MISMATCH",
             Self::InUse { .. } => "CONFLICT",

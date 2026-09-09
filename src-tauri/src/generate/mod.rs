@@ -6,7 +6,9 @@
 //! [`error`] names what can go wrong on the provider side, which is a
 //! different thing from what can go wrong on the storage side: the client
 //! recovers from the first by opening Settings and from the second by
-//! retrying.
+//! retrying. [`media`] is where a reference to a stored asset becomes bytes,
+//! and where the size and format rules live so that no adapter has to repeat
+//! them.
 //!
 //! The types below are the whole generation vocabulary that leaves this
 //! module: a request phrased in the project's own terms and a result phrased
@@ -15,6 +17,7 @@
 
 pub mod adapters;
 pub mod error;
+pub mod media;
 pub mod providers;
 
 use std::sync::atomic::{AtomicBool, Ordering};
