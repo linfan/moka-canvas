@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use crate::domain::validate::mention_spans;
+use crate::domain::validate::{mention_spans, MAX_PROMPT_LENGTH};
 use crate::domain::{
     AssetId, CanvasDocument, GenerationInputMode, GenerationSpec, NodeId, NodeKind,
     ResultSlotStatus, WorkflowNode,
@@ -33,10 +33,24 @@ pub struct ResolvedInputs {
     pub prompt: String,
     /// Reference media, in the order it was found.
     pub inputs: Vec<GenerateInput>,
+    /// Which node each entry of [`Self::inputs`] came from, position by
+    /// position. A request carries no node ids — a provider has no use for one
+    /// — but a preview has to say which card each reference is, and the two
+    /// lists are filled in the same pass so they cannot disagree.
+    pub input_sources: Vec<NodeId>,
     /// Every node that contributed, in contribution order and without repeats.
     /// A node with nothing to give is not in here, which is what makes this
     /// list safe to record as provenance.
     pub used_node_ids: Vec<NodeId>,
+    /// Characters cut off the contributing text to keep the whole prompt inside
+    /// [`MAX_PROMPT_LENGTH`]. Zero unless something had to go, and the amount
+    /// rather than a flag so that "the upstream text was too long" can say by
+    /// how much.
+    pub truncated_chars: usize,
+    /// Ids named by a mention the canvas has no node for. Nothing is sent for
+    /// one: it is reported so that the ask can be refused before a run pays for
+    /// a prompt with a hole in it.
+    pub unresolved: Vec<String>,
 }
 
 impl ResolvedInputs {
@@ -168,7 +182,7 @@ fn from_upstream(
         }
     }
     label(&mut contributions);
-    finish(&spec.prompt, contributions)
+    finish(&spec.prompt, contributions, Vec::new())
 }
 
 /// Only the listed references, in the order they were listed. The wiring is
@@ -187,7 +201,7 @@ fn from_references(canvas: &CanvasDocument, spec: &GenerationSpec) -> ResolvedIn
         }
     }
     label(&mut contributions);
-    finish(&spec.prompt, contributions)
+    finish(&spec.prompt, contributions, Vec::new())
 }
 
 /// Only the nodes the prompt names. Each `@[node:<id>]` becomes the label of
@@ -197,7 +211,14 @@ fn from_mentions(canvas: &CanvasDocument, spec: &GenerationSpec) -> ResolvedInpu
     let mut taken = HashSet::new();
     let mut contributions = Vec::new();
     let mut tokens: Vec<(Range<usize>, Vec<NodeId>)> = Vec::new();
+    let mut unresolved = Vec::new();
     for (span, node_id) in mention_spans(&spec.prompt) {
+        // A token naming a node the canvas has never heard of is a hole in the
+        // sentence rather than a reference. Nothing can be sent for it, so it is
+        // said out loud instead of quietly leaving the prose with a gap.
+        if canvas.node(&node_id).is_none() && !unresolved.contains(&node_id) {
+            unresolved.push(node_id.clone());
+        }
         let sources = expand(canvas, &node_id);
         tokens.push((span, sources.iter().map(|node| node.id.clone()).collect()));
         for source in sources {
@@ -230,14 +251,27 @@ fn from_mentions(canvas: &CanvasDocument, spec: &GenerationSpec) -> ResolvedInpu
     }
     prompt.push_str(&spec.prompt[cursor..]);
 
-    finish(&prompt, contributions)
+    finish(&prompt, contributions, unresolved)
 }
 
 /// Folds the contributions into the answer: text blocks behind the prompt,
 /// media in order, and the contributing nodes with them.
-fn finish(prompt: &str, contributions: Vec<Contribution>) -> ResolvedInputs {
+///
+/// The whole thing is kept inside [`MAX_PROMPT_LENGTH`]. A spec's own prompt is
+/// capped when the document is validated, but what upstream text folds in beside
+/// it is not, and sending more than a provider will read is a refusal nobody can
+/// diagnose from the answer. The budget is spent in contribution order, so the
+/// text nearest the prompt is the text that survives.
+fn finish(
+    prompt: &str,
+    contributions: Vec<Contribution>,
+    unresolved: Vec<String>,
+) -> ResolvedInputs {
     let mut body = prompt.trim_end().to_string();
+    let mut budget = MAX_PROMPT_LENGTH.saturating_sub(body.chars().count());
+    let mut truncated_chars = 0;
     let mut inputs = Vec::new();
+    let mut input_sources = Vec::new();
     let mut used_node_ids = Vec::new();
     for contribution in contributions {
         let Contribution {
@@ -246,23 +280,50 @@ fn finish(prompt: &str, contributions: Vec<Contribution>) -> ResolvedInputs {
             share,
             ..
         } = contribution;
-        used_node_ids.push(node_id);
         match share {
             Share::Text(text) => {
+                // The blank line and the label travel with the text, so the
+                // budget pays for them before the text is cut to what is left.
+                let framing = if body.is_empty() { 0 } else { 2 } + label.chars().count() + 1;
+                let kept = cut_at(&text, budget.saturating_sub(framing));
+                truncated_chars += text.chars().count() - kept.chars().count();
+                // A label pointing at a block that was cut away whole points at
+                // nothing, and the node behind it contributed nothing a run will
+                // carry — so it is not recorded as having contributed.
+                if kept.trim().is_empty() {
+                    continue;
+                }
+                budget = budget.saturating_sub(framing + kept.chars().count());
                 if !body.is_empty() {
                     body.push_str("\n\n");
                 }
                 body.push_str(&label);
                 body.push('\n');
-                body.push_str(&text);
+                body.push_str(kept);
             }
-            Share::Media { role, asset_id } => inputs.push(GenerateInput { role, asset_id }),
+            Share::Media { role, asset_id } => {
+                inputs.push(GenerateInput { role, asset_id });
+                input_sources.push(node_id.clone());
+            }
         }
+        used_node_ids.push(node_id);
     }
     ResolvedInputs {
         prompt: body,
         inputs,
+        input_sources,
         used_node_ids,
+        truncated_chars,
+        unresolved,
+    }
+}
+
+/// The first `limit` characters of `text`, cut on a character boundary so that
+/// a character taking several bytes is never split in half.
+fn cut_at(text: &str, limit: usize) -> &str {
+    match text.char_indices().nth(limit) {
+        Some((index, _)) => &text[..index],
+        None => text,
     }
 }
 
@@ -733,6 +794,9 @@ mod tests {
         // The second token has no closing bracket, so it is prose and stays.
         assert_eq!(resolved.prompt, "Paint  and @[node:node-brief");
         assert!(resolved.used_node_ids.is_empty());
+        // Dropped silently is a hole nobody can see; the id is reported so the
+        // ask can be refused before a run pays for it.
+        assert_eq!(resolved.unresolved, ["node-deleted"]);
     }
 
     #[test]
@@ -886,6 +950,102 @@ mod tests {
         let resolved = collect_generation_inputs(&document, &asked);
         assert_eq!(resolved.prompt, "[Text 1]\nOnce.");
         assert_eq!(resolved.used_node_ids, [id("brief")]);
+    }
+
+    /// A preview has to say which card each reference is, and the request the
+    /// gateway gets carries no node ids to say it with.
+    #[test]
+    fn each_reference_says_which_node_it_came_from() {
+        let asked = asking(GenerationInputMode::Upstream, "Paint it.");
+        let document = canvas(
+            vec![
+                image("subject", "asset-subject"),
+                image("stencil", "asset-stencil"),
+                text("brief", "A lake."),
+                asked.clone(),
+            ],
+            vec![
+                (&id("brief"), "prompt", &id("poster")),
+                (&id("subject"), "images", &id("poster")),
+                (&id("stencil"), "mask", &id("poster")),
+            ],
+        );
+
+        let resolved = collect_generation_inputs(&document, &asked);
+        assert_eq!(assets(&resolved.inputs), ["asset-subject", "asset-stencil"]);
+        assert_eq!(
+            resolved.input_sources,
+            [id("subject"), id("stencil")],
+            "position by position with the references"
+        );
+    }
+
+    /// What upstream text folds in is not capped by validation, and sending more
+    /// than a provider reads is a refusal nobody can diagnose from the answer.
+    #[test]
+    fn upstream_text_past_the_cap_is_cut_and_the_amount_is_said() {
+        let asked = asking(GenerationInputMode::Upstream, "Paint.");
+        let document = canvas(
+            vec![
+                text("near", &"a".repeat(19_990)),
+                text("far", &"b".repeat(50)),
+                asked.clone(),
+            ],
+            vec![
+                (&id("near"), "prompt", &id("poster")),
+                (&id("far"), "prompt", &id("poster")),
+            ],
+        );
+
+        let resolved = collect_generation_inputs(&document, &asked);
+        assert_eq!(
+            resolved.prompt.chars().count(),
+            MAX_PROMPT_LENGTH,
+            "the whole prompt lands on the cap and not past it"
+        );
+        // Seven off the block that partly fitted, and all fifty off the one that
+        // could not fit at all.
+        assert_eq!(resolved.truncated_chars, 57);
+        assert!(resolved.prompt.contains("[Text 1]"));
+    }
+
+    /// A label pointing at a block that was cut away whole points at nothing,
+    /// and the node behind it did not contribute anything a run will carry.
+    #[test]
+    fn a_block_that_cannot_fit_takes_its_label_and_its_node_with_it() {
+        let asked = asking(GenerationInputMode::Upstream, "Paint.");
+        let document = canvas(
+            vec![
+                text("near", &"a".repeat(19_990)),
+                text("far", "The palette should stay cold."),
+                asked.clone(),
+            ],
+            vec![
+                (&id("near"), "prompt", &id("poster")),
+                (&id("far"), "prompt", &id("poster")),
+            ],
+        );
+
+        let resolved = collect_generation_inputs(&document, &asked);
+        assert!(!resolved.prompt.contains("[Text 2]"));
+        assert!(!resolved.prompt.contains("cold"));
+        assert_eq!(resolved.used_node_ids, [id("near")]);
+    }
+
+    /// The cap counts characters, so a cut has to land between them: a byte
+    /// offset would split a character taking three of them.
+    #[test]
+    fn a_cut_lands_on_a_character_boundary() {
+        let asked = asking(GenerationInputMode::Upstream, "画");
+        let document = canvas(
+            vec![text("lanterns", &"灯".repeat(19_990)), asked.clone()],
+            vec![(&id("lanterns"), "prompt", &id("poster"))],
+        );
+
+        let resolved = collect_generation_inputs(&document, &asked);
+        assert_eq!(resolved.prompt.chars().count(), MAX_PROMPT_LENGTH);
+        assert_eq!(resolved.truncated_chars, 2);
+        assert!(resolved.prompt.ends_with('灯'));
     }
 
     fn slot(is_primary: bool, status: ResultSlotStatus, text: &str) -> ResultSlot {

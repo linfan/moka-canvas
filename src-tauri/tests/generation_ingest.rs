@@ -176,6 +176,7 @@ async fn an_image_answer_lands_in_the_project_bearing_its_provenance() {
             asset_id: "asset-sketch".into(),
         }],
         used_node_ids: vec!["node-sketch".into()],
+        ..ResolvedInputs::default()
     };
     // A caption beside the picture is not a second asset: it belongs on the
     // node, where the reader sees it next to what it describes.
