@@ -1,0 +1,393 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import type {
+  AssetId,
+  CanvasDocument,
+  GenerationInputMode,
+  GenerationSpec,
+  NodeId,
+  ResourceEntry,
+  WorkflowEdge,
+  WorkflowNode,
+} from "../../shared/domain";
+import {
+  createCanvas,
+  createNode,
+  defaultGenerationSpec,
+} from "../../shared/domain";
+import { ReferenceBar } from "./components/ReferenceBar";
+import { ASSET_DRAG_MIME } from "./interactions/actions";
+
+const T = "2026-01-01T00:00:00.000Z";
+
+function card(
+  kind: WorkflowNode["kind"],
+  id: string,
+  title: string,
+  data: Record<string, unknown> = {},
+): WorkflowNode {
+  const made = createNode(kind, { x: 0, y: 0 });
+  made.id = id;
+  made.title = title;
+  made.data = { ...made.data, ...data };
+  return made;
+}
+
+function wire(
+  from: string,
+  to: string,
+  id: string,
+  portId = "prompt",
+): WorkflowEdge {
+  return {
+    id,
+    source: { nodeId: from, portId: "out" },
+    target: { nodeId: to, portId },
+    createdAt: T,
+  };
+}
+
+function sheet(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[] = [],
+): CanvasDocument {
+  const made = createCanvas("Canvas");
+  made.nodes = nodes;
+  made.edges = edges;
+  return made;
+}
+
+/** A card that can be asked for something, and so has a panel to be given in. */
+function asked(
+  kind: "image" | "video" | "audio" | "text",
+  id: string,
+  title: string,
+): WorkflowNode {
+  const made = card(kind, id, title);
+  const spec = defaultGenerationSpec(kind);
+  if (!spec) throw new Error(`${kind} is a kind that can be asked`);
+  made.data = { ...made.data, generation: spec };
+  return made;
+}
+
+const PICTURE: ResourceEntry = {
+  id: "asset-1",
+  name: "lantern.png",
+  path: "assets/images/lantern.png",
+  mime: "image/png",
+  bytes: 20480,
+  createdAt: T,
+  updatedAt: T,
+  probe: {
+    mime: "image/png",
+    bytes: 20480,
+    sha256: "aa",
+    width: 512,
+    height: 512,
+  },
+};
+
+const RESOURCES = new Map<AssetId, ResourceEntry>([[PICTURE.id, PICTURE]]);
+const ISSUES = new Map<AssetId, "missing">();
+
+const BRIEF = card("text", "n-brief", "Brief", {
+  content: "A lantern floats over a quiet lake at dusk.",
+});
+const PLATE = card("image", "n-plate", "Plate", { assetId: PICTURE.id });
+const SHOT = card("image", "n-shot", "Shot", { assetId: PICTURE.id });
+const TARGET = asked("image", "n-target", "Target");
+const FILM = asked("video", "n-film", "Film");
+
+/** Two arrivals at the target: words on its prompt, a picture on its images. */
+const SHEET = sheet(
+  [BRIEF, PLATE, SHOT, TARGET, FILM],
+  [
+    wire("n-brief", "n-target", "e-words"),
+    wire("n-plate", "n-target", "e-picture", "images"),
+  ],
+);
+
+const cut = vi.fn();
+const find = vi.fn();
+const mode = vi.fn();
+const move = vi.fn();
+const point = vi.fn();
+const picking = vi.fn();
+const tookAsset = vi.fn();
+
+function Bar({
+  canvas = SHEET,
+  inputMode = "upstream",
+  node = TARGET,
+  referenceNodeIds = [],
+}: {
+  canvas?: CanvasDocument;
+  inputMode?: GenerationInputMode;
+  node?: WorkflowNode;
+  referenceNodeIds?: NodeId[];
+}) {
+  const stored = (node.data as { generation?: GenerationSpec }).generation;
+  if (!stored) throw new Error("a node with a panel has a spec");
+  return (
+    <ReferenceBar
+      canvas={canvas}
+      issues={ISSUES}
+      node={node}
+      onCut={cut}
+      onFind={find}
+      onMode={mode}
+      onMove={move}
+      onPicking={picking}
+      onPoint={point}
+      onTakeAsset={tookAsset}
+      resources={RESOURCES}
+      spec={{ ...stored, inputMode, referenceNodeIds }}
+    />
+  );
+}
+
+function bar() {
+  return screen.getByTestId("reference-bar");
+}
+
+function rows() {
+  return within(bar()).getAllByRole("listitem");
+}
+
+/** Something being dragged from the resource panel, which is an asset id. */
+function carrying(assetId: string | null) {
+  return {
+    dataTransfer: {
+      getData: (type: string) =>
+        assetId !== null && type === ASSET_DRAG_MIME ? assetId : "",
+      types: assetId === null ? ["text/plain"] : [ASSET_DRAG_MIME],
+    },
+  };
+}
+
+beforeEach(() => {
+  for (const spy of [cut, find, mode, move, point, picking, tookAsset]) {
+    spy.mockClear();
+  }
+});
+
+afterEach(cleanup);
+
+describe("what is wired in", () => {
+  it("is read off the graph, in the order the document holds it", () => {
+    render(<Bar />);
+    const [words, picture] = rows();
+    expect(words.textContent).toContain("Brief");
+    expect(words.textContent).toContain("Prompt");
+    expect(picture.textContent).toContain("Plate");
+    expect(picture.textContent).toContain("Images");
+    // Counted on the mode that is showing them, where it can be seen at a glance.
+    expect(screen.getByRole("button", { name: /Wired in/ }).textContent).toBe(
+      "Wired in 2",
+    );
+  });
+
+  it("says so when nothing is", () => {
+    render(<Bar canvas={sheet(SHEET.nodes)} />);
+    expect(bar().textContent).toContain("Nothing is wired into this node yet.");
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("hands back the edge that is to be taken out", () => {
+    render(<Bar />);
+    fireEvent.click(
+      within(rows()[0]).getByRole("button", {
+        name: "Disconnect Brief from Target",
+      }),
+    );
+    expect(cut).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "e-words" }),
+    );
+  });
+
+  it("hands back the node that is to be brought into view", () => {
+    render(<Bar />);
+    fireEvent.click(
+      within(rows()[1]).getByRole("button", {
+        name: "Find Plate on the canvas",
+      }),
+    );
+    expect(find).toHaveBeenCalledWith("n-plate");
+  });
+
+  it("offers a picture as the mask of the picture being painted over", () => {
+    render(<Bar />);
+    const [words, picture] = rows();
+    // Words have nowhere else to go on this node, and are not offered a move.
+    expect(
+      within(words).queryByRole("button", { name: /^Use Brief as/ }),
+    ).toBeNull();
+    fireEvent.click(
+      within(picture).getByRole("button", { name: "Use Plate as the mask" }),
+    );
+    expect(move).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "e-picture" }),
+      "mask",
+    );
+  });
+
+  it("offers a picture as either frame of a shot", () => {
+    const filmed = sheet(SHEET.nodes, [
+      wire("n-shot", "n-film", "e-opening", "firstFrame"),
+      wire("n-plate", "n-film", "e-subject", "images"),
+    ]);
+    render(<Bar canvas={filmed} node={FILM} />);
+    const [opening, subject] = rows();
+    expect(opening.textContent).toContain("First frame");
+    fireEvent.click(
+      within(subject).getByRole("button", {
+        name: "Use Plate as the last frame",
+      }),
+    );
+    expect(move).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "e-subject" }),
+      "lastFrame",
+    );
+  });
+});
+
+describe("where the ask takes what it is given from", () => {
+  it("is a choice, and the one showing is the one written", () => {
+    render(<Bar inputMode="manual" referenceNodeIds={["n-plate"]} />);
+    const chosen = screen.getByRole("button", { name: /By hand/ });
+    expect(chosen).toHaveProperty("ariaPressed", "true");
+    expect(chosen.textContent).toBe("By hand 1");
+
+    fireEvent.click(screen.getByRole("button", { name: /Wired in/ }));
+    expect(mode).toHaveBeenCalledWith("upstream");
+    fireEvent.click(screen.getByRole("button", { name: /In the prompt/ }));
+    expect(mode).toHaveBeenCalledWith("mentions");
+  });
+
+  it("says what the prompt's own pointing means for what will be sent", () => {
+    render(<Bar inputMode="mentions" />);
+    expect(bar().textContent).toContain("What the prompt points at with @");
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+});
+
+describe("what is pointed at by hand", () => {
+  it("is listed in the order it was written, which is the order it is sent", () => {
+    render(
+      <Bar inputMode="manual" referenceNodeIds={["n-plate", "n-brief"]} />,
+    );
+    const [first, second] = rows();
+    expect(first.textContent).toContain("Plate");
+    expect(second.textContent).toContain("Brief");
+  });
+
+  it("writes the list whole when one is taken out", () => {
+    render(
+      <Bar inputMode="manual" referenceNodeIds={["n-plate", "n-brief"]} />,
+    );
+    fireEvent.click(
+      within(rows()[0]).getByRole("button", {
+        name: "Take Plate out of the list",
+      }),
+    );
+    // One write rather than one per chip that moved: the order is one thing.
+    expect(point).toHaveBeenCalledTimes(1);
+    expect(point).toHaveBeenCalledWith(["n-brief"]);
+  });
+
+  it("writes the list whole when one is dragged somewhere else", () => {
+    render(
+      <Bar inputMode="manual" referenceNodeIds={["n-plate", "n-brief"]} />,
+    );
+    const [first, second] = rows();
+    fireEvent.dragStart(second);
+    fireEvent.drop(first);
+    expect(point).toHaveBeenCalledTimes(1);
+    expect(point).toHaveBeenCalledWith(["n-brief", "n-plate"]);
+  });
+
+  it("reads as broken when a node it names is gone, and can still be taken out", () => {
+    render(<Bar inputMode="manual" referenceNodeIds={["n-gone"]} />);
+    const [row] = rows();
+    expect(row.textContent).toContain("a node that is gone");
+    expect(within(row).queryByRole("button", { name: /^Find/ })).toBeNull();
+    fireEvent.click(
+      within(row).getByRole("button", {
+        name: "Take a node that is gone out of the list",
+      }),
+    );
+    expect(point).toHaveBeenCalledWith([]);
+  });
+
+  it("offers to list what is already wired in rather than starting from nothing", () => {
+    render(<Bar inputMode="manual" />);
+    expect(bar().textContent).toContain("Nothing is listed yet.");
+    fireEvent.click(
+      screen.getByRole("button", { name: "List what is wired in" }),
+    );
+    expect(point).toHaveBeenCalledWith(["n-brief", "n-plate"]);
+  });
+
+  it("points at something else on the canvas from the picker", () => {
+    render(<Bar inputMode="manual" referenceNodeIds={["n-brief"]} />);
+    expect(
+      screen.queryByRole("group", { name: "What this node may point at" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Point at…" }));
+    expect(picking).toHaveBeenCalledWith(true);
+    const offered = screen.getByRole("group", {
+      name: "What this node may point at",
+    });
+    // Already listed, so not offered a second time; and never this node itself.
+    expect(within(offered).queryByRole("button", { name: /Brief/ })).toBeNull();
+    expect(
+      within(offered).queryByRole("button", { name: /Target/ }),
+    ).toBeNull();
+
+    fireEvent.click(within(offered).getByRole("button", { name: /Plate/ }));
+    expect(point).toHaveBeenCalledWith(["n-brief", "n-plate"]);
+
+    fireEvent.click(within(offered).getByRole("button", { name: "Done" }));
+    expect(picking).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("an asset left on the bar", () => {
+  it("reads as a place it can be left while it is being dragged over", () => {
+    render(<Bar />);
+    fireEvent.dragOver(bar(), carrying(PICTURE.id));
+    expect(bar().className).toContain("is-dropping");
+    fireEvent.dragLeave(bar());
+    expect(bar().className).not.toContain("is-dropping");
+  });
+
+  it("hands back the asset that was left there", () => {
+    render(<Bar />);
+    fireEvent.drop(bar(), carrying(PICTURE.id));
+    expect(tookAsset).toHaveBeenCalledWith(PICTURE.id);
+  });
+
+  it("leaves alone something that is not an asset", () => {
+    render(<Bar />);
+    fireEvent.dragOver(bar(), carrying(null));
+    expect(bar().className).not.toContain("is-dropping");
+    fireEvent.drop(bar(), carrying(null));
+    expect(tookAsset).not.toHaveBeenCalled();
+  });
+
+  it("is not a place anything can be left where the prompt decides", () => {
+    render(<Bar inputMode="mentions" />);
+    fireEvent.dragOver(bar(), carrying(PICTURE.id));
+    expect(bar().className).not.toContain("is-dropping");
+    fireEvent.drop(bar(), carrying(PICTURE.id));
+    expect(tookAsset).not.toHaveBeenCalled();
+  });
+});

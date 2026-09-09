@@ -436,6 +436,46 @@ export function disconnectInput(nodeId: NodeId, portId: string) {
 }
 
 /**
+ * Moves one edge to another input of the node it already feeds, taking over
+ * whatever was there.
+ *
+ * The leaving and the arriving are one step of history: an undo that only undid
+ * the arrival would leave the node fed from both, which is not where it was.
+ */
+export function moveInput(edgeId: EdgeId, portId: string) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const edge = canvas.edges.find((entry) => entry.id === edgeId);
+  if (!edge || edge.target.portId === portId) return;
+  const target: PortRef = { nodeId: edge.target.nodeId, portId };
+  const result = validateEdgeCandidate(canvas, edge.source, target);
+  if (!result.ok && result.code !== "CARDINALITY_VIOLATION") {
+    toastError(result.message);
+    announce(`Connection rejected: ${result.message}`);
+    return;
+  }
+  const leaving = canvas.edges
+    .filter(
+      (entry) =>
+        entry.id === edgeId ||
+        (entry.target.nodeId === target.nodeId &&
+          entry.target.portId === portId),
+    )
+    .map((entry) => entry.id);
+  const label =
+    findNode(canvas, target.nodeId)?.ports.find((port) => port.id === portId)
+      ?.label ?? portId;
+  if (
+    execute("Move an input", [
+      { type: "removeEdges", canvasId: canvas.id, edgeIds: leaving },
+      { type: "addEdge", canvasId: canvas.id, edge: { ...edge, target } },
+    ])
+  ) {
+    announce(`Moved to ${label}`);
+  }
+}
+
+/**
  * Nodes that could source the given input: every node with an output port
  * the domain validator accepts (an occupied input is a valid replace).
  */
@@ -558,15 +598,21 @@ export async function confirmDeleteAsset() {
   await removeAssetNow(prompt.assetId);
 }
 
-/** Creates a source node for a registered asset at a world position. */
-export async function addAssetNode(assetId: AssetId, at?: Point) {
-  const canvas = activeCanvas();
+/**
+ * Builds the node a registered asset becomes: its kind from where the file
+ * lives, its title from the file's own name, and its body from what the asset
+ * holds. The anchor is where the node is wanted, before the offset every new
+ * node is placed by.
+ */
+async function makeAssetNode(
+  assetId: AssetId,
+  anchor: Point,
+): Promise<WorkflowNode | null> {
   const { moka } = useProjectStore.getState();
-  if (!canvas || !moka) return;
+  if (!moka) return null;
   const entry = buildResourceIndex(moka).get(assetId);
-  if (!entry) return;
+  if (!entry) return null;
   const category = entry.path.split("/")[1];
-  const anchor = at ?? viewCenterWorld() ?? { x: 0, y: 0 };
   let kind: NodeKind;
   if (category === "images") kind = "image";
   else if (category === "videos") kind = "video";
@@ -596,12 +642,80 @@ export async function addAssetNode(assetId: AssetId, at?: Point) {
       posterAssetId: entry.probe?.posterAssetId,
     };
   }
+  return node;
+}
+
+/** Creates a source node for a registered asset at a world position. */
+export async function addAssetNode(assetId: AssetId, at?: Point) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const anchor = at ?? viewCenterWorld() ?? { x: 0, y: 0 };
+  const node = await makeAssetNode(assetId, anchor);
+  if (!node) return;
   if (
     execute("Add asset node", [{ type: "addNode", canvasId: canvas.id, node }])
   ) {
     useEditorStore.getState().selectOnly(node.id);
-    announce(`Added ${entry.name}`);
+    announce(`Added ${node.title}`);
   }
+}
+
+/**
+ * Creates a node for an asset beside the node it is meant to feed, and hands
+ * back its id.
+ *
+ * The selection is left where it was, which is the whole of the difference from
+ * dropping the same asset on the canvas: this is how a node is given something
+ * while its own panel is open, and a panel follows the selection.
+ */
+export async function addAssetBeside(
+  targetNodeId: NodeId,
+  assetId: AssetId,
+): Promise<NodeId | null> {
+  const canvas = activeCanvas();
+  const target = canvas ? findNode(canvas, targetNodeId) : null;
+  if (!canvas || !target) return null;
+  const node = await makeAssetNode(assetId, {
+    x: target.bounds.x - 120,
+    y: target.bounds.y + 40,
+  });
+  if (!node) return null;
+  if (
+    execute("Add a reference", [{ type: "addNode", canvasId: canvas.id, node }])
+  ) {
+    announce(`Added ${node.title}`);
+    return node.id;
+  }
+  return null;
+}
+
+/**
+ * Wires the first output of one node that fits into the first input of another
+ * that is free to take it.
+ *
+ * False when the two have nothing in common, which is the caller's to say out
+ * loud: a node created beside this one may still have nowhere to plug into it.
+ * An input already holding something is passed over rather than replaced, since
+ * taking over a mask or a frame is a choice rather than a side effect.
+ */
+export function feedInto(sourceNodeId: NodeId, targetNodeId: NodeId): boolean {
+  const canvas = activeCanvas();
+  if (!canvas) return false;
+  const source = findNode(canvas, sourceNodeId);
+  const target = findNode(canvas, targetNodeId);
+  if (!source || !target) return false;
+  for (const out of source.ports) {
+    if (out.direction !== "output") continue;
+    for (const into of target.ports) {
+      if (into.direction !== "input") continue;
+      const from: PortRef = { nodeId: sourceNodeId, portId: out.id };
+      const to: PortRef = { nodeId: targetNodeId, portId: into.id };
+      if (!validateEdgeCandidate(canvas, from, to).ok) continue;
+      connectPorts(from, to);
+      return true;
+    }
+  }
+  return false;
 }
 
 export interface ImportFilesOptions {

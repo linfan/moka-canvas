@@ -1542,6 +1542,143 @@ button.danger:hover:not(:disabled) {
   margin: 0;
 }
 
+.reference-bar {
+  display: grid;
+  gap: 6px;
+  position: relative;
+}
+
+/* Read as a place something can be left while something is being dragged over
+   it, which is the only way a drop target says so before the drop. */
+.reference-bar.is-dropping {
+  outline: 1px dashed var(--muted);
+  outline-offset: 3px;
+}
+
+.reference-modes {
+  display: flex;
+  gap: 4px;
+}
+
+.reference-modes button {
+  border-radius: 6px;
+  flex: 1;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
+.reference-empty {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
+
+.reference-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.reference-chip {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 4px 2px 2px;
+}
+
+/* A reference to a card that is gone sends nothing, and has to read as that
+   rather than as a reference the model ignored. */
+.reference-chip.is-gone {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.reference-thumb {
+  border-radius: 4px;
+  flex: none;
+  height: 18px;
+  object-fit: cover;
+  width: 18px;
+}
+
+.reference-name {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-port,
+.reference-summary {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.reference-port {
+  flex: none;
+}
+
+.reference-action {
+  border-radius: 999px;
+  color: var(--muted);
+  flex: none;
+  font-size: 10px;
+  padding: 1px 4px;
+}
+
+.reference-add {
+  border-radius: 6px;
+  font-size: 11px;
+  justify-self: start;
+  padding: 3px 7px;
+}
+
+/* Hung under the bar rather than laid out in it, for the reason the mention
+   offer is: a list that pushed the prompt down would move the caret. */
+.reference-pick {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 1px;
+  left: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 40;
+}
+
+.reference-pick-label {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  margin: 4px 2px 2px;
+  text-transform: uppercase;
+}
+
+.reference-pick button {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  text-align: left;
+  width: 100%;
+}
+
 /* Why an ask did not finish, held beside the card that says so. It takes no
    pointer events: swallowing the hover that summoned it would blink it away. */
 

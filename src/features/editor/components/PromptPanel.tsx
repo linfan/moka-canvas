@@ -27,7 +27,14 @@ import {
 } from "../../settings/providerStore";
 import { worldToClient } from "../canvas/canvasControl";
 import { buildIssueIndex, buildResourceIndex } from "../canvas/mediaCards";
-import { setNodeGeneration } from "../interactions/actions";
+import {
+  addAssetBeside,
+  disconnectEdge,
+  feedInto,
+  fitSelectionAction,
+  moveInput,
+  setNodeGeneration,
+} from "../interactions/actions";
 import {
   GENERATION_UNAVAILABLE,
   useAppStore,
@@ -39,6 +46,7 @@ import { useLatestRunForNode, useRunStore } from "../stores/runStore";
 import { GenerationParams, type ParamValue } from "./GenerationParams";
 import { InputPreview } from "./InputPreview";
 import { MentionField } from "./MentionField";
+import { ReferenceBar } from "./ReferenceBar";
 
 const PANEL_WIDTH = 320;
 const PANEL_HEIGHT = 220;
@@ -50,6 +58,8 @@ const PANEL_HEIGHT_COUNT = 22;
 const PANEL_HEIGHT_PREVIEW = 200;
 /** What the panel grows by while the prompt field is offering candidates. */
 const PANEL_HEIGHT_OFFER = 180;
+/** What the panel grows by for the row that says where its inputs come from. */
+const PANEL_HEIGHT_REFERENCES = 34;
 /** What the panel grows by for each row the prompt's mentions are drawn in. */
 const PANEL_HEIGHT_CHIPS = 28;
 /** Gap left between the panel and the node, and between it and a canvas edge. */
@@ -172,6 +182,7 @@ export function PromptPanel() {
   const [reading, setReading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [offering, setOffering] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   // Built once per document rather than once per keystroke: a project may hold
   // thousands of assets and the field asks after every one of them.
@@ -386,6 +397,40 @@ export function PromptPanel() {
   };
 
   /**
+   * Takes an asset dropped on what this node is given.
+   *
+   * A node is made for it beside this one first, because a reference is a node
+   * and an asset on its own is not one. Where this node takes what it is given
+   * from the wiring, the new node is wired in; where it takes it from a list
+   * kept by hand, it is listed instead.
+   */
+  const takeAsset = async (assetId: AssetId) => {
+    const made = await addAssetBeside(node.id, assetId);
+    if (!made) return;
+    if (spec.inputMode === "manual") {
+      commit({ referenceNodeIds: [...spec.referenceNodeIds, made] });
+      return;
+    }
+    if (!feedInto(made, node.id)) {
+      useEditorStore
+        .getState()
+        .announce("It is on the canvas, but this node has no input for it");
+    }
+  };
+
+  /**
+   * Brings one of the nodes this node is given into view.
+   *
+   * The panel goes with the selection, so this closes it — which is the point:
+   * the reader asked to be taken to the other node, not to keep looking at this
+   * one while it happens somewhere off screen.
+   */
+  const locate = (target: NodeId) => {
+    useEditorStore.getState().selectOnly(target);
+    fitSelectionAction();
+  };
+
+  /**
    * Opens or folds away the disclosure of what this node will send.
    *
    * Opening saves what is typed first and waits for it to land. The preview is
@@ -454,13 +499,25 @@ export function PromptPanel() {
     x: node.bounds.x,
     y: node.bounds.y + node.bounds.height,
   });
+  // Counted here for the clamp alone: the bar reads the graph for itself, and
+  // a second reading of it that only ever decides how much room to leave is
+  // not one that can disagree with what is drawn.
+  const references =
+    spec.inputMode === "upstream"
+      ? canvas.edges.filter((edge) => edge.target.nodeId === node.id).length
+      : spec.inputMode === "manual"
+        ? spec.referenceNodeIds.length
+        : 0;
   const tall =
     (paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT) +
+    PANEL_HEIGHT_REFERENCES +
+    (references === 0 ? PANEL_HEIGHT_COUNT : 0) +
+    (picking ? PANEL_HEIGHT_OFFER : 0) +
     (previewOpen ? PANEL_HEIGHT_PREVIEW : 0) +
     (counted ? PANEL_HEIGHT_COUNT : 0) +
     (dangling ? PANEL_HEIGHT_COUNT : 0) +
     (offering ? PANEL_HEIGHT_OFFER : 0) +
-    Math.ceil(chips / 2) * PANEL_HEIGHT_CHIPS;
+    Math.ceil((chips + references) / 2) * PANEL_HEIGHT_CHIPS;
   const style: React.CSSProperties = {
     left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${
       PANEL_WIDTH + GAP
@@ -524,6 +581,22 @@ export function PromptPanel() {
           value={spec.model || null}
         />
       )}
+
+      <ReferenceBar
+        canvas={canvas}
+        issues={issues}
+        key={`refs-${node.id}`}
+        node={node}
+        onCut={(edge) => disconnectEdge(edge.id)}
+        onFind={locate}
+        onMode={(mode) => commit({ inputMode: mode })}
+        onMove={(edge, portId) => moveInput(edge.id, portId)}
+        onPicking={setPicking}
+        onPoint={(nodeIds) => commit({ referenceNodeIds: nodeIds })}
+        onTakeAsset={(assetId) => void takeAsset(assetId)}
+        resources={resources}
+        spec={spec}
+      />
 
       <MentionField
         canvas={canvas}

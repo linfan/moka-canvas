@@ -1124,3 +1124,54 @@ describe("a prompt that points at other nodes", () => {
     expect(specOf(ids.image)?.inputMode).toBe("mentions");
   });
 });
+
+describe("what a node is given", () => {
+  function given() {
+    return screen.getByTestId("reference-bar");
+  }
+
+  /** How many steps of history the document is holding, as it stands now. */
+  function steps() {
+    return useHistoryStore.getState().undoStack.length;
+  }
+
+  it("lists by hand what the wiring does not, in one step of history", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    expect(given().textContent).toContain(
+      "Nothing is wired into this node yet.",
+    );
+
+    fireEvent.click(within(given()).getByRole("button", { name: /By hand/ }));
+    await settle();
+    expect(specOf(ids.image)?.inputMode).toBe("manual");
+    const before = steps();
+
+    fireEvent.click(within(given()).getByRole("button", { name: "Point at…" }));
+    await settle();
+    fireEvent.click(
+      within(
+        screen.getByRole("group", { name: "What this node may point at" }),
+      ).getByRole("button", { name: /Brief/ }),
+    );
+    await settle();
+    expect(specOf(ids.image)?.referenceNodeIds).toEqual([ids.text]);
+    // One step, so one undo takes the list back whole rather than halfway.
+    expect(steps()).toBe(before + 1);
+  });
+
+  it("takes out what is wired in, edge and all", async () => {
+    const fed = withFedNode();
+    await openEditor();
+    selectNode(fed);
+    await settle();
+    const [chip] = within(given()).getAllByRole("listitem");
+    expect(chip.textContent).toContain("Prompt");
+
+    fireEvent.click(within(chip).getByRole("button", { name: /Disconnect/ }));
+    await settle();
+    const canvas = useProjectStore.getState().moka?.canvas[0];
+    expect(canvas?.edges.map((edge) => edge.id)).not.toContain("edge-fed");
+  });
+});
