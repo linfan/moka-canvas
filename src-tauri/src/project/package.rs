@@ -273,7 +273,11 @@ fn collect_files(
 /// to hold only what is placed keeps the registry down to the assets a canvas
 /// points at, which is a choice about size rather than about anybody's history,
 /// so the two are decided separately and can be asked for together.
-fn document_for_export(moka: &MokaFile, scope: &PackageScope) -> MokaFile {
+///
+/// The same rule reads in both directions. An export asks it what to write; an
+/// import asks it what an arriving package is allowed to have brought, since a
+/// build older than this one may have written more than today's rule keeps.
+fn carried_document(moka: &MokaFile, scope: &PackageScope) -> MokaFile {
     let mut document = moka.clone();
     if !scope.personal_history {
         for entry in document.resources.all_mut() {
@@ -354,7 +358,7 @@ pub fn export_project(
     allow_incomplete: bool,
     scope: PackageScope,
 ) -> Result<PackageReport, ProjectError> {
-    let document = document_for_export(moka, &scope);
+    let document = carried_document(moka, &scope);
     let collected = collect_files(root, &scope, &left_behind(moka, &document))?;
 
     // Completeness: everything the package carries must be there to carry. An
@@ -592,11 +596,28 @@ pub fn import_project(
         }
 
         // The staged tree must itself be a valid project before committing.
-        let moka_path = staging.join("canvas.moka");
+        let moka_path = staging.join(DOCUMENT_NAME);
         let moka_bytes = std::fs::read(&moka_path).map_err(|_| {
             ProjectError::domain("PACKAGE_INVALID", "Package contains no canvas.moka")
         })?;
-        crate::project::codec::decode_moka_file(&moka_bytes)?;
+        let document = crate::project::codec::decode_moka_file(&moka_bytes)?;
+
+        // Cleaning comes after verification rather than during staging: the
+        // hashes prove what arrived is what was sent, and that question is worth
+        // answering about the package as it was made. What is kept is a separate
+        // question, asked of this build's rule. A manifest that does not say it
+        // carried the runs is taken at its word — including one old enough to
+        // have no such field, which is what the range check above is for.
+        if !manifest.personal_history {
+            let runs = staging.join(RUN_RECORDS);
+            if runs.is_dir() {
+                std::fs::remove_dir_all(&runs)?;
+            }
+            let carried = carried_document(&document, &PackageScope::default());
+            if carried != document {
+                std::fs::write(&moka_path, encode_moka_file(&carried, None)?)?;
+            }
+        }
 
         if target_root.exists() && target_root.read_dir()?.next().is_some() {
             return Err(ProjectError::domain(
@@ -790,7 +811,7 @@ mod tests {
     /// Read off the encoding rather than off the fields: what is not in the
     /// bytes did not travel, whichever field it might have been hiding in.
     fn carries(document: &MokaFile, scope: &PackageScope, needle: &str) -> bool {
-        let bytes = encode_moka_file(&document_for_export(document, scope), None).unwrap();
+        let bytes = encode_moka_file(&carried_document(document, scope), None).unwrap();
         bytes
             .windows(needle.len())
             .any(|window| window == needle.as_bytes())
@@ -845,7 +866,7 @@ mod tests {
         provenance.parameter_snapshot =
             Some(serde_json::json!({ "prompt": "a sign that reads runId, at dusk" }));
 
-        let redacted = document_for_export(&fixture, &WORK);
+        let redacted = carried_document(&fixture, &WORK);
         let snapshot = &redacted
             .resources
             .find("asset-made")
@@ -876,13 +897,13 @@ mod tests {
     #[test]
     fn a_full_backup_writes_the_document_it_was_given() {
         let fixture = fixture();
-        assert_eq!(document_for_export(&fixture, &BACKUP), fixture);
+        assert_eq!(carried_document(&fixture, &BACKUP), fixture);
     }
 
     #[test]
     fn redacting_a_copy_leaves_the_project_on_this_machine_alone() {
         let fixture = fixture();
-        let _ = document_for_export(&fixture, &WORK);
+        let _ = carried_document(&fixture, &WORK);
         assert_eq!(
             fixture
                 .resources
@@ -908,7 +929,7 @@ mod tests {
     #[test]
     fn a_small_package_drops_the_shelf_and_the_names_pointing_at_it() {
         let fixture = fixture();
-        let small = document_for_export(&fixture, &PLACED_ONLY);
+        let small = carried_document(&fixture, &PLACED_ONLY);
 
         let carried: Vec<&str> = small
             .resources
@@ -947,13 +968,13 @@ mod tests {
     #[test]
     fn a_package_nobody_asked_to_be_small_keeps_the_whole_shelf() {
         let fixture = fixture();
-        assert!(left_behind(&fixture, &document_for_export(&fixture, &WORK)).is_empty());
+        assert!(left_behind(&fixture, &carried_document(&fixture, &WORK)).is_empty());
     }
 
     #[test]
     fn the_two_choices_are_made_separately() {
         let fixture = fixture();
-        let small_backup = document_for_export(
+        let small_backup = carried_document(
             &fixture,
             &PackageScope {
                 personal_history: true,

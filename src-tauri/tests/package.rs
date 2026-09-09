@@ -4,7 +4,7 @@ use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
 use moka_canvas::domain::{
     derive_ports, AssetProvenance, DocumentCommand, MokaFile, NodeData, NodeKind, Rect,
-    WorkflowNode,
+    WorkflowNode, PACKAGE_MANIFEST_VERSION,
 };
 use moka_canvas::project::codec::decode_moka_file;
 use moka_canvas::project::store::FsProjectStore;
@@ -323,6 +323,14 @@ async fn import_rejects_an_unsupported_format_version() {
     let (status, body) = try_import(&app, &future, &imports).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["code"], "MOKA_VERSION_UNSUPPORTED");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("this build reads 1 to {PACKAGE_MANIFEST_VERSION}")),
+        "a refusal says what would have been taken: {}",
+        body["message"]
+    );
     assert_import_left_no_trace(&imports, "future");
 }
 
@@ -845,5 +853,159 @@ async fn a_small_package_leaves_the_shelf_behind_entry_and_file_together() {
         imported.self_check.issues.is_empty(),
         "what arrives opens as whole: {:?}",
         imported.self_check.issues
+    );
+}
+
+/// A record of a run, written where an export asked to carry everything will
+/// find it: a run is something this machine did, and only a full backup says so.
+fn write_run_record(root: &Path, run_id: &str) -> String {
+    let name = format!("history/runs/{run_id}.json");
+    let record = root.join(&name);
+    std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+    std::fs::write(
+        &record,
+        serde_json::to_vec_pretty(&json!({
+            "id": run_id,
+            "status": "succeeded",
+            "parameters": { "model": "a-model", "prompt": "a lake at dusk" },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    name
+}
+
+/// The same package as an older build would have written it: a version this one
+/// still reads, and nothing said either way about the records of the runs.
+///
+/// The entries are left exactly as they were, so the hashes still describe what
+/// arrived — the question of what is kept is a different one, and it is asked
+/// only after that one is answered.
+fn rewrite_as_older_package(package: &Path, destination: &Path) -> PathBuf {
+    let mut entries = read_zip_entries(package);
+    let mut manifest = manifest_of(&entries);
+    manifest["formatVersion"] = json!(1);
+    for field in ["personalHistory", "skipped"] {
+        manifest.as_object_mut().unwrap().remove(field);
+    }
+    let (_, bytes) = entries
+        .iter_mut()
+        .find(|(name, _)| name == "moka-package.json")
+        .expect("a package carries a manifest");
+    *bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+    write_zip(destination, &entries);
+    destination.to_path_buf()
+}
+
+/// Turning an older package away would turn away work somebody has on disk, so
+/// this build reads it. What it may keep is decided here rather than there: an
+/// older manifest never said whether it carried the records of the runs, so it
+/// is taken as a package of the work and cleaned to that rule on the way in.
+#[tokio::test]
+async fn an_older_package_is_cleaned_to_the_rule_this_build_keeps() {
+    let temp = tempfile::tempdir().unwrap();
+    let staged = stage_generated_project(temp.path()).await;
+    let record_name = write_run_record(&staged.root, MADE_BY_RUN);
+
+    let backup = temp.path().join("backup.mokapkg.zip");
+    staged
+        .store
+        .export_package(
+            Some(&backup),
+            false,
+            PackageScope {
+                personal_history: true,
+                ..PackageScope::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let older = rewrite_as_older_package(&backup, &temp.path().join("older.mokapkg.zip"));
+    assert!(
+        read_zip_entries(&older)
+            .iter()
+            .any(|(name, _)| name == &record_name),
+        "the package the older build would have written carries the record"
+    );
+
+    let target = temp.path().join("imports").join("Older");
+    let imported = staged.store.import_package(&older, &target).await.unwrap();
+    assert!(
+        imported.self_check.issues.is_empty(),
+        "what arrives opens as whole: {:?}",
+        imported.self_check.issues
+    );
+
+    assert!(
+        !target.join("history/runs").exists(),
+        "the record of a run made somewhere else does not stay"
+    );
+    let on_disk = decode_moka_file(&std::fs::read(target.join("canvas.moka")).unwrap()).unwrap();
+    let provenance = provenance_of(&on_disk, &staged.placed);
+    assert_eq!(
+        provenance.run_id, None,
+        "and the document stops pointing at one"
+    );
+    assert_eq!(
+        provenance.parameter_snapshot.as_ref().unwrap()["prompt"],
+        "a lake at dusk",
+        "how it was asked for is the reusable part and survives the cleaning"
+    );
+    assert_eq!(
+        provenance.operation_node_id.as_deref(),
+        Some("node-1"),
+        "asking the same way again is still built from what the document keeps"
+    );
+}
+
+/// Cleaning answers to what the manifest says rather than to a guess about what
+/// is inside: a package that says outright it carried the records of the runs is
+/// believed, and keeps them.
+#[tokio::test]
+async fn a_package_that_says_it_carried_the_runs_keeps_them_through_an_import() {
+    let temp = tempfile::tempdir().unwrap();
+    let staged = stage_generated_project(temp.path()).await;
+    let record_name = write_run_record(&staged.root, MADE_BY_RUN);
+
+    let backup = temp.path().join("backup.mokapkg.zip");
+    staged
+        .store
+        .export_package(
+            Some(&backup),
+            false,
+            PackageScope {
+                personal_history: true,
+                ..PackageScope::default()
+            },
+        )
+        .await
+        .unwrap();
+    let entries = read_zip_entries(&backup);
+    let (_, record_bytes) = entries
+        .iter()
+        .find(|(name, _)| name == &record_name)
+        .expect("a full backup carries the run record")
+        .clone();
+    assert_eq!(manifest_of(&entries)["personalHistory"], true);
+
+    let target = temp.path().join("imports").join("Backup");
+    let imported = staged.store.import_package(&backup, &target).await.unwrap();
+    assert!(
+        imported.self_check.issues.is_empty(),
+        "what arrives opens as whole: {:?}",
+        imported.self_check.issues
+    );
+    assert_eq!(
+        std::fs::read(target.join(&record_name)).unwrap(),
+        record_bytes,
+        "the record arrives as it was written"
+    );
+    assert_eq!(
+        provenance_of(&imported.moka, &staged.placed)
+            .run_id
+            .as_deref(),
+        Some(MADE_BY_RUN),
+        "and the document still points at it"
     );
 }
