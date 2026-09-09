@@ -392,8 +392,9 @@ fn merged(mut request: GenerateRequest, preferences: &Preferences) -> GenerateRe
     let capability = request.capability;
     // A global instruction frames a written answer. Speech has a direction of
     // its own below, and a persona meant for text would replace it rather than
-    // join it.
-    if capability == Capability::Text && request.system.is_none() {
+    // join it. A request that states its own instruction is left alone: what one
+    // node asked for is closer to the ask than what was set for all of them.
+    if capability == Capability::Text && request.instruction().is_none() {
         let instruction = preferences.system_prompt.trim();
         if !instruction.is_empty() {
             request.system = Some(instruction.to_string());
@@ -656,6 +657,21 @@ mod tests {
             &preferences(),
         );
         assert_eq!(own.system.as_deref(), Some("be terse"));
+
+        // One node can state its own as a parameter, and that is an instruction
+        // just the same.
+        let asked = merged(
+            request(
+                Capability::Text,
+                json!({ "instructions": "  answer in verse  " }),
+            ),
+            &preferences(),
+        );
+        assert_eq!(
+            asked.system, None,
+            "a global persona would replace the one this node asked for"
+        );
+        assert_eq!(asked.instruction(), Some("answer in verse"));
     }
 
     #[test]

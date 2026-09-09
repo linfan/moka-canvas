@@ -8,6 +8,7 @@ import {
 } from "./constants";
 import { buildGoldenMokaFile, goldenNodeIds } from "./fixtures";
 import {
+  boundsForShape,
   createCanvas,
   createNode,
   executorKeyForNode,
@@ -539,6 +540,49 @@ describe("which executor a node runs on", () => {
     expect(executorKeyForNode(createNode("image", { x: 0, y: 0 }))).toBeNull();
     expect(executorKeyForNode(createNode("group", { x: 0, y: 0 }))).toBeNull();
     expect(executorKeyForNode(createNode("export", { x: 0, y: 0 }))).toBeNull();
+  });
+});
+
+describe("a node asked for a shape", () => {
+  const waiting = { x: 100, y: 40, width: 280, height: 200 };
+
+  it("keeps the centre it has and follows the width it has", () => {
+    expect(boundsForShape(waiting, "16:9")).toEqual({
+      x: 100,
+      y: 61,
+      width: 280,
+      height: 158,
+    });
+    expect(boundsForShape(waiting, "9:16")).toEqual({
+      x: 100,
+      y: -109,
+      width: 280,
+      height: 498,
+    });
+  });
+
+  it("widens a shape too flat to leave a node as short as a node may be", () => {
+    // At its own width this shape would be 86 tall, and a node that short is
+    // refused by the document, so the shape is kept and the width gives way.
+    expect(
+      boundsForShape({ x: 0, y: 0, width: 200, height: 200 }, "21:9"),
+    ).toEqual({ x: -40, y: 40, width: 280, height: 120 });
+  });
+
+  it("reads a size in pixels as the shape it describes", () => {
+    expect(boundsForShape(waiting, "1024x1536")).toEqual({
+      x: 100,
+      y: -70,
+      width: 280,
+      height: 420,
+    });
+  });
+
+  it("reshapes nothing for a value that states no shape", () => {
+    expect(boundsForShape(waiting, "auto")).toBeNull();
+    expect(boundsForShape(waiting, "")).toBeNull();
+    expect(boundsForShape(waiting, "0:512")).toBeNull();
+    expect(boundsForShape(waiting, "1024")).toBeNull();
   });
 });
 

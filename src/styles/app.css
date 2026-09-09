@@ -1228,9 +1228,36 @@ button.danger:hover:not(:disabled) {
   padding: 6px 8px;
 }
 
+.prompt-panel-params {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.prompt-panel-params .dialog-field {
+  gap: 3px;
+}
+
+.prompt-panel-params .dialog-field > span {
+  font-size: 11px;
+}
+
+.prompt-panel-params input,
+.prompt-panel-params select {
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+/* A field carrying a sentence needs the width of the panel, not half of it. */
+.prompt-panel-wide {
+  grid-column: span 2;
+}
+
 .prompt-panel-actions {
   display: flex;
-  justify-content: flex-end;
+  gap: 6px;
+  justify-content: space-between;
 }
 
 .prompt-panel-actions button.primary {

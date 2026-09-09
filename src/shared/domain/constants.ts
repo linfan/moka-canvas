@@ -139,7 +139,7 @@ export const FRAGMENT_SCHEMA_VERSION = 1;
  * meanings as the global provider preferences. Unknown keys are rejected.
  */
 export const GENERATION_PARAM_KEYS: Record<Capability, readonly string[]> = {
-  text: ["temperature", "maxTokens", "reasoningEffort"],
+  text: ["temperature", "maxTokens", "reasoningEffort", "instructions"],
   image: ["size", "quality", "background", "count"],
   audio: ["voice", "format", "speed", "instructions", "music"],
   video: [
@@ -151,6 +151,49 @@ export const GENERATION_PARAM_KEYS: Record<Capability, readonly string[]> = {
     "mode",
   ],
 };
+
+/**
+ * The shapes a picture or a shot can be asked for, stated as a proportion.
+ *
+ * A shape is also the shape of the node waiting for it, which is why it is not
+ * stated in pixels: the pixels are each provider's own answer to the same ask.
+ */
+export const GENERATION_SHAPES = [
+  "1:1",
+  "3:4",
+  "4:3",
+  "16:9",
+  "9:16",
+  "21:9",
+] as const;
+
+export const IMAGE_QUALITIES = ["auto", "low", "medium", "high"] as const;
+export const IMAGE_BACKGROUNDS = ["auto", "transparent", "opaque"] as const;
+export const VIDEO_RESOLUTIONS = ["480", "720", "1080"] as const;
+
+/**
+ * What a video does with the pictures it is given: `auto` reads them as the
+ * frames of the shot, and `reference` as its subject or style.
+ */
+export const VIDEO_IMAGE_MODES = ["auto", "reference"] as const;
+
+export const AUDIO_VOICES = [
+  "alloy",
+  "echo",
+  "fable",
+  "onyx",
+  "nova",
+  "shimmer",
+] as const;
+export const AUDIO_FORMATS = [
+  "mp3",
+  "wav",
+  "opus",
+  "aac",
+  "flac",
+  "pcm",
+] as const;
+export const REASONING_EFFORTS = ["auto", "low", "medium", "high"] as const;
 
 export const HISTORY_LIMIT = 50;
 

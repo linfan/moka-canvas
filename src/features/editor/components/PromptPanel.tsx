@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   CAPABILITY_LABELS,
+  boundsForShape,
   defaultGenerationSpec,
   findNode,
   generationCapabilityFor,
@@ -9,6 +10,7 @@ import {
   type GenerationMode,
   type GenerationSpec,
   type NodeId,
+  type Rect,
   type WorkflowNode,
 } from "../../../shared/domain";
 import { ModelPicker } from "../../settings/ModelPicker";
@@ -26,11 +28,25 @@ import {
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useRunStore } from "../stores/runStore";
+import { GenerationParams, type ParamValue } from "./GenerationParams";
 
 const PANEL_WIDTH = 320;
 const PANEL_HEIGHT = 220;
+/** The tallest the panel gets, which is with every parameter it has showing. */
+const PANEL_HEIGHT_PARAMS = 360;
 /** Gap left between the panel and the node, and between it and a canvas edge. */
 const GAP = 8;
+
+/**
+ * The parameter that states the shape of what a node makes, and so the shape the
+ * node itself is given while it waits.
+ */
+const SHAPE_PARAM: Record<Capability, string | null> = {
+  image: "size",
+  video: "ratio",
+  text: null,
+  audio: null,
+};
 
 /** The modes each kind of node can be asked in. */
 const MODES: Record<Capability, readonly GenerationMode[]> = {
@@ -82,6 +98,7 @@ export function PromptPanel() {
   const shownFor = useRef<NodeId | null>(null);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [paramsOpen, setParamsOpen] = useState(false);
 
   const canvas =
     moka?.canvas.find((entry) => entry.id === activeCanvasId) ??
@@ -152,14 +169,34 @@ export function PromptPanel() {
   const mode = stored && offered.includes(stored.mode) ? stored.mode : opening;
   const models = modelOptionsFor(providers, capability);
 
-  const commit = (patch: Partial<GenerationSpec> = {}) => {
-    setNodeGeneration(canvas.id, node.id, {
-      ...spec,
-      mode,
-      prompt,
-      ...patch,
-      updatedAt: nowIso(),
-    });
+  const commit = (patch: Partial<GenerationSpec> = {}, bounds?: Rect) => {
+    setNodeGeneration(
+      canvas.id,
+      node.id,
+      {
+        ...spec,
+        mode,
+        prompt,
+        ...patch,
+        updatedAt: nowIso(),
+      },
+      bounds,
+    );
+  };
+
+  const setParam = (key: string, value: ParamValue | null) => {
+    const params = { ...spec.params };
+    if (value === null) delete params[key];
+    else params[key] = value;
+    // A shape is the shape of the node as well, while the node is still waiting
+    // for something: an empty one is resized to it in the same step. One that
+    // already holds something keeps the size its content gave it, since a
+    // picture has the shape it has whatever was asked for.
+    const reshaped =
+      value !== null && key === SHAPE_PARAM[capability] && !holdsSomething(node)
+        ? boundsForShape(node.bounds, `${value}`)
+        : null;
+    commit({ params }, reshaped ?? undefined);
   };
 
   // Losing focus with nothing typed is not a request. The panel came up on its
@@ -200,12 +237,13 @@ export function PromptPanel() {
     x: node.bounds.x,
     y: node.bounds.y + node.bounds.height,
   });
+  const tall = paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT;
   const style: React.CSSProperties = {
     left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${
       PANEL_WIDTH + GAP
     }px))`,
     top: `clamp(${GAP}px, ${(origin?.y ?? 0) + GAP * zoom}px, calc(100% - ${
-      PANEL_HEIGHT + GAP
+      tall + GAP
     }px))`,
     width: PANEL_WIDTH,
   };
@@ -284,7 +322,25 @@ export function PromptPanel() {
         value={prompt}
       />
 
+      {paramsOpen && (
+        <GenerationParams
+          capability={capability}
+          defaults={providers?.preferences ?? null}
+          key={node.id}
+          onChange={setParam}
+          params={spec.params}
+        />
+      )}
+
       <div className="prompt-panel-actions">
+        <button
+          aria-expanded={paramsOpen}
+          onClick={() => setParamsOpen((shown) => !shown)}
+          title="What this node's own ask carries, over the defaults set in settings"
+          type="button"
+        >
+          Parameters
+        </button>
         <button
           className="primary"
           disabled={busy || starting || !generationOn}

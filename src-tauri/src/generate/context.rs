@@ -48,10 +48,11 @@ impl ResolvedInputs {
     /// contributing text folded in behind the labels that point at it — and the
     /// media travels under the role its port implied.
     ///
-    /// No instruction is set: a spec carries none, and the only `instructions`
-    /// parameter in the whitelist belongs to speech, where it is a direction to
-    /// the voice rather than a framing instruction. A global one is offered by
-    /// the gateway, which is the only place that knows the preferences.
+    /// No instruction is set as its own field: one a node asked for travels in
+    /// the parameters and is read from there, which keeps the framing of an
+    /// answer and the direction to a voice in the one place a node states it. A
+    /// global one is offered by the gateway, which is the only place that knows
+    /// the preferences.
     pub fn request_for(&self, spec: &GenerationSpec) -> GenerateRequest {
         GenerateRequest {
             capability: spec.capability,

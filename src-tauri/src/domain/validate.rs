@@ -92,7 +92,12 @@ pub fn model_reference_shaped(model: &str) -> bool {
 /// `src/shared/domain/constants.ts`.
 pub fn generation_param_keys(capability: Capability) -> &'static [&'static str] {
     match capability {
-        Capability::Text => &["temperature", "maxTokens", "reasoningEffort"],
+        Capability::Text => &[
+            "temperature",
+            "maxTokens",
+            "reasoningEffort",
+            "instructions",
+        ],
         Capability::Image => &["size", "quality", "background", "count"],
         Capability::Audio => &["voice", "format", "speed", "instructions", "music"],
         Capability::Video => &[

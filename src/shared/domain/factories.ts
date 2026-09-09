@@ -3,6 +3,7 @@ import {
   CANVAS_SCHEMA_VERSION,
   DEFAULT_NODE_HEIGHT,
   DEFAULT_NODE_WIDTH,
+  MIN_NODE_HEIGHT,
   MOKA_FILE_VERSION,
   NODE_PORTS,
   PROVIDER_EXECUTOR_KEY,
@@ -17,6 +18,7 @@ import type {
   NodeId,
   NodeKind,
   PortDefinition,
+  Rect,
   ResourceRegistry,
   WorkflowNode,
 } from "./types";
@@ -127,6 +129,49 @@ export function defaultGenerationSpec(kind: NodeKind): GenerationSpec | null {
     referenceNodeIds: [],
     updatedAt: nowIso(),
   };
+}
+
+/**
+ * The bounds a node takes when it is asked for a shape, around the centre it
+ * already has.
+ *
+ * The width is kept and the height follows it, so a node asked for a shape
+ * stays where it was put across the canvas. A shape too wide to leave the node
+ * as short as a node may be widens it instead: the ask has to be drawable, and
+ * a rectangle below the smallest size would be refused by the document.
+ */
+export function boundsForShape(bounds: Rect, shape: string): Rect | null {
+  const ratio = proportionOf(shape);
+  if (!ratio) return null;
+  let width = bounds.width;
+  let height = Math.round(width / ratio);
+  if (height < MIN_NODE_HEIGHT) {
+    height = MIN_NODE_HEIGHT;
+    width = Math.round(height * ratio);
+  }
+  return {
+    x: Math.round(bounds.x + (bounds.width - width) / 2),
+    y: Math.round(bounds.y + (bounds.height - height) / 2),
+    width,
+    height,
+  };
+}
+
+/**
+ * The width over the height a shape states, or null when it states none.
+ *
+ * Both ways of stating one are read: a proportion is what a node is asked for,
+ * and a size in pixels is what a provider answers with, and the shape of an
+ * answer is the shape of the ask.
+ */
+function proportionOf(shape: string): number | null {
+  const sides = shape.trim().toLowerCase().split(/[:x]/);
+  if (sides.length !== 2) return null;
+  const width = Number(sides[0]);
+  const height = Number(sides[1]);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+  return width / height;
 }
 
 /**

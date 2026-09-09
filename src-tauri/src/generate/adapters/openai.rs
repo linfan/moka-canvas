@@ -517,8 +517,10 @@ async fn image(
 
 fn image_body(call: &ChannelCall, request: &GenerateRequest) -> Value {
     let mut body = opening(call, "prompt", request);
+    if let Some(size) = image_size(request) {
+        body.insert("size".into(), json!(size));
+    }
     for (key, value) in [
-        ("size", request.text_param("size")),
         ("quality", request.text_param("quality")),
         ("background", request.text_param("background")),
     ] {
@@ -530,6 +532,31 @@ fn image_body(call: &ChannelCall, request: &GenerateRequest) -> Value {
         body.insert("n".into(), json!(count));
     }
     Value::Object(body)
+}
+
+/// The size this endpoint is told for the shape a request asked for.
+///
+/// It takes three sizes, and a shape is not one of them, so the closest of the
+/// three is sent: an ask refused for the word it used costs the same as an ask
+/// answered. A size already in pixels is one it takes and is passed on, as is
+/// `auto`, which is its own way of saying the provider may choose.
+fn image_size(request: &GenerateRequest) -> Option<String> {
+    let asked = request.text_param("size")?;
+    Some(match proportion(asked) {
+        None => asked.to_string(),
+        Some(ratio) if ratio > 1.0 => "1536x1024".to_string(),
+        Some(ratio) if ratio < 1.0 => "1024x1536".to_string(),
+        Some(_) => "1024x1024".to_string(),
+    })
+}
+
+/// The width over the height a size stated as `16:9` describes, or nothing when
+/// it is stated some other way.
+fn proportion(size: &str) -> Option<f64> {
+    let (width, height) = size.trim().split_once(':')?;
+    let width: f64 = width.trim().parse().ok()?;
+    let height: f64 = height.trim().parse().ok()?;
+    (width > 0.0 && height > 0.0).then_some(width / height)
 }
 
 fn edit_body(
@@ -548,8 +575,10 @@ fn edit_body(
     let mut body = MultipartBody::new()
         .field("model", &call.model_id)
         .field("prompt", &request.prompt);
+    if let Some(size) = image_size(request) {
+        body = body.field("size", &size);
+    }
     for (key, value) in [
-        ("size", request.text_param("size")),
         ("quality", request.text_param("quality")),
         ("background", request.text_param("background")),
     ] {
@@ -1013,6 +1042,40 @@ mod tests {
                 "n": 2,
             })
         );
+    }
+
+    #[test]
+    fn a_shape_is_sent_as_the_closest_size_this_endpoint_takes() {
+        let call = channel("gpt-image-2");
+        for (asked, sent) in [
+            ("16:9", "1536x1024"),
+            ("21:9", "1536x1024"),
+            ("9:16", "1024x1536"),
+            ("3:4", "1024x1536"),
+            ("1:1", "1024x1024"),
+            // A size it takes is passed on, as is its own way of leaving the
+            // choice to the provider.
+            ("1024x1536", "1024x1536"),
+            ("auto", "auto"),
+        ] {
+            let body = image_body(
+                &call,
+                &generation(Capability::Image, "a cat", json!({ "size": asked })),
+            );
+            assert_eq!(body["size"].as_str(), Some(sent), "asked for {asked}");
+        }
+
+        // Nothing asked for is nothing sent, and the endpoint chooses.
+        let plain = image_body(&call, &generation(Capability::Image, "a cat", json!({})));
+        assert!(plain.get("size").is_none(), "{plain}");
+
+        // The other endpoint takes the same three sizes, so it is told the same.
+        let photo = media("photo", InputRole::Reference);
+        let request = generation(Capability::Image, "make it snow", json!({ "size": "16:9" }));
+        let (body, _) = edit_body(&call, &request, &[&photo], None);
+        let text = String::from_utf8(body).expect("every part here is text");
+        assert!(text.contains("1536x1024"), "{text}");
+        assert!(!text.contains("16:9"), "{text}");
     }
 
     #[test]

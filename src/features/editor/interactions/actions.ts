@@ -762,11 +762,15 @@ function asksTheSame(
  *
  * Callers commit prompt edits on blur; an unchanged spec is skipped so those
  * commits do not add identical entries to the history stack.
+ *
+ * Bounds may travel with the spec: asking a node for a shape and giving the node
+ * that shape are one action, and undoing it should give back both.
  */
 export function setNodeGeneration(
   canvasId: CanvasId,
   nodeId: NodeId,
   generation: GenerationSpec | null,
+  bounds?: Rect,
 ) {
   const { moka } = useProjectStore.getState();
   const canvas = moka?.canvas.find((entry) => entry.id === canvasId);
@@ -775,19 +779,23 @@ export function setNodeGeneration(
   if (generation && generationCapabilityFor(node.kind) === null) return;
 
   const data = node.data as { generation?: GenerationSpec };
-  if (asksTheSame(data.generation ?? null, generation)) return;
-
   const next = { ...data } as Record<string, unknown>;
   if (generation === null) delete next.generation;
   else next.generation = generation;
-  execute(generation ? "Edit generation" : "Clear generation", [
-    {
+
+  const commands: DocumentCommand[] = [];
+  if (!asksTheSame(data.generation ?? null, generation)) {
+    commands.push({
       type: "updateNode",
       canvasId,
       nodeId,
       patch: { data: next as NodeData },
-    },
-  ]);
+    });
+  }
+  if (bounds) commands.push({ type: "resizeNode", canvasId, nodeId, bounds });
+  if (commands.length === 0) return;
+
+  execute(generation ? "Edit generation" : "Clear generation", commands);
 }
 
 export function fitViewAction() {

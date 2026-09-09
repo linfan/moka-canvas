@@ -353,18 +353,30 @@ fn generation_config(request: &GenerateRequest) -> Option<Value> {
     (!config.is_empty()).then(|| Value::Object(config))
 }
 
-/// A size like `1024x1536` as the shape it describes, reduced so that a
-/// provider comparing it against the handful it offers can recognise it.
+/// The shape a size describes, as this protocol states one.
+///
+/// A size in pixels is reduced so that a provider comparing it against the
+/// handful of shapes it offers can recognise it. A shape already stated as one
+/// is the answer: reducing it again would turn a shape a provider lists into one
+/// it does not.
 fn aspect_ratio(size: &str) -> Option<String> {
-    let lowered = size.to_lowercase();
-    let (width, height) = lowered.split_once('x')?;
-    let width: u32 = width.trim().parse().ok()?;
-    let height: u32 = height.trim().parse().ok()?;
-    if width == 0 || height == 0 {
-        return None;
+    let lowered = size.trim().to_lowercase();
+    if let Some((width, height)) = lowered.split_once(':') {
+        let (width, height) = sides(width, height)?;
+        return Some(format!("{width}:{height}"));
     }
+    let (width, height) = lowered.split_once('x')?;
+    let (width, height) = sides(width, height)?;
     let shared = divisor(width, height);
     Some(format!("{}:{}", width / shared, height / shared))
+}
+
+/// Two whole numbers out of the two sides of a size, in whatever spacing it
+/// arrived. A side of nothing or of zero describes no shape at all.
+fn sides(width: &str, height: &str) -> Option<(u32, u32)> {
+    let width: u32 = width.trim().parse().ok()?;
+    let height: u32 = height.trim().parse().ok()?;
+    (width > 0 && height > 0).then_some((width, height))
 }
 
 fn divisor(width: u32, height: u32) -> u32 {
@@ -712,6 +724,15 @@ mod tests {
         assert_eq!(aspect_ratio("auto"), None);
         assert_eq!(aspect_ratio("0x512"), None);
         assert_eq!(aspect_ratio("1024"), None);
+    }
+
+    #[test]
+    fn a_shape_stated_as_one_is_not_reduced_again() {
+        assert_eq!(aspect_ratio("21:9").as_deref(), Some("21:9"));
+        assert_eq!(aspect_ratio(" 16:9 ").as_deref(), Some("16:9"));
+        assert_eq!(aspect_ratio("1:1").as_deref(), Some("1:1"));
+        assert_eq!(aspect_ratio("0:512"), None);
+        assert_eq!(aspect_ratio("16:"), None);
     }
 
     #[test]

@@ -13,7 +13,7 @@ import {
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
-import { createNode } from "../../shared/domain";
+import { MAX_IMAGES_PER_RUN, createNode } from "../../shared/domain";
 import type { GenerationSpec, MokaFile, RunRecord } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
 import type { ProvidersView } from "../../api";
@@ -490,5 +490,247 @@ describe("the generation panel", () => {
     });
     await settle();
     expect(screen.queryByTestId("prompt-panel")).toBeNull();
+  });
+});
+
+/** The bounds the document holds for a node, as they stand now. */
+function boundsOf(nodeId: string) {
+  const moka = useProjectStore.getState().moka;
+  const canvas = moka?.canvas.find((entry) => entry.id === ids.canvasMain);
+  return canvas?.nodes.find((entry) => entry.id === nodeId)?.bounds;
+}
+
+/**
+ * A document with one empty node of each kind that has a shape or a yes-and-no
+ * to offer, built once so their ids stay the same across every read of it.
+ */
+function withEmptyNodes() {
+  const moka = buildGoldenMokaFile();
+  const image = createNode("image", { x: 800, y: 0 });
+  const video = createNode("video", { x: 1200, y: 0 });
+  const audio = createNode("audio", { x: 1600, y: 0 });
+  moka.canvas[0].nodes.push(image, video, audio);
+  api.moka = () => moka;
+  return { image: image.id, video: video.id, audio: audio.id };
+}
+
+function openParams() {
+  fireEvent.click(within(panel()).getByRole("button", { name: "Parameters" }));
+}
+
+describe("the parameters a node carries", () => {
+  it("offers the ones its kind of node has, and no others", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    openParams();
+    await settle();
+    for (const name of ["Shape", "Quality", "Background"]) {
+      expect(within(panel()).queryByRole("combobox", { name })).toBeTruthy();
+    }
+    expect(
+      within(panel()).queryByRole("spinbutton", { name: "Images" }),
+    ).toBeTruthy();
+    expect(
+      within(panel()).queryByRole("spinbutton", { name: "Temperature" }),
+    ).toBeNull();
+
+    // The disclosure belongs to the panel rather than to one node, so a
+    // selection that moves on finds it still open.
+    selectNode(ids.text);
+    await settle();
+    for (const name of ["Temperature", "Max tokens"]) {
+      expect(within(panel()).queryByRole("spinbutton", { name })).toBeTruthy();
+    }
+    expect(
+      within(panel()).queryByRole("combobox", { name: "Reasoning effort" }),
+    ).toBeTruthy();
+    expect(
+      within(panel()).queryByRole("textbox", { name: "System prompt" }),
+    ).toBeTruthy();
+    expect(
+      within(panel()).queryByRole("combobox", { name: "Shape" }),
+    ).toBeNull();
+  });
+
+  it("says on the choice that leaves a parameter out what the default is", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    openParams();
+    await settle();
+    const shape = within(panel()).getByRole("combobox", { name: "Shape" });
+    expect(shape).toHaveProperty("value", "");
+    expect(
+      Array.from((shape as HTMLSelectElement).options).map(
+        (option) => option.textContent,
+      ),
+    ).toEqual(["Default · 1:1", "1:1", "3:4", "4:3", "16:9", "9:16", "21:9"]);
+  });
+
+  it("writes the parameter and takes it back out again", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    openParams();
+    await settle();
+    const shape = within(panel()).getByRole("combobox", { name: "Shape" });
+
+    fireEvent.change(shape, { target: { value: "16:9" } });
+    await settle();
+    expect(specOf(ids.image)?.params.size).toBe("16:9");
+
+    fireEvent.change(shape, { target: { value: "" } });
+    await settle();
+    expect(specOf(ids.image)?.params).toEqual({});
+  });
+
+  it("gives an empty node the shape it was asked for", async () => {
+    const empty = withEmptyNodes();
+    await openEditor();
+    selectNode(empty.image);
+    await settle();
+    openParams();
+    await settle();
+    expect(boundsOf(empty.image)).toEqual({
+      x: 800,
+      y: 0,
+      width: 280,
+      height: 200,
+    });
+
+    fireEvent.change(within(panel()).getByRole("combobox", { name: "Shape" }), {
+      target: { value: "16:9" },
+    });
+    await settle();
+    expect(boundsOf(empty.image)).toEqual({
+      x: 800,
+      y: 21,
+      width: 280,
+      height: 158,
+    });
+
+    // Taking the parameter back out leaves the node the size the shape gave it:
+    // the size is the user's to change by hand, and the ask no longer names one.
+    fireEvent.change(within(panel()).getByRole("combobox", { name: "Shape" }), {
+      target: { value: "" },
+    });
+    await settle();
+    expect(boundsOf(empty.image)?.height).toBe(158);
+  });
+
+  it("leaves the size of a node that already holds something alone", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    openParams();
+    await settle();
+    fireEvent.change(within(panel()).getByRole("combobox", { name: "Shape" }), {
+      target: { value: "21:9" },
+    });
+    await settle();
+    expect(boundsOf(ids.image)).toEqual({
+      x: -320,
+      y: 160,
+      width: 280,
+      height: 220,
+    });
+  });
+
+  it("shows on a yes-and-no the answer that will be sent", async () => {
+    const empty = withEmptyNodes();
+    await openEditor();
+    selectNode(empty.video);
+    await settle();
+    openParams();
+    await settle();
+    const audio = within(panel()).getByRole("checkbox", {
+      name: "Generate audio",
+    });
+    const watermark = within(panel()).getByRole("checkbox", {
+      name: "Watermark",
+    });
+    // Neither is the node's own yet: each shows what the defaults would send.
+    expect(specOf(empty.video)).toBeUndefined();
+    expect(audio).toHaveProperty("checked", true);
+    expect(watermark).toHaveProperty("checked", false);
+
+    fireEvent.click(audio);
+    fireEvent.click(watermark);
+    await settle();
+    expect(specOf(empty.video)?.params).toEqual({
+      generateAudio: false,
+      watermark: true,
+    });
+  });
+
+  it("files an audio result where the node says rather than by default", async () => {
+    const empty = withEmptyNodes();
+    await openEditor();
+    selectNode(empty.audio);
+    await settle();
+    openParams();
+    await settle();
+    const music = within(panel()).getByRole("checkbox", {
+      name: "File under Music",
+    });
+    expect(music).toHaveProperty("checked", false);
+
+    fireEvent.click(music);
+    await settle();
+    expect(specOf(empty.audio)?.params.music).toBe(true);
+  });
+
+  it("lets one text node frame its own answer", async () => {
+    await openEditor();
+    selectNode(ids.text);
+    await settle();
+    openParams();
+    await settle();
+    const system = within(panel()).getByRole("textbox", {
+      name: "System prompt",
+    });
+    fireEvent.change(system, { target: { value: "Answer in one sentence." } });
+    // A keystroke is not a choice, so nothing is written until the field is left.
+    expect(specOf(ids.text)?.params.instructions).toBeUndefined();
+    fireEvent.blur(system);
+    await settle();
+    expect(specOf(ids.text)?.params.instructions).toBe(
+      "Answer in one sentence.",
+    );
+
+    fireEvent.change(
+      within(panel()).getByRole("combobox", {
+        name: "Reasoning effort",
+      }),
+      { target: { value: "high" } },
+    );
+    await settle();
+    expect(specOf(ids.text)?.params.reasoningEffort).toBe("high");
+  });
+
+  it("holds a number to the bounds an ask is made within", async () => {
+    const empty = withEmptyNodes();
+    await openEditor();
+    selectNode(empty.image);
+    await settle();
+    openParams();
+    await settle();
+    const images = within(panel()).getByRole("spinbutton", { name: "Images" });
+
+    fireEvent.change(images, { target: { value: "99" } });
+    // Nothing is written while the field still has the keyboard.
+    expect(specOf(empty.image)).toBeUndefined();
+    fireEvent.blur(images);
+    await settle();
+    expect(specOf(empty.image)?.params.count).toBe(MAX_IMAGES_PER_RUN);
+    expect(images).toHaveProperty("value", `${MAX_IMAGES_PER_RUN}`);
+
+    // Emptying it hands the choice back to the default.
+    fireEvent.change(images, { target: { value: "" } });
+    fireEvent.blur(images);
+    await settle();
+    expect(specOf(empty.image)?.params.count).toBeUndefined();
+    expect(images).toHaveProperty("value", "");
   });
 });
