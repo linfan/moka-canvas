@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { findNode, generationCapabilityFor } from "../../../shared/domain";
+import type { WorkflowNode } from "../../../shared/domain";
 import { redo, undo } from "../commands/execute";
 import { cancelGesture, zoomBy, zoomReset } from "../canvas/canvasControl";
 import { useEditorStore } from "../stores/editorStore";
@@ -22,6 +24,27 @@ function isEditableTarget(target: EventTarget | null): boolean {
   if (target.isContentEditable) return true;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+/** What Enter does to the one selected node. */
+export type EnterIntent = "edit" | "ask" | "rename";
+
+/**
+ * Enter edits a text node that already has words in it, and otherwise asks the
+ * node for something.
+ *
+ * A node with nothing in it is more often a request waiting to be typed than a
+ * title waiting to be changed, so the panel takes the key. Renaming keeps
+ * double-click and the right-click menu, which is where a title edit is looked
+ * for once Enter is spoken for.
+ */
+export function enterIntent(node: WorkflowNode | undefined): EnterIntent {
+  if (!node) return "rename";
+  if (node.kind === "text") {
+    const content = (node.data as { content?: string }).content ?? "";
+    return content.trim() === "" ? "ask" : "edit";
+  }
+  return generationCapabilityFor(node.kind) === null ? "rename" : "ask";
 }
 
 /**
@@ -60,6 +83,8 @@ export function useEditorKeyboard() {
           editor.stopRenaming();
         } else if (editor.textEditing) {
           editor.stopEditingText();
+        } else if (editor.promptPanel) {
+          editor.closePromptPanel();
         } else if (editor.inputPick) {
           editor.stopInputPick();
         } else if (editor.gesture.kind !== "idle") {
@@ -133,12 +158,12 @@ export function useEditorKeyboard() {
         if (selection.nodeIds.length === 1) {
           const nodeId = selection.nodeIds[0];
           const canvas = activeCanvas();
-          const node = canvas?.nodes.find((entry) => entry.id === nodeId);
-          if (node?.kind === "text") {
-            editor.startEditingText(nodeId);
-          } else {
-            editor.startRenaming(nodeId);
-          }
+          const node = canvas ? findNode(canvas, nodeId) : undefined;
+          if (!node) return;
+          const intent = enterIntent(node);
+          if (intent === "edit") editor.startEditingText(nodeId);
+          else if (intent === "ask") editor.openPromptPanel(nodeId, true);
+          else editor.startRenaming(nodeId);
         }
         return;
       }

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { findNode } from "../../../shared/domain";
+import { findNode, generationCapabilityFor } from "../../../shared/domain";
 import {
   activeCanvas,
   copySelection,
@@ -56,6 +56,12 @@ export function ContextMenu() {
     const targetId = menu.target.nodeId;
     const selectedCount = editor.selection.nodeIds.length;
     const targetNode = canvas ? findNode(canvas, targetId) : undefined;
+    if (targetNode && generationCapabilityFor(targetNode.kind) !== null) {
+      items.push({
+        label: "Generate…",
+        action: () => editor.openPromptPanel(targetId, true),
+      });
+    }
     items.push(
       { label: "Rename", action: () => editor.startRenaming(targetId) },
       { label: "Duplicate", action: () => void duplicateSelection() },

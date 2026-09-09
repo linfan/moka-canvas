@@ -839,7 +839,11 @@ describe("generation UI", () => {
     expect(inspected("Mode")).toBe("generate");
     expect(inspected("Model")).toBe("demo::painter");
     expect(inspected("Inputs from")).toBe("mentions");
-    expect(screen.getByText(/as a poster\./)).toBeTruthy();
+    // The panel under the node carries the same words, so the excerpt is read
+    // from the inspector's own row rather than from anywhere on screen.
+    const excerpt =
+      document.querySelector(".inspector-text-excerpt")?.textContent ?? "";
+    expect(excerpt).toMatch(/as a poster\./);
     expect(screen.getByText(/"count": 2/)).toBeTruthy();
   });
 

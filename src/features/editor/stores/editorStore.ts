@@ -105,8 +105,16 @@ interface EditorState {
   renaming: { nodeId: NodeId } | null;
   /** Text-node body editing (textarea overlay). */
   textEditing: { nodeId: NodeId } | null;
-  /** The generation panel open under a node. */
-  promptPanel: { nodeId: NodeId } | null;
+  /**
+   * The generation panel open under a node, and whether it takes the keyboard.
+   *
+   * Asked for by an entry the user chose (Enter, the right-click menu) it does;
+   * brought up because a node was selected it must not, or typing would land in
+   * the prompt and Delete would stop deleting the node.
+   */
+  promptPanel: { nodeId: NodeId; focus: boolean } | null;
+  /** Whether selecting one node brings its generation panel up on its own. */
+  promptPanelOnSelect: boolean;
   /** Inspector "replace input" pick mode: choosing a new source node. */
   inputPick: { nodeId: NodeId; portId: string } | null;
   /** Confirmation for deleting an asset still referenced by nodes. */
@@ -137,8 +145,9 @@ interface EditorState {
   stopRenaming: () => void;
   startEditingText: (nodeId: NodeId) => void;
   stopEditingText: () => void;
-  openPromptPanel: (nodeId: NodeId) => void;
+  openPromptPanel: (nodeId: NodeId, focus?: boolean) => void;
   closePromptPanel: () => void;
+  togglePromptPanelOnSelect: () => void;
   startInputPick: (target: { nodeId: NodeId; portId: string }) => void;
   stopInputPick: () => void;
   openAssetDeletePrompt: (prompt: {
@@ -169,6 +178,7 @@ export const useEditorStore = create<EditorState>()((set) => ({
   renaming: null,
   textEditing: null,
   promptPanel: null,
+  promptPanelOnSelect: true,
   inputPick: null,
   assetDeletePrompt: null,
   previewAssetId: null,
@@ -204,8 +214,11 @@ export const useEditorStore = create<EditorState>()((set) => ({
   stopRenaming: () => set({ renaming: null }),
   startEditingText: (nodeId) => set({ textEditing: { nodeId } }),
   stopEditingText: () => set({ textEditing: null }),
-  openPromptPanel: (nodeId) => set({ promptPanel: { nodeId } }),
+  openPromptPanel: (nodeId, focus = false) =>
+    set({ promptPanel: { nodeId, focus } }),
   closePromptPanel: () => set({ promptPanel: null }),
+  togglePromptPanelOnSelect: () =>
+    set((state) => ({ promptPanelOnSelect: !state.promptPanelOnSelect })),
   startInputPick: (target) => set({ inputPick: target }),
   stopInputPick: () => set({ inputPick: null }),
   openAssetDeletePrompt: (prompt) => set({ assetDeletePrompt: prompt }),

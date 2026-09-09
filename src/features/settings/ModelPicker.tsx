@@ -7,10 +7,13 @@ interface Props {
   value: string | null;
   onChange: (reference: string | null) => void;
   disabled?: boolean;
+  /** What choosing nothing is called: a node falls back to the provider's own. */
+  noneLabel?: string;
 }
 
 /**
- * The default model for one capability.
+ * The model for one capability: the stored default in settings, or one node's
+ * own choice.
  *
  * A stored reference whose channel has since been switched off or deleted is
  * still offered, rather than quietly collapsing to "no default": the setting is
@@ -21,6 +24,7 @@ export function ModelPicker({
   value,
   onChange,
   disabled = false,
+  noneLabel = "No default",
 }: Props) {
   const view = useProviderStore((state) => state.view);
   const options = useMemo(
@@ -40,7 +44,7 @@ export function ModelPicker({
         }
         value={value ?? ""}
       >
-        <option value="">No default</option>
+        <option value="">{noneLabel}</option>
         {options.map((option) => (
           <option key={option.reference} value={option.reference}>
             {option.label}

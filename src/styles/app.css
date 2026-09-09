@@ -1170,6 +1170,76 @@ button.danger:hover:not(:disabled) {
   width: auto;
 }
 
+.prompt-panel {
+  backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--surface-glass);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  position: absolute;
+  z-index: 30;
+}
+
+.prompt-panel-head {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.prompt-panel-modes {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+
+.prompt-panel-modes button,
+.prompt-panel-close {
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 4px 7px;
+}
+
+.prompt-panel-modes button {
+  flex: 1;
+}
+
+.prompt-panel-close {
+  color: var(--muted);
+  flex: none;
+}
+
+.prompt-panel-models {
+  display: grid;
+  gap: 6px;
+}
+
+.prompt-panel-note {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
+
+.prompt-panel-input {
+  font-size: 12px;
+  min-height: 58px;
+  padding: 6px 8px;
+}
+
+.prompt-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.prompt-panel-actions button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+
 .sr-only {
   height: 1px;
   overflow: hidden;

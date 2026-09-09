@@ -35,6 +35,7 @@ import {
 import { ExportBlockedDialog } from "./components/ExportBlockedDialog";
 import { RenameOverlay } from "./components/RenameOverlay";
 import { TextEditOverlay } from "./components/TextEditOverlay";
+import { PromptPanel } from "./components/PromptPanel";
 
 const SAVE_LABEL: Record<string, string> = {
   saved: "Saved",
@@ -61,6 +62,9 @@ export function EditorPage() {
     (state) => state.resourcesPanelOpen,
   );
   const inspectorOpen = useEditorStore((state) => state.inspectorOpen);
+  const promptPanelOnSelect = useEditorStore(
+    (state) => state.promptPanelOnSelect,
+  );
   const announcement = useEditorStore((state) => state.announcement);
   const canUndo = useCanUndo();
   const canRedo = useHistoryStore((state) => state.redoStack.length > 0);
@@ -324,6 +328,7 @@ export function EditorPage() {
           <CanvasSurface />
           <RenameOverlay />
           <TextEditOverlay />
+          <PromptPanel />
           <p className="editor-canvas-hint">
             {activeCanvas
               ? `${activeCanvas.nodes.length} nodes · ${activeCanvas.edges.length} edges`
@@ -409,6 +414,16 @@ export function EditorPage() {
             type="button"
           >
             Inspector
+          </button>
+          <button
+            aria-pressed={promptPanelOnSelect}
+            onClick={() =>
+              useEditorStore.getState().togglePromptPanelOnSelect()
+            }
+            title="Bring the generation panel up when a node is selected"
+            type="button"
+          >
+            Prompt
           </button>
         </div>
       </footer>
