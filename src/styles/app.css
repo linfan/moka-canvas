@@ -1656,6 +1656,37 @@ button.danger:hover:not(:disabled) {
   padding: 1px 7px;
 }
 
+/* Under the words rather than beside them: an answer is read first, and only
+   then decided about. */
+.assistant-line-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The download is an anchor, so it is made to look like its neighbours here
+   rather than by leaning on the button rule they inherit. */
+.assistant-line-actions a,
+.assistant-line-actions button {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 8px;
+}
+
+.assistant-line-actions a {
+  text-decoration: none;
+}
+
+.assistant-line-actions a:hover,
+.assistant-line-actions button:hover {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
 .assistant-about {
   color: var(--muted);
   flex: none;

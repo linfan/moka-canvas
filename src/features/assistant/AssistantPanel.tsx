@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import type {
   AssetId,
+  AssistantMessage,
   AssistantReference,
   AssistantRole,
+  CanvasDocument,
   CanvasId,
+  NodeId,
   ResourceEntry,
+  RunId,
 } from "../../shared/domain";
 import { mentionNodeIds } from "../../shared/domain";
 import { modelOptionsFor, useProviderStore } from "../settings/providerStore";
@@ -35,6 +39,15 @@ import {
   upstreamOf,
 } from "./asking";
 import { useAssistantStore } from "./assistantStore";
+import {
+  answerFile,
+  copyWords,
+  fileAnswer,
+  overwriteCard,
+  overwriteTarget,
+  runsOfAssets,
+  showOnCanvas,
+} from "./answers";
 import { latestSession } from "./conversation";
 
 const ROLE_WORDS: Record<AssistantRole, string> = {
@@ -53,10 +66,12 @@ function Line({
   role,
   words,
   about,
+  actions,
 }: {
   role: AssistantRole;
   words: string;
   about?: readonly AssistantReference[];
+  actions?: ReactNode;
 }) {
   return (
     <li className={`assistant-line is-${role}`}>
@@ -69,7 +84,69 @@ function Line({
           ))}
         </ul>
       )}
+      {actions}
     </li>
+  );
+}
+
+/**
+ * What a kept line can be done with.
+ *
+ * Only kept lines: an answer still arriving has nothing to file yet, and a
+ * question is already on the canvas as the cards it was about.
+ */
+function LineActions({
+  canvas,
+  chosen,
+  line,
+  filed,
+}: {
+  canvas: CanvasDocument;
+  chosen: readonly NodeId[];
+  line: AssistantMessage;
+  filed: Map<RunId, readonly ResourceEntry[]>;
+}) {
+  const made = line.toolCalls?.[0];
+  if (made) {
+    const onto = made.nodeId;
+    return (
+      <div className="assistant-line-actions">
+        {onto !== undefined && (
+          <button onClick={() => showOnCanvas(canvas, onto)} type="button">
+            Show on canvas
+          </button>
+        )}
+        {(filed.get(made.runId)?.length ?? 0) > 0 && (
+          <button
+            onClick={() => useEditorStore.getState().openResourcesPanel()}
+            type="button"
+          >
+            Show in assets
+          </button>
+        )}
+      </div>
+    );
+  }
+  if (line.role !== "assistant" || line.text.trim() === "") return null;
+  const target = overwriteTarget(canvas, chosen);
+  const file = answerFile(line.text);
+  return (
+    <div className="assistant-line-actions">
+      <button onClick={() => fileAnswer(canvas, line.text)} type="button">
+        Insert on canvas
+      </button>
+      {target !== null && (
+        <button onClick={() => overwriteCard(target, line.text)} type="button">
+          Replace selection
+        </button>
+      )}
+      <button onClick={() => void copyWords(line.text)} type="button">
+        Copy text
+      </button>
+      <a download={file.name} href={file.href}>
+        Download
+      </a>
+    </div>
   );
 }
 
@@ -110,6 +187,11 @@ export function AssistantPanel() {
     [moka],
   );
   const issues = useMemo(() => buildIssueIndex(selfCheck), [selfCheck]);
+  const filed = useMemo(
+    () =>
+      moka ? runsOfAssets(moka) : new Map<RunId, readonly ResourceEntry[]>(),
+    [moka],
+  );
 
   // Keyed on what the question names rather than on its words. Finding what
   // feeds the chosen cards means walking the wires and looking each card up in
@@ -201,6 +283,14 @@ export function AssistantPanel() {
               {lines.map((line) => (
                 <Line
                   about={line.references}
+                  actions={
+                    <LineActions
+                      canvas={canvas}
+                      chosen={chosen}
+                      filed={filed}
+                      line={line}
+                    />
+                  }
                   key={line.id}
                   role={line.role}
                   words={line.text}

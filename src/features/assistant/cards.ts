@@ -71,7 +71,7 @@ function overlaps(a: Rect, b: Rect): boolean {
  * a card made while a reader is looking somewhere is expected to appear where
  * they are looking — and behind a pile of other cards it would appear nowhere.
  */
-function landingSpot(canvas: CanvasDocument): Point {
+export function landingSpot(canvas: CanvasDocument): Point {
   const centre = viewCenterWorld() ?? { x: 0, y: 0 };
   let at = { x: centre.x - DROP_OFFSET.x, y: centre.y - DROP_OFFSET.y };
   for (let tried = 0; tried < LANDING_TRIES; tried += 1) {

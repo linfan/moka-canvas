@@ -40,6 +40,25 @@ async function servedSessions(): Promise<ServedSession[]> {
   return body.moka?.canvas?.[0]?.sessions ?? [];
 }
 
+interface ServedNode {
+  id: string;
+  kind: string;
+  title: string;
+  data?: { content?: string };
+}
+
+/** The cards the server holds, on the first canvas of the document. */
+async function servedNodes(): Promise<ServedNode[]> {
+  const response = await fetch(`${APP}/api/v1/projects/current`);
+  if (!response.ok) {
+    throw new Error(`reading the project: ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    moka?: { canvas?: { nodes?: ServedNode[] }[] };
+  };
+  return body.moka?.canvas?.[0]?.nodes ?? [];
+}
+
 async function providerCalls(): Promise<ProviderCall[]> {
   const response = await fetch(`${PROVIDER_ORIGIN}/__calls`);
   if (!response.ok) throw new Error(`reading the stand-in: ${response.status}`);
@@ -193,4 +212,53 @@ test("a question asked over a card is answered and kept in the document", async 
   await expect(page.locator(".assistant-line.is-assistant")).toContainText(
     SENTENCE,
   );
+});
+
+test("an answer goes back onto the canvas, over a card or as one of its own", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureTextChannel(STORYTELLER);
+
+  await openWithWords(
+    page,
+    "Answered Back On The Canvas",
+    join(projectHome("assistant-file"), "project"),
+    "A lantern floats over a quiet lake at dusk.",
+  );
+  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page
+    .getByLabel("Ask about this canvas")
+    .fill("What does the brief say?");
+  await page.getByRole("button", { name: "Send: Ask" }).click();
+
+  await expect(page.locator(".assistant-line.is-assistant")).toContainText(
+    SENTENCE,
+    { timeout: 15_000 },
+  );
+
+  // Named after the answer rather than after nothing, since a file called
+  // "answer.txt" tells a reader nothing about which answer it holds.
+  await expect(
+    column(page).getByRole("link", { name: "Download" }),
+  ).toHaveAttribute("download", `${SENTENCE}.txt`);
+
+  // The card the question was about, chosen still, is the one offered to take
+  // the words.
+  await column(page).getByRole("button", { name: "Replace selection" }).click();
+  await expect
+    .poll(async () => (await servedNodes())[0]?.data?.content, {
+      timeout: 10_000,
+    })
+    .toBe(SENTENCE);
+  expect(await persistedNodeCount(page)).toBe(1);
+
+  // And a card of its own, so the answer survives the card it was asked with.
+  await column(page).getByRole("button", { name: "Insert on canvas" }).click();
+  await expect
+    .poll(() => persistedNodeCount(page), { timeout: 10_000 })
+    .toBe(2);
+  const laid = (await servedNodes()).find((node) => node.title === SENTENCE);
+  expect(laid?.kind).toBe("text");
+  expect(laid?.data?.content).toBe(SENTENCE);
 });
