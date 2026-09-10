@@ -26,6 +26,83 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/** One line of the shortcuts dialog: the keys that work and what they do. */
+export interface ShortcutRow {
+  label: string;
+  /** Alternate ways to press it; "Mod" and "Shift" are drawn per platform. */
+  chords: string[][];
+}
+
+/** A section of the shortcuts dialog. */
+export interface ShortcutGroup {
+  title: string;
+  rows: ShortcutRow[];
+}
+
+/**
+ * What the editor answers to, as the help dialog lists it.
+ *
+ * Written here under the handler rather than in the dialog so the two are read
+ * together: a key that moves in one and not the other is caught between
+ * neighbours rather than between files.
+ */
+export const SHORTCUT_GROUPS: ShortcutGroup[] = [
+  {
+    title: "Editing",
+    rows: [
+      { label: "Undo", chords: [["Mod", "Z"]] },
+      {
+        label: "Redo",
+        chords: [
+          ["Shift", "Mod", "Z"],
+          ["Mod", "Y"],
+        ],
+      },
+      { label: "Select all", chords: [["Mod", "A"]] },
+      { label: "Copy", chords: [["Mod", "C"]] },
+      { label: "Cut", chords: [["Mod", "X"]] },
+      { label: "Paste", chords: [["Mod", "V"]] },
+      { label: "Duplicate", chords: [["Mod", "D"]] },
+      {
+        label: "Delete the selection",
+        chords: [["Delete"], ["Backspace"]],
+      },
+      { label: "Edit the words, ask the node, or rename", chords: [["Enter"]] },
+      {
+        label: "Close what is open, or clear the selection",
+        chords: [["Escape"]],
+      },
+    ],
+  },
+  {
+    title: "Selection",
+    rows: [
+      { label: "Group", chords: [["Mod", "G"]] },
+      { label: "Ungroup", chords: [["Shift", "Mod", "G"]] },
+    ],
+  },
+  {
+    title: "View",
+    rows: [
+      { label: "Zoom in", chords: [["Mod", "="]] },
+      { label: "Zoom out", chords: [["Mod", "-"]] },
+      { label: "Actual size", chords: [["Mod", "0"]] },
+      { label: "Fit everything", chords: [["Mod", "1"]] },
+      { label: "Fit the selection", chords: [["Shift", "Mod", "1"]] },
+      {
+        label: "Pan while held",
+        chords: [["Space"], ["Ctrl"]],
+      },
+      { label: "Select tool", chords: [["V"]] },
+      { label: "Pan tool", chords: [["H"]] },
+    ],
+  },
+  {
+    title: "Help",
+    rows: [{ label: "Keyboard shortcuts", chords: [["?"]] }],
+  },
+];
+
 /** What Enter does to the one selected node. */
 export type EnterIntent = "edit" | "ask" | "rename";
 
@@ -57,7 +134,12 @@ export function useEditorKeyboard() {
       const editor = useEditorStore.getState();
       const project = useProjectStore.getState();
       if (!project.moka) return;
-      if (editor.assetDeletePrompt || editor.previewAssetId) return;
+      if (
+        editor.assetDeletePrompt ||
+        editor.previewAssetId ||
+        editor.shortcutsOpen
+      )
+        return;
       if (editor.pictureTool) return;
       if (isEditableTarget(event.target)) return;
 
@@ -145,6 +227,12 @@ export function useEditorKeyboard() {
           event.preventDefault();
           fitViewAction();
         }
+        return;
+      }
+
+      if (event.key === "?") {
+        event.preventDefault();
+        editor.openShortcuts();
         return;
       }
 

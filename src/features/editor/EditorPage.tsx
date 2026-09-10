@@ -45,6 +45,7 @@ import { NodeActionBar } from "./components/NodeActionBar";
 import { SelectionActionBar } from "./components/SelectionActionBar";
 import { DescribeDialog } from "./components/DescribeDialog";
 import { PictureToolDialog } from "./components/PictureToolDialog";
+import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { RepaintDialog } from "./components/RepaintDialog";
 
 /** What a package asked to carry only the placed assets would leave behind. */
@@ -270,6 +271,7 @@ export function EditorPage() {
       <PictureToolDialog />
       <RepaintDialog />
       <DescribeDialog />
+      <ShortcutsDialog />
       {exportOpen && (
         <ExportDialog
           busy={exportBusy}

@@ -152,6 +152,8 @@ interface EditorState {
   assetDeletePrompt: { assetId: AssetId; nodeIds: NodeId[] } | null;
   /** Full-preview dialog for an asset (image/video). */
   previewAssetId: AssetId | null;
+  /** The keyboard help dialog. */
+  shortcutsOpen: boolean;
   /**
    * The tool being asked of a node's picture, if one is.
    *
@@ -208,6 +210,8 @@ interface EditorState {
   closeAssetDeletePrompt: () => void;
   openPreview: (assetId: AssetId) => void;
   closePreview: () => void;
+  openShortcuts: () => void;
+  closeShortcuts: () => void;
   openPictureTool: (ask: PictureToolAsk) => void;
   closePictureTool: () => void;
   openAssetPicker: (ask: AssetPickerState) => void;
@@ -238,6 +242,7 @@ export const useEditorStore = create<EditorState>()((set) => ({
   inputPick: null,
   assetDeletePrompt: null,
   previewAssetId: null,
+  shortcutsOpen: false,
   pictureTool: null,
   assetPicker: null,
   announcement: "",
@@ -289,6 +294,8 @@ export const useEditorStore = create<EditorState>()((set) => ({
   closeAssetDeletePrompt: () => set({ assetDeletePrompt: null }),
   openPreview: (assetId) => set({ previewAssetId: assetId }),
   closePreview: () => set({ previewAssetId: null }),
+  openShortcuts: () => set({ shortcutsOpen: true }),
+  closeShortcuts: () => set({ shortcutsOpen: false }),
   openPictureTool: (ask) => set({ pictureTool: ask }),
   closePictureTool: () => set({ pictureTool: null }),
   openAssetPicker: (ask) => set({ assetPicker: ask }),

@@ -1281,6 +1281,69 @@ h2 {
   white-space: nowrap;
 }
 
+.dialog-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.dialog-head h2 {
+  margin: 0;
+}
+
+.shortcuts-dialog {
+  max-width: min(560px, calc(100vw - 48px));
+}
+
+.shortcut-groups {
+  display: grid;
+  gap: 14px;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+}
+
+.shortcut-group h3 {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.shortcut-group ul {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.shortcut-group li {
+  align-items: baseline;
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.shortcut-keys {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+}
+
+.shortcut-keys kbd {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 .preview-media {
   border-radius: var(--radius-sm);
   max-height: 70vh;
