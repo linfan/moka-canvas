@@ -3,13 +3,18 @@ import { generateApi } from "../../api";
 import type {
   AssistantMessage,
   CanvasDocument,
+  CanvasId,
   DocumentCommand,
   NodeId,
   RunId,
   SessionId,
   WorkflowNode,
 } from "../../shared/domain";
-import { mentionNodeIds, newId, nowIso } from "../../shared/domain";
+import {
+  MAX_ASSISTANT_TITLE_LENGTH,
+  mentionNodeIds,
+  nowIso,
+} from "../../shared/domain";
 import { execute } from "../editor/commands/execute";
 import { useEditorStore } from "../editor/stores/editorStore";
 import { useProjectStore } from "../editor/stores/projectStore";
@@ -23,13 +28,15 @@ import {
 } from "./asking";
 import { madeWords, planCard } from "./cards";
 import {
-  latestSession,
   lineAsked,
   lineCutShort,
   lineFailed,
   lineFromRun,
   lineSaid,
+  sessionTarget,
   titleFor,
+  type SessionTarget,
+  type ShownSession,
 } from "./conversation";
 
 /**
@@ -50,9 +57,22 @@ interface AssistantState {
   /** What has arrived of the answer so far. */
   saying: string;
   busy: boolean;
+  /**
+   * Which conversation the panel is reading.
+   *
+   * Held here rather than worked out from the document each time, because which
+   * one a reader is looking at is something they chose and is not written
+   * anywhere in the project: a canvas switched back to goes to the conversation
+   * something was last said in, but one picked out of a list stays picked.
+   */
+  shown: ShownSession;
 
   setIntent: (intent: AssistantIntent) => void;
   setDraft: (draft: string) => void;
+  show: (shown: ShownSession) => void;
+  rename: (canvas: CanvasDocument, sessionId: SessionId, title: string) => void;
+  remove: (canvas: CanvasDocument, sessionId: SessionId) => void;
+  removeEvery: (canvas: CanvasDocument) => void;
   ask: (about: {
     canvas: CanvasDocument;
     chosen: readonly NodeId[];
@@ -72,25 +92,15 @@ let going: AbortController | null = null;
 /** The run a card ask is waiting on, which is stopped rather than abandoned. */
 let goingRun: RunId | null = null;
 
-/** The conversation a turn is written to, and whether the turn opens it. */
-interface SessionTarget {
-  id: SessionId;
-  opening: boolean;
-}
-
-/**
- * Which conversation this turn belongs to.
- *
- * Settled before the turn is had, because a card asked on a conversation's
- * behalf is filed with its id and has to be filed with the id the turn will
- * itself be kept under — which, for a first turn, does not exist yet. Making the
- * id here is what lets the two agree on it.
- */
-function sessionTarget(canvas: CanvasDocument): SessionTarget {
-  const carrying = latestSession(canvas.sessions ?? []);
-  return carrying
-    ? { id: carrying.id, opening: false }
-    : { id: newId(), opening: true };
+/** How many lines a conversation holds in the document as it now stands. */
+function lineCount(canvasId: CanvasId, sessionId: SessionId): number | null {
+  const canvas = useProjectStore
+    .getState()
+    .moka?.canvas.find((entry) => entry.id === canvasId);
+  const session = (canvas?.sessions ?? []).find(
+    (entry) => entry.id === sessionId,
+  );
+  return session ? session.messages.length : null;
 }
 
 /**
@@ -99,6 +109,11 @@ function sessionTarget(canvas: CanvasDocument): SessionTarget {
  * A first turn starts the conversation it is the first of and is named after
  * what was asked, so a conversation is never in the document with nothing in
  * it: taking back the turn that started one takes the conversation with it.
+ *
+ * What the write cost is read out of the document rather than worked out from a
+ * limit, because the turn could be the one that pushed a conversation past the
+ * length it is kept to and lost its oldest lines with nobody having asked them
+ * to go.
  */
 function keep(
   canvas: CanvasDocument,
@@ -107,6 +122,7 @@ function keep(
   answer: AssistantMessage,
 ): void {
   const lines = [question, answer];
+  const before = target.opening ? null : lineCount(canvas.id, target.id);
   const command: DocumentCommand = target.opening
     ? {
         type: "addSession",
@@ -125,7 +141,16 @@ function keep(
         sessionId: target.id,
         messages: lines,
       };
-  execute("Ask the assistant", [command]);
+  if (!execute("Ask the assistant", [command])) return;
+  if (before === null) return;
+  const lost = before + lines.length - (lineCount(canvas.id, target.id) ?? 0);
+  if (lost > 0) {
+    const words =
+      lost === 1
+        ? "1 old line let go to keep the conversation readable. Undo brings it back."
+        : `${lost} old lines let go to keep the conversation readable. Undo brings them back.`;
+    useEditorStore.getState().announce(words);
+  }
 }
 
 /**
@@ -272,21 +297,80 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   asking: null,
   saying: "",
   busy: false,
+  shown: "newest",
 
   setIntent: (intent) => set({ intent }),
   setDraft: (draft) => set({ draft }),
+  show: (shown) => set({ shown }),
+
+  rename: (canvas, sessionId, title) => {
+    const name = title.trim().slice(0, MAX_ASSISTANT_TITLE_LENGTH);
+    const held = (canvas.sessions ?? []).find(
+      (session) => session.id === sessionId,
+    );
+    if (!held || name === "" || name === held.title) return;
+    execute("Rename conversation", [
+      { type: "renameSession", canvasId: canvas.id, sessionId, title: name },
+    ]);
+  },
+
+  remove: (canvas, sessionId) => {
+    const held = (canvas.sessions ?? []).find(
+      (session) => session.id === sessionId,
+    );
+    if (!held) return;
+    const lines = held.messages.length;
+    if (
+      lines > 0 &&
+      !window.confirm(
+        `Delete “${held.title}” and its ${lines} ${lines === 1 ? "line" : "lines"}?`,
+      )
+    ) {
+      return;
+    }
+    execute("Remove conversation", [
+      { type: "removeSession", canvasId: canvas.id, sessionId },
+    ]);
+  },
+
+  removeEvery: (canvas) => {
+    const sessions = canvas.sessions ?? [];
+    if (sessions.length === 0) return;
+    const lines = sessions.reduce(
+      (total, session) => total + session.messages.length,
+      0,
+    );
+    const many = sessions.length === 1 ? "conversation" : "conversations";
+    if (
+      !window.confirm(
+        `Delete all ${sessions.length} ${many} and their ${lines} ${lines === 1 ? "line" : "lines"}?`,
+      )
+    ) {
+      return;
+    }
+    // One thing to undo, so a clear meant as a sweep cannot half-happen: a
+    // conversation put back on its own would be one the reader had said go.
+    execute(
+      "Remove conversations",
+      sessions.map((session) => ({
+        type: "removeSession",
+        canvasId: canvas.id,
+        sessionId: session.id,
+      })),
+    );
+  },
 
   ask: async ({ canvas, chosen }) => {
     // One turn at a time: a second ask sent while an answer is arriving would
     // be written into the conversation before the one it interrupted, and read
     // as an answer to the wrong question.
     if (going !== null) return;
-    const { intent, draft } = get();
+    const { intent, draft, shown } = get();
     if (draft.trim() === "") return;
 
     const nodes = referenceNodes(canvas, chosen, mentionNodeIds(draft));
     const ask = askOf(intent, nodes, draft);
-    const target = sessionTarget(canvas);
+    const target = sessionTarget(canvas, shown);
 
     const controller = new AbortController();
     going = controller;
@@ -300,6 +384,9 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
             )
           : await answerByCard({ canvas, nodes, ask, sessionId: target.id });
       keep(canvas, target, turn.question, turn.answer);
+      // A conversation the turn opened is one the reader is now in: left
+      // unnamed, the next turn would open a second one beside it.
+      if (target.opening) set({ shown: target.id });
     } finally {
       going = null;
       goingRun = null;

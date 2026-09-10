@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  AssistantSession,
+  DocumentCommand,
   MokaFile,
   NodeId,
   RunRecord,
@@ -7,9 +9,15 @@ import type {
   SessionId,
 } from "../../shared/domain";
 import {
+  MAX_ASSISTANT_MESSAGES_PER_SESSION,
+  MAX_ASSISTANT_TITLE_LENGTH,
+} from "../../shared/domain";
+import {
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
+import { undo } from "../editor/commands/execute";
+import { useEditorStore } from "../editor/stores/editorStore";
 import { useHistoryStore } from "../editor/stores/historyStore";
 import { useProjectStore } from "../editor/stores/projectStore";
 import { useRunStore } from "../editor/stores/runStore";
@@ -219,6 +227,54 @@ function cardOf(title: string) {
   return found;
 }
 
+const WHEN = "2026-01-01T00:00:00.000Z";
+
+/** A conversation holding this many lines, oldest first. */
+function talked(
+  id: string,
+  title: string,
+  lines: number,
+  updatedAt = WHEN,
+): AssistantSession {
+  return {
+    id,
+    title,
+    messages: Array.from({ length: lines }, (_, at) => ({
+      id: `${id}-line-${at}`,
+      role: "user" as const,
+      text: `${title} line ${at}`,
+      createdAt: WHEN,
+    })),
+    createdAt: WHEN,
+    updatedAt,
+  };
+}
+
+/**
+ * Puts conversations in the document the way an opened project would hold them.
+ *
+ * Written through the command layer rather than by editing the fixture, so what
+ * a test reads back afterwards is the same document the panel reads.
+ */
+function seed(...sessions: AssistantSession[]) {
+  const canvas = board(useProjectStore.getState().moka!);
+  useProjectStore.getState().applyLocal(
+    sessions.map((session): DocumentCommand => ({
+      type: "addSession",
+      canvasId: canvas.id,
+      session,
+    })),
+  );
+  useHistoryStore.getState().clear();
+}
+
+/** Stands in for the browser's confirmation box, answering every time. */
+function askedToConfirm(answer: boolean) {
+  const asked = vi.fn(() => answer);
+  vi.stubGlobal("window", { confirm: asked });
+  return asked;
+}
+
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {
@@ -231,7 +287,9 @@ beforeEach(() => {
     asking: null,
     saying: "",
     busy: false,
+    shown: "newest",
   });
+  useEditorStore.setState({ announcement: "" });
 });
 
 afterEach(() => {
@@ -646,5 +704,186 @@ describe("a turn asked of a card", () => {
       code: "GENERATION_CANCELLED",
       retryable: true,
     });
+  });
+});
+
+describe("the conversation a turn is written to", () => {
+  it("carries on the one the panel is reading, not simply the newest", async () => {
+    hydrate();
+    seed(
+      talked("s-old", "The first ask", 2, "2026-01-01T00:00:00.000Z"),
+      talked("s-new", "The later ask", 2, "2026-06-06T00:00:00.000Z"),
+    );
+    useAssistantStore.getState().show("s-old");
+    stubAnswer("Still the first one.");
+    useAssistantStore.getState().setDraft("Back to the first ask?");
+
+    await useAssistantStore.getState().ask({
+      canvas: board(useProjectStore.getState().moka!),
+      chosen: [],
+    });
+
+    const held = sessionsOf();
+    expect(
+      held.find((session) => session.id === "s-old")?.messages,
+    ).toHaveLength(4);
+    expect(
+      held.find((session) => session.id === "s-new")?.messages,
+    ).toHaveLength(2);
+    expect(useAssistantStore.getState().shown).toBe("s-old");
+  });
+
+  it("leaves the panel reading the conversation a turn opened", async () => {
+    const moka = hydrate();
+    useAssistantStore.getState().show("fresh");
+    stubAnswer("First.");
+    useAssistantStore.getState().setDraft("What is happening here?");
+    await useAssistantStore.getState().ask({ canvas: board(moka), chosen: [] });
+
+    expect(sessionsOf()).toHaveLength(1);
+    const opened = sessionsOf()[0].id;
+    expect(useAssistantStore.getState().shown).toBe(opened);
+
+    // Asked again without another word about it, the turn belongs to the
+    // conversation it opened rather than to a second one beside it.
+    stubAnswer("Second.");
+    useAssistantStore.getState().setDraft("And the lake?");
+    await useAssistantStore.getState().ask({
+      canvas: board(useProjectStore.getState().moka!),
+      chosen: [],
+    });
+
+    expect(sessionsOf()).toHaveLength(1);
+    expect(sessionsOf()[0].messages).toHaveLength(4);
+  });
+
+  it("says when a turn cost a conversation its oldest lines", async () => {
+    hydrate();
+    seed(
+      talked("s-full", "A long talk", MAX_ASSISTANT_MESSAGES_PER_SESSION - 1),
+    );
+    stubAnswer("So it does.");
+    useAssistantStore.getState().setDraft("And the lake?");
+
+    await useAssistantStore.getState().ask({
+      canvas: board(useProjectStore.getState().moka!),
+      chosen: [],
+    });
+
+    expect(sessionsOf()).toHaveLength(1);
+    const held = sessionsOf()[0].messages;
+    expect(held).toHaveLength(MAX_ASSISTANT_MESSAGES_PER_SESSION);
+    expect(held[0].text).toBe("A long talk line 1");
+    expect(useEditorStore.getState().announcement).toBe(
+      "1 old line let go to keep the conversation readable. Undo brings it back.",
+    );
+  });
+});
+
+describe("keeping the conversations", () => {
+  it("gives one another name, as one thing to undo", () => {
+    hydrate();
+    seed(talked("s-1", "The first ask", 3));
+
+    useAssistantStore
+      .getState()
+      .rename(
+        board(useProjectStore.getState().moka!),
+        "s-1",
+        "  The lantern  ",
+      );
+
+    expect(sessionsOf()[0].title).toBe("The lantern");
+    expect(useHistoryStore.getState().undoStack).toHaveLength(1);
+    expect(undo()).toBe(true);
+    expect(sessionsOf()[0].title).toBe("The first ask");
+  });
+
+  it("cuts a name to the length the document allows", () => {
+    hydrate();
+    seed(talked("s-1", "The first ask", 1));
+
+    useAssistantStore
+      .getState()
+      .rename(board(useProjectStore.getState().moka!), "s-1", "n".repeat(400));
+
+    expect(sessionsOf()[0].title).toHaveLength(MAX_ASSISTANT_TITLE_LENGTH);
+  });
+
+  it("leaves a conversation alone when the name says nothing new", () => {
+    hydrate();
+    seed(talked("s-1", "The first ask", 1));
+    const assistant = useAssistantStore.getState();
+    const canvas = board(useProjectStore.getState().moka!);
+
+    assistant.rename(canvas, "s-1", "   ");
+    assistant.rename(canvas, "s-1", "The first ask");
+    assistant.rename(canvas, "gone", "Renamed anyway");
+
+    expect(sessionsOf().map((session) => session.title)).toEqual([
+      "The first ask",
+    ]);
+    expect(useHistoryStore.getState().undoStack).toHaveLength(0);
+  });
+
+  it("takes one conversation away, lines and all, and gives it back", () => {
+    hydrate();
+    seed(talked("s-1", "The first ask", 3), talked("s-2", "The second", 1));
+    const asked = askedToConfirm(true);
+
+    useAssistantStore
+      .getState()
+      .remove(board(useProjectStore.getState().moka!), "s-1");
+
+    expect(asked).toHaveBeenCalledWith(
+      "Delete “The first ask” and its 3 lines?",
+    );
+    expect(sessionsOf().map((session) => session.id)).toEqual(["s-2"]);
+    expect(undo()).toBe(true);
+    expect(sessionsOf().map((session) => session.id)).toEqual(["s-1", "s-2"]);
+    expect(sessionsOf()[0].messages).toHaveLength(3);
+  });
+
+  it("leaves a conversation alone when the answer is no", () => {
+    hydrate();
+    seed(talked("s-1", "The first ask", 3));
+    askedToConfirm(false);
+
+    useAssistantStore
+      .getState()
+      .remove(board(useProjectStore.getState().moka!), "s-1");
+
+    expect(sessionsOf()).toHaveLength(1);
+    expect(useHistoryStore.getState().undoStack).toHaveLength(0);
+  });
+
+  it("takes every conversation away as one thing to undo", () => {
+    hydrate();
+    seed(talked("s-1", "The first ask", 2), talked("s-2", "The second", 3));
+    const asked = askedToConfirm(true);
+
+    useAssistantStore
+      .getState()
+      .removeEvery(board(useProjectStore.getState().moka!));
+
+    expect(asked).toHaveBeenCalledWith(
+      "Delete all 2 conversations and their 5 lines?",
+    );
+    expect(sessionsOf()).toEqual([]);
+    expect(useHistoryStore.getState().undoStack).toHaveLength(1);
+    expect(undo()).toBe(true);
+    expect(sessionsOf().map((session) => session.title)).toEqual([
+      "The first ask",
+      "The second",
+    ]);
+  });
+
+  it("asks nothing to confirm when there is nothing to take away", () => {
+    const moka = hydrate();
+    const asked = askedToConfirm(true);
+
+    useAssistantStore.getState().removeEvery(board(moka));
+
+    expect(asked).not.toHaveBeenCalled();
   });
 });

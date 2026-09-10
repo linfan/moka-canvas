@@ -1,16 +1,18 @@
-import { type ReactNode, useEffect, useMemo, useRef } from "react";
-import type {
-  AssetId,
-  AssistantMessage,
-  AssistantReference,
-  AssistantRole,
-  CanvasDocument,
-  CanvasId,
-  NodeId,
-  ResourceEntry,
-  RunId,
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  MAX_ASSISTANT_TITLE_LENGTH,
+  mentionNodeIds,
+  type AssetId,
+  type AssistantMessage,
+  type AssistantReference,
+  type AssistantRole,
+  type CanvasDocument,
+  type CanvasId,
+  type NodeId,
+  type ResourceEntry,
+  type RunId,
+  type SessionId,
 } from "../../shared/domain";
-import { mentionNodeIds } from "../../shared/domain";
 import { modelOptionsFor, useProviderStore } from "../settings/providerStore";
 import {
   buildIssueIndex,
@@ -48,13 +50,27 @@ import {
   runsOfAssets,
   showOnCanvas,
 } from "./answers";
-import { latestSession } from "./conversation";
+import { sessionShown } from "./conversation";
 
 const ROLE_WORDS: Record<AssistantRole, string> = {
   user: "You",
   assistant: "Assistant",
   error: "Trouble",
 };
+
+/**
+ * The select's value for a conversation nothing has been said in yet.
+ *
+ * Held in the same field as the ids because the control offers both kinds and
+ * one of them has to be chosen; no conversation can be mistaken for it, since an
+ * id is made as a UUID.
+ */
+const FRESH_OPTION = "fresh";
+
+/** How many lines a conversation holds, said so that one reads as one. */
+function lineWords(count: number): string {
+  return `${count} ${count === 1 ? "line" : "lines"}`;
+}
 
 /**
  * One line of a conversation, whether it was kept or is still arriving.
@@ -151,6 +167,113 @@ function LineActions({
 }
 
 /**
+ * The conversations this canvas has, and what to do with them.
+ *
+ * A list of them at the head of the panel rather than a stack of tabs, because
+ * the panel shows one at a time: the reader is here to say something, and a
+ * conversation is picked to go back to rather than to keep two in view.
+ *
+ * Every change is written through the document, so a conversation taken away is
+ * one thing to undo and a project reopened holds what it held.
+ */
+function Conversations({ canvas }: { canvas: CanvasDocument }) {
+  const shown = useAssistantStore((state) => state.shown);
+  const [renaming, setRenaming] = useState<SessionId | null>(null);
+  const [title, setTitle] = useState("");
+
+  const sessions = [...(canvas.sessions ?? [])].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+  const carrying = sessionShown(canvas, shown);
+
+  const commitRename = () => {
+    const held = renaming;
+    setRenaming(null);
+    if (held !== null) {
+      useAssistantStore.getState().rename(canvas, held, title);
+    }
+  };
+
+  return (
+    <div className="assistant-sessions">
+      {renaming === null ? (
+        <select
+          aria-label="Conversation"
+          data-testid="assistant-session-select"
+          onChange={(event) =>
+            useAssistantStore
+              .getState()
+              .show(
+                event.target.value === FRESH_OPTION
+                  ? "fresh"
+                  : event.target.value,
+              )
+          }
+          title="Which conversation this panel is reading"
+          value={carrying?.id ?? FRESH_OPTION}
+        >
+          {sessions.map((session) => (
+            <option key={session.id} value={session.id}>
+              {`${session.title} · ${lineWords(session.messages.length)}`}
+            </option>
+          ))}
+          <option value={FRESH_OPTION}>New conversation</option>
+        </select>
+      ) : (
+        <input
+          aria-label="Conversation name"
+          autoFocus
+          data-testid="assistant-session-rename"
+          maxLength={MAX_ASSISTANT_TITLE_LENGTH}
+          onBlur={commitRename}
+          onChange={(event) => setTitle(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") commitRename();
+            if (event.key === "Escape") setRenaming(null);
+          }}
+          value={title}
+        />
+      )}
+      <div className="assistant-session-actions">
+        <button
+          disabled={carrying === null || renaming !== null}
+          onClick={() => {
+            if (!carrying) return;
+            setTitle(carrying.title);
+            setRenaming(carrying.id);
+          }}
+          title="Give this conversation another name"
+          type="button"
+        >
+          Rename
+        </button>
+        <button
+          disabled={carrying === null}
+          onClick={() => {
+            if (carrying) {
+              useAssistantStore.getState().remove(canvas, carrying.id);
+            }
+          }}
+          title="Take this conversation and its lines away"
+          type="button"
+        >
+          Remove
+        </button>
+        <button
+          className="danger"
+          disabled={sessions.length === 0}
+          onClick={() => useAssistantStore.getState().removeEvery(canvas)}
+          title="Take every conversation on this canvas away, as one thing to undo"
+          type="button"
+        >
+          Remove all
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The conversation had over the canvas, in the column beside it.
  *
  * A column and not a floating panel, because a conversation is read top to
@@ -175,6 +298,7 @@ export function AssistantPanel() {
   const asking = useAssistantStore((state) => state.asking);
   const saying = useAssistantStore((state) => state.saying);
   const busy = useAssistantStore((state) => state.busy);
+  const shown = useAssistantStore((state) => state.shown);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const canvasId = canvas?.id ?? null;
@@ -227,11 +351,14 @@ export function AssistantPanel() {
   }, [canvas, chosen, resources, issues]);
 
   // A question typed about one canvas is not a question about another, so what
-  // is typed goes when the board under it does.
+  // is typed goes when the board under it does, and the conversation on show is
+  // the one that board was last being talked in rather than the one left picked.
   useEffect(() => {
     if (shownFor.current === canvasId) return;
     shownFor.current = canvasId;
-    useAssistantStore.getState().setDraft("");
+    const assistant = useAssistantStore.getState();
+    assistant.setDraft("");
+    assistant.show("newest");
   }, [canvasId]);
 
   // Kept in view as it grows, since the newest line is the one being read.
@@ -242,7 +369,7 @@ export function AssistantPanel() {
     }
   }, [asking, saying]);
 
-  const lines = latestSession(canvas?.sessions ?? [])?.messages ?? [];
+  const lines = canvas ? (sessionShown(canvas, shown)?.messages ?? []) : [];
   const summary = referenceSummary(planned?.references ?? []);
   const capability = capabilityFor(intent);
   const noModel =
@@ -273,10 +400,14 @@ export function AssistantPanel() {
         <p className="prompt-panel-note">No canvas is open.</p>
       ) : (
         <>
+          <Conversations canvas={canvas} />
+
           <div className="assistant-lines" data-testid="assistant-lines">
             {lines.length === 0 && !busy && (
               <p className="prompt-panel-note">
-                Nothing has been asked over this canvas yet.
+                {shown === "fresh"
+                  ? "A new conversation, nothing said in it yet."
+                  : "Nothing has been asked over this canvas yet."}
               </p>
             )}
             <ol>

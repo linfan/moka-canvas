@@ -262,3 +262,94 @@ test("an answer goes back onto the canvas, over a card or as one of its own", as
   expect(laid?.kind).toBe("text");
   expect(laid?.data?.content).toBe(SENTENCE);
 });
+
+test("a canvas holds several conversations, and reads the one it was pointed at", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureTextChannel(STORYTELLER);
+
+  const name = "Several Conversations";
+  await openWithWords(
+    page,
+    name,
+    join(projectHome("assistant-sessions"), "project"),
+    "A lantern floats over a quiet lake at dusk.",
+  );
+  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+
+  const first = "What does the brief say?";
+  await page.getByLabel("Ask about this canvas").fill(first);
+  await page.getByRole("button", { name: "Send: Ask" }).click();
+  await expect(page.locator(".assistant-line.is-assistant")).toContainText(
+    SENTENCE,
+    { timeout: 15_000 },
+  );
+
+  // A conversation kept is something to go back to rather than only to carry on,
+  // so another can be opened beside it over the same cards.
+  const listing = page.getByLabel("Conversation", { exact: true });
+  await listing.selectOption({ label: "New conversation" });
+  await expect(
+    column(page).getByText("A new conversation, nothing said in it yet."),
+  ).toBeVisible();
+
+  const second = "Is it dusk there?";
+  await page.getByLabel("Ask about this canvas").fill(second);
+  await page.getByRole("button", { name: "Send: Ask" }).click();
+  await expect
+    .poll(async () => (await servedSessions()).length, { timeout: 10_000 })
+    .toBe(2);
+
+  // Only the second is on show, which is what makes them two rather than one
+  // run of asking.
+  await expect(column(page).locator(".assistant-line.is-user")).toHaveCount(1);
+  await expect(column(page).locator(".assistant-line.is-user")).toContainText(
+    second,
+  );
+
+  const held = await servedSessions();
+  const older = held.find((session) => session.title === first);
+  if (!older) throw new Error(`The first conversation is not in ${held}`);
+
+  // Read the first again, then name it something a list can be picked from.
+  await listing.selectOption(older.id);
+  await expect(column(page).locator(".assistant-line.is-user")).toContainText(
+    first,
+  );
+  await column(page).getByRole("button", { name: "Rename" }).click();
+  await page.getByTestId("assistant-session-rename").fill("The brief, asked");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(
+      async () =>
+        (await servedSessions()).find((session) => session.id === older.id)
+          ?.title,
+      { timeout: 10_000 },
+    )
+    .toBe("The brief, asked");
+
+  // Carried by the document, and found again by when something was last said in
+  // it: the reopened panel reads the second conversation, not the one left picked.
+  const newest = (await servedSessions()).find(
+    (session) => session.title === second,
+  );
+  if (!newest) throw new Error("The second conversation did not stay kept");
+
+  await page.reload();
+  await openRecent(page, name);
+  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await expect
+    .poll(() => listing.inputValue(), { timeout: 10_000 })
+    .toBe(newest.id);
+  await expect(column(page).locator(".assistant-line.is-user")).toContainText(
+    second,
+  );
+  // Named by what was first asked, in the order they were last talked in, with
+  // the one not written yet beside them.
+  await expect(listing.locator("option")).toHaveText([
+    `${second} · 2 lines`,
+    "The brief, asked · 2 lines",
+    "New conversation",
+  ]);
+});

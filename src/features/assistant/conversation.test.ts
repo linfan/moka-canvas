@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../api/client";
-import type { AssistantSession } from "../../shared/domain";
-import { MAX_ASSISTANT_TITLE_LENGTH } from "../../shared/domain";
+import type { AssistantSession, CanvasDocument } from "../../shared/domain";
+import { emptyCanvas, MAX_ASSISTANT_TITLE_LENGTH } from "../../shared/domain";
 import {
   latestSession,
   lineAsked,
@@ -9,6 +9,8 @@ import {
   lineFailed,
   lineFromRun,
   lineSaid,
+  sessionShown,
+  sessionTarget,
   titleFor,
 } from "./conversation";
 
@@ -17,6 +19,17 @@ const T = "2026-01-01T00:00:00.000Z";
 function talk(id: string, title: string, updatedAt: string): AssistantSession {
   return { id, title, messages: [], createdAt: T, updatedAt };
 }
+
+/** A canvas holding these conversations and nothing else. */
+function board(sessions: readonly AssistantSession[]): CanvasDocument {
+  return { ...emptyCanvas("c-1", "One"), sessions: [...sessions] };
+}
+
+/** Two conversations, one of which something was said in later than the other. */
+const TALKED = [
+  talk("s-old", "Older", T),
+  talk("s-new", "Newer", "2026-02-02T00:00:00.000Z"),
+];
 
 describe("latestSession", () => {
   it("has nothing to carry on with when nothing has been said", () => {
@@ -32,6 +45,47 @@ describe("latestSession", () => {
       talk("s-last", "Last", "2026-03-03T00:00:00.000Z"),
     ];
     expect(latestSession(held)?.id).toBe("s-last");
+  });
+});
+
+describe("the conversation on show", () => {
+  it("goes to the one something was last said in", () => {
+    expect(sessionShown(board(TALKED), "newest")?.id).toBe("s-new");
+  });
+
+  it("keeps reading the one that was picked, wherever it sits", () => {
+    expect(sessionShown(board(TALKED), "s-old")?.id).toBe("s-old");
+  });
+
+  it("reads as the newest again once the picked one has been taken away", () => {
+    // The reader did not ask to stop seeing conversations, only to stop seeing
+    // that one, so the panel is not left looking at nothing.
+    expect(sessionShown(board([TALKED[1]]), "s-old")?.id).toBe("s-new");
+  });
+
+  it("has nothing to show for a conversation nothing has been said in", () => {
+    expect(sessionShown(board(TALKED), "fresh")).toBeNull();
+  });
+
+  it("has nothing to show on a canvas that has never been talked over", () => {
+    expect(sessionShown(board([]), "newest")).toBeNull();
+  });
+});
+
+describe("the conversation a turn is written to", () => {
+  it("carries on the conversation the panel is reading", () => {
+    const target = sessionTarget(board(TALKED), "s-old");
+    expect(target).toEqual({ id: "s-old", opening: false });
+  });
+
+  it("opens one when the panel is reading a fresh conversation", () => {
+    const opening = sessionTarget(board(TALKED), "fresh");
+    expect(opening.opening).toBe(true);
+    expect(TALKED.some((session) => session.id === opening.id)).toBe(false);
+  });
+
+  it("opens one on a canvas that has never been talked over", () => {
+    expect(sessionTarget(board([]), "newest").opening).toBe(true);
   });
 });
 

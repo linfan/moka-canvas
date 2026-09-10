@@ -4,9 +4,11 @@ import type {
   AssistantReference,
   AssistantSession,
   AssistantToolCall,
+  CanvasDocument,
   NodeId,
   ProblemCode,
   RunId,
+  SessionId,
 } from "../../shared/domain";
 import { PROBLEM_CODES, newId } from "../../shared/domain";
 
@@ -43,6 +45,60 @@ export function latestSession(
 export function titleFor(asked: string): string {
   const line = asked.replace(/\s+/g, " ").trim();
   return line.length > TITLE_CHARS ? `${line.slice(0, TITLE_CHARS)}…` : line;
+}
+
+/**
+ * Which conversation a canvas is being read at.
+ *
+ * "newest" is the one something was last said in, which is where a canvas is
+ * found from its tabs; an id is one picked out of a list, since a conversation
+ * kept is something to go back to rather than only to carry on; and "fresh" is
+ * one that has not been written yet, asked for by a reader who wants to say
+ * something that is not part of what went before.
+ */
+export type ShownSession = SessionId | "newest" | "fresh";
+
+/**
+ * The conversation on show, or null when there is nothing to show.
+ *
+ * An id naming a conversation that has since been removed reads as the newest
+ * again rather than as nothing, because the removal is what it was: the reader
+ * did not ask to stop seeing conversations, only to stop seeing that one.
+ */
+export function sessionShown(
+  canvas: CanvasDocument,
+  shown: ShownSession,
+): AssistantSession | null {
+  if (shown === "fresh") return null;
+  if (shown === "newest") return latestSession(canvas.sessions ?? []);
+  return (
+    (canvas.sessions ?? []).find((session) => session.id === shown) ??
+    latestSession(canvas.sessions ?? [])
+  );
+}
+
+/** The conversation a turn is written to, and whether the turn opens it. */
+export interface SessionTarget {
+  id: SessionId;
+  opening: boolean;
+}
+
+/**
+ * Which conversation this turn belongs to.
+ *
+ * Settled before the turn is had, because a card asked on a conversation's
+ * behalf is filed with its id and has to be filed with the id the turn will
+ * itself be kept under — which, for a first turn, does not exist yet. Making the
+ * id here is what lets the two agree on it.
+ */
+export function sessionTarget(
+  canvas: CanvasDocument,
+  shown: ShownSession,
+): SessionTarget {
+  const carrying = sessionShown(canvas, shown);
+  return carrying
+    ? { id: carrying.id, opening: false }
+    : { id: newId(), opening: true };
 }
 
 /** The line that records what was asked, and what it was asked about. */

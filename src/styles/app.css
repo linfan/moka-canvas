@@ -1596,6 +1596,64 @@ button.danger:hover:not(:disabled) {
   flex: none;
 }
 
+/* The conversations this canvas has, at the head of the column. It holds its
+   height while the lines scroll, since which conversation is being read is
+   something a reader checks rather than scrolls back to find. */
+.assistant-sessions {
+  display: flex;
+  flex-wrap: wrap;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+}
+
+.assistant-sessions select,
+.assistant-sessions input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.assistant-sessions select:hover,
+.assistant-sessions input:hover {
+  border-color: var(--primary);
+}
+
+.assistant-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.assistant-session-actions button {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 8px;
+}
+
+.assistant-session-actions button:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
+.assistant-session-actions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.assistant-session-actions button.danger {
+  color: var(--danger);
+}
+
 /* The lines scroll and the field does not: a question being typed is not
    something to lose above the fold to make room for what was already said. */
 .assistant-lines {
