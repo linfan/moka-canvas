@@ -50,6 +50,7 @@ import { PromptPanel } from "./components/PromptPanel";
 import { RunHint } from "./components/RunHint";
 import { NodeActionBar } from "./components/NodeActionBar";
 import { PictureToolDialog } from "./components/PictureToolDialog";
+import { RepaintDialog } from "./components/RepaintDialog";
 
 const SAVE_LABEL: Record<string, string> = {
   saved: "Saved",
@@ -390,6 +391,7 @@ export function EditorPage() {
       <AssetDeleteDialog />
       <AssetPreviewDialog />
       <PictureToolDialog />
+      <RepaintDialog />
       {exportOpen && (
         <ExportDialog
           busy={exportBusy}

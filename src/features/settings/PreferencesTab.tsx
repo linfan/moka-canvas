@@ -14,6 +14,7 @@ import {
 } from "../../shared/domain";
 import { useProviderStore } from "./providerStore";
 import {
+  BAR_ENTRIES,
   PICTURE_TOOLS,
   TOOL_LABELS,
   useToolPrefs,
@@ -287,7 +288,7 @@ function NodeToolChoices() {
     <section aria-label="Picture tools" className="settings-section">
       <h3 className="settings-heading">Picture tools on a node</h3>
       <div className="settings-columns">
-        {PICTURE_TOOLS.map((tool) => (
+        {BAR_ENTRIES.map((tool) => (
           <label className="settings-check" key={tool}>
             <input
               checked={shown.includes(tool)}
@@ -299,9 +300,14 @@ function NodeToolChoices() {
         ))}
       </div>
       <p className="settings-hint">
-        These work on the pixels a picture already has, so they cost nothing and
-        give the same answer twice. They never rewrite the file a node holds:
-        what they make is filed beside it and given a node of its own.
+        {PICTURE_TOOLS.map((tool) => TOOL_LABELS[tool]).join(", ")} work on the
+        pixels a picture already has, so they cost nothing and give the same
+        answer twice. {TOOL_LABELS.repaint} is the one that does not: it marks a
+        region and hands it to a model, so it costs what an ask costs.
+      </p>
+      <p className="settings-hint">
+        None of them rewrites the file a node holds: what they make is filed
+        beside it and given a node of its own.
       </p>
     </section>
   );

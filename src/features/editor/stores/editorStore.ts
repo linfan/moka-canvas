@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import type { PictureTool } from "../../../api/tools";
 import type {
   AssetId,
   EdgeId,
@@ -7,6 +6,7 @@ import type {
   Point,
   Viewport,
 } from "../../../shared/domain";
+import type { BarEntry } from "./toolPrefs";
 
 export type EditorTool = "select" | "pan";
 
@@ -87,6 +87,13 @@ export type ActiveGesture =
   | { kind: "draggingAsset"; assetId: string; currentWorld: Point }
   | { kind: "draggingMinimap"; pointerId: number };
 
+/** A tool asked of the picture a node holds, naming the picture it was asked of. */
+export interface PictureToolAsk {
+  nodeId: NodeId;
+  assetId: AssetId;
+  tool: BarEntry;
+}
+
 interface EditorState {
   tool: EditorTool;
   /** Space/Ctrl-held temporary tool inversion. */
@@ -123,13 +130,17 @@ interface EditorState {
   /** Full-preview dialog for an asset (image/video). */
   previewAssetId: AssetId | null;
   /**
-   * The local picture tool being asked of a node's asset, if one is.
+   * The tool being asked of a node's picture, if one is.
    *
    * The asset is named here rather than left to be found again from the node:
-   * what the tool works on is the file the node held when it was asked, and a
-   * node re-filled while the dialog is open must not change the subject under it.
+   * what a tool works on is the file the node held when it was asked, and a node
+   * re-filled while the dialog is open must not change the subject under it.
+   *
+   * One field for every entry the bar offers, including the one that ends in a
+   * generation rather than in a local operator, because the bar asks one
+   * question at a time and two fields for it could both be answered at once.
    */
-  pictureTool: { nodeId: NodeId; assetId: AssetId; tool: PictureTool } | null;
+  pictureTool: PictureToolAsk | null;
   /** Screen-reader announcement fed to the editor's live region. */
   announcement: string;
 
@@ -167,11 +178,7 @@ interface EditorState {
   closeAssetDeletePrompt: () => void;
   openPreview: (assetId: AssetId) => void;
   closePreview: () => void;
-  openPictureTool: (ask: {
-    nodeId: NodeId;
-    assetId: AssetId;
-    tool: PictureTool;
-  }) => void;
+  openPictureTool: (ask: PictureToolAsk) => void;
   closePictureTool: () => void;
   announce: (message: string) => void;
 }

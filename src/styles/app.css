@@ -1828,6 +1828,16 @@ button.danger:hover:not(:disabled) {
   position: absolute;
 }
 
+/* Where a region is marked, laid exactly over the picture it is marked on. */
+.repaint-sheet {
+  cursor: crosshair;
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  touch-action: none;
+  width: 100%;
+}
+
 .tool-params {
   display: grid;
   gap: 10px;

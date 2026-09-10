@@ -4,6 +4,7 @@ import {
   GROUP_DETACH_THRESHOLD_PX,
   MAX_TEXT_CONTENT_LENGTH,
   createNode,
+  defaultGenerationSpec,
   findNode,
   findResource,
   generationCapabilityFor,
@@ -51,6 +52,7 @@ import {
 } from "./clipboard";
 import { fitBounds, viewCenterWorld } from "../canvas/canvasControl";
 import { buildResourceIndex } from "../canvas/mediaCards";
+import { maskName } from "../canvas/repaint";
 import type { ConnectionCheck } from "../canvas/controller";
 
 function toastError(message: string) {
@@ -796,6 +798,132 @@ export async function applyPictureTool(
         : `Made ${made.length} pieces, and selected them`),
   );
   return made;
+}
+
+/** The port a mask is fed through, and the only one that carries it as one. */
+const MASK_PORT = "mask";
+
+export interface RepaintAsk {
+  nodeId: NodeId;
+  /** The picture the region was marked on, which is the one left as it is. */
+  assetId: AssetId;
+  /** The name of that picture, which is what the mask filed beside it is named. */
+  sourceName: string;
+  /** The finished mask: white where the picture may change, black where it may not. */
+  mask: Blob;
+  /** What the marked part should become. */
+  prompt: string;
+}
+
+/**
+ * Files a marked region as a mask of its own and points the picture at it.
+ *
+ * Nothing is repainted here, and that is the point: what this makes is the two
+ * halves of an ask — a picture with a region marked on it and the words saying
+ * what the region should become — laid out on the canvas where they can be read,
+ * changed and run again. The mask is a node like any other reference, so a
+ * second attempt is a matter of editing the words rather of painting again.
+ *
+ * The picture's ask becomes an edit that reads what is wired into it. A mask
+ * travels as a mask only along a wire: picked by hand into a list of references
+ * it arrives as just another picture, and the region marked on it means nothing.
+ * A picture wears one of them, so marking a second region takes the port over.
+ *
+ * Null when nothing was filed, which is said out loud here rather than left to
+ * be read in the dialog that asked.
+ */
+export async function fileRepaint(ask: RepaintAsk): Promise<NodeId | null> {
+  const canvas = activeCanvas();
+  const subject = canvas ? findNode(canvas, ask.nodeId) : undefined;
+  if (!canvas || !subject) return null;
+  const sink = subject.ports.find((port) => port.id === MASK_PORT);
+  if (!sink) return null;
+
+  const name = maskName(ask.sourceName);
+  let saved;
+  try {
+    saved = await assetsApi.upload(
+      new File([ask.mask], name, { type: "image/png" }),
+      { categoryHint: "images" },
+    );
+  } catch (error) {
+    toastError(
+      error instanceof Error ? error.message : "The mask could not be filed",
+    );
+    return null;
+  }
+  useProjectStore.getState().integrateAssetEntry(saved.entry, saved);
+
+  // A picture wears one mask: the port takes a single wire, so marking again
+  // takes the port over rather than adding to it.
+  const worn = canvas.edges.find(
+    (edge) =>
+      edge.target.nodeId === subject.id && edge.target.portId === MASK_PORT,
+  );
+  const before = worn ? findNode(canvas, worn.source.nodeId) : undefined;
+  // To the left, where an input comes from, and below the mask this replaces
+  // rather than on top of it, so the attempts stay readable in the order they
+  // were made. What was there is left on the canvas as the picture it is.
+  const node = await makeAssetNode(saved.entry.id, {
+    x: subject.bounds.x - BESIDE_GAP_PX - DEFAULT_NODE_WIDTH,
+    y: before ? before.bounds.y + CASCADE_DROP_OFFSET : subject.bounds.y,
+  });
+  if (!node) return null;
+  const out = node.ports.find((port) => port.direction === "output");
+  if (!out) return null;
+
+  const held = subject.data as { generation?: GenerationSpec };
+  const base = held.generation ?? defaultGenerationSpec(subject.kind);
+  const commands: DocumentCommand[] = [];
+  // Let go of the old wire in the same step as the new one arrives, since the
+  // port would refuse a second and the two are never meaningfully apart.
+  if (worn) {
+    commands.push({
+      type: "removeEdges",
+      canvasId: canvas.id,
+      edgeIds: [worn.id],
+    });
+  }
+  commands.push(
+    { type: "addNode", canvasId: canvas.id, node },
+    {
+      type: "addEdge",
+      canvasId: canvas.id,
+      edge: {
+        id: newId(),
+        source: { nodeId: node.id, portId: out.id },
+        target: { nodeId: subject.id, portId: sink.id },
+        createdAt: nowIso(),
+      },
+    },
+  );
+  if (base) {
+    commands.push({
+      type: "updateNode",
+      canvasId: canvas.id,
+      nodeId: subject.id,
+      patch: {
+        data: {
+          ...(subject.data as Record<string, unknown>),
+          generation: {
+            ...base,
+            mode: "edit",
+            prompt: ask.prompt,
+            inputMode: "upstream",
+            updatedAt: nowIso(),
+          },
+        } as NodeData,
+      },
+    });
+  }
+  if (!execute("Mark a region to repaint", commands)) return null;
+
+  useEditorStore.getState().selectOnly(subject.id);
+  // Left open on the picture rather than closed with the painting: the next
+  // thing to do with a mask is ask what it marks, and that is one press away.
+  useEditorStore.getState().openPromptPanel(subject.id);
+  announce(`Marked a region of ${ask.sourceName} to repaint`);
+  return node.id;
 }
 
 /**

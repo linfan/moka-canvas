@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { PictureTool } from "../../../api/tools";
 import { MAX_DIVISIONS } from "../../../shared/domain";
 
-/** Every tool the bar can offer, in the order it offers them. */
+/** The tools that work on a picture here, without asking anybody for anything. */
 export const PICTURE_TOOLS: readonly PictureTool[] = [
   "crop",
   "split",
@@ -11,18 +11,31 @@ export const PICTURE_TOOLS: readonly PictureTool[] = [
 ];
 
 /**
- * What each tool is called on the bar.
+ * Everything the bar can offer, in the order it offers them.
+ *
+ * Wider than the local tools: a repaint asks a model rather than working the
+ * pixels here, but it is offered in the same row, hidden by the same setting and
+ * answered in the same kind of dialog, because from the node it is one more way
+ * of getting a picture out of the one that is there.
+ */
+export type BarEntry = PictureTool | "repaint";
+
+export const BAR_ENTRIES: readonly BarEntry[] = [...PICTURE_TOOLS, "repaint"];
+
+/**
+ * What each entry is called on the bar.
  *
  * "Resample" rather than "resize" because a resize here is arithmetic on the
  * pixels that are there: it can make a picture smaller cleanly and larger only
  * by guessing, and the word has to say which of those it is doing before the
  * model that can actually add detail is offered beside it.
  */
-export const TOOL_LABELS: Record<PictureTool, string> = {
+export const TOOL_LABELS: Record<BarEntry, string> = {
   crop: "Crop",
   split: "Split",
   resize: "Resample",
   tilt: "Tilt",
+  repaint: "Repaint",
 };
 
 /** The ratios the crop field offers before anything is typed into it. */
@@ -45,13 +58,13 @@ export const SPLIT_GRIDS: readonly { rows: number; cols: number }[] = [
 export const MAX_DIVISIONS_PER_SIDE = Math.floor(Math.sqrt(MAX_DIVISIONS));
 
 interface StoredPrefs {
-  shown: PictureTool[];
+  shown: BarEntry[];
   cropRatio: string | null;
   grid: { rows: number; cols: number } | null;
 }
 
 const START: StoredPrefs = {
-  shown: [...PICTURE_TOOLS],
+  shown: [...BAR_ENTRIES],
   cropRatio: null,
   grid: null,
 };
@@ -74,7 +87,7 @@ function read(): StoredPrefs {
     const parsed = JSON.parse(kept) as Partial<StoredPrefs>;
     return {
       shown: Array.isArray(parsed.shown)
-        ? PICTURE_TOOLS.filter((tool) => parsed.shown?.includes(tool))
+        ? BAR_ENTRIES.filter((entry) => parsed.shown?.includes(entry))
         : START.shown,
       cropRatio: typeof parsed.cropRatio === "string" ? parsed.cropRatio : null,
       grid:
@@ -100,7 +113,7 @@ function keep(prefs: StoredPrefs) {
 }
 
 export interface ToolPrefsState extends StoredPrefs {
-  toggleShown: (tool: PictureTool) => void;
+  toggleShown: (entry: BarEntry) => void;
   rememberCrop: (ratio: string | null) => void;
   rememberGrid: (grid: { rows: number; cols: number } | null) => void;
 }
@@ -118,15 +131,15 @@ export const useToolPrefs = create<ToolPrefsState>()((set, get) => {
   };
   return {
     ...read(),
-    // Put back in the order the bar offers them, so a tool hidden and shown
+    // Put back in the order the bar offers them, so an entry hidden and shown
     // again does not move to the end of the row.
-    toggleShown: (tool) =>
+    toggleShown: (entry) =>
       write({
         ...prefsOf(get()),
-        shown: PICTURE_TOOLS.filter((entry) =>
-          entry === tool
-            ? !get().shown.includes(tool)
-            : get().shown.includes(entry),
+        shown: BAR_ENTRIES.filter((candidate) =>
+          candidate === entry
+            ? !get().shown.includes(entry)
+            : get().shown.includes(candidate),
         ),
       }),
     rememberCrop: (ratio) => write({ ...prefsOf(get()), cropRatio: ratio }),

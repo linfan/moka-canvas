@@ -18,7 +18,7 @@ import { useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
-import { PICTURE_TOOLS, useToolPrefs } from "./stores/toolPrefs";
+import { BAR_ENTRIES, useToolPrefs } from "./stores/toolPrefs";
 
 const CONFIG = {
   productName: "Moka Canvas",
@@ -123,7 +123,7 @@ beforeEach(() => {
   );
   localStorage.clear();
   useToolPrefs.setState({
-    shown: [...PICTURE_TOOLS],
+    shown: [...BAR_ENTRIES],
     cropRatio: null,
     grid: null,
   });
@@ -217,7 +217,7 @@ describe("the tools offered on a picture node", () => {
       within(bar)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["Crop", "Split", "Resample", "Tilt"]);
+    ).toEqual(["Crop", "Split", "Resample", "Tilt", "Repaint"]);
 
     act(() => {
       useEditorStore
@@ -277,12 +277,12 @@ describe("the tools offered on a picture node", () => {
       within(bar)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["Crop", "Split"]);
+    ).toEqual(["Crop", "Split", "Repaint"]);
     // Kept here rather than in the document: a bar somebody tidied stays tidied
     // without the tidying travelling with the project.
     expect(
       JSON.parse(localStorage.getItem("moka-canvas:picture-tools")!).shown,
-    ).toEqual(["crop", "split"]);
+    ).toEqual(["crop", "split", "repaint"]);
   });
 });
 

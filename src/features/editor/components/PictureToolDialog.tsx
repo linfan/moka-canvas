@@ -304,7 +304,11 @@ function starting(): Draft {
  * against the picture — and the picture is what is worked on.
  */
 export function PictureToolDialog() {
-  const asked = useEditorStore((state) => state.pictureTool);
+  const opened = useEditorStore((state) => state.pictureTool);
+  // Standing aside for the marking entry has to be complete, keys included: an
+  // Escape listener left running here would close the dialog that is open as
+  // well as the one that is not.
+  const asked = opened?.tool === "repaint" ? null : opened;
   const moka = useProjectStore((state) => state.moka);
   const [draft, setDraft] = useState<Draft>(starting);
   const [size, setSize] = useState<Size | null>(null);
@@ -357,7 +361,9 @@ export function PictureToolDialog() {
     });
   }, [size]);
 
-  if (!asked || !tool) return null;
+  // The marking entry has a dialog of its own, since what it asks for is a region
+  // drawn on the picture rather than one written in numbers.
+  if (!asked || tool === null || tool === "repaint") return null;
   const entry = moka ? buildResourceIndex(moka).get(asked.assetId) : undefined;
   if (!entry) return null;
 

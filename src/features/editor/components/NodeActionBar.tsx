@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import type { PictureTool } from "../../../api/tools";
 import { findNode, type AssetId } from "../../../shared/domain";
 import { worldToClient } from "../canvas/canvasControl";
 import {
@@ -9,22 +8,24 @@ import {
 } from "../canvas/mediaCards";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
-import { TOOL_LABELS, useToolPrefs } from "../stores/toolPrefs";
+import { TOOL_LABELS, useToolPrefs, type BarEntry } from "../stores/toolPrefs";
 
 /** Gap left between the bar and the node, and between it and a canvas edge. */
 const GAP = 6;
 /** How tall the row of buttons is, which is all the bar ever is. */
 const BAR_HEIGHT = 30;
 /** The widest the bar gets, which is with every tool it has showing. */
-const BAR_WIDTH = 320;
+const BAR_WIDTH = 400;
 
 /** What each tool does, said where it is offered rather than after it is used. */
-const TOOL_HINTS: Record<PictureTool, string> = {
+const TOOL_HINTS: Record<BarEntry, string> = {
   crop: "Cut a region out as a picture of its own",
   split: "Divide into pieces, and make a node for each",
   resize:
     "Resample these pixels to another size. Nothing is invented here: a model is what adds detail.",
   tilt: "Turn it in perspective, as a plate to show a model",
+  repaint:
+    "Mark the part that may change and say what it should become. A model does the repainting, so it costs what an ask costs.",
 };
 
 /**
@@ -110,7 +111,7 @@ export function NodeActionBar() {
     }px, calc(100% - ${BAR_HEIGHT + GAP}px))`,
   };
 
-  const ask = (tool: PictureTool) =>
+  const ask = (tool: BarEntry) =>
     useEditorStore
       .getState()
       .openPictureTool({ nodeId: node.id, assetId, tool });
