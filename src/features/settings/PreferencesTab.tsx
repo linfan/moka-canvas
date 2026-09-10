@@ -13,6 +13,11 @@ import {
   MIN_AUDIO_SPEED,
 } from "../../shared/domain";
 import { useProviderStore } from "./providerStore";
+import {
+  PICTURE_TOOLS,
+  TOOL_LABELS,
+  useToolPrefs,
+} from "../editor/stores/toolPrefs";
 
 /** A blank number field keeps its last value rather than becoming zero. */
 function toNumber(value: string, fallback: number): number {
@@ -42,7 +47,7 @@ function clone(preferences: GenerationPreferences): GenerationPreferences {
  * size-and-quality pair means nothing, but an untouched group is left alone so
  * that saving here cannot undo a change made somewhere else.
  */
-export function PreferencesTab() {
+function GenerationDefaults() {
   const view = useProviderStore((state) => state.view);
   const saving = useProviderStore((state) => state.saving);
   const [draft, setDraft] = useState<GenerationPreferences | null>(() =>
@@ -263,6 +268,50 @@ export function PreferencesTab() {
           {saving ? "Saving…" : "Save preferences"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Which picture tools the row over a node offers.
+ *
+ * Kept on this machine rather than in the document, so what somebody has tidied
+ * stays tidied for them and travels in no package. Unticking a tool hides it from
+ * the row and nothing else: it is not removed from the project, and whatever it
+ * already made stays exactly where it was put.
+ */
+function NodeToolChoices() {
+  const shown = useToolPrefs((state) => state.shown);
+  const toggleShown = useToolPrefs((state) => state.toggleShown);
+  return (
+    <section aria-label="Picture tools" className="settings-section">
+      <h3 className="settings-heading">Picture tools on a node</h3>
+      <div className="settings-columns">
+        {PICTURE_TOOLS.map((tool) => (
+          <label className="settings-check" key={tool}>
+            <input
+              checked={shown.includes(tool)}
+              onChange={() => toggleShown(tool)}
+              type="checkbox"
+            />
+            <span>{TOOL_LABELS[tool]}</span>
+          </label>
+        ))}
+      </div>
+      <p className="settings-hint">
+        These work on the pixels a picture already has, so they cost nothing and
+        give the same answer twice. They never rewrite the file a node holds:
+        what they make is filed beside it and given a node of its own.
+      </p>
+    </section>
+  );
+}
+
+export function PreferencesTab() {
+  return (
+    <div className="settings-section">
+      <NodeToolChoices />
+      <GenerationDefaults />
     </div>
   );
 }

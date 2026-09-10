@@ -26,6 +26,12 @@ import {
   type WorkflowNode,
 } from "../../../shared/domain";
 import { assetsApi, assetUrl } from "../../../api";
+import {
+  toolsApi,
+  type PictureTool,
+  type PictureToolParams,
+  type ToolReport,
+} from "../../../api/tools";
 import { useAppStore } from "../stores/appStore";
 import {
   useEditorStore,
@@ -33,6 +39,7 @@ import {
   type Selection,
 } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
+import { TOOL_LABELS } from "../stores/toolPrefs";
 import { execute } from "../commands/execute";
 import {
   buildFragment,
@@ -613,12 +620,11 @@ export async function confirmDeleteAsset() {
 /**
  * Builds the node a registered asset becomes: its kind from where the file
  * lives, its title from the file's own name, and its body from what the asset
- * holds. The anchor is where the node is wanted, before the offset every new
- * node is placed by.
+ * holds. `at` is the corner the node is placed at.
  */
 async function makeAssetNode(
   assetId: AssetId,
-  anchor: Point,
+  at: Point,
 ): Promise<WorkflowNode | null> {
   const { moka } = useProjectStore.getState();
   if (!moka) return null;
@@ -630,10 +636,7 @@ async function makeAssetNode(
   else if (category === "videos") kind = "video";
   else if (category === "music" || category === "voice") kind = "audio";
   else kind = "text";
-  const node = createNode(kind, {
-    x: anchor.x - NODE_DROP_OFFSET.x,
-    y: anchor.y - NODE_DROP_OFFSET.y,
-  });
+  const node = createNode(kind, at);
   node.title = entry.name;
   if (kind === "audio") {
     node.data = {
@@ -665,7 +668,10 @@ export async function addAssetNode(assetId: AssetId, at?: Point) {
   const canvas = activeCanvas();
   if (!canvas) return;
   const anchor = at ?? viewCenterWorld() ?? { x: 0, y: 0 };
-  const node = await makeAssetNode(assetId, anchor);
+  const node = await makeAssetNode(assetId, {
+    x: anchor.x - NODE_DROP_OFFSET.x,
+    y: anchor.y - NODE_DROP_OFFSET.y,
+  });
   if (!node) return;
   if (
     execute("Add asset node", [{ type: "addNode", canvasId: canvas.id, node }])
@@ -691,8 +697,8 @@ export async function addAssetBeside(
   const target = canvas ? findNode(canvas, targetNodeId) : null;
   if (!canvas || !target) return null;
   const node = await makeAssetNode(assetId, {
-    x: target.bounds.x - 120,
-    y: target.bounds.y + 40,
+    x: target.bounds.x - BESIDE_GAP_PX - DEFAULT_NODE_WIDTH,
+    y: target.bounds.y,
   });
   if (!node) return null;
   if (
@@ -702,6 +708,94 @@ export async function addAssetBeside(
     return node.id;
   }
   return null;
+}
+
+/**
+ * Works on a picture the project already holds with a tool that asks nothing of
+ * anybody, and lays out what came back.
+ *
+ * The subject is left exactly as it was, which is the whole of what makes a tool
+ * safe to press: what it makes is filed as an asset of its own and gets a node
+ * of its own to the right, wired from the subject, so the step reads in the graph
+ * as one picture made out of another rather than as a file that changed
+ * underneath a node. Every piece lands in one undo step and all of them are
+ * selected, so a division can be grouped the moment it arrives.
+ *
+ * Null when nothing was made: a refusal, which is said out loud here rather than
+ * left to be read in the dialog that asked, or a subject this canvas has lost.
+ */
+export async function applyPictureTool(
+  nodeId: NodeId,
+  assetId: AssetId,
+  tool: PictureTool,
+  params: PictureToolParams[PictureTool],
+): Promise<NodeId[] | null> {
+  const canvas = activeCanvas();
+  const subject = canvas ? findNode(canvas, nodeId) : undefined;
+  if (!canvas || !subject) return null;
+
+  let report: ToolReport;
+  try {
+    report = await toolsApi.apply(tool, assetId, params);
+  } catch (error) {
+    toastError(
+      error instanceof Error ? error.message : "The tool could not be done",
+    );
+    return null;
+  }
+
+  const out = subject.ports.find((port) => port.direction === "output");
+  const beside = {
+    x: subject.bounds.x + subject.bounds.width + BESIDE_GAP_PX,
+    y: subject.bounds.y,
+  };
+  const commands: DocumentCommand[] = [];
+  const made: NodeId[] = [];
+  for (const [index, entry] of report.entries.entries()) {
+    // Filed in the registry before the node is built, because a node is built
+    // out of what the registry says the asset is.
+    useProjectStore.getState().integrateAssetEntry(entry, report);
+    const node = await makeAssetNode(entry.id, {
+      x: beside.x + index * CASCADE_DROP_OFFSET,
+      y: beside.y + index * CASCADE_DROP_OFFSET,
+    });
+    if (!node) continue;
+    commands.push({ type: "addNode", canvasId: canvas.id, node });
+    made.push(node.id);
+    // Matched by what the ports carry rather than asked of the canvas, which has
+    // not seen this node yet. An output feeds as many inputs as it is given.
+    const into = out
+      ? node.ports.find(
+          (port) =>
+            port.direction === "input" &&
+            portTypesIntersect(out.dataTypes, port.dataTypes),
+        )
+      : undefined;
+    if (out && into) {
+      commands.push({
+        type: "addEdge",
+        canvasId: canvas.id,
+        edge: {
+          id: newId(),
+          source: { nodeId: subject.id, portId: out.id },
+          target: { nodeId: node.id, portId: into.id },
+          createdAt: nowIso(),
+        },
+      });
+    }
+  }
+  if (made.length === 0) return null;
+  if (!execute(`${TOOL_LABELS[tool]} a picture`, commands)) return null;
+  useEditorStore.getState().setSelection({ nodeIds: made, edgeIds: [] });
+  // A turn reports the words its picture was made from, and they are worth more
+  // than a count: they are what the next ask made out of it is written against.
+  announce(
+    report.prompt ??
+      (made.length === 1
+        ? `Made ${report.entries[0].name}`
+        : `Made ${made.length} pieces, and selected them`),
+  );
+  return made;
 }
 
 /**

@@ -23,6 +23,13 @@ export const MAX_EDGES_PER_CANVAS = 10_000;
 export const MAX_CANVASES_PER_PROJECT = 64;
 export const MAX_RESOURCES_PER_CATEGORY = 10_000;
 
+/** The most pixels one picture tool will work on, coming or going. */
+export const MAX_OPERATED_PIXELS = 40_000_000;
+/** The most pieces one division makes. */
+export const MAX_DIVISIONS = 64;
+/** How far a picture may be turned, in degrees either way. */
+export const MAX_TILT_DEGREES = 60;
+
 export const CLICK_DRAG_THRESHOLD_PX = 3;
 export const GROUP_DETACH_THRESHOLD_PX = 48;
 export const MIN_NODE_WIDTH = 200;

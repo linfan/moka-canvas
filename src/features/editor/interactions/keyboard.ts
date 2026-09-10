@@ -58,6 +58,7 @@ export function useEditorKeyboard() {
       const project = useProjectStore.getState();
       if (!project.moka) return;
       if (editor.assetDeletePrompt || editor.previewAssetId) return;
+      if (editor.pictureTool) return;
       if (isEditableTarget(event.target)) return;
 
       const mod = event.metaKey || event.ctrlKey;

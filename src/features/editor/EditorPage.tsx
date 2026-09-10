@@ -48,6 +48,8 @@ import { RenameOverlay } from "./components/RenameOverlay";
 import { TextEditOverlay } from "./components/TextEditOverlay";
 import { PromptPanel } from "./components/PromptPanel";
 import { RunHint } from "./components/RunHint";
+import { NodeActionBar } from "./components/NodeActionBar";
+import { PictureToolDialog } from "./components/PictureToolDialog";
 
 const SAVE_LABEL: Record<string, string> = {
   saved: "Saved",
@@ -369,6 +371,7 @@ export function EditorPage() {
           }}
         >
           <CanvasSurface />
+          <NodeActionBar />
           <RenameOverlay />
           <TextEditOverlay />
           <PromptPanel />
@@ -386,6 +389,7 @@ export function EditorPage() {
       <NodeMenu />
       <AssetDeleteDialog />
       <AssetPreviewDialog />
+      <PictureToolDialog />
       {exportOpen && (
         <ExportDialog
           busy={exportBusy}

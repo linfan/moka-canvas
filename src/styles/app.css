@@ -1745,6 +1745,115 @@ button.danger:hover:not(:disabled) {
   clip-path: inset(50%);
 }
 
+/* Picture tools */
+
+/* The row over a node, hugging its top border. Under the dialogs, which cover
+   the canvas and everything anchored to it. */
+.node-bar {
+  align-items: center;
+  backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--surface-glass);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  position: absolute;
+  z-index: 20;
+}
+
+.node-bar button {
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.node-bar button:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+/* Why no tool is offered, said where the row would have been. */
+.node-bar-blocked {
+  color: var(--danger);
+  font-size: 11px;
+  max-width: 280px;
+  padding: 4px 6px;
+}
+
+/* Wider than a dialog that only asks a question: this one holds a picture. */
+.tool-dialog {
+  max-width: 640px;
+  width: min(640px, calc(100vw - 48px));
+}
+
+/* Clipped, so what is drawn over the picture can be larger than the frame it is
+   drawn in and still not escape the stage it is on. */
+.tool-stage {
+  align-items: center;
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: center;
+  max-height: 320px;
+  overflow: hidden;
+  padding: 12px;
+}
+
+/* Shrunk to the picture, so a part of the frame is a part of the picture. */
+.tool-frame {
+  line-height: 0;
+  position: relative;
+}
+
+.tool-frame img {
+  border-radius: 6px;
+  display: block;
+  max-height: 294px;
+  max-width: 100%;
+  width: auto;
+}
+
+/* The region to be cut, with the rest of the picture dimmed around it. */
+.tool-outline {
+  border: 1px solid var(--primary);
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 55%);
+  position: absolute;
+}
+
+.tool-grid {
+  inset: 0;
+  position: absolute;
+}
+
+.tool-params {
+  display: grid;
+  gap: 10px;
+}
+
+.tool-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-choices button {
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+/* Read off what the button already says about itself, rather than off a second
+   class that is free to disagree with it. */
+.tool-choices button[aria-pressed="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+
 /* Toasts */
 
 .toasts {

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { PictureTool } from "../../../api/tools";
 import type {
   AssetId,
   EdgeId,
@@ -121,6 +122,14 @@ interface EditorState {
   assetDeletePrompt: { assetId: AssetId; nodeIds: NodeId[] } | null;
   /** Full-preview dialog for an asset (image/video). */
   previewAssetId: AssetId | null;
+  /**
+   * The local picture tool being asked of a node's asset, if one is.
+   *
+   * The asset is named here rather than left to be found again from the node:
+   * what the tool works on is the file the node held when it was asked, and a
+   * node re-filled while the dialog is open must not change the subject under it.
+   */
+  pictureTool: { nodeId: NodeId; assetId: AssetId; tool: PictureTool } | null;
   /** Screen-reader announcement fed to the editor's live region. */
   announcement: string;
 
@@ -158,6 +167,12 @@ interface EditorState {
   closeAssetDeletePrompt: () => void;
   openPreview: (assetId: AssetId) => void;
   closePreview: () => void;
+  openPictureTool: (ask: {
+    nodeId: NodeId;
+    assetId: AssetId;
+    tool: PictureTool;
+  }) => void;
+  closePictureTool: () => void;
   announce: (message: string) => void;
 }
 
@@ -183,6 +198,7 @@ export const useEditorStore = create<EditorState>()((set) => ({
   inputPick: null,
   assetDeletePrompt: null,
   previewAssetId: null,
+  pictureTool: null,
   announcement: "",
 
   setTool: (tool) => set({ tool }),
@@ -227,6 +243,8 @@ export const useEditorStore = create<EditorState>()((set) => ({
   closeAssetDeletePrompt: () => set({ assetDeletePrompt: null }),
   openPreview: (assetId) => set({ previewAssetId: assetId }),
   closePreview: () => set({ previewAssetId: null }),
+  openPictureTool: (ask) => set({ pictureTool: ask }),
+  closePictureTool: () => set({ pictureTool: null }),
   announce: (message) => set({ announcement: message }),
 }));
 
