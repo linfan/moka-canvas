@@ -8,6 +8,8 @@ import { CANVAS_THEME_LABELS, CANVAS_THEME_NAMES } from "./canvas/theme";
 import {
   ASSET_DRAG_MIME,
   addAssetNode,
+  dropFileOnNode,
+  fileDropTargetAt,
   fitSelectionAction,
   fitViewAction,
   importFiles,
@@ -234,6 +236,15 @@ export function EditorPage() {
               return;
             }
             const files = [...event.dataTransfer.files];
+            // One file over a node is that node's new asset; anything else is
+            // the canvas taking what was dropped, as it always has.
+            if (files.length === 1 && world) {
+              const target = fileDropTargetAt(world);
+              if (target) {
+                void dropFileOnNode(target.id, files[0], world);
+                return;
+              }
+            }
             if (files.length > 0) {
               void importFiles(files, {
                 at: world ?? undefined,

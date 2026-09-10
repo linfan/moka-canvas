@@ -26,6 +26,8 @@ import {
   generationSummary,
   waveformPeaks,
 } from "./canvas/mediaCards";
+import { registerController } from "./canvas/canvasControl";
+import type { LeaferEditorController } from "./canvas/controller";
 import { undo } from "./commands/execute";
 import {
   addAssetNode,
@@ -105,6 +107,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  registerController(null);
   vi.unstubAllGlobals();
 });
 
@@ -617,6 +620,120 @@ describe("editor shell integration", () => {
     expect(
       state.moka!.canvas[0].nodes.some((n) => n.title === "drop.png"),
     ).toBe(true);
+  });
+
+  /** Points the camera stand-in at the middle of a node, for a drop. */
+  function aimAt(nodeId: string) {
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    const node = canvas.nodes.find((entry) => entry.id === nodeId)!;
+    const aimed = {
+      x: node.bounds.x + node.bounds.width / 2,
+      y: node.bounds.y + node.bounds.height / 2,
+    };
+    registerController({
+      clientToWorld: () => aimed,
+      viewCenterWorld: () => aimed,
+      worldToClient: () => ({ x: 0, y: 0 }),
+    } as unknown as LeaferEditorController);
+    return aimed;
+  }
+
+  it("puts a file dropped on a node in place of what that node held", async () => {
+    const ids = goldenNodeIds();
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    aimAt(ids.image);
+
+    fireEvent.drop(screen.getByTestId("canvas-host"), {
+      dataTransfer: {
+        getData: () => "",
+        files: [new File(["x"], "drop.png", { type: "image/png" })],
+      },
+    });
+    await vi.waitFor(() => {
+      const node = useProjectStore
+        .getState()
+        .moka!.canvas[0].nodes.find((entry) => entry.id === ids.image);
+      expect((node?.data as { assetId?: string }).assetId).toBe(
+        "dropped-asset",
+      );
+    });
+
+    // The file went onto the node rather than onto the canvas: nothing new.
+    expect(useProjectStore.getState().moka!.canvas[0].nodes).toHaveLength(4);
+    expect(useEditorStore.getState().announcement).toBe(
+      "Replaced Reference image with drop.png",
+    );
+  });
+
+  it("lays a file the node cannot hold on the canvas instead", async () => {
+    const ids = goldenNodeIds();
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    aimAt(ids.text);
+
+    fireEvent.drop(screen.getByTestId("canvas-host"), {
+      dataTransfer: {
+        getData: () => "",
+        files: [new File(["x"], "drop.png", { type: "image/png" })],
+      },
+    });
+    await vi.waitFor(() => {
+      expect(
+        useProjectStore
+          .getState()
+          .moka!.canvas[0].nodes.some((n) => n.title === "drop.png"),
+      ).toBe(true);
+    });
+
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    const brief = canvas.nodes.find((entry) => entry.id === ids.text)!;
+    // A picture is not words: the brief keeps its own text and no asset.
+    expect((brief.data as { content?: string }).content).toBe(
+      "A lantern floats over a quiet lake at dusk.",
+    );
+    expect((brief.data as { assetId?: string }).assetId).toBeUndefined();
+    expect(canvas.nodes).toHaveLength(5);
+  });
+
+  it("files and wires a file dropped on what the node is given", async () => {
+    const ids = goldenNodeIds();
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    act(() => {
+      useEditorStore.setState({ promptPanel: null, promptPanelOnSelect: true });
+      useEditorStore
+        .getState()
+        .setSelection({ nodeIds: [ids.image], edgeIds: [] });
+    });
+    const bar = await screen.findByTestId("reference-bar");
+
+    fireEvent.drop(bar, {
+      dataTransfer: {
+        getData: () => "",
+        files: [new File(["x"], "drop.png", { type: "image/png" })],
+        types: ["Files"],
+      },
+    });
+    await vi.waitFor(() => {
+      expect(
+        useProjectStore
+          .getState()
+          .moka!.canvas[0].nodes.some((n) => n.title === "drop.png"),
+      ).toBe(true);
+    });
+
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    const made = canvas.nodes.find((node) => node.title === "drop.png")!;
+    // One node, wired in: the canvas under the panel did not take the same
+    // drop a second time.
+    expect(canvas.nodes).toHaveLength(5);
+    expect(canvas.edges).toContainEqual(
+      expect.objectContaining({
+        source: { nodeId: made.id, portId: "out" },
+        target: { nodeId: ids.image, portId: "images" },
+      }),
+    );
   });
 
   it("lists assets in the resource panel with use counts", async () => {

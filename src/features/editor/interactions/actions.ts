@@ -875,6 +875,42 @@ export async function confirmDeleteAsset() {
   await removeAssetNow(prompt.assetId);
 }
 
+/** The kind of node a registered asset becomes, read from where it is filed. */
+function kindOfAsset(entry: ResourceEntry): NodeKind {
+  const category = entry.path.split("/")[1];
+  if (category === "images") return "image";
+  if (category === "videos") return "video";
+  if (category === "music" || category === "voice") return "audio";
+  return "text";
+}
+
+/** The body an asset gives a node of that kind. */
+async function assetDataFor(
+  kind: NodeKind,
+  entry: ResourceEntry,
+): Promise<NodeData> {
+  if (kind === "audio") {
+    const category = entry.path.split("/")[1];
+    return {
+      assetId: entry.id,
+      audioCategory: category === "voice" ? "voice" : "music",
+    };
+  }
+  if (kind === "text") {
+    let content = "";
+    try {
+      const response = await fetch(assetUrl(entry.id));
+      if (response.ok) {
+        content = (await response.text()).slice(0, MAX_TEXT_CONTENT_LENGTH);
+      }
+    } catch {
+      // Keep the empty body; the asset link still identifies the file.
+    }
+    return { content, assetId: entry.id };
+  }
+  return { assetId: entry.id, posterAssetId: entry.probe?.posterAssetId };
+}
+
 /**
  * Builds the node a registered asset becomes: its kind from where the file
  * lives, its title from the file's own name, and its body from what the asset
@@ -888,36 +924,10 @@ async function makeAssetNode(
   if (!moka) return null;
   const entry = buildResourceIndex(moka).get(assetId);
   if (!entry) return null;
-  const category = entry.path.split("/")[1];
-  let kind: NodeKind;
-  if (category === "images") kind = "image";
-  else if (category === "videos") kind = "video";
-  else if (category === "music" || category === "voice") kind = "audio";
-  else kind = "text";
+  const kind = kindOfAsset(entry);
   const node = createNode(kind, at);
   node.title = entry.name;
-  if (kind === "audio") {
-    node.data = {
-      assetId,
-      audioCategory: category === "voice" ? "voice" : "music",
-    };
-  } else if (kind === "text") {
-    let content = "";
-    try {
-      const response = await fetch(assetUrl(assetId));
-      if (response.ok) {
-        content = (await response.text()).slice(0, MAX_TEXT_CONTENT_LENGTH);
-      }
-    } catch {
-      // Keep the empty body; the asset link still identifies the file.
-    }
-    node.data = { content, assetId };
-  } else {
-    node.data = {
-      assetId,
-      posterAssetId: entry.probe?.posterAssetId,
-    };
-  }
+  node.data = await assetDataFor(kind, entry);
   return node;
 }
 
@@ -1411,13 +1421,15 @@ export const ASSET_DRAG_MIME = "application/x-moka-asset";
 
 /**
  * Uploads files one at a time (server sniffing routes each to its category
- * directory) and folds every accepted entry into the local registry. A failed
- * file is reported and skipped; the rest of the batch continues.
+ * directory) and folds every accepted entry into the local registry, handing
+ * back the entries that were taken. A failed file is reported and skipped; the
+ * rest of the batch continues.
  */
 export async function importFiles(
   files: File[],
   options: ImportFilesOptions = {},
-): Promise<void> {
+): Promise<AssetId[]> {
+  const imported: AssetId[] = [];
   for (const [index, file] of files.entries()) {
     if (options.signal?.aborted) break;
     try {
@@ -1431,6 +1443,7 @@ export async function importFiles(
         revision: change.revision,
         updatedAt: change.updatedAt,
       });
+      imported.push(change.entry.id);
       if (options.addNodes) {
         const at = options.at
           ? {
@@ -1447,6 +1460,79 @@ export async function importFiles(
       toastError(`${file.name}: ${message}`);
       options.onFileDone?.(index, message);
     }
+  }
+  return imported;
+}
+
+/** What a node of each kind holds, so a file can be told what it could fill. */
+const NODES_HOLDING_FILES: readonly NodeKind[] = [
+  "text",
+  "image",
+  "audio",
+  "video",
+];
+
+/**
+ * The node a dropped file would land on: the topmost one holding a file whose
+ * rect covers the point, or null where the drop is the canvas's.
+ */
+export function fileDropTargetAt(world: Point): WorkflowNode | null {
+  const canvas = activeCanvas();
+  if (!canvas) return null;
+  let best: WorkflowNode | null = null;
+  for (const node of canvas.nodes) {
+    if (!NODES_HOLDING_FILES.includes(node.kind)) continue;
+    const { x, y, width, height } = node.bounds;
+    if (world.x < x || world.x > x + width) continue;
+    if (world.y < y || world.y > y + height) continue;
+    if (!best || node.zIndex >= best.zIndex) best = node;
+  }
+  return best;
+}
+
+/**
+ * Lands a file dropped on a node: put into the project, then drawn on that
+ * node in place of whatever it held. A file the node cannot hold is laid out
+ * as a node of its own where it was dropped, which is what dropping it on the
+ * canvas does.
+ */
+export async function dropFileOnNode(
+  nodeId: NodeId,
+  file: File,
+  at?: Point,
+): Promise<void> {
+  try {
+    const change = await assetsApi.upload(file);
+    useProjectStore.getState().integrateAssetEntry(change.entry, {
+      revision: change.revision,
+      updatedAt: change.updatedAt,
+    });
+    const canvas = activeCanvas();
+    const node = canvas ? findNode(canvas, nodeId) : null;
+    const kind = kindOfAsset(change.entry);
+    if (!canvas || !node || kind !== node.kind) {
+      await addAssetNode(change.entry.id, at);
+      return;
+    }
+    const data = {
+      ...(node.data as NodeData),
+      ...(await assetDataFor(kind, change.entry)),
+    };
+    if (
+      execute("Replace the node's asset", [
+        {
+          type: "updateNode",
+          canvasId: canvas.id,
+          nodeId,
+          patch: { data },
+        },
+      ])
+    ) {
+      announce(`Replaced ${node.title} with ${change.entry.name}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Import failed";
+    toastError(`${file.name}: ${message}`);
   }
 }
 

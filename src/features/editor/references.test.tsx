@@ -121,6 +121,7 @@ const move = vi.fn();
 const point = vi.fn();
 const picking = vi.fn();
 const tookAsset = vi.fn();
+const tookFiles = vi.fn();
 
 function Bar({
   canvas = SHEET,
@@ -147,6 +148,7 @@ function Bar({
       onPicking={picking}
       onPoint={point}
       onTakeAsset={tookAsset}
+      onTakeFiles={tookFiles}
       resources={RESOURCES}
       spec={{ ...stored, inputMode, referenceNodeIds }}
     />
@@ -172,8 +174,30 @@ function carrying(assetId: string | null) {
   };
 }
 
+/** Files being dragged from this machine, which is what Finder drags carry. */
+function carryingFiles(files: File[]) {
+  return {
+    dataTransfer: {
+      getData: () => "",
+      files,
+      types: ["Files"],
+    },
+  };
+}
+
+const FILE = new File(["x"], "lantern.png", { type: "image/png" });
+
 beforeEach(() => {
-  for (const spy of [cut, find, mode, move, point, picking, tookAsset]) {
+  for (const spy of [
+    cut,
+    find,
+    mode,
+    move,
+    point,
+    picking,
+    tookAsset,
+    tookFiles,
+  ]) {
     spy.mockClear();
   }
 });
@@ -389,5 +413,37 @@ describe("an asset left on the bar", () => {
     expect(bar().className).not.toContain("is-dropping");
     fireEvent.drop(bar(), carrying(PICTURE.id));
     expect(tookAsset).not.toHaveBeenCalled();
+  });
+
+  it("takes files brought from this machine, to be filed and listed", () => {
+    render(<Bar />);
+    fireEvent.dragOver(bar(), carryingFiles([FILE]));
+    expect(bar().className).toContain("is-dropping");
+    fireEvent.drop(bar(), carryingFiles([FILE]));
+    expect(tookFiles).toHaveBeenCalledWith([FILE]);
+  });
+
+  it("refuses files where the prompt decides, as it refuses assets", () => {
+    render(<Bar inputMode="mentions" />);
+    fireEvent.dragOver(bar(), carryingFiles([FILE]));
+    expect(bar().className).not.toContain("is-dropping");
+    fireEvent.drop(bar(), carryingFiles([FILE]));
+    expect(tookFiles).not.toHaveBeenCalled();
+  });
+
+  it("keeps a drop it takes from reaching what lies under it", () => {
+    const under = vi.fn();
+    render(
+      <div onDrop={under}>
+        <Bar />
+      </div>,
+    );
+    // The canvas under the panel would otherwise take the same drop and make
+    // a node of it a second time.
+    fireEvent.drop(bar(), carrying(PICTURE.id));
+    fireEvent.drop(bar(), carryingFiles([FILE]));
+    expect(tookAsset).toHaveBeenCalledWith(PICTURE.id);
+    expect(tookFiles).toHaveBeenCalledWith([FILE]);
+    expect(under).not.toHaveBeenCalled();
   });
 });

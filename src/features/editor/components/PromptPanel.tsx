@@ -32,6 +32,7 @@ import {
   attachAssetsToNode,
   disconnectEdge,
   fitSelectionAction,
+  importFiles,
   moveInput,
   setNodeGeneration,
 } from "../interactions/actions";
@@ -422,6 +423,14 @@ export function PromptPanel() {
     void attachAssetsToNode(node.id, [assetId]);
   };
 
+  /** The same, for files brought from this machine rather than the panel. */
+  const takeFiles = (files: File[]) => {
+    void (async () => {
+      const imported = await importFiles(files);
+      if (imported.length > 0) await attachAssetsToNode(node.id, imported);
+    })();
+  };
+
   /**
    * Brings one of the nodes this node is given into view.
    *
@@ -606,6 +615,7 @@ export function PromptPanel() {
         onPicking={setPicking}
         onPoint={(nodeIds) => commit({ referenceNodeIds: nodeIds })}
         onTakeAsset={(assetId) => void takeAsset(assetId)}
+        onTakeFiles={takeFiles}
         resources={resources}
         spec={spec}
       />

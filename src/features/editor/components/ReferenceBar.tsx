@@ -132,6 +132,8 @@ export interface ReferenceBarProps {
   onPicking: (picking: boolean) => void;
   /** Takes an asset dropped here from the resource panel. */
   onTakeAsset: (assetId: AssetId) => void;
+  /** Takes files dropped here from this machine, filed then listed. */
+  onTakeFiles: (files: File[]) => void;
 }
 
 /**
@@ -154,6 +156,7 @@ export function ReferenceBar({
   onPoint,
   onPicking,
   onTakeAsset,
+  onTakeFiles,
 }: ReferenceBarProps) {
   const [picking, setPicking] = useState(false);
   const [dragged, setDragged] = useState<number | null>(null);
@@ -188,16 +191,29 @@ export function ReferenceBar({
       onDragLeave={() => setHovered(false)}
       onDragOver={(event) => {
         if (!takes) return;
-        if (!event.dataTransfer.types.includes(ASSET_DRAG_MIME)) return;
+        const kinds = event.dataTransfer.types;
+        if (!kinds.includes(ASSET_DRAG_MIME) && !kinds.includes("Files")) {
+          return;
+        }
         event.preventDefault();
         setHovered(true);
       }}
       onDrop={(event) => {
         setHovered(false);
         if (!takes) return;
+        // Consumed here: the canvas under the panel would otherwise take the
+        // same drop and make a node of it a second time.
+        const files = [...(event.dataTransfer.files ?? [])];
+        if (files.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          onTakeFiles(files);
+          return;
+        }
         const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME);
         if (!assetId) return;
         event.preventDefault();
+        event.stopPropagation();
         onTakeAsset(assetId as AssetId);
       }}
       role="group"
