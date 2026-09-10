@@ -24,6 +24,7 @@ import {
   type Point,
   type Rect,
   type ResultSlot,
+  type ResourceEntry,
   type WorkflowNode,
 } from "../../../shared/domain";
 import { assetsApi, assetUrl } from "../../../api";
@@ -560,6 +561,28 @@ export function assetReferencingNodeIds(assetId: string): NodeId[] {
     }
   }
   return ids;
+}
+
+/**
+ * Writes down whether this file is kept to hand. The registry entry is all it
+ * touches, so marking a video a keeper costs nothing of the video's.
+ */
+export async function markAssetKeeper(
+  entry: ResourceEntry,
+  keeper: boolean,
+): Promise<void> {
+  try {
+    const change = await assetsApi.patchShelf(entry.id, { favorite: keeper });
+    useProjectStore.getState().integrateAssetEntry(change.entry, {
+      revision: change.revision,
+      updatedAt: change.updatedAt,
+    });
+    announce(`${entry.name} ${keeper ? "is a keeper" : "is no keeper"}`);
+  } catch (error) {
+    toastError(
+      error instanceof Error ? error.message : "Could not write to the shelf",
+    );
+  }
 }
 
 /**

@@ -86,6 +86,17 @@ export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
 export const ASSET_ORIGINS = ["brought", "filed"] as const;
 export type AssetOrigin = (typeof ASSET_ORIGINS)[number];
 
+/**
+ * What each origin is called where a reader is told of it.
+ *
+ * An asset this project made is not labelled here: it says so through
+ * `provenance`, and the shelf calls that "Made here" where it reads the entry.
+ */
+export const ASSET_ORIGIN_LABELS: Record<AssetOrigin, string> = {
+  brought: "Brought in",
+  filed: "Filed from a node",
+};
+
 /** How many words a reader may put on one asset to find it again. */
 export const MAX_ASSET_TAGS = 24;
 /** How long one of those words may be. */
