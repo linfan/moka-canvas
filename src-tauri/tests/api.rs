@@ -549,3 +549,196 @@ async fn api_responses_carry_request_ids_and_problem_codes() {
         "PROJECT_NOT_OPEN"
     );
 }
+
+#[tokio::test]
+async fn a_picture_tool_answers_with_what_it_filed_and_not_with_the_picture() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    create_project(&app, &temp.path().join("projects"), "Tools").await;
+
+    let response = app
+        .clone()
+        .oneshot(multipart_request(
+            "/api/v1/projects/current/assets",
+            ("lake.png", &make_test_png()),
+            &[],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let subject = body_json(response).await["entry"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/tools",
+            json!({
+                "tool": "crop",
+                "assetId": subject,
+                "params": { "region": { "x": 4, "y": 4, "width": 32, "height": 16 } },
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let report = body_json(response).await;
+    assert!(report["revision"].is_number());
+    let entries = report["entries"].as_array().expect("what was filed");
+    assert_eq!(entries.len(), 1);
+    let made = &entries[0];
+    assert_eq!(made["name"], "lake-32x16");
+    assert_eq!(made["probe"]["width"], 32);
+    assert_eq!(made["probe"]["height"], 16);
+    // Nothing was asked of anybody, so there is no run behind this and nothing
+    // for it to have come with.
+    assert!(report.get("prompt").is_none());
+    assert_eq!(made["provenance"]["runId"], Value::Null);
+    assert_eq!(made["provenance"]["operationNodeId"], Value::Null);
+    assert_eq!(made["provenance"]["inputAssetIds"], json!([subject]));
+    assert_eq!(
+        made["provenance"]["parameterSnapshot"]["tool"],
+        json!("crop")
+    );
+
+    // The answer names the asset rather than carrying it, so the picture is
+    // asked for the way any other asset in the project is.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/projects/current/assets/{}",
+                    made["id"].as_str().unwrap()
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "image/png"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert!(!bytes.is_empty(), "the result is a picture, not a promise");
+}
+
+#[tokio::test]
+async fn a_picture_tool_that_cannot_be_done_is_refused_as_a_problem() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    create_project(&app, &temp.path().join("projects"), "Tools").await;
+
+    let response = app
+        .clone()
+        .oneshot(multipart_request(
+            "/api/v1/projects/current/assets",
+            ("lake.png", &make_test_png()),
+            &[],
+        ))
+        .await
+        .unwrap();
+    let picture = body_json(response).await["entry"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let response = app
+        .clone()
+        .oneshot(multipart_request(
+            "/api/v1/projects/current/assets",
+            ("note.txt", b"a sentence, which has no picture in it"),
+            &[],
+        ))
+        .await
+        .unwrap();
+    let words = body_json(response).await["entry"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // A tool nobody has is not guessed at, and the refusal names what was asked
+    // for so a reader can see which word was the problem.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/tools",
+            json!({ "tool": "prettify", "assetId": picture }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response.headers().get("x-error-code").unwrap(),
+        "VALIDATION_FAILED"
+    );
+    let problem = body_json(response).await;
+    assert_eq!(problem["code"], "VALIDATION_FAILED");
+    assert!(
+        problem["message"].as_str().unwrap().contains("prettify"),
+        "{problem}"
+    );
+
+    // A field this tool does not have is refused rather than quietly dropped,
+    // because dropping it would answer a different question and call it this one.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/tools",
+            json!({
+                "tool": "crop",
+                "assetId": picture,
+                "params": { "region": { "x": 0, "y": 0, "width": 8, "height": 8 }, "sharpen": true },
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body_json(response).await["code"],
+        Value::String("VALIDATION_FAILED".into())
+    );
+
+    // A subject with no picture in it is a different refusal from a bad ask:
+    // the ask was fine, the thing it was pointed at cannot be worked on.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/tools",
+            json!({
+                "tool": "crop",
+                "assetId": words,
+                "params": { "ratio": "1:1" },
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(
+        response.headers().get("x-error-code").unwrap(),
+        "UNSUPPORTED_MEDIA_TYPE"
+    );
+
+    // And a subject the project does not hold is simply not there.
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/tools",
+            json!({
+                "tool": "crop",
+                "assetId": "asset-nobody-has",
+                "params": { "ratio": "1:1" },
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

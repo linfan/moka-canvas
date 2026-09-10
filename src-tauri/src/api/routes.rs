@@ -14,6 +14,7 @@ use crate::generate::{
     collect_generation_inputs, Cancel, DeltaSink, GenerateInput, GenerateRequest, GenerateResult,
     ProviderError, TaskState,
 };
+use crate::imaging::{operate, OperatorReport, OperatorRequest};
 use crate::metadata::RecentProject;
 use crate::project::{
     ByteRange, CreateProject, OpenProject, PackageScope, ProjectStore, StagedAsset,
@@ -408,6 +409,21 @@ fn spawn_reveal(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), Problem>
                 format!("Could not open the file manager: {error}"),
             )
         })
+}
+
+/// One of the tools that works on a picture the project already holds.
+///
+/// Answers 201 with what was filed rather than the picture itself: the bytes
+/// are in the project now and reachable the way any other asset is, and sending
+/// them back as well would double the cost of a tool whose whole product is a
+/// new node.
+pub async fn apply_picture_tool(
+    State(state): State<ApiState>,
+    json: Result<Json<OperatorRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<OperatorReport>), Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let report = operate(&*state.store, request).await?;
+    Ok((StatusCode::CREATED, Json(report)))
 }
 
 fn parse_range_header(value: Option<&str>, total: u64) -> Result<Option<ByteRange>, Problem> {

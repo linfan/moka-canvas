@@ -3,6 +3,7 @@ pub mod assets;
 pub mod config;
 pub mod domain;
 pub mod generate;
+pub mod imaging;
 pub mod metadata;
 pub mod project;
 pub mod server;

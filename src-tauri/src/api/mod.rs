@@ -107,6 +107,13 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/assets/{id}/reveal",
             post(routes::reveal_asset),
         )
+        // Beside the assets rather than under the generation routes: nothing is
+        // asked of anybody, so a reader whose picture could not be worked on has
+        // no channel to go and configure and no bill to look at.
+        .route(
+            "/api/v1/projects/current/tools",
+            post(routes::apply_picture_tool),
+        )
         .route(
             "/api/v1/projects/current/export",
             post(routes::export_package),
