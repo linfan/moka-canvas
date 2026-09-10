@@ -198,6 +198,38 @@ npm run test:e2e  # Playwright: critical path, provider settings, a
     go of half way through. The automated equivalents are
     `cargo test imaging`, `npm test`, and
     `npx playwright test picture-tools`.
+14. Hold a conversation over a canvas, which is the other half of asking.
+    Open the **Assistant** tab beside the inspector and confirm the head of
+    the panel says what the conversation is about in counts — the selected
+    cards and whatever feeds them — and that naming one more with `@` adds
+    it to that. Ask a question against a channel you really configured and
+    confirm the answer arrives as it is written, then becomes a kept line;
+    reload and confirm the same conversation is still there, that the list
+    at the head offers every conversation this canvas has had, that a new
+    one starts empty, and that renaming or removing one is reflected after
+    another reload. Select a text card and choose **Rewrite**, then
+    **Replace selection**: the card's words change in one undo step and the
+    line it came from stays. From other lines confirm **Insert on canvas**
+    makes a card of its own, **Copy text** and **Download** do what they
+    say, and **Ask again** puts the question back in the field without
+    sending it twice. Choose **Image**: a card lands beside the cards it was
+    about, wired to them, the file is filed once under `assets/images/`
+    with provenance naming the run and the conversation that asked, and
+    both **Show on canvas** and **Show in assets** go where they promise.
+    Make one fail — remove the model, or point the channel at a provider
+    that gives up — and confirm the trouble is a line in the conversation
+    carrying the reason rather than a notice that fades, that **Ask the card
+    again** offered from it re-runs the card that is there rather than
+    adding a second one, and that the card still says nothing it never got.
+    For a words ask, choose how many earlier lines travel with the question
+    and confirm the panel counts the characters that go and the provider was
+    handed those lines; a media ask offers no such choice, since the cards
+    feed it over wires. A conversation longer than the column steps back in
+    increments, and a card a kept line was about that has since been deleted
+    says so rather than offering to find it. Finally remove the model for a
+    kind and confirm the panel names the kind that is missing and offers the
+    settings instead of answering the ask badly. The automated equivalents
+    are `npm test` and `npx playwright test assistant`.
 
 ## macOS (`make package-macos`)
 
@@ -303,6 +335,10 @@ Intended behaviour, recorded here so a tester does not file it as a defect.
    directories remain on disk and each still opens. Keeping several
    independent copies of one package means giving the document a new id,
    which this build does not do on your behalf.
+2. **A picture asked for in a conversation is two steps of undo.** The card
+   and the line that asked for it are separate entries deliberately: taking
+   back what was said should not quietly delete a picture that was paid
+   for.
 
 ## Sign-off
 
