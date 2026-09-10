@@ -10,6 +10,7 @@ import type {
   RunRecord,
   RunStatus,
   RunStepRecord,
+  SessionId,
   ValidationIssue,
 } from "../../../shared/domain";
 import { ASSET_CATEGORY_LABELS } from "../../../shared/domain";
@@ -75,7 +76,11 @@ interface RunState {
    */
   streamText: Record<RunId, Record<NodeId, string>>;
   load: () => Promise<void>;
-  start: (canvasId: CanvasId, nodeIds: NodeId[]) => Promise<RunRecord>;
+  start: (
+    canvasId: CanvasId,
+    nodeIds: NodeId[],
+    askedBy?: SessionId,
+  ) => Promise<RunRecord>;
   cancel: (runId: RunId) => Promise<void>;
   retry: (runId: RunId) => Promise<RunRecord>;
   select: (runId: RunId | null) => void;
@@ -280,10 +285,10 @@ export const useRunStore = create<RunState>()((set, get) => {
       }
     },
 
-    async start(canvasId, nodeIds) {
+    async start(canvasId, nodeIds, askedBy) {
       set({ starting: true, error: null, lastIssues: [] });
       try {
-        const record = await runsApi.start(canvasId, nodeIds);
+        const record = await runsApi.start(canvasId, nodeIds, askedBy);
         foldIn(record);
         get().openStream(record.id);
         ensurePolling();
@@ -520,6 +525,41 @@ export function useRunsInFlight(): number {
       0,
     ),
   );
+}
+
+/**
+ * Waits for a run to be over, and hands back the record saying how.
+ *
+ * Null when the run went away with a project that closed: what was waiting on
+ * it has nothing left to wait for, and a turn held open by a run nobody will
+ * report on again is a panel that never frees itself.
+ *
+ * The record is read rather than the stream it arrived on, because a stream only
+ * hurries a display along and the record is what the canvas and the history
+ * believe.
+ */
+export function untilRunEnds(runId: RunId): Promise<RunRecord | null> {
+  return new Promise((resolve) => {
+    let seen = false;
+    const outcome = (runs: RunRecord[]): RunRecord | null | undefined => {
+      const found = runs.find((run) => run.id === runId);
+      if (found) seen = true;
+      if (found) return isActive(found.status) ? undefined : found;
+      return seen ? null : undefined;
+    };
+
+    const first = outcome(useRunStore.getState().runs);
+    if (first !== undefined) {
+      resolve(first);
+      return;
+    }
+    const stop = useRunStore.subscribe((state) => {
+      const settled = outcome(state.runs);
+      if (settled === undefined) return;
+      stop();
+      resolve(settled);
+    });
+  });
 }
 
 /**

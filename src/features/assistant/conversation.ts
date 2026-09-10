@@ -3,7 +3,10 @@ import type {
   AssistantMessage,
   AssistantReference,
   AssistantSession,
+  AssistantToolCall,
+  NodeId,
   ProblemCode,
+  RunId,
 } from "../../shared/domain";
 import { PROBLEM_CODES, newId } from "../../shared/domain";
 
@@ -60,6 +63,46 @@ export function lineAsked(
 /** The line that records an answer that arrived. */
 export function lineSaid(said: string, at: string): AssistantMessage {
   return { id: newId(), role: "assistant", text: said, createdAt: at };
+}
+
+/**
+ * The line that records what a run made, or the trouble it ran into.
+ *
+ * The run is named on the line beside what came of it, because a paid ask that
+ * failed is asked again from where it stands: the card it was for is already on
+ * the canvas, and the record already holds what it was asked for. A line that
+ * said only that nothing arrived loses both of those.
+ */
+export function lineFromRun(options: {
+  summary: string;
+  runId: RunId;
+  nodeId: NodeId;
+  at: string;
+  failure?: { message: string; code: ProblemCode; retryable: boolean };
+}): AssistantMessage {
+  const call: AssistantToolCall = {
+    runId: options.runId,
+    nodeId: options.nodeId,
+    summary: options.summary,
+  };
+  const trouble = options.failure;
+  if (!trouble) {
+    return {
+      id: newId(),
+      role: "assistant",
+      text: options.summary,
+      createdAt: options.at,
+      toolCalls: [call],
+    };
+  }
+  return {
+    id: newId(),
+    role: "error",
+    text: trouble.message,
+    createdAt: options.at,
+    failure: { code: trouble.code, retryable: trouble.retryable },
+    toolCalls: [call],
+  };
 }
 
 /**

@@ -41,6 +41,9 @@ pub struct ApplyCommandsRequest {
 pub struct StartRunRequest {
     pub canvas_id: String,
     pub node_ids: Vec<String>,
+    /// The conversation asking on a card's behalf, when a conversation is.
+    #[serde(default)]
+    pub assistant_session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

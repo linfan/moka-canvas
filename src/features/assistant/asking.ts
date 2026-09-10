@@ -2,6 +2,7 @@ import type { GenerateInput, GenerateRequest } from "../../api/generate";
 import type {
   AssetId,
   AssistantReference,
+  Capability,
   CanvasDocument,
   NodeId,
   WorkflowNode,
@@ -13,23 +14,70 @@ import {
   type GroupKey,
 } from "../editor/canvas/mentions";
 
-/** What one turn of a conversation asks for. */
-export type AssistantIntent = "answer" | "rewrite";
+/** What one turn of a conversation asks for: words, or a card to hold them. */
+export type AssistantIntent =
+  "answer" | "rewrite" | "image" | "video" | "audio";
 
 export const ASSISTANT_INTENTS: readonly AssistantIntent[] = [
   "answer",
   "rewrite",
+  "image",
+  "video",
+  "audio",
 ];
 
 export const INTENT_LABELS: Record<AssistantIntent, string> = {
   answer: "Ask",
   rewrite: "Rewrite",
+  image: "Image",
+  video: "Video",
+  audio: "Audio",
 };
 
 export const INTENT_HINTS: Record<AssistantIntent, string> = {
   answer: "Ask about the cards this conversation is about",
   rewrite: "Send the chosen text back written again, and nothing else",
+  image: "Put a picture on the canvas, asked with the cards this names",
+  video: "Put a moving picture on the canvas, asked with the cards this names",
+  audio: "Put a sound on the canvas, asked with the cards this names",
 };
+
+/** The kinds of card a conversation can ask for. */
+export type CardKind = "image" | "video" | "audio";
+
+/**
+ * The kind of card a turn puts on the canvas, or null when it only answers.
+ *
+ * The words line up on purpose — the thing a reader chooses to ask for is the
+ * kind of card that arrives — which is also how the ask knows which capability
+ * to be refused for not having a model.
+ */
+export function mediaKindFor(intent: AssistantIntent): CardKind | null {
+  return intent === "image" || intent === "video" || intent === "audio"
+    ? intent
+    : null;
+}
+
+/** What each intent invites the reader to type. */
+export const INTENT_PLACEHOLDERS: Record<AssistantIntent, string> = {
+  answer: "Ask about the cards you chose…",
+  rewrite: "How should it read instead?",
+  image: "What should the picture be?",
+  video: "What should the shot be?",
+  audio: "What should it sound like?",
+};
+
+/**
+ * The models an intent needs one of.
+ *
+ * A card is asked for through a run, so the model it wants is not on this wire
+ * at all — but a board with no picture model has no way to answer a request for
+ * a picture either, and saying so before the ask is worth more than a run that
+ * would only be refused.
+ */
+export function capabilityFor(intent: AssistantIntent): Capability {
+  return mediaKindFor(intent) ?? "text";
+}
 
 /**
  * How much of the cards a turn is about travels with it.
@@ -161,16 +209,8 @@ function readable(asked: string, names: ReadonlyMap<NodeId, string>): string {
   return `${words}${asked.slice(at)}`.trim();
 }
 
-/**
- * What one turn sends, and what it will be recorded as having been about.
- *
- * The cards travel as themselves rather than as a description of themselves:
- * what a text card says is quoted, and what a picture card holds is named by
- * the asset already in the project, so no bytes are carried across the wire
- * twice and nothing is stored that was not stored already.
- */
-export interface AssistantAsk {
-  request: GenerateRequest;
+/** What a turn is recorded as having asked, and about, either way it answers. */
+interface AskAbout {
   /** The question as it reads, which is what the line recording it holds. */
   asked: string;
   /** The cards that travelled, as the line recording the turn remembers them. */
@@ -179,6 +219,34 @@ export interface AssistantAsk {
   leftOut: number;
 }
 
+/** A turn answered by words, which are what goes down the ask wire. */
+export type AssistantWordsAsk = AskAbout & {
+  kind: null;
+  request: GenerateRequest;
+};
+
+/**
+ * A turn answered by a card on the canvas.
+ *
+ * No request, because nothing is sent in one message: the cards reach the
+ * generation over the graph as wires, and the run built from the card is what
+ * carries them.
+ */
+export type AssistantCardAsk = AskAbout & {
+  kind: CardKind;
+  request: null;
+};
+
+/**
+ * What one turn sends, and what it will be recorded as having been about.
+ *
+ * The cards travel as themselves rather than as a description of themselves:
+ * what a text card says is quoted, and what a picture card holds is named by
+ * the asset already in the project, so no bytes are carried across the wire
+ * twice and nothing is stored that was not stored already.
+ */
+export type AssistantAsk = AssistantWordsAsk | AssistantCardAsk;
+
 const ANSWER_SYSTEM =
   "Answer from the cards given to you. Where they do not say, say that rather than filling the gap.";
 
@@ -186,10 +254,26 @@ const REWRITE_SYSTEM =
   "Send the text given to you back written again as the reader asked. Return only that text, with no heading and nothing said about it.";
 
 export function askOf(
+  intent: "answer" | "rewrite",
+  nodes: readonly WorkflowNode[],
+  asked: string,
+): AssistantWordsAsk;
+export function askOf(
+  intent: "image" | "video" | "audio",
+  nodes: readonly WorkflowNode[],
+  asked: string,
+): AssistantCardAsk;
+export function askOf(
+  intent: AssistantIntent,
+  nodes: readonly WorkflowNode[],
+  asked: string,
+): AssistantAsk;
+export function askOf(
   intent: AssistantIntent,
   nodes: readonly WorkflowNode[],
   asked: string,
 ): AssistantAsk {
+  const kind = mediaKindFor(intent);
   const names = new Map<NodeId, string>(
     nodes.map((node) => [node.id, node.title]),
   );
@@ -198,6 +282,7 @@ export function askOf(
   const inputs: GenerateInput[] = [];
   const references: AssistantReference[] = [];
   let room = ASSISTANT_CONTEXT_CHARS;
+  let media = 0;
   let leftOut = 0;
 
   for (const node of nodes) {
@@ -205,22 +290,29 @@ export function askOf(
     if (node.kind === "text") {
       const content = (held.content ?? "").trim();
       if (content === "") continue;
-      const block = `[${node.title}]\n${content}`;
-      if (block.length > room) {
-        leftOut += 1;
-        continue;
+      if (kind === null) {
+        const block = `[${node.title}]\n${content}`;
+        if (block.length > room) {
+          leftOut += 1;
+          continue;
+        }
+        room -= block.length;
+        blocks.push(block);
       }
-      room -= block.length;
-      blocks.push(block);
       references.push({ nodeId: node.id, title: node.title, kind: node.kind });
       continue;
     }
     if (!held.assetId) continue;
-    if (inputs.length >= ASSISTANT_PICTURE_LIMIT) {
+    // Counted the same whichever way it travels: a picture is paid for again by
+    // the model that reads it, whether it was quoted in a message or wired in.
+    if (media >= ASSISTANT_PICTURE_LIMIT) {
       leftOut += 1;
       continue;
     }
-    inputs.push({ role: "reference", assetId: held.assetId });
+    media += 1;
+    if (kind === null) {
+      inputs.push({ role: "reference", assetId: held.assetId });
+    }
     references.push({
       nodeId: node.id,
       title: node.title,
@@ -230,15 +322,17 @@ export function askOf(
   }
 
   const context = blocks.join("\n\n");
-  return {
-    request: {
-      capability: "text",
-      system: intent === "rewrite" ? REWRITE_SYSTEM : ANSWER_SYSTEM,
-      prompt: context === "" ? words : `${context}\n\n---\n\n${words}`,
-      inputs,
-    },
-    asked: words,
-    references,
-    leftOut,
-  };
+  const about = { asked: words, references, leftOut };
+  return kind === null
+    ? {
+        kind: null,
+        request: {
+          capability: "text",
+          system: intent === "rewrite" ? REWRITE_SYSTEM : ANSWER_SYSTEM,
+          prompt: context === "" ? words : `${context}\n\n---\n\n${words}`,
+          inputs,
+        },
+        ...about,
+      }
+    : { kind, request: null, ...about };
 }

@@ -10,6 +10,7 @@ import {
   ASSISTANT_CONTEXT_CHARS,
   ASSISTANT_PICTURE_LIMIT,
   askOf,
+  capabilityFor,
   referenceNodes,
   referenceSummary,
   upstreamOf,
@@ -234,5 +235,53 @@ describe("askOf", () => {
     expect(ask.request.inputs).toHaveLength(ASSISTANT_PICTURE_LIMIT);
     expect(ask.leftOut).toBe(2);
     expect(ask.references).toHaveLength(ASSISTANT_PICTURE_LIMIT);
+  });
+});
+
+describe("askOf, asked for a card", () => {
+  it("sends no message of its own and says which card it wants", () => {
+    const ask = askOf("image", [STUDY, PLATE], "a wider shot");
+    expect(ask.kind).toBe("image");
+    // What a generation takes is what is wired into it, so there is no request
+    // to speak of — the cards reach the model over the graph instead.
+    expect(ask.request).toBeNull();
+    expect(aboutIds(ask)).toEqual(["n-study", "n-plate"]);
+  });
+
+  it("keeps the cards it is about rather than leaving a long one behind", () => {
+    // Nothing is quoted into a prompt that this never sends, so the ceiling on
+    // quoted text does not apply: the card reads what it is wired to itself.
+    const long = card("text", "n-long", "Long", {
+      content: "x".repeat(ASSISTANT_CONTEXT_CHARS + 1_000),
+    });
+    const ask = askOf("image", [long], "wider");
+    expect(ask.leftOut).toBe(0);
+    expect(aboutIds(ask)).toEqual(["n-long"]);
+  });
+
+  it("still caps the pictures, which are paid for either way", () => {
+    const plates = Array.from(
+      { length: ASSISTANT_PICTURE_LIMIT + 3 },
+      (_, at) =>
+        card("image", `n-${at}`, `Plate ${at}`, { assetId: `asset-${at}` }),
+    );
+    const ask = askOf("video", plates, "moving");
+    expect(ask.references).toHaveLength(ASSISTANT_PICTURE_LIMIT);
+    expect(ask.leftOut).toBe(3);
+  });
+
+  it("writes the question out the same way, mentions and all", () => {
+    const ask = askOf("audio", [PLATE], `make ${mentionToken("n-plate")} hum`);
+    expect(ask.asked).toBe("make [Plate] hum");
+  });
+});
+
+describe("capabilityFor", () => {
+  it("names the model each intent would have to have one of", () => {
+    expect(capabilityFor("answer")).toBe("text");
+    expect(capabilityFor("rewrite")).toBe("text");
+    expect(capabilityFor("image")).toBe("image");
+    expect(capabilityFor("video")).toBe("video");
+    expect(capabilityFor("audio")).toBe("audio");
   });
 });

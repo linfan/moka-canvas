@@ -33,6 +33,16 @@ async fn create_store(tmp: &TempDir) -> (FsProjectStore, PathBuf, String) {
 }
 
 fn run(canvas_id: &str) -> RunRecord {
+    asked_over(canvas_id, None)
+}
+
+/// The same record, asked for on behalf of a conversation rather than by a card
+/// wanting something for itself.
+fn run_asked_over(canvas_id: &str, session: &str) -> RunRecord {
+    asked_over(canvas_id, Some(session.to_string()))
+}
+
+fn asked_over(canvas_id: &str, session: Option<String>) -> RunRecord {
     let now = now_iso();
     RunRecord {
         id: new_id(),
@@ -44,6 +54,7 @@ fn run(canvas_id: &str) -> RunRecord {
         graph_hash: String::new(),
         parameters: json!({}),
         retry_of_run_id: None,
+        assistant_session_id: session,
         steps: Vec::new(),
         error: None,
         cancel_requested: false,
@@ -225,6 +236,48 @@ async fn an_image_answer_lands_in_the_project_bearing_its_provenance() {
         .expect("provenance encoded in the document");
     assert_eq!(stored.run_id, provenance.run_id);
     assert_eq!(stored.parameter_snapshot, provenance.parameter_snapshot);
+    // A card that asked for itself is traced to the card and the run, and to
+    // no conversation.
+    assert_eq!(stored.assistant_session_id, None);
+}
+
+#[tokio::test]
+async fn an_answer_a_conversation_asked_for_is_traced_back_to_it() {
+    let tmp = TempDir::new().unwrap();
+    let (store, _root, canvas_id) = create_store(&tmp).await;
+    let run = run_asked_over(&canvas_id, "session-lantern");
+    let node = asking(NodeKind::Image, "Poster", None);
+
+    let entries = ingest_generated(
+        &store,
+        &run,
+        &node,
+        &ResolvedInputs::default(),
+        &answer(vec![image(make_test_png())]),
+    )
+    .await
+    .unwrap();
+    let provenance = entries[0].provenance.as_ref().expect("an answer is traced");
+    assert_eq!(
+        provenance.assistant_session_id.as_deref(),
+        Some("session-lantern")
+    );
+    assert_eq!(provenance.run_id.as_deref(), Some(run.id.as_str()));
+
+    store
+        .open_project(&tmp.path().join("demo-project"))
+        .await
+        .unwrap();
+    let stored = registered(&store).await;
+    assert_eq!(
+        stored[0]
+            .provenance
+            .as_ref()
+            .expect("provenance encoded in the document")
+            .assistant_session_id
+            .as_deref(),
+        Some("session-lantern")
+    );
 }
 
 #[tokio::test]

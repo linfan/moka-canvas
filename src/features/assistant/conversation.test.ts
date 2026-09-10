@@ -7,6 +7,7 @@ import {
   lineAsked,
   lineCutShort,
   lineFailed,
+  lineFromRun,
   lineSaid,
   titleFor,
 } from "./conversation";
@@ -148,5 +149,47 @@ describe("lineCutShort", () => {
       code: "GENERATION_CANCELLED",
       retryable: true,
     });
+  });
+});
+
+describe("lineFromRun", () => {
+  it("names the run an answer came from, and the card it was for", () => {
+    const line = lineFromRun({
+      summary: "Made 2 images",
+      runId: "r-1",
+      nodeId: "n-card",
+      at: T,
+    });
+    expect(line.role).toBe("assistant");
+    expect(line.text).toBe("Made 2 images");
+    expect(line.toolCalls).toEqual([
+      { runId: "r-1", nodeId: "n-card", summary: "Made 2 images" },
+    ]);
+  });
+
+  it("keeps a run that did not finish as one to ask again from", () => {
+    // The card is already on the canvas and the record already holds what was
+    // asked of it, so a line that said only that nothing arrived would lose both
+    // of the ways back to the ask.
+    const line = lineFromRun({
+      summary: "Made nothing",
+      runId: "r-1",
+      nodeId: "n-card",
+      at: T,
+      failure: {
+        message: "The model would not take the ask.",
+        code: "PROVIDER_UNAVAILABLE",
+        retryable: true,
+      },
+    });
+    expect(line.role).toBe("error");
+    expect(line.text).toBe("The model would not take the ask.");
+    expect(line.failure).toEqual({
+      code: "PROVIDER_UNAVAILABLE",
+      retryable: true,
+    });
+    expect(line.toolCalls).toEqual([
+      { runId: "r-1", nodeId: "n-card", summary: "Made nothing" },
+    ]);
   });
 });

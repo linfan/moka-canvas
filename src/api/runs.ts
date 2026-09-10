@@ -6,6 +6,7 @@ import type {
   RunId,
   RunRecord,
   RunStatus,
+  SessionId,
 } from "../shared/domain";
 import { http } from "./client";
 
@@ -125,10 +126,19 @@ export const runsApi = {
     });
   },
 
-  start(canvasId: CanvasId, nodeIds: NodeId[]): Promise<RunRecord> {
+  /**
+   * `askedBy` is the conversation a run was asked over, when a conversation
+   * asked rather than a card wanting something for itself. The record carries
+   * it so the answer filed among the assets can say whose it is.
+   */
+  start(
+    canvasId: CanvasId,
+    nodeIds: NodeId[],
+    askedBy?: SessionId,
+  ): Promise<RunRecord> {
     return http.request<RunRecord>("/api/v1/projects/current/runs", {
       method: "POST",
-      body: { canvasId, nodeIds },
+      body: { canvasId, nodeIds, assistantSessionId: askedBy },
     });
   },
 

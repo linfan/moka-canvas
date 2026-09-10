@@ -972,6 +972,13 @@ pub struct RunRecord {
     pub parameters: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_of_run_id: Option<RunId>,
+    /// The conversation that asked for this, when a conversation did.
+    ///
+    /// Held by the record rather than by the document, because it is the record
+    /// that is read when an answer is filed: a card on the canvas asks for
+    /// itself, but a card made on somebody's behalf has to be told whose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_session_id: Option<SessionId>,
     pub steps: Vec<RunStepRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

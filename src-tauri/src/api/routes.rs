@@ -724,7 +724,16 @@ pub async fn start_run(
     }
     let run = state
         .runs
-        .start(&request.canvas_id, request.node_ids, None)
+        .start(
+            &request.canvas_id,
+            request.node_ids,
+            None,
+            // A blank is no conversation: the field is there or it is not, and an
+            // empty id filed as a trace would be read as one that was lost.
+            request
+                .assistant_session_id
+                .filter(|id| !id.trim().is_empty()),
+        )
         .await
         .map_err(start_run_problem)?;
     Ok((StatusCode::CREATED, Json(run)))

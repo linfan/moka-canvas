@@ -427,6 +427,13 @@ export interface RunRecord {
   graphHash: string;
   parameters: Record<string, unknown>;
   retryOfRunId?: RunId;
+  /**
+   * The conversation that asked for this, when a conversation did.
+   *
+   * What the assets this run files are traced back to, which is why the record
+   * holds it: a card made on somebody's behalf has to be told whose.
+   */
+  assistantSessionId?: SessionId;
   steps: RunStepRecord[];
   error?: string;
   cancelRequested: boolean;

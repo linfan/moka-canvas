@@ -45,6 +45,15 @@ interface ProjectState {
     onProgress?: (fraction: number) => void,
   ) => Promise<SelfCheckReport>;
   reload: () => Promise<void>;
+  /**
+   * Settles once a read of the document that has started has landed.
+   *
+   * What a run made arrives by the server rewriting the document, and the
+   * record says the run is over a moment before that rewrite does — so a line
+   * written from what the record said has to wait for it, or it is written onto
+   * a document that is on its way to being replaced.
+   */
+  untilAdopted: () => Promise<void>;
   close: () => void;
 
   switchCanvas: (canvasId: CanvasId) => void;
@@ -66,6 +75,10 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 // the duplicate would arrive with a stale expected revision and surface a
 // spurious conflict after the first request already saved it.
 let flushInFlight: Promise<void> | null = null;
+// The read of the document that is on its way, if one is. Held so that what a
+// record says about a run that just ended can be written after the document it
+// is about to describe has landed, rather than on the one being replaced.
+let readInFlight: Promise<void> | null = null;
 
 function activeCanvasOf(moka: MokaFile, activeCanvasId: CanvasId | null) {
   return (
@@ -131,14 +144,29 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
     },
 
     async reload() {
-      const opened = await projectsApi.current();
-      get().hydrate(opened);
+      const reading = (async () => {
+        const opened = await projectsApi.current();
+        get().hydrate(opened);
+      })();
+      readInFlight = reading;
+      try {
+        await reading;
+      } finally {
+        if (readInFlight === reading) readInFlight = null;
+      }
+    },
+
+    untilAdopted() {
+      // A read that came to nothing has still replaced the display as far as
+      // anything waiting on it is concerned, so the trouble is not passed on.
+      return readInFlight ? readInFlight.catch(() => {}) : Promise.resolve();
     },
 
     close() {
       if (flushTimer) clearTimeout(flushTimer);
       flushTimer = null;
       flushInFlight = null;
+      readInFlight = null;
       set({
         root: null,
         moka: null,

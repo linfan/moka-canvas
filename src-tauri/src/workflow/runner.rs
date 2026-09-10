@@ -16,7 +16,8 @@ use crate::domain::validate::MAX_TITLE_LENGTH;
 use crate::domain::{
     new_id, now_iso, AssetId, CanvasDocument, Capability, DataType, DocumentCommand, EdgeEndpoint,
     MokaFile, NodeData, NodeId, NodeKind, NodePatch, PortDirection, ResultSlot, ResultSlotStatus,
-    RunId, RunRecord, RunStatus, RunStepRecord, ValidationIssue, WorkflowEdge, WorkflowNode,
+    RunId, RunRecord, RunStatus, RunStepRecord, SessionId, ValidationIssue, WorkflowEdge,
+    WorkflowNode,
 };
 use crate::generate::{ingest_generated, GenerateResult};
 use crate::project::store::FsProjectStore;
@@ -477,6 +478,7 @@ impl RunManager {
         canvas_id: &str,
         node_ids: Vec<NodeId>,
         retry_of_run_id: Option<RunId>,
+        assistant_session_id: Option<SessionId>,
     ) -> Result<RunRecord, StartRunError> {
         let opened = self
             .store
@@ -524,6 +526,7 @@ impl RunManager {
             graph_hash: snapshot.graph_hash.clone(),
             parameters: serde_json::Value::Object(parameters),
             retry_of_run_id,
+            assistant_session_id,
             steps: snapshot
                 .order
                 .iter()
@@ -570,6 +573,10 @@ impl RunManager {
             &run.canvas_id.clone(),
             run.requested_node_ids.clone(),
             Some(run.id.clone()),
+            // Asking again for what a conversation asked for is still that
+            // conversation asking, and an answer filed without it would be
+            // traceable to nothing.
+            run.assistant_session_id.clone(),
         )
         .await
     }

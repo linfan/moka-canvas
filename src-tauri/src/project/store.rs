@@ -870,6 +870,7 @@ mod tests {
             graph_hash: "abc".to_string(),
             parameters: serde_json::Value::Null,
             retry_of_run_id: None,
+            assistant_session_id: None,
             steps: vec![RunStepRecord {
                 node_id: "n-shot".to_string(),
                 status: RunStatus::Running,

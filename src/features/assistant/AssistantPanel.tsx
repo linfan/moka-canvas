@@ -27,7 +27,9 @@ import {
   ASSISTANT_INTENTS,
   INTENT_HINTS,
   INTENT_LABELS,
+  INTENT_PLACEHOLDERS,
   askOf,
+  capabilityFor,
   referenceNodes,
   referenceSummary,
   upstreamOf,
@@ -160,13 +162,14 @@ export function AssistantPanel() {
 
   const lines = latestSession(canvas?.sessions ?? [])?.messages ?? [];
   const summary = referenceSummary(planned?.references ?? []);
+  const capability = capabilityFor(intent);
   const noModel =
-    providers !== null && modelOptionsFor(providers, "text").length === 0;
+    providers !== null && modelOptionsFor(providers, capability).length === 0;
   // A configuration still being read is not one with nothing in it.
   const refusal = !generationOn
     ? GENERATION_UNAVAILABLE
     : noModel
-      ? "No text model is configured yet."
+      ? `No ${capability} model is configured yet.`
       : null;
   const canAsk =
     !busy && refusal === null && canvas !== null && draft.trim() !== "";
@@ -263,11 +266,7 @@ export function AssistantPanel() {
                 onDismiss={() => areaRef.current?.blur()}
                 onOffer={() => {}}
                 onSubmit={send}
-                placeholder={
-                  intent === "rewrite"
-                    ? "How should it read instead?"
-                    : "Ask about the cards you chose…"
-                }
+                placeholder={INTENT_PLACEHOLDERS[intent]}
                 resources={resources}
                 value={draft}
               />

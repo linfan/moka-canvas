@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MokaFile } from "../../shared/domain";
+import type {
+  MokaFile,
+  NodeId,
+  RunRecord,
+  RunStatus,
+  SessionId,
+} from "../../shared/domain";
 import {
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
 import { useHistoryStore } from "../editor/stores/historyStore";
 import { useProjectStore } from "../editor/stores/projectStore";
+import { useRunStore } from "../editor/stores/runStore";
 import { useAssistantStore } from "./assistantStore";
 
 /** A stream that can be fed a frame at a time, the way one arrives. */
@@ -96,11 +103,128 @@ function sessionsOf() {
   return moka?.canvas[0].sessions ?? [];
 }
 
+/**
+ * The server a turn asked of a card goes over.
+ *
+ * Four calls, in an order that matters: the save that carries the card to disk,
+ * the run built from it, the record read once it ends, and the document read that
+ * brings what the run made. The last returns what the store is already holding,
+ * which is what lets a test see whether a line written after the run landed on
+ * the document the run changed or on the reading that was there before it.
+ */
+function stubRunServer(
+  options: {
+    status?: RunStatus;
+    made?: number;
+    stepError?: string;
+    /** Keeps the record unreadable until the test says, so a wait can be stopped. */
+    holdRecord?: boolean;
+  } = {},
+) {
+  const T = "2026-01-01T00:00:00.000Z";
+  const runId = "r-asked";
+  const order: string[] = [];
+  const started: { nodeIds: NodeId[]; askedBy: SessionId | null } = {
+    nodeIds: [],
+    askedBy: null,
+  };
+  let land = () => {};
+  let held: Promise<void> = Promise.resolve();
+  const settled = options.status ?? "succeeded";
+
+  const record = (status: RunStatus): RunRecord => ({
+    id: runId,
+    projectId: "p-1",
+    canvasId: board(useProjectStore.getState().moka!).id,
+    requestedNodeIds: started.nodeIds,
+    status,
+    executorKey: "stub",
+    graphHash: "h-1",
+    parameters: {},
+    assistantSessionId: started.askedBy ?? undefined,
+    steps: started.nodeIds.map((nodeId) => ({
+      nodeId,
+      status,
+      ...(options.stepError ? { error: options.stepError } : {}),
+      ...(status === "succeeded" && (options.made ?? 0) > 0
+        ? {
+            outputAssetIds: Array.from(
+              { length: options.made ?? 0 },
+              (_, at) => `asset-made-${at}`,
+            ),
+          }
+        : {}),
+    })),
+    cancelRequested: status === "cancelled",
+    createdAt: T,
+    updatedAt: T,
+  });
+
+  const json = (value: unknown) =>
+    new Response(JSON.stringify(value), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+    const path = String(input);
+    const method = init?.method ?? "GET";
+    const body =
+      init?.body === undefined
+        ? {}
+        : (JSON.parse(init.body as string) as Record<string, unknown>);
+
+    if (method === "POST" && path.endsWith("/projects/current/commands")) {
+      order.push("commands");
+      return json({ revision: 2, updatedAt: T });
+    }
+    if (method === "POST" && path.endsWith("/current/runs")) {
+      order.push("start");
+      started.nodeIds = body.nodeIds as NodeId[];
+      started.askedBy = (body.assistantSessionId as SessionId) ?? null;
+      if (options.holdRecord) {
+        held = new Promise<void>((resolve) => {
+          land = resolve;
+        });
+      }
+      return json(record("queued"));
+    }
+    if (method === "POST" && path.endsWith("/cancel")) {
+      order.push("cancel");
+      return json(record("cancelled"));
+    }
+    if (method === "GET" && /\/current\/runs\/[^/]+$/.test(path)) {
+      order.push("record");
+      await held;
+      return json(record(settled));
+    }
+    if (method === "GET" && path.endsWith("/projects/current")) {
+      order.push("current");
+      return json({
+        root: "/tmp/moka-test",
+        moka: useProjectStore.getState().moka,
+        selfCheck: { ok: true, issues: [] },
+      });
+    }
+    throw new Error(`Nothing was stubbed for ${method} ${path}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { order, started, runId, release: () => land() };
+}
+
+function cardOf(title: string) {
+  const canvas = board(useProjectStore.getState().moka!);
+  const found = canvas.nodes.find((node) => node.title === title);
+  if (!found) throw new Error(`No card called ${title} on the canvas`);
+  return found;
+}
+
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {
   useProjectStore.getState().close();
   useHistoryStore.getState().clear();
+  useRunStore.getState().reset();
   useAssistantStore.setState({
     intent: "answer",
     draft: "",
@@ -111,6 +235,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useRunStore.getState().reset();
   useProjectStore.getState().close();
   vi.unstubAllGlobals();
 });
@@ -394,5 +519,132 @@ describe("what is not sent", () => {
     stream.finish();
     await first;
     expect(sessionsOf()[0].messages).toHaveLength(2);
+  });
+});
+
+describe("a turn asked of a card", () => {
+  it("puts the card on the canvas and records what the run made", async () => {
+    const moka = hydrate();
+    const ids = goldenNodeIds();
+    const asked = "A wider shot of the lake";
+    const server = stubRunServer({ made: 1 });
+    useAssistantStore.getState().setIntent("image");
+    useAssistantStore.getState().setDraft(asked);
+
+    await useAssistantStore
+      .getState()
+      .ask({ canvas: board(moka), chosen: [ids.text] });
+
+    const canvas = board(useProjectStore.getState().moka!);
+    const card = cardOf(asked);
+    expect(card.kind).toBe("image");
+    expect(
+      (card.data as { generation: { prompt: string } }).generation.prompt,
+    ).toBe(asked);
+    // What the ask was about reaches the generation over the graph, which is
+    // why the card is wired before it is run.
+    const wires = canvas.edges.filter((edge) => edge.target.nodeId === card.id);
+    expect(wires.map((edge) => edge.source.nodeId)).toEqual([ids.text]);
+
+    const held = sessionsOf()[0];
+    expect(held.title).toBe(asked);
+    expect(held.messages.map((line) => line.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+    expect(held.messages[1].text).toBe("Made 1 image");
+    expect(held.messages[1].toolCalls).toEqual([
+      { runId: server.runId, nodeId: card.id, summary: "Made 1 image" },
+    ]);
+
+    // The run is built from the document on disk, so the card has to be saved
+    // before it is asked to drive anything — and what the run made arrives by
+    // that document being read back, which the line has to wait for.
+    expect(server.order).toEqual(["commands", "start", "record", "current"]);
+    expect(server.started.nodeIds).toEqual([card.id]);
+    // Filed with the conversation that asked, which is whose the answer is.
+    expect(server.started.askedBy).toBe(held.id);
+    // The card and the conversation are separate things to undo: taking back
+    // what was said should not quietly delete a picture that was paid for.
+    expect(useHistoryStore.getState().undoStack).toHaveLength(2);
+  });
+
+  it("leaves a card that reached nothing out of what the turn was about", async () => {
+    const moka = hydrate();
+    const ids = goldenNodeIds();
+    stubRunServer({ made: 1 });
+    useAssistantStore.getState().setIntent("audio");
+    useAssistantStore.getState().setDraft("Read it aloud");
+
+    await useAssistantStore
+      .getState()
+      .ask({ canvas: board(moka), chosen: [ids.image] });
+
+    // A sound card takes words, so the picture named contributed nothing to what
+    // came back, and the line does not claim it did.
+    expect(cardOf("Read it aloud").kind).toBe("audio");
+    const canvas = board(useProjectStore.getState().moka!);
+    expect(canvas.edges).toHaveLength(board(moka).edges.length);
+    expect(sessionsOf()[0].messages[0].references).toBeUndefined();
+    expect(sessionsOf()[0].messages[1].text).toBe("Made 1 sound");
+  });
+
+  it("keeps a card whose run did not finish as one to ask again from", async () => {
+    const moka = hydrate();
+    const ids = goldenNodeIds();
+    const asked = "A wider shot of the lake";
+    stubRunServer({
+      status: "failed",
+      stepError: "No model would take the ask.",
+    });
+    useAssistantStore.getState().setIntent("image");
+    useAssistantStore.getState().setDraft(asked);
+
+    await useAssistantStore
+      .getState()
+      .ask({ canvas: board(moka), chosen: [ids.text] });
+
+    // The card stays where it landed: it is the asking again, and it was paid
+    // for by the run that did not come back.
+    expect(cardOf(asked).kind).toBe("image");
+    const line = sessionsOf()[0].messages[1];
+    expect(line.role).toBe("error");
+    expect(line.text).toBe("No model would take the ask.");
+    expect(line.failure).toEqual({
+      code: "PROVIDER_UNAVAILABLE",
+      retryable: true,
+    });
+    expect(line.toolCalls?.[0].summary).toBe("Made nothing");
+  });
+
+  it("asks the run to give up rather than only stopping the waiting", async () => {
+    const moka = hydrate();
+    const ids = goldenNodeIds();
+    const server = stubRunServer({
+      status: "cancelled",
+      holdRecord: true,
+    });
+    useAssistantStore.getState().setIntent("image");
+    useAssistantStore.getState().setDraft("A wider shot");
+
+    const going = useAssistantStore
+      .getState()
+      .ask({ canvas: board(moka), chosen: [ids.text] });
+    await flush();
+    useAssistantStore.getState().stop();
+    await going;
+    server.release();
+    await flush();
+
+    // Aborting the ask alone would leave the generation being paid for behind a
+    // panel that had stopped looking at it.
+    expect(server.order).toContain("cancel");
+    const line = sessionsOf()[0].messages[1];
+    expect(line.role).toBe("error");
+    expect(line.text).toBe("Stopped. The card is on the canvas to ask again.");
+    expect(line.failure).toEqual({
+      code: "GENERATION_CANCELLED",
+      retryable: true,
+    });
   });
 });
