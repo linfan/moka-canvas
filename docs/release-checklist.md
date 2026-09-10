@@ -365,6 +365,14 @@ Intended behaviour, recorded here so a tester does not file it as a defect.
    and the line that asked for it are separate entries deliberately: taking
    back what was said should not quietly delete a picture that was paid
    for.
+3. **A web deployment holds one set of channels and keys.** The metadata
+   store — channels, credentials, defaults, preferences — is a
+   single-user, file-backed store: the deployment's operator owns it and
+   every visitor asks through the same channels and spends the same keys.
+   Per-project or per-user keys are not part of this build; per-user
+   metadata directories wait for a database-backed store. Serve a web
+   build only where the operator means everyone to share what they
+   configured.
 
 ## Sign-off
 
