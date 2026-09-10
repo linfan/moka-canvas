@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import type { ChannelView } from "../../api";
 import { ChannelEditor } from "./ChannelEditor";
 import { useProviderStore } from "./providerStore";
+import { SecretStorageNote } from "./SecretStorageNote";
 
 /**
  * The address-and-key shortcut. Everything else about the channel is derived
@@ -170,6 +171,8 @@ export function ChannelsTab() {
           New channel
         </button>
       </div>
+
+      {view && <SecretStorageNote tier={view.secretStorage} />}
     </div>
   );
 }

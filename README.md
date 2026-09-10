@@ -33,6 +33,8 @@ Application-level state — provider channels, encrypted API keys, defaults and 
 
 Three environment variables override the resolved values: `MOKA_METADATA_DIR` (location), `MOKA_METADATA_STORE` (only `file` is accepted), and `MOKA_METADATA_KEY` (the server-mode master key, base64 of 32 bytes). The directory must be on a local disk and must be used by one process at a time; a second process pointing at it fails to start and names the pid holding the lock.
 
+A master key does not have to exist before the first API key is stored: one is generated into the OS keychain on a desktop, or into `<metadata.dir>/master.key` on a server started without `MOKA_METADATA_KEY`. The file tier is the weaker one — the key sits beside the ciphertext it protects — so export a key (`moka-server --generate-key` prints one) for any deployment that is not local and single-user. `/api/health` and the settings page report which tier is in use.
+
 Each project document carries its own canvas schema stamp. A document written by an older schema is migrated forward when it opens — every node's ports are reconciled against the current port table — while a document stamped with a newer schema is refused as an unsupported version instead of being partially read. Documents are never rewritten downwards, so read [docs/release-checklist.md](docs/release-checklist.md) before installing an older build over a newer one.
 
 `GET /api/health` reports the store kind, the redacted root, the schema version, the secret-storage tier, and per-document state. `GET /api/ready` answers 503 until the assets are present, a write probe against the metadata directory succeeds, and any open project directory still exists.

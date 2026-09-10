@@ -71,6 +71,7 @@ function fixture(): ProvidersView {
       },
       audio: { voice: "alloy", format: "mp3", speed: 1, instructions: "" },
     },
+    secretStorage: "file",
   };
 }
 
@@ -454,6 +455,44 @@ describe("provider settings", () => {
     ).toBeTruthy();
     // The view was re-read, so the form is not left holding a stale revision.
     expect(readsOf("/api/v1/providers")).toBeGreaterThan(readsBefore);
+  });
+
+  it("says how strongly the stored keys are protected", async () => {
+    await openSettings();
+    await screen.findByText("Example Inc");
+
+    // The file tier is the weaker one, so the warning belongs where a key is
+    // typed, not only in the deployment docs.
+    const note = screen.getByTestId("secret-storage-note");
+    expect(note.textContent).toContain("master.key");
+    expect(note.textContent).toContain("MOKA_METADATA_KEY");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByLabelText("API key");
+    expect(screen.getByTestId("secret-storage-note").textContent).toContain(
+      "master.key",
+    );
+  });
+
+  it("explains a missing master key instead of only reporting it", async () => {
+    refuseNextWrite = {
+      status: 503,
+      code: "CONFIG_METADATA_KEY_MISSING",
+      message: "no master key protects stored credentials",
+    };
+    await openSettings();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByLabelText("API key"), {
+      target: { value: KEY },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+
+    expect(
+      await screen.findByText("no master key protects stored credentials"),
+    ).toBeTruthy();
+    const guidance = await screen.findByTestId("error-guidance");
+    expect(guidance.textContent).toContain("--generate-key");
+    expect(guidance.textContent).toContain("MOKA_METADATA_KEY");
   });
 
   it("reports a channel that refuses the probe inside the dialog", async () => {

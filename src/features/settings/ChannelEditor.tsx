@@ -10,6 +10,7 @@ import {
   type ProviderProtocol,
 } from "../../shared/domain";
 import { useProviderStore } from "./providerStore";
+import { SecretStorageNote } from "./SecretStorageNote";
 
 /** A model row plus the identity that keeps it mounted while rows come and go. */
 interface ModelRow extends ChannelModel {
@@ -69,6 +70,9 @@ interface Props {
 
 export function ChannelEditor({ channel, onDone }: Props) {
   const saving = useProviderStore((state) => state.saving);
+  const secretStorage = useProviderStore(
+    (state) => state.view?.secretStorage ?? null,
+  );
   const activity = useProviderStore(
     (state) => state.activity[channel?.id ?? ""],
   );
@@ -207,6 +211,8 @@ export function ChannelEditor({ channel, onDone }: Props) {
           />
         </label>
       </div>
+
+      {secretStorage && <SecretStorageNote tier={secretStorage} />}
 
       <label className="settings-check">
         <input

@@ -14,7 +14,9 @@ use moka_canvas::metadata::contract::{run_metadata_suite, StoreFactory};
 use moka_canvas::metadata::crypto::{KEY_ENV, MASTER_KEY_FILE};
 use moka_canvas::metadata::docs::{PROVIDERS_DOC, RECENT_DOC, SECRETS_DOC};
 use moka_canvas::metadata::fs::{LOCK_FILE, SECRET_MODE, TMP_DIR};
-use moka_canvas::metadata::{self, ChannelDraft, MetadataError, MetadataStore, RecentProject};
+use moka_canvas::metadata::{
+    self, ChannelDraft, MetadataError, MetadataStore, RecentProject, SecretStorage,
+};
 
 const PLAINTEXT_KEY: &str = "sk-plaintext-value";
 
@@ -157,7 +159,7 @@ async fn the_credential_document_is_private() {
 }
 
 #[tokio::test]
-async fn storing_a_credential_without_a_master_key_fails_actionably() {
+async fn a_first_credential_in_server_mode_creates_a_file_held_master_key() {
     if std::env::var(KEY_ENV).is_ok() {
         // The developer's shell exports a master key; nothing to assert.
         return;
@@ -166,27 +168,64 @@ async fn storing_a_credential_without_a_master_key_fails_actionably() {
     let store = open(root.path()).expect("the store opens with no credentials stored");
     store.upsert_channel(&draft("unkeyed")).await.unwrap();
 
-    let error = store
+    // Storing must not be refused just because nobody exported a key: the
+    // alternative is a server where the API key field can never be filled in.
+    store
         .put_secret("unkeyed", PLAINTEXT_KEY)
         .await
-        .unwrap_err();
-    assert_eq!(error.code(), "CONFIG_METADATA_KEY_MISSING");
-    assert!(error.to_string().contains(KEY_ENV), "{error}");
+        .expect("the credential is stored against a newly created key");
 
-    // Refusing the credential must not cost the user the channel.
-    let snapshot = store.provider_snapshot().await.unwrap();
-    assert!(
-        snapshot
-            .channels
-            .iter()
-            .any(|channel| channel.id == "unkeyed"),
-        "the channel survives a refused credential"
+    let path = root.path().join(MASTER_KEY_FILE);
+    let encoded = std::fs::read_to_string(&path).expect("the master key is on disk");
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .expect("base64")
+            .len(),
+        32
     );
-    let state = store.secret_state("unkeyed").await.unwrap();
-    assert!(
-        !state.as_ref().is_some_and(|info| info.set),
-        "no credential may be recorded: {state:?}"
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, SECRET_MODE);
+    }
+
+    // The tier is reported rather than looking like an exported key.
+    assert_eq!(store.info().await.secret_storage, SecretStorage::File);
+
+    // And the next process over the same directory opens what this one sealed.
+    drop(store);
+    let reloaded = open(root.path()).expect("the store reopens");
+    assert_eq!(
+        reloaded.get_secret("unkeyed").await.unwrap().as_deref(),
+        Some(PLAINTEXT_KEY)
     );
+}
+
+#[tokio::test]
+async fn stored_credentials_without_any_master_key_refuse_startup() {
+    if std::env::var(KEY_ENV).is_ok() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    seed_master_key(root.path());
+    let store = open(root.path()).expect("the store opens");
+    store.upsert_channel(&draft("keyed")).await.unwrap();
+    store.put_secret("keyed", PLAINTEXT_KEY).await.unwrap();
+    drop(store);
+
+    // Losing the key is not a state to start up in: every generation request
+    // would fail with an authentication error while the channel looked
+    // configured. The message has to name both places the key could come from.
+    std::fs::remove_file(root.path().join(MASTER_KEY_FILE)).unwrap();
+    let error = open(root.path())
+        .err()
+        .expect("a directory holding ciphertext with no key must not open");
+    assert_eq!(error.code(), "CONFIG_METADATA_KEY_MISSING");
+    let message = error.to_string();
+    assert!(message.contains(KEY_ENV), "{message}");
+    assert!(message.contains(MASTER_KEY_FILE), "{message}");
 }
 
 #[tokio::test]

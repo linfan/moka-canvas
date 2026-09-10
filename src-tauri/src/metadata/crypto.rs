@@ -21,8 +21,10 @@ use crate::config::RuntimeMode;
 use crate::metadata::fs;
 use crate::metadata::paths::APP_ID;
 
-/// Base64-encoded 32-byte master key. Read in server mode, where there is no
-/// desktop session and therefore no keychain to ask.
+/// Base64-encoded 32-byte master key. The server-mode source of truth, because
+/// a server has no desktop session and therefore no keychain to ask. Optional:
+/// when it is absent, the first credential stored creates a file-held key
+/// instead — see [`KeyProvider::acquire`].
 pub const KEY_ENV: &str = "MOKA_METADATA_KEY";
 
 /// Keychain account holding the master key in desktop mode.
@@ -145,8 +147,10 @@ impl KeyProvider {
                     self.master_key_path().display()
                 ),
                 RuntimeMode::Web => format!(
-                    "{KEY_ENV} is not set but stored credentials exist; \
-                     export it before starting the server"
+                    "{KEY_ENV} is not set and {} is absent, but stored credentials \
+                     exist; supply the key that sealed them. A key generated now \
+                     would open none of them",
+                    self.master_key_path().display()
                 ),
             }));
         }
@@ -157,34 +161,49 @@ impl KeyProvider {
     ///
     /// Blocking: consults the OS keychain. Call it through
     /// `tokio::task::spawn_blocking`.
+    ///
+    /// A key is only ever created where no ciphertext exists yet: [`probe`]
+    /// refuses to start a server holding credentials it cannot open, so this
+    /// never runs against a directory whose key was lost.
     pub fn acquire(&self) -> Result<MasterKey, MetadataError> {
         if let Some(existing) = self.find_existing()? {
             return Ok(existing);
         }
-        if self.mode == RuntimeMode::Web {
-            return Err(MetadataError::key_missing(format!(
-                "{KEY_ENV} is not set; server mode does not use the OS keychain"
-            )));
-        }
         let generated = generate();
-        match self.store_in_keyring(&generated) {
-            Ok(()) => self.cache(MasterKey {
-                bytes: generated,
-                storage: SecretStorage::Keyring,
-            }),
-            Err(keyring_error) => {
-                tracing::warn!(
+        if self.mode == RuntimeMode::Native {
+            match self.store_in_keyring(&generated) {
+                Ok(()) => {
+                    return self.cache(MasterKey {
+                        bytes: generated,
+                        storage: SecretStorage::Keyring,
+                    })
+                }
+                Err(keyring_error) => tracing::warn!(
                     target: "moka::metadata",
                     error = %keyring_error,
                     "OS keychain unavailable; falling back to a file-held master key"
-                );
-                self.write_master_key_file(&generated)?;
-                self.cache(MasterKey {
-                    bytes: generated,
-                    storage: SecretStorage::File,
-                })
+                ),
             }
+        } else {
+            // Refusing here instead would leave a server started without an
+            // exported key unable to store a credential at all, and the refusal
+            // would surface only when someone typed an API key in. The file tier
+            // is the one desktop falls back to; it is weaker, so say so rather
+            // than letting it look equivalent to an exported key.
+            tracing::warn!(
+                target: "moka::metadata",
+                path = %self.master_key_path().display(),
+                "{KEY_ENV} is not set and a server has no OS keychain; storing a \
+                 file-held master key beside the credentials it protects. Whatever \
+                 can read this directory can read it, and a backup of the directory \
+                 carries it: export a key for a deployment meant to outlive this one"
+            );
         }
+        self.write_master_key_file(&generated)?;
+        self.cache(MasterKey {
+            bytes: generated,
+            storage: SecretStorage::File,
+        })
     }
 
     /// Where the master key currently comes from, without creating one.
@@ -292,6 +311,15 @@ impl KeyProvider {
     }
 }
 
+/// A fresh master key, base64-encoded for `MOKA_METADATA_KEY`.
+///
+/// Printed for an operator to place wherever the deployment keeps secrets; this
+/// process writes nothing, because where the value lives afterwards is not this
+/// process's decision.
+pub fn generate_encoded() -> String {
+    base64::engine::general_purpose::STANDARD.encode(generate())
+}
+
 fn decode_key(raw: &str) -> Option<[u8; KEY_LEN]> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
     bytes.try_into().ok()
@@ -358,15 +386,44 @@ mod tests {
     }
 
     #[test]
-    fn server_mode_without_a_key_is_reported_actionably() {
+    fn server_mode_without_a_key_creates_a_file_held_one() {
         if std::env::var(KEY_ENV).is_ok() {
             // The developer's shell exports a master key; nothing to assert.
             return;
         }
         let root = tempfile::tempdir().unwrap();
         let provider = KeyProvider::new(root.path(), RuntimeMode::Web);
-        let error = provider.acquire().unwrap_err();
-        assert!(error.to_string().contains(KEY_ENV), "{error}");
+        let created = provider.acquire().expect("a server can always store a key");
+        assert_eq!(created.storage(), SecretStorage::File);
+
+        // The key is on disk for the next process, not just in this one's cache.
+        let reloaded = KeyProvider::new(root.path(), RuntimeMode::Web);
+        let recovered = reloaded.acquire().expect("the stored key is found");
+        assert_eq!(recovered.bytes(), created.bytes());
+    }
+
+    #[test]
+    fn a_generated_key_is_exportable_and_not_repeated() {
+        let first = generate_encoded();
+        let second = generate_encoded();
+        assert_ne!(first, second);
+        assert_eq!(decode_key(&first).unwrap().len(), KEY_LEN);
+    }
+
+    #[test]
+    fn an_exported_key_is_read_even_when_a_file_held_one_exists() {
+        let Ok(raw) = std::env::var(KEY_ENV) else {
+            // Without an exported key there is nothing to prefer.
+            return;
+        };
+        let expected = decode_key(raw.trim()).expect("the exported key is valid");
+        let root = tempfile::tempdir().unwrap();
+        let provider = KeyProvider::new(root.path(), RuntimeMode::Web);
+        provider.write_master_key_file(&generate()).unwrap();
+
+        let found = provider.acquire().unwrap();
+        assert_eq!(found.storage(), SecretStorage::Env);
+        assert_eq!(found.bytes(), &expected);
     }
 
     #[test]

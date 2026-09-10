@@ -2,7 +2,11 @@ import { useEffect } from "react";
 import { ChannelsTab } from "./ChannelsTab";
 import { DefaultsTab } from "./DefaultsTab";
 import { PreferencesTab } from "./PreferencesTab";
-import { useProviderStore, type SettingsTab } from "./providerStore";
+import {
+  guidanceFor,
+  useProviderStore,
+  type SettingsTab,
+} from "./providerStore";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "channels", label: "Channels" },
@@ -20,8 +24,10 @@ export function SettingsDialog() {
   const open = useProviderStore((state) => state.open);
   const tab = useProviderStore((state) => state.tab);
   const error = useProviderStore((state) => state.error);
+  const errorCode = useProviderStore((state) => state.errorCode);
   const loading = useProviderStore((state) => state.loading);
   const loaded = useProviderStore((state) => state.view !== null);
+  const guidance = guidanceFor(errorCode);
 
   useEffect(() => {
     if (!open) return;
@@ -98,6 +104,11 @@ export function SettingsDialog() {
         {error && (
           <p className="dialog-error" role="alert">
             {error}
+          </p>
+        )}
+        {error && guidance && (
+          <p className="dialog-note" data-testid="error-guidance">
+            {guidance}
           </p>
         )}
 

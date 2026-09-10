@@ -61,12 +61,19 @@ export interface GenerationPreferences {
   audio: AudioPreferences;
 }
 
+/**
+ * Where the master key protecting the stored credentials lives. `unset` means
+ * no credential has ever been stored, so no key was needed yet.
+ */
+export type SecretStorageTier = "keyring" | "file" | "env" | "unset";
+
 export interface ProvidersView {
   version: number;
   revision: number;
   channels: ChannelView[];
   defaults: ModelDefaults;
   preferences: GenerationPreferences;
+  secretStorage: SecretStorageTier;
 }
 
 /** A model a channel offers, before anybody has decided what it is for. */

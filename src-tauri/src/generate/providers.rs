@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::Capability;
 use crate::metadata::{
     Channel, ChannelDraft, ChannelModel, ChannelRecord, Defaults, MetadataStore, Preferences,
-    Protocol, ProviderSnapshot, SecretInfo,
+    Protocol, ProviderSnapshot, SecretInfo, SecretStorage,
 };
 
 use super::adapters;
@@ -118,6 +118,10 @@ pub struct ProvidersView {
     pub channels: Vec<ChannelView>,
     pub defaults: Defaults,
     pub preferences: Preferences,
+    /// Which tier holds the master key protecting the stored credentials.
+    /// Reported with every view so the settings page can say how strong the
+    /// current protection is, and warn when it is the file tier.
+    pub secret_storage: SecretStorage,
 }
 
 /// Everything needed to place one provider call, minus the credential.
@@ -239,6 +243,7 @@ impl ProviderRepo {
             channels,
             defaults: snapshot.defaults,
             preferences: snapshot.preferences,
+            secret_storage: self.metadata.info().await.secret_storage,
         })
     }
 

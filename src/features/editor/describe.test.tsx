@@ -94,6 +94,7 @@ function providers(): ProvidersView {
       },
       audio: { voice: "alloy", format: "mp3", speed: 1, instructions: "" },
     },
+    secretStorage: "unset",
   };
 }
 

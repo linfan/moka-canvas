@@ -78,8 +78,36 @@ const IDLE: ChannelActivity = {
   probe: null,
 };
 
-function describe(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
+/**
+ * Codes whose fix is not in this dialog. The server's message says what is
+ * wrong; this says what to do about it, because the remedy is a shell command
+ * and a restart that no control here can perform.
+ */
+const GUIDANCE: Record<string, string> = {
+  CONFIG_METADATA_KEY_MISSING:
+    "The master key protecting stored credentials is missing. Start the server " +
+    "with MOKA_METADATA_KEY set — `moka-server --generate-key` prints a " +
+    "value — or put back the <metadata.dir>/master.key that belongs to this " +
+    "directory. A key created from now on cannot open credentials sealed with " +
+    "the missing one.",
+};
+
+/** How to act on a failure whose code is known, if there is anything to add. */
+export function guidanceFor(code: string | null): string | null {
+  return code === null ? null : (GUIDANCE[code] ?? null);
+}
+
+/** The two fields every failure sets on the store. */
+interface Failure {
+  error: string;
+  errorCode: string | null;
+}
+
+function describe(error: unknown, fallback: string): Failure {
+  return {
+    error: error instanceof Error ? error.message : fallback,
+    errorCode: isApiError(error) ? error.code : null,
+  };
 }
 
 /**
@@ -96,6 +124,8 @@ interface ProviderState {
   loading: boolean;
   saving: boolean;
   error: string | null;
+  /** The problem code behind `error`, so the dialog can explain the fix. */
+  errorCode: string | null;
   activity: Record<string, ChannelActivity>;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
@@ -139,14 +169,14 @@ export const useProviderStore = create<ProviderState>()((set, get) => {
     fallback: string,
     send: (revision: number | null) => Promise<ProvidersView>,
   ): Promise<boolean> => {
-    set({ saving: true, error: null });
+    set({ saving: true, error: null, errorCode: null });
     try {
       set({ view: await send(get().view?.revision ?? null), saving: false });
       return true;
     } catch (error) {
       set({ saving: false });
       if (isApiError(error, "METADATA_CONFLICT")) await get().load();
-      set({ error: describe(error, fallback) });
+      set(describe(error, fallback));
       return false;
     }
   };
@@ -158,6 +188,7 @@ export const useProviderStore = create<ProviderState>()((set, get) => {
     loading: false,
     saving: false,
     error: null,
+    errorCode: null,
     activity: {},
 
     openSettings(tab = "channels") {
@@ -176,12 +207,14 @@ export const useProviderStore = create<ProviderState>()((set, get) => {
       if (get().loading) return;
       set({ loading: true });
       try {
-        set({ view: await providersApi.list(), loading: false, error: null });
-      } catch (error) {
         set({
+          view: await providersApi.list(),
           loading: false,
-          error: describe(error, "Failed to load settings"),
+          error: null,
+          errorCode: null,
         });
+      } catch (error) {
+        set({ loading: false, ...describe(error, "Failed to load settings") });
       }
     },
 
@@ -228,10 +261,14 @@ export const useProviderStore = create<ProviderState>()((set, get) => {
       withActivity(id, { listing: true });
       try {
         const candidates = await providersApi.fetchModels(id);
-        withActivity(id, { listing: false, candidates }, { error: null });
+        withActivity(
+          id,
+          { listing: false, candidates },
+          { error: null, errorCode: null },
+        );
       } catch (error) {
         withActivity(id, { listing: false });
-        set({ error: describe(error, "Failed to list the channel's models") });
+        set(describe(error, "Failed to list the channel's models"));
       }
     },
 
@@ -239,10 +276,14 @@ export const useProviderStore = create<ProviderState>()((set, get) => {
       withActivity(id, { probing: true });
       try {
         const probe = await providersApi.probe(id);
-        withActivity(id, { probing: false, probe }, { error: null });
+        withActivity(
+          id,
+          { probing: false, probe },
+          { error: null, errorCode: null },
+        );
       } catch (error) {
         withActivity(id, { probing: false });
-        set({ error: describe(error, "Failed to reach the channel") });
+        set(describe(error, "Failed to reach the channel"));
       }
     },
 
@@ -260,6 +301,7 @@ export const useProviderStore = create<ProviderState>()((set, get) => {
         loading: false,
         saving: false,
         error: null,
+        errorCode: null,
         activity: {},
       });
     },

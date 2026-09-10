@@ -315,9 +315,11 @@ live in the platform application-data directory, never in the program tree. See
 5. Confirm `/api/health` reports `secretStorage` and that the value
    fits the runtime: `keyring` for a desktop build with a usable
    keychain, `file` when the master key came from
-   `<metadata.dir>/master.key`, `env` for a server started with
-   `MOKA_METADATA_KEY`, and `unset` while no credential has ever
-   been stored.
+   `<metadata.dir>/master.key` — including one the server created
+   itself because `MOKA_METADATA_KEY` was not exported — `env` for a
+   server started with `MOKA_METADATA_KEY`, and `unset` while no
+   credential has ever been stored. The settings dialog repeats the
+   tier next to the API key field, so confirm the two agree.
 6. Hard-kill the process (`kill -9`, or Force Quit / Task Manager),
    then relaunch: `tmp/` is empty, no document is reported
    `corrupt`, channels and the recent-project list are intact, and

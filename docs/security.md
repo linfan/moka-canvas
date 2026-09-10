@@ -49,22 +49,38 @@ placeholder. Credentials live in `secrets.json`, which is written `0600` inside 
 | Desktop | OS keychain, then `<metadata.dir>/master.key` (`0600`)                     |
 | Server  | `MOKA_METADATA_KEY` (base64 of 32 bytes), then `<metadata.dir>/master.key` |
 
-`/api/health` reports which tier is in use as `secretStorage` so the current
-level is visible without exposing the key.
+Neither source has to exist beforehand. When the first credential is stored and
+no key can be found, one is generated: into the keychain on a desktop, into
+`<metadata.dir>/master.key` (`0600`) on a server. A server started without an
+exported key therefore still accepts an API key instead of failing the moment
+someone types one — at the cost of landing on the weakest tier, where the key
+sits beside the ciphertext it protects and a copy of the directory carries
+both. Export `MOKA_METADATA_KEY` for anything beyond a local, single-user
+deployment; `moka-server --generate-key` prints a value.
 
-If credentials are on disk and no master key can be found, server startup fails
-with `CONFIG_METADATA_KEY_MISSING`. Starting anyway would produce the confusing
-state where configuration looks complete but every generation request is
-rejected by the provider.
+`/api/health` and every `/api/v1/providers` response report which tier is in
+use as `secretStorage` (`keyring`, `env`, `file`, or `unset` while nothing has
+been stored), and the settings page repeats it next to the API key field, so
+the current level is visible without exposing the key.
+
+If credentials are already on disk and no master key can be found, server
+startup fails with `CONFIG_METADATA_KEY_MISSING` rather than generating a key
+that would open none of them. Starting anyway would produce the confusing state
+where configuration looks complete but every generation request is rejected by
+the provider.
 
 ### What encryption does and does not buy
 
 The honest positioning, and the one the UI must not overstate:
 
-- **It does** keep plaintext keys out of the metadata directory, out of backups
-  of that directory, out of logs, out of HTTP responses, and out of exported
-  project packages. A misconfigured sync client that uploads the directory does
-  not upload usable keys.
+- **It does** keep plaintext keys out of the metadata directory, out of logs,
+  out of HTTP responses, and out of exported project packages. With the key in
+  the keychain or exported through the environment it also keeps them out of
+  backups of that directory; with a file-held key the backup carries the key
+  alongside the ciphertext, so that part of the guarantee is only as strong as
+  the tier in use. A misconfigured sync client that uploads the directory does
+  not upload usable keys unless it also uploads a file-held master key with
+  them.
 - **It does not** defend against malware running as the same user. Such a
   process can read the keychain entry or `master.key` and can call the running
   application's own API. This is encryption at rest against accidental exposure,

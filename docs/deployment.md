@@ -36,11 +36,11 @@ the prompt library live in one directory resolved at startup. The default is the
 platform application-data directory (see [security.md](security.md)); override it
 per deployment:
 
-| Variable              | Overrides        | Notes                                          |
-| --------------------- | ---------------- | ---------------------------------------------- |
-| `MOKA_METADATA_DIR`   | `metadata.dir`   | Absolute path required                         |
-| `MOKA_METADATA_STORE` | `metadata.store` | Only `file` is accepted                        |
-| `MOKA_METADATA_KEY`   | —                | Base64 of 32 bytes; the server-mode master key |
+| Variable              | Overrides        | Notes                                                                                                                    |
+| --------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `MOKA_METADATA_DIR`   | `metadata.dir`   | Absolute path required                                                                                                   |
+| `MOKA_METADATA_STORE` | `metadata.store` | Only `file` is accepted                                                                                                  |
+| `MOKA_METADATA_KEY`   | —                | Base64 of 32 bytes; the server-mode master key. Optional — see [Credentials in server mode](#credentials-in-server-mode) |
 
 Startup refuses the directory when it is relative, when it resolves inside the
 executable's directory, the static asset directory, or the working directory, or
@@ -88,7 +88,10 @@ container:
 
 - `MOKA_METADATA_DIR` points at a **mounted volume**. On a read-only root
   filesystem the process exits at startup without one.
-- `MOKA_METADATA_KEY` is present if credentials are stored.
+- `MOKA_METADATA_KEY` is present if credentials are stored, or if they will be.
+  Without it the first stored credential leaves a `master.key` inside the
+  mounted volume — usable, but the weaker tier, and it only survives as long as
+  the volume does.
 
 ```sh
 docker run \
@@ -108,14 +111,24 @@ The desktop app takes its master key from the OS keychain. A server has no
 desktop session, so it reads `MOKA_METADATA_KEY` or falls back to
 `<metadata.dir>/master.key`.
 
-If `secrets.json` already holds credentials and no master key is available,
-startup fails with `CONFIG_METADATA_KEY_MISSING`. Supply the key rather than
-deleting the document — deleting it discards every stored credential.
+If neither is there, the first credential stored creates
+`<metadata.dir>/master.key` (`0600`) and the server logs a warning. Nothing is
+refused, so a server started without the variable is still usable — but the key
+then sits beside the ciphertext it protects and a backup of the directory
+carries both. That is fine for a local, single-user server. Export a key for
+anything else, and check `secretStorage` in `/api/health`: `file` means the
+weaker tier.
 
-Generate one with:
+If `secrets.json` already holds credentials and no master key is available,
+startup fails with `CONFIG_METADATA_KEY_MISSING`. Supply the key that sealed
+them rather than deleting the document — deleting it discards every stored
+credential, and a key generated now opens none of them.
+
+Generate one with either of:
 
 ```sh
 openssl rand -base64 32
+moka-server --generate-key
 ```
 
 Treat it like any other production secret: inject it from the orchestrator's
