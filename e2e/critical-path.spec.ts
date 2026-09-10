@@ -58,7 +58,7 @@ test("launcher boots, project persists across reload, and export/import roundtri
   await expect(canvasList.getByText("1 nodes · 0 edges")).toBeVisible();
 
   // Import an image asset through the resource panel.
-  const importInput = page.getByLabel("Import files");
+  const importInput = page.getByLabel("Import files", { exact: true });
   await importInput.setInputFiles({
     name: "tiny.png",
     mimeType: "image/png",
@@ -112,7 +112,7 @@ test("missing asset surfaces the self-check dialog and blocks export", async ({
   await page.goto("/");
   await createProject(page, join(home, "project"), "Missing Asset");
 
-  const importInput = page.getByLabel("Import files");
+  const importInput = page.getByLabel("Import files", { exact: true });
   await importInput.setInputFiles({
     name: "tiny.png",
     mimeType: "image/png",

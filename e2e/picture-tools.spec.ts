@@ -116,7 +116,7 @@ async function openWithAPicture(page: Page, name: string): Promise<string> {
   await page.goto("/");
   await createProject(page, join(projectHome(slug), "project"), name);
 
-  await page.getByLabel("Import files").setInputFiles({
+  await page.getByLabel("Import files", { exact: true }).setInputFiles({
     name: SOURCE_NAME,
     mimeType: "image/png",
     buffer: PICTURE,

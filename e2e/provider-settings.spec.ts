@@ -35,9 +35,13 @@ test("a channel and its default survive a reload", async ({ page }) => {
   await expect(row.getByText("No key stored")).toBeVisible();
   await expect(row.getByText("openai", { exact: true })).toBeVisible();
 
-  // With no models there is nothing a default could be pointed at.
+  // The new channel brought no models, so nothing here can point at it. The
+  // stored default itself is whatever earlier specs left behind — the whole
+  // suite shares one metadata store.
   await dialog.getByRole("tab", { name: "Defaults" }).click();
-  await expect(dialog.getByLabel("Image")).toHaveValue("");
+  await expect(
+    dialog.getByLabel("Image").locator('option[value^="api-example-com::"]'),
+  ).toHaveCount(0);
 
   await dialog.getByRole("tab", { name: "Channels" }).click();
   await row.getByRole("button", { name: "Edit" }).click();

@@ -496,7 +496,9 @@ test("a conversation asked for a picture puts one on the canvas and files it", a
   );
 
   await page.getByRole("button", { name: "Assistant", exact: true }).click();
-  await page.getByRole("button", { name: "Image" }).click();
+  await column(page)
+    .getByRole("button", { name: "Image", exact: true })
+    .click();
   await expect(page.getByTestId("assistant-about")).toHaveText("About 1 text");
 
   const asked = "A poster of it, at dawn.";
@@ -566,7 +568,9 @@ test("a card whose making came back empty is asked again without a second one", 
   );
 
   await page.getByRole("button", { name: "Assistant", exact: true }).click();
-  await page.getByRole("button", { name: "Image" }).click();
+  await column(page)
+    .getByRole("button", { name: "Image", exact: true })
+    .click();
   await page
     .getByLabel("Ask about this canvas")
     .fill("[refuse] A poster of it, at dawn.");
