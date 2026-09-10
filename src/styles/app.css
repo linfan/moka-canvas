@@ -258,6 +258,27 @@ h2 {
   font-size: 13px;
 }
 
+.dialog-choice {
+  align-items: start;
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+}
+
+.dialog-choice input {
+  accent-color: var(--primary);
+  flex: none;
+  margin-top: 2px;
+  padding: 0;
+  width: auto;
+}
+
+.dialog-choice small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+}
+
 .dialog-actions {
   display: flex;
   gap: 10px;

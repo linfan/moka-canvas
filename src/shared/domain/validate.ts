@@ -272,6 +272,18 @@ export function allResources(moka: MokaFile): ResourceEntry[] {
   );
 }
 
+/**
+ * The assets nothing on any canvas points at.
+ *
+ * A package asked to carry only what is placed leaves these behind, so the
+ * question has to be able to say how many and how much room they take before
+ * it is answered rather than after.
+ */
+export function unreferencedAssets(moka: MokaFile): ResourceEntry[] {
+  const placed = collectAssetReferences(moka);
+  return allResources(moka).filter((entry) => !placed.has(entry.id));
+}
+
 export function findResource(
   moka: MokaFile,
   assetId: string,

@@ -11,6 +11,7 @@ import {
   boundsForShape,
   createCanvas,
   createNode,
+  createProject,
   executorKeyForNode,
   generationSpecFromSnapshot,
 } from "./factories";
@@ -19,7 +20,9 @@ import type {
   CanvasDocument,
   DocumentCommand,
   GenerationSpec,
+  MediaNodeData,
   MokaFile,
+  ResourceEntry,
   ResultSlot,
   WorkflowNode,
 } from "./types";
@@ -27,6 +30,7 @@ import {
   mentionNodeIds,
   modelReferenceShaped,
   topologicalOrder,
+  unreferencedAssets,
   validateBounds,
   validateCanvas,
   validateEdgeCandidate,
@@ -636,5 +640,82 @@ describe("a spec rebuilt from what an asset recorded", () => {
     expect(spec?.inputMode).toBe("mentions");
     expect(spec?.params).toEqual({});
     expect(spec?.referenceNodeIds).toEqual(["node-one"]);
+  });
+});
+
+describe("the assets a package would leave behind", () => {
+  const WHEN = "2026-01-01T00:00:00.000Z";
+
+  function shelf(id: string, path: string, bytes: number): ResourceEntry {
+    return {
+      id,
+      name: path.slice(path.lastIndexOf("/") + 1),
+      path,
+      bytes,
+      createdAt: WHEN,
+      updatedAt: WHEN,
+    };
+  }
+
+  function pointingAt(kind: "assetId" | "posterAssetId", id: string) {
+    const node = createNode(kind === "posterAssetId" ? "video" : "image", {
+      x: 0,
+      y: 0,
+    });
+    (node.data as MediaNodeData)[kind] = id;
+    return node;
+  }
+
+  /**
+   * One asset behind each of the three pointers a node can hold, and two that
+   * nothing points at — the second filed somewhere other than the images, so
+   * the sweep has to reach every shelf rather than stop at the first.
+   */
+  function shelfDocument(): MokaFile {
+    const moka = createProject("Shelf Fixture");
+    const answered = createNode("image", { x: 640, y: 0 });
+    (answered.data as MediaNodeData).resultSlots = [
+      {
+        id: "result",
+        status: "succeeded",
+        assetId: "in-a-slot",
+        isPrimary: true,
+      },
+    ];
+    moka.canvas[0].nodes = [
+      pointingAt("assetId", "on-a-node"),
+      pointingAt("posterAssetId", "as-a-poster"),
+      answered,
+    ];
+    moka.resources.images = [
+      shelf("on-a-node", "assets/images/on-a-node.png", 1),
+      shelf("in-a-slot", "assets/images/in-a-slot.png", 2),
+      shelf("left-image", "assets/images/left-image.png", 3),
+    ];
+    moka.resources.videos = [
+      shelf("as-a-poster", "assets/videos/as-a-poster.mp4", 4),
+      shelf("left-video", "assets/videos/left-video.mp4", 5),
+    ];
+    return moka;
+  }
+
+  it("leaves out only what no pointer holds, on every shelf", () => {
+    expect(
+      unreferencedAssets(shelfDocument()).map((entry) => entry.id),
+    ).toEqual(["left-image", "left-video"]);
+  });
+
+  it("counts a pointer held on a canvas other than the first", () => {
+    const moka = shelfDocument();
+    const second = createCanvas("Canvas 2");
+    second.nodes = [pointingAt("assetId", "left-image")];
+    moka.canvas.push(second);
+    expect(unreferencedAssets(moka).map((entry) => entry.id)).toEqual([
+      "left-video",
+    ]);
+  });
+
+  it("has nothing to leave out when every asset is placed", () => {
+    expect(unreferencedAssets(buildGoldenMokaFile())).toEqual([]);
   });
 });

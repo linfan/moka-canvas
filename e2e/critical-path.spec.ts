@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   addNode,
+  askToExport,
   backToLauncher,
   createProject,
+  exportWorkPackage,
   openRecent,
   persistedNodeCount,
   projectHome,
@@ -65,7 +67,7 @@ test("launcher boots, project persists across reload, and export/import roundtri
   ).toBeVisible({ timeout: 10_000 });
 
   // Export a package.
-  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await exportWorkPackage(page);
   const toast = page.getByText(/Exported \d+ files to /);
   await expect(toast).toBeVisible({ timeout: 10_000 });
   const destination = ((await toast.textContent()) ?? "").replace(
@@ -111,7 +113,7 @@ test("missing asset surfaces the self-check dialog and blocks export", async ({
   ).toBeVisible({ timeout: 10_000 });
 
   // Export now to learn the asset's stored path, then leave to the launcher.
-  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await exportWorkPackage(page);
   await expect(page.getByText(/Exported \d+ files to /)).toBeVisible({
     timeout: 10_000,
   });
@@ -139,7 +141,13 @@ test("missing asset surfaces the self-check dialog and blocks export", async ({
   await expect(
     page.getByRole("banner").getByText("Missing Asset", { exact: true }),
   ).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "Export", exact: true }).click();
+  // The import put the image onto a node as it arrived, so there is nothing
+  // this project could leave out and the choice that would is not offered.
+  const asked = await askToExport(page);
+  await expect(
+    asked.getByRole("checkbox", { name: /Only the assets a node points at/ }),
+  ).toBeDisabled();
+  await asked.getByRole("button", { name: "Export package" }).click();
   const blocked = page.locator(".dialog");
   await expect(
     blocked.getByRole("heading", { name: "Assets are missing" }),

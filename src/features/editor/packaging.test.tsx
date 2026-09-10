@@ -13,7 +13,7 @@ import {
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
-import type { SelfCheckReport } from "../../shared/domain";
+import type { MokaFile, SelfCheckReport } from "../../shared/domain";
 import { editTextContent } from "./interactions/actions";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
@@ -45,10 +45,19 @@ const RECENTS = [
 
 const fetchMock = vi.fn<typeof fetch>();
 
+/** What the export endpoint is told, as the server reads it. */
+interface ExportBody {
+  allowIncomplete?: boolean;
+  includePersonalHistory?: boolean;
+  onlyReferencedAssets?: boolean;
+}
+
 interface RouteOptions {
   selfCheck?: SelfCheckReport;
   /** When set, the first export fails with this problem body. */
   exportFailure?: { code: string; message: string; status: number };
+  /** A document other than the shared fixture, for cases it cannot describe. */
+  moka?: MokaFile;
 }
 
 function route(options: RouteOptions = {}) {
@@ -65,7 +74,7 @@ function route(options: RouteOptions = {}) {
     if (url === "/api/v1/projects/open") {
       return json({
         root: "/tmp/golden",
-        moka: buildGoldenMokaFile(),
+        moka: options.moka ?? buildGoldenMokaFile(),
         selfCheck: options.selfCheck ?? { ok: true, issues: [] },
       });
     }
@@ -96,9 +105,7 @@ function route(options: RouteOptions = {}) {
       if (options.exportFailure && exportAttempts === 1) {
         return json(options.exportFailure, options.exportFailure.status);
       }
-      const body = JSON.parse(String(init.body ?? "{}")) as {
-        allowIncomplete?: boolean;
-      };
+      const body = JSON.parse(String(init.body ?? "{}")) as ExportBody;
       return json({
         destination: "/tmp/golden/pack.zip",
         entries: 5,
@@ -142,7 +149,7 @@ function missingImageCheck(): SelfCheckReport {
   };
 }
 
-function exportCalls(): { body: { allowIncomplete?: boolean } }[] {
+function exportCalls(): { body: ExportBody }[] {
   return fetchMock.mock.calls
     .filter(
       ([url, init]) =>
@@ -150,10 +157,44 @@ function exportCalls(): { body: { allowIncomplete?: boolean } }[] {
         (init as RequestInit)?.method === "POST",
     )
     .map(([, init]) => ({
-      body: JSON.parse(String((init as RequestInit).body ?? "{}")) as {
-        allowIncomplete?: boolean;
-      },
+      body: JSON.parse(
+        String((init as RequestInit).body ?? "{}"),
+      ) as ExportBody,
     }));
+}
+
+/**
+ * The fixture's registry holds only what its nodes point at, so it cannot ask
+ * the question this one is for: what would ticking "only the placed assets"
+ * leave on the shelf. The shared fixture stays as it is — the Rust contract
+ * reads the same bytes — and the case is built beside it instead.
+ */
+function goldenWithShelfAsset(bytes: number): MokaFile {
+  const moka = buildGoldenMokaFile();
+  return {
+    ...moka,
+    resources: {
+      ...moka.resources,
+      images: [
+        ...moka.resources.images,
+        {
+          id: "shelf-asset",
+          name: "unused-plate.png",
+          path: "assets/images/unused-plate.png",
+          mime: "image/png",
+          bytes,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    },
+  };
+}
+
+/** Ask to export, and return the question that answers back first. */
+async function askToExport(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  return screen.findByRole("dialog");
 }
 
 beforeEach(() => {
@@ -258,6 +299,83 @@ describe("missing-asset recovery", () => {
 });
 
 describe("export package", () => {
+  it("says what is going into the package before one is written", async () => {
+    await openGolden({ moka: goldenWithShelfAsset(3145728) });
+    await screen.findByRole("button", { name: "Canvas 1" });
+    const asked = await askToExport();
+
+    // What is never in a project package at all is said here rather than left
+    // to be discovered by whoever opens it.
+    expect(asked.textContent).toContain("never exported");
+    // The cost of the second choice is known before the choice is made.
+    expect(asked.textContent).toContain(
+      "Leaves out 1 unreferenced asset (3.0 MB).",
+    );
+    expect(exportCalls()).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    await vi.waitFor(() => {
+      expect(exportCalls()).toHaveLength(1);
+    });
+    // Nothing ticked is the work package: the work, and no record of the
+    // machine that made it.
+    expect(exportCalls()[0].body.includePersonalHistory).toBeUndefined();
+    expect(exportCalls()[0].body.onlyReferencedAssets).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  it("offers nothing to leave out when every asset is placed", async () => {
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    const asked = await askToExport();
+
+    expect(asked.textContent).toContain(
+      "Every asset in this project is placed",
+    );
+    // A choice that would change nothing is not a choice to make.
+    expect(
+      screen.getByRole("checkbox", {
+        name: /Only the assets a node points at/,
+      }),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("carries both choices in the request that makes the package", async () => {
+    await openGolden({ moka: goldenWithShelfAsset(3145728) });
+    await screen.findByRole("button", { name: "Canvas 1" });
+    await askToExport();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Include my run history/ }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Only the assets a node points at/,
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    await vi.waitFor(() => {
+      expect(exportCalls()).toHaveLength(1);
+    });
+    expect(exportCalls()[0].body).toEqual({
+      includePersonalHistory: true,
+      onlyReferencedAssets: true,
+    });
+  });
+
+  it("backing out of the question writes nothing", async () => {
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    await askToExport();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(exportCalls()).toHaveLength(0);
+    expect(useAppStore.getState().phase).toBe("editing");
+  });
+
   it("offers an incomplete export when assets are missing", async () => {
     await openGolden({
       exportFailure: {
@@ -267,7 +385,11 @@ describe("export package", () => {
       },
     });
     await screen.findByRole("button", { name: "Canvas 1" });
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await askToExport();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Include my run history/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export package" }));
 
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("1 referenced asset");
@@ -278,6 +400,9 @@ describe("export package", () => {
       expect(exportCalls()).toHaveLength(2);
     });
     expect(exportCalls()[1].body.allowIncomplete).toBe(true);
+    // A retry after a refusal is the same export, not a fresh one with the
+    // questions asked again from scratch.
+    expect(exportCalls()[1].body.includePersonalHistory).toBe(true);
     await vi.waitFor(() => {
       expect(
         useAppStore
@@ -301,7 +426,8 @@ describe("export package", () => {
       },
     });
     await screen.findByRole("button", { name: "Canvas 1" });
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await askToExport();
+    fireEvent.click(screen.getByRole("button", { name: "Export package" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -409,6 +535,10 @@ describe("unsaved-work guard", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Export copy and close" }),
     );
+    // The guard hands over to the same question an export from the topbar
+    // asks, and the project closes once the answer has been written.
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Export package" }));
     await vi.waitFor(() => {
       expect(useAppStore.getState().phase).toBe("launcher");
     });

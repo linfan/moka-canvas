@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { isApiError, projectsApi } from "../../api";
-import { PROVIDER_EXECUTOR_KEY, executorKeyForNode } from "../../shared/domain";
+import {
+  PROVIDER_EXECUTOR_KEY,
+  executorKeyForNode,
+  unreferencedAssets,
+  type MokaFile,
+} from "../../shared/domain";
 import { useProviderStore } from "../settings/providerStore";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
@@ -33,6 +38,12 @@ import {
   type CloseAction,
 } from "./components/UnsavedWorkDialog";
 import { ExportBlockedDialog } from "./components/ExportBlockedDialog";
+import {
+  EXPORT_DEFAULTS,
+  ExportDialog,
+  type ExportChoices,
+  type LeftBehind,
+} from "./components/ExportDialog";
 import { RenameOverlay } from "./components/RenameOverlay";
 import { TextEditOverlay } from "./components/TextEditOverlay";
 import { PromptPanel } from "./components/PromptPanel";
@@ -44,6 +55,16 @@ const SAVE_LABEL: Record<string, string> = {
   conflicted: "Conflict",
   error: "Save failed",
 };
+
+/** What a package asked to carry only the placed assets would leave behind. */
+function countLeftBehind(moka: MokaFile | null): LeftBehind {
+  if (!moka) return { count: 0, bytes: 0 };
+  const shelf = unreferencedAssets(moka);
+  return {
+    count: shelf.length,
+    bytes: shelf.reduce((total, entry) => total + (entry.bytes ?? 0), 0),
+  };
+}
 
 function useCanUndo(): boolean {
   return useHistoryStore((state) => {
@@ -99,10 +120,27 @@ export function EditorPage() {
 
   const [exportBlock, setExportBlock] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportChoices, setExportChoices] =
+    useState<ExportChoices>(EXPORT_DEFAULTS);
+  const [leftBehind, setLeftBehind] = useState<LeftBehind>({
+    count: 0,
+    bytes: 0,
+  });
+  const [exportThenClose, setExportThenClose] = useState(false);
   const [closeGuardOpen, setCloseGuardOpen] = useState(false);
   const [closeBusy, setCloseBusy] = useState<CloseAction | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
   const pendingCount = useProjectStore((state) => state.pending.length);
+
+  // Read when the question is asked rather than watched: what is on offer is
+  // the document as it stands at that moment, and numbers that move while a
+  // dialog is being read are numbers to read again.
+  const askAboutExport = (thenClose: boolean) => {
+    setLeftBehind(countLeftBehind(useProjectStore.getState().moka));
+    setExportThenClose(thenClose);
+    setExportOpen(true);
+  };
 
   const finishClose = () => {
     useProjectStore.getState().close();
@@ -150,13 +188,10 @@ export function EditorPage() {
       }
     }
     if (action === "export") {
-      try {
-        await projectsApi.exportPackage({});
-      } catch (error) {
-        setCloseBusy(null);
-        setCloseError(error instanceof Error ? error.message : "Export failed");
-        return;
-      }
+      setCloseBusy(null);
+      setCloseGuardOpen(false);
+      askAboutExport(true);
+      return;
     }
     setCloseBusy(null);
     setCloseGuardOpen(false);
@@ -186,13 +221,20 @@ export function EditorPage() {
     }
   };
 
-  const exportPackage = async (allowIncomplete = false) => {
-    setExportBusy(allowIncomplete);
+  const exportPackage = async (
+    choices: ExportChoices,
+    allowIncomplete = false,
+  ) => {
+    setExportChoices(choices);
+    setExportBusy(true);
     try {
-      const report = await projectsApi.exportPackage(
-        allowIncomplete ? { allowIncomplete: true } : {},
-      );
+      const report = await projectsApi.exportPackage({
+        allowIncomplete: allowIncomplete || undefined,
+        includePersonalHistory: choices.includePersonalHistory || undefined,
+        onlyReferencedAssets: choices.onlyReferencedAssets || undefined,
+      });
       setExportBlock(null);
+      setExportOpen(false);
       useAppStore
         .getState()
         .pushToast(
@@ -201,8 +243,10 @@ export function EditorPage() {
             ? `Exported ${report.entries} files (flagged incomplete) to ${report.destination}`
             : `Exported ${report.entries} files to ${report.destination}`,
         );
+      if (exportThenClose) finishClose();
     } catch (error) {
       if (!allowIncomplete && isApiError(error, "ASSET_MISSING")) {
+        setExportOpen(false);
         setExportBlock(error.message);
       } else {
         setExportBlock(null);
@@ -290,7 +334,7 @@ export function EditorPage() {
         >
           Settings
         </button>
-        <button onClick={() => void exportPackage()} type="button">
+        <button onClick={() => askAboutExport(false)} type="button">
           Export
         </button>
       </header>
@@ -342,12 +386,20 @@ export function EditorPage() {
       <NodeMenu />
       <AssetDeleteDialog />
       <AssetPreviewDialog />
+      {exportOpen && (
+        <ExportDialog
+          busy={exportBusy}
+          leftBehind={leftBehind}
+          onCancel={() => setExportOpen(false)}
+          onExport={(choices) => void exportPackage(choices)}
+        />
+      )}
       {exportBlock !== null && (
         <ExportBlockedDialog
           busy={exportBusy}
           message={exportBlock}
           onCancel={() => setExportBlock(null)}
-          onExportAnyway={() => void exportPackage(true)}
+          onExportAnyway={() => void exportPackage(exportChoices, true)}
         />
       )}
       {closeGuardOpen && (

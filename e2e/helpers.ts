@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 /** The server under test, for the calls a test makes beside the browser's. */
 export const APP = `http://127.0.0.1:${process.env.MOKA_E2E_PORT ?? 8971}`;
@@ -63,6 +63,23 @@ export async function openRecent(page: Page, name: string) {
     .locator("button.launcher-recent")
     .filter({ hasText: name })
     .click();
+}
+
+/** Open the question an export asks about what the package should carry. */
+export async function askToExport(page: Page): Promise<Locator> {
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  const asked = page.getByRole("dialog", { name: "Export package" });
+  await expect(asked).toBeVisible({ timeout: 10_000 });
+  return asked;
+}
+
+/**
+ * Answer it with both choices left off: the work, and nothing about the
+ * machine that made it.
+ */
+export async function exportWorkPackage(page: Page) {
+  const asked = await askToExport(page);
+  await asked.getByRole("button", { name: "Export package" }).click();
 }
 
 /**
