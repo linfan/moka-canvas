@@ -4,6 +4,9 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   addNode,
   APP,
+  CHANNEL,
+  CHANNEL_KEY,
+  configureWordsAndPictures,
   createProject,
   openRecent,
   persistedNodeCount,
@@ -17,10 +20,6 @@ import {
   STORYTELLER,
   type ProviderCall,
 } from "./mock-provider";
-
-const CHANNEL = "stand-in";
-/** Stored, sent, and never looked for again: only that one travelled is checked. */
-const CHANNEL_KEY = "e2e-stand-in-credential";
 
 interface ServedAsset {
   id: string;
@@ -78,43 +77,6 @@ async function served(): Promise<Served> {
     "reading the project",
   );
   return (await response.json()) as Served;
-}
-
-/**
- * Points one channel at the stand-in and makes it the default for both
- * capabilities the suite drives.
- *
- * An upsert replaces rather than appends, so the second test's call is a rewrite
- * of the same channel and the two never race over a revision.
- */
-async function configureChannel(): Promise<void> {
-  await json(`${APP}/api/v1/providers/channels`, "configuring the channel", {
-    method: "PUT",
-    body: {
-      id: CHANNEL,
-      name: "Stand-in",
-      baseUrl: PROVIDER_ADDRESS,
-      protocol: "openai",
-      enabled: true,
-      models: [
-        { id: PAINTER, capability: "image", alias: "Painter", enabled: true },
-        {
-          id: STORYTELLER,
-          capability: "text",
-          alias: "Storyteller",
-          enabled: true,
-        },
-      ],
-      apiKey: CHANNEL_KEY,
-    },
-  });
-  await json(`${APP}/api/v1/providers/defaults`, "setting the defaults", {
-    method: "PATCH",
-    body: {
-      image: `${CHANNEL}::${PAINTER}`,
-      text: `${CHANNEL}::${STORYTELLER}`,
-    },
-  });
 }
 
 async function providerCalls(): Promise<ProviderCall[]> {
@@ -229,7 +191,7 @@ test("an image node asks the provider and files the answer as its own asset", as
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureChannel();
+  await configureWordsAndPictures();
 
   const prompt = "A lantern drifting over a quiet lake.";
   const nodeId = await openWithASpec(
@@ -315,7 +277,7 @@ test("a text node keeps what the provider said, word for word", async ({
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureChannel();
+  await configureWordsAndPictures();
 
   const nodeId = await openWithASpec(
     page,
@@ -370,7 +332,7 @@ test("a run that gave up leaves its mark, and its reason where pointed at", asyn
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureChannel();
+  await configureWordsAndPictures();
 
   await openWithASpec(
     page,
@@ -411,7 +373,7 @@ test("a node is asked from the panel under it, and one of several answers shown"
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureChannel();
+  await configureWordsAndPictures();
 
   await page.goto("/");
   await createProject(
@@ -487,7 +449,7 @@ test("what the preview shows is what the provider is handed", async ({
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureChannel();
+  await configureWordsAndPictures();
 
   const name = "Shown To The Provider";
   await page.goto("/");

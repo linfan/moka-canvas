@@ -7,6 +7,7 @@ import {
   backToLauncher,
   createProject,
   exportWorkPackage,
+  forgetProjects,
   openRecent,
   persistedNodeCount,
   projectHome,
@@ -25,6 +26,7 @@ test("launcher boots, project persists across reload, and export/import roundtri
   const root = join(home, "project");
   const importedRoot = join(home, "imported");
 
+  await forgetProjects();
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Moka Canvas" }),
@@ -65,6 +67,12 @@ test("launcher boots, project persists across reload, and export/import roundtri
   await expect(
     page.getByRole("button", { name: /^tiny\.png 70 B/ }),
   ).toBeVisible({ timeout: 10_000 });
+  // The shelf adds a card for what it took in, so the canvas holds two — and
+  // the package is asked for only once the server is holding both, rather than
+  // packing a document that is behind what the screen shows.
+  await expect
+    .poll(() => persistedNodeCount(page), { timeout: 10_000 })
+    .toBe(2);
 
   // Export a package.
   await exportWorkPackage(page);
@@ -86,7 +94,9 @@ test("launcher boots, project persists across reload, and export/import roundtri
   await expect(
     page.getByRole("banner").getByText("E2E Flow", { exact: true }),
   ).toBeVisible({ timeout: 10_000 });
-  await expect(canvasList.getByText("1 nodes · 0 edges")).toBeVisible();
+  // Both cards came back: the one that was typed and the one the shelf put
+  // there when it took the file in.
+  await expect(canvasList.getByText("2 nodes · 0 edges")).toBeVisible();
   await expect(
     page.getByRole("button", { name: /^tiny\.png 70 B/ }),
   ).toBeVisible();

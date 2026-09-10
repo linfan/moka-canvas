@@ -4,12 +4,14 @@ import {
   addNode,
   APP,
   configureTextChannel,
+  configureWordsAndPictures,
   createProject,
   openRecent,
   persistedNodeCount,
   projectHome,
 } from "./helpers";
 import {
+  PAINTER,
   PROVIDER_ORIGIN,
   SENTENCE,
   STORYTELLER,
@@ -44,7 +46,11 @@ interface ServedNode {
   id: string;
   kind: string;
   title: string;
-  data?: { content?: string };
+  data?: {
+    content?: string;
+    assetId?: string;
+    generation?: { prompt?: string };
+  };
 }
 
 /** The cards the server holds, on the first canvas of the document. */
@@ -57,6 +63,88 @@ async function servedNodes(): Promise<ServedNode[]> {
     moka?: { canvas?: { nodes?: ServedNode[] }[] };
   };
   return body.moka?.canvas?.[0]?.nodes ?? [];
+}
+
+/** The wires the server holds, on the first canvas of the document. */
+async function servedEdges(): Promise<unknown[]> {
+  const response = await fetch(`${APP}/api/v1/projects/current`);
+  if (!response.ok) {
+    throw new Error(`reading the project: ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    moka?: { canvas?: { edges?: unknown[] }[] };
+  };
+  return body.moka?.canvas?.[0]?.edges ?? [];
+}
+
+interface ServedImage {
+  id: string;
+  provenance?: {
+    runId?: string;
+    canvasId?: string;
+    assistantSessionId?: string;
+  };
+}
+
+/** The pictures the project has filed, and what each says it came from. */
+async function servedImages(): Promise<ServedImage[]> {
+  const response = await fetch(`${APP}/api/v1/projects/current`);
+  if (!response.ok) {
+    throw new Error(`reading the project: ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    moka?: { resources?: { images?: ServedImage[] } };
+  };
+  return body.moka?.resources?.images ?? [];
+}
+
+/**
+ * Rewrites what a card was asked to make.
+ *
+ * Behind the page's back on purpose: asking a card again asks it for what the
+ * card says, so a test that wants the second attempt to answer has to change the
+ * asking rather than the answer.
+ */
+async function reaskTheCard(nodeId: string, prompt: string): Promise<void> {
+  const response = await fetch(`${APP}/api/v1/projects/current`);
+  if (!response.ok) {
+    throw new Error(`reading the project: ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    moka: {
+      metadata: { revision: number };
+      canvas: { id: string; nodes: ServedNode[] }[];
+    };
+  };
+  const canvas = body.moka.canvas[0];
+  const card = canvas.nodes.find((node) => node.id === nodeId);
+  const written = await fetch(`${APP}/api/v1/projects/current/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expectedRevision: body.moka.metadata.revision,
+      commands: [
+        {
+          type: "updateNode",
+          canvasId: canvas.id,
+          nodeId,
+          patch: {
+            data: {
+              ...card?.data,
+              generation: {
+                ...card?.data?.generation,
+                prompt,
+                updatedAt: new Date().toISOString(),
+              },
+            },
+          },
+        },
+      ],
+    }),
+  });
+  if (!written.ok) {
+    throw new Error(`reasking the card: ${written.status}`);
+  }
 }
 
 async function providerCalls(): Promise<ProviderCall[]> {
@@ -390,4 +478,146 @@ test("a canvas holds several conversations, and reads the one it was pointed at"
     "The brief, asked · 2 lines",
     "New conversation",
   ]);
+});
+
+test("a conversation asked for a picture puts one on the canvas and files it", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureWordsAndPictures();
+
+  const name = "Asked For A Picture";
+  const seed = "A lantern floats over a quiet lake at dusk.";
+  await openWithWords(
+    page,
+    name,
+    join(projectHome("assistant-picture"), "project"),
+    seed,
+  );
+
+  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("button", { name: "Image" }).click();
+  await expect(page.getByTestId("assistant-about")).toHaveText("About 1 text");
+
+  const asked = "A poster of it, at dawn.";
+  await page.getByLabel("Ask about this canvas").fill(asked);
+  await page.getByRole("button", { name: "Send: Image" }).click();
+
+  await expect
+    .poll(() => servedNodes().then((nodes) => nodes.map((node) => node.kind)), {
+      timeout: 20_000,
+    })
+    .toEqual(["text", "image"]);
+  await expect(
+    column(page).locator(".assistant-line.is-assistant"),
+  ).toContainText("Made 1 image", { timeout: 20_000 });
+
+  const calls = await providerCalls();
+  expect(calls).toHaveLength(1);
+  expect(calls[0].model).toBe(PAINTER);
+  expect(calls[0].prompt).toContain(asked);
+  // A card is asked through a run, so the card it was about feeds it over a wire
+  // rather than as words quoted into the asking.
+  expect(await servedEdges()).toHaveLength(1);
+  expect(calls[0].prompt).toContain(seed);
+
+  // Filed once, as its own asset.
+  const picture = (await servedNodes())[1];
+  const images = await servedImages();
+  expect(images).toHaveLength(1);
+  expect(picture.data?.assetId).toBe(images[0].id);
+
+  // Saved on the page's own schedule, so the conversation is waited for rather
+  // than assumed — and the asset points back at it once it has arrived.
+  await expect
+    .poll(async () => (await servedSessions())[0]?.messages.length ?? 0, {
+      timeout: 10_000,
+    })
+    .toBe(2);
+  const kept = (await servedSessions())[0];
+  expect(kept.messages.map((line) => line.role)).toEqual(["user", "assistant"]);
+  expect(kept.messages[1].text).toBe("Made 1 image");
+  expect(images[0].provenance?.assistantSessionId).toBe(kept.id);
+  expect(images[0].provenance?.runId).toBeTruthy();
+
+  // Both ways out of the line that made something: the card, and the shelf it
+  // was put on.
+  const answer = column(page).locator(".assistant-line.is-assistant");
+  await expect(
+    answer.getByRole("button", { name: "Show on canvas" }),
+  ).toBeVisible();
+  await expect(
+    answer.getByRole("button", { name: "Show in assets" }),
+  ).toBeVisible();
+});
+
+test("a card whose making came back empty is asked again without a second one", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureWordsAndPictures();
+
+  const name = "Asked Again";
+  await openWithWords(
+    page,
+    name,
+    join(projectHome("assistant-retry"), "project"),
+    "A lantern floats over a quiet lake at dusk.",
+  );
+
+  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("button", { name: "Image" }).click();
+  await page
+    .getByLabel("Ask about this canvas")
+    .fill("[refuse] A poster of it, at dawn.");
+  await page.getByRole("button", { name: "Send: Image" }).click();
+
+  const again = page.getByRole("button", { name: "Ask the card again" });
+  await expect(again).toBeVisible({ timeout: 20_000 });
+
+  const cards = await servedNodes();
+  const picture = cards.find((node) => node.kind === "image");
+  if (!picture)
+    throw new Error("The asked-for card did not stay on the canvas");
+  expect(
+    (await servedImages()).filter((image) => image.provenance?.runId),
+  ).toHaveLength(0);
+
+  // The asking is what was wrong, so that is what gets changed before the card
+  // is asked a second time. Written behind the page's back, so it waits for the
+  // page to have saved what it was holding: a stale write of its own would take
+  // the conversation away with it.
+  await expect
+    .poll(async () => (await servedSessions())[0]?.messages.length ?? 0, {
+      timeout: 10_000,
+    })
+    .toBe(2);
+  await reaskTheCard(picture.id, "A poster of it, at dawn.");
+  await page.reload();
+  await openRecent(page, name);
+  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await expect(again).toBeVisible({ timeout: 10_000 });
+
+  await page.on("dialog", (dialog) => dialog.accept());
+  await again.click();
+
+  await expect(
+    column(page).locator(".assistant-line.is-assistant"),
+  ).toContainText("Made 1 image", { timeout: 20_000 });
+
+  // Paid for twice, but placed once: the same card holds the picture the second
+  // attempt made.
+  const after = await servedNodes();
+  expect(after.map((node) => node.kind)).toEqual(["text", "image"]);
+  expect(after[1].id).toBe(picture.id);
+  expect(
+    (await servedImages()).filter((image) => image.provenance?.runId),
+  ).toHaveLength(1);
+  // Counted as what was asked rather than as what the transport attempted: a
+  // refused ask is knocked at more than once before it is given up on.
+  const calls = await providerCalls();
+  expect(calls.some((call) => call.prompt.startsWith("[refuse]"))).toBe(true);
+  expect(
+    calls.filter((call) => call.prompt.startsWith("A poster of it")),
+  ).toHaveLength(1);
 });

@@ -3,13 +3,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { expect, type Locator, type Page } from "@playwright/test";
-import { PROVIDER_ADDRESS } from "./mock-provider";
+import { PAINTER, PROVIDER_ADDRESS, STORYTELLER } from "./mock-provider";
 
 /** The server under test, for the calls a test makes beside the browser's. */
 export const APP = `http://127.0.0.1:${process.env.MOKA_E2E_PORT ?? 8971}`;
 
 export function projectHome(name: string) {
   return mkdtempSync(join(tmpdir(), `moka-e2e-${name}-`));
+}
+
+/** Forget every project this server boot has opened.
+ *
+ * One server answers the whole suite, so the launcher's list is state that
+ * carries across spec files: a check that the launcher has nothing to offer
+ * has to clear the list rather than trust that its file ran first.
+ */
+export async function forgetProjects(): Promise<void> {
+  const listed = (await (
+    await fetch(`${APP}/api/v1/recent-projects`)
+  ).json()) as { id: string }[];
+  await Promise.all(
+    listed.map(async (project) => {
+      await fetch(`${APP}/api/v1/recent-projects/${project.id}`, {
+        method: "DELETE",
+      });
+    }),
+  );
 }
 
 /** Open the launcher's create dialog and scaffold a new project. */
@@ -107,13 +126,19 @@ export const CHANNEL = "stand-in";
 export const CHANNEL_KEY = "e2e-stand-in-credential";
 
 /**
- * Points one channel at the stand-in and makes a written answer the default.
+ * Points one channel at the stand-in and makes each model the default for what
+ * it offers.
  *
- * Only the text side, since a conversation asks for words: a test that also
- * needs a picture configures both itself. An upsert replaces rather than
- * appends, so two specs pointing the same channel never race over a revision.
+ * An upsert replaces rather than appends, so two specs pointing the same channel
+ * never race over a revision.
  */
-export async function configureTextChannel(model: string): Promise<void> {
+export async function configureChannels(
+  models: readonly {
+    id: string;
+    capability: "text" | "image";
+    alias: string;
+  }[],
+): Promise<void> {
   const put = await fetch(`${APP}/api/v1/providers/channels`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -123,9 +148,7 @@ export async function configureTextChannel(model: string): Promise<void> {
       baseUrl: PROVIDER_ADDRESS,
       protocol: "openai",
       enabled: true,
-      models: [
-        { id: model, capability: "text", alias: "Storyteller", enabled: true },
-      ],
+      models: models.map((model) => ({ ...model, enabled: true })),
       apiKey: CHANNEL_KEY,
     }),
   });
@@ -134,14 +157,32 @@ export async function configureTextChannel(model: string): Promise<void> {
       `configuring the channel: ${put.status} ${await put.text()}`,
     );
   }
-  const defaults = await fetch(`${APP}/api/v1/providers/defaults`, {
+  const defaults = Object.fromEntries(
+    models.map((model) => [model.capability, `${CHANNEL}::${model.id}`]),
+  );
+  const patched = await fetch(`${APP}/api/v1/providers/defaults`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: `${CHANNEL}::${model}` }),
+    body: JSON.stringify(defaults),
   });
-  if (!defaults.ok) {
+  if (!patched.ok) {
     throw new Error(
-      `setting the default: ${defaults.status} ${await defaults.text()}`,
+      `setting the default: ${patched.status} ${await patched.text()}`,
     );
   }
+}
+
+/** Words only, which is what a conversation asked of a card needs. */
+export async function configureTextChannel(model: string): Promise<void> {
+  await configureChannels([
+    { id: model, capability: "text", alias: "Storyteller" },
+  ]);
+}
+
+/** A picture as well, for an ask that wants one put on the canvas. */
+export async function configureWordsAndPictures(): Promise<void> {
+  await configureChannels([
+    { id: PAINTER, capability: "image", alias: "Painter" },
+    { id: STORYTELLER, capability: "text", alias: "Storyteller" },
+  ]);
 }
