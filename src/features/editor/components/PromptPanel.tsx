@@ -27,6 +27,7 @@ import {
 } from "../../settings/providerStore";
 import { worldToClient } from "../canvas/canvasControl";
 import { buildIssueIndex, buildResourceIndex } from "../canvas/mediaCards";
+import { mentionChoices } from "../canvas/mentions";
 import {
   addAssetBeside,
   disconnectEdge,
@@ -198,6 +199,14 @@ export function PromptPanel() {
     moka?.canvas[0] ??
     null;
   const node = open && canvas ? findNode(canvas, open.nodeId) : null;
+  // What the field may mention, worked out here rather than in it: the field
+  // narrows this list on every keystroke, and walking the canvas each time it
+  // does would cost more than the narrowing.
+  const choices = useMemo(
+    () =>
+      node && canvas ? mentionChoices(canvas, node, resources, issues) : [],
+    [canvas, node, resources, issues],
+  );
   const capability = node ? generationCapabilityFor(node.kind) : null;
   const nodeId = node && capability ? node.id : null;
   const canvasId = canvas?.id ?? null;
@@ -614,11 +623,11 @@ export function PromptPanel() {
 
       <MentionField
         canvas={canvas}
+        choices={choices}
         inputRef={areaRef}
         issues={issues}
         key={`prompt-${node.id}`}
         label={`Prompt for ${node.title}`}
-        node={node}
         onChange={changePrompt}
         onCommit={commitPrompt}
         onDismiss={dismiss}

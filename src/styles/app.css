@@ -654,7 +654,8 @@ h2 {
 }
 
 .editor-side,
-.editor-inspector {
+.editor-inspector,
+.assistant-panel {
   background: var(--surface);
   display: flex;
   flex-direction: column;
@@ -668,7 +669,8 @@ h2 {
   border-right: 1px solid var(--stroke);
 }
 
-.editor-inspector {
+.editor-inspector,
+.assistant-panel {
   border-left: 1px solid var(--stroke);
 }
 
@@ -1582,6 +1584,113 @@ button.danger:hover:not(:disabled) {
   margin: 0;
 }
 
+/* Read in sentences rather than in the short rows an inspector holds, so it
+   takes more of the window than the column beside it does. */
+.assistant-panel {
+  gap: 10px;
+  overflow: hidden;
+  width: 320px;
+}
+
+.assistant-panel > h2 {
+  flex: none;
+}
+
+/* The lines scroll and the field does not: a question being typed is not
+   something to lose above the fold to make room for what was already said. */
+.assistant-lines {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.assistant-lines ol {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.assistant-line {
+  display: grid;
+  gap: 3px;
+}
+
+.assistant-line-who {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.assistant-line-words {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.assistant-line.is-error .assistant-line-who,
+.assistant-line.is-error .assistant-line-words {
+  color: var(--danger);
+}
+
+.assistant-line-about {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.assistant-line-about li {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 1px 7px;
+}
+
+.assistant-about {
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  margin: 0;
+}
+
+/* Offered upward: the field sits at the foot of the column, and a list hanging
+   under it would hang under the window instead. */
+.assistant-panel .mention-offer {
+  bottom: 100%;
+  top: auto;
+}
+
+/* Written for a panel that grows around its rows, where flex: 1 makes the
+   switch share one; in a column with spare height it would take all of it and
+   the two words would become two tall slabs. */
+.assistant-panel .prompt-panel-modes {
+  flex: none;
+}
+
+.assistant-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.assistant-actions button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+
 .reference-bar {
   display: grid;
   gap: 6px;
@@ -1925,7 +2034,8 @@ button.danger:hover:not(:disabled) {
 
 @media (max-width: 900px) {
   .editor-side,
-  .editor-inspector {
+  .editor-inspector,
+  .assistant-panel {
     display: none;
   }
 }

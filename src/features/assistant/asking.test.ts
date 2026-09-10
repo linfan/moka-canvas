@@ -1,0 +1,238 @@
+import { describe, expect, it } from "vitest";
+import type {
+  CanvasDocument,
+  WorkflowEdge,
+  WorkflowNode,
+} from "../../shared/domain";
+import { createCanvas, createNode } from "../../shared/domain";
+import { mentionToken } from "../editor/canvas/mentions";
+import {
+  ASSISTANT_CONTEXT_CHARS,
+  ASSISTANT_PICTURE_LIMIT,
+  askOf,
+  referenceNodes,
+  referenceSummary,
+  upstreamOf,
+} from "./asking";
+
+const T = "2026-01-01T00:00:00.000Z";
+
+function card(
+  kind: WorkflowNode["kind"],
+  id: string,
+  title: string,
+  data: Record<string, unknown> = {},
+): WorkflowNode {
+  const made = createNode(kind, { x: 0, y: 0 });
+  made.id = id;
+  made.title = title;
+  made.data = { ...made.data, ...data };
+  return made;
+}
+
+function wire(from: string, to: string, id: string): WorkflowEdge {
+  return {
+    id,
+    source: { nodeId: from, portId: "out" },
+    target: { nodeId: to, portId: "prompt" },
+    createdAt: T,
+  };
+}
+
+function sheet(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[] = [],
+): CanvasDocument {
+  const made = createCanvas("Canvas");
+  made.nodes = nodes;
+  made.edges = edges;
+  return made;
+}
+
+const SEED = card("text", "n-seed", "Seed", { content: "A quiet lake." });
+const STUDY = card("text", "n-study", "Study", {
+  content: "Dusk, nobody about.",
+});
+const PLATE = card("image", "n-plate", "Plate", { assetId: "asset-plate" });
+const SHOT = card("video", "n-shot", "Shot", { assetId: "asset-shot" });
+const BLANK = card("text", "n-blank", "Blank", { content: "   " });
+
+/** Seed → Study → Plate → Shot, with Blank wired in from nowhere. */
+const CHAIN = sheet(
+  [SEED, STUDY, PLATE, SHOT, BLANK],
+  [
+    wire("n-seed", "n-study", "e-1"),
+    wire("n-study", "n-plate", "e-2"),
+    wire("n-plate", "n-shot", "e-3"),
+  ],
+);
+
+const ids = (nodes: readonly WorkflowNode[]) => nodes.map((node) => node.id);
+
+const aboutIds = (ask: { references: { nodeId: string }[] }) =>
+  ask.references.map((reference) => reference.nodeId);
+
+describe("upstreamOf", () => {
+  it("walks a chain all the way back rather than one wire", () => {
+    expect(upstreamOf(CHAIN, ["n-shot"]).sort()).toEqual([
+      "n-plate",
+      "n-seed",
+      "n-study",
+    ]);
+  });
+
+  it("leaves out what it started from, and what nothing leads to", () => {
+    expect(upstreamOf(CHAIN, ["n-seed"])).toEqual([]);
+    expect(upstreamOf(CHAIN, ["n-shot"])).not.toContain("n-shot");
+    expect(upstreamOf(CHAIN, ["n-shot"])).not.toContain("n-blank");
+  });
+
+  it("counts a card once however many ways it feeds in", () => {
+    const twice = sheet(
+      [SEED, STUDY, PLATE],
+      [
+        wire("n-seed", "n-plate", "e-1"),
+        wire("n-study", "n-plate", "e-2"),
+        wire("n-seed", "n-study", "e-3"),
+      ],
+    );
+    expect(upstreamOf(twice, ["n-plate"]).sort()).toEqual([
+      "n-seed",
+      "n-study",
+    ]);
+  });
+
+  it("walks a loop once rather than for ever", () => {
+    const round = sheet(
+      [SEED, STUDY],
+      [wire("n-seed", "n-study", "e-1"), wire("n-study", "n-seed", "e-2")],
+    );
+    expect(upstreamOf(round, ["n-seed"])).toEqual(["n-study"]);
+  });
+});
+
+describe("referenceNodes", () => {
+  it("takes what was chosen, then what feeds it, then what was named", () => {
+    const about = referenceNodes(CHAIN, ["n-shot"], ["n-blank"]);
+    expect(ids(about)).toEqual([
+      "n-shot",
+      "n-plate",
+      "n-study",
+      "n-seed",
+      "n-blank",
+    ]);
+  });
+
+  it("does not offer the same card twice when it is named as well as chosen", () => {
+    expect(
+      ids(referenceNodes(CHAIN, ["n-shot"], ["n-seed", "n-shot"])),
+    ).toEqual(["n-shot", "n-plate", "n-study", "n-seed"]);
+  });
+
+  it("leaves out an id that is not on this canvas", () => {
+    expect(ids(referenceNodes(CHAIN, ["n-gone"], ["n-seed"]))).toEqual([
+      "n-seed",
+    ]);
+  });
+});
+
+describe("referenceSummary", () => {
+  it("counts what is being sent, in the order it reads", () => {
+    const ask = askOf(
+      "answer",
+      referenceNodes(CHAIN, ["n-shot"], ["n-blank"]),
+      "all of it",
+    );
+    // The empty card is pointed at and sends nothing, so it is not counted.
+    expect(referenceSummary(ask.references)).toBe("2 text · 1 image · 1 video");
+  });
+
+  it("says nothing when nothing is being sent", () => {
+    expect(referenceSummary([])).toBe("");
+  });
+});
+
+describe("askOf", () => {
+  it("writes a mention as the card's name and keeps no id", () => {
+    const ask = askOf(
+      "answer",
+      [PLATE],
+      `what is ${mentionToken("n-plate")} doing`,
+    );
+    expect(ask.asked).toBe("what is [Plate] doing");
+    expect(ask.request.prompt).toContain("what is [Plate] doing");
+    expect(ask.request.prompt).not.toContain("n-plate");
+  });
+
+  it("says so when a mention names a card that is not being sent", () => {
+    const ask = askOf("answer", [], `${mentionToken("n-gone")} again`);
+    expect(ask.asked).toBe("[a card that is gone] again");
+  });
+
+  it("quotes what a text card says under the card's name", () => {
+    const ask = askOf("answer", [STUDY], "read it back");
+    expect(ask.request.prompt).toBe(
+      "[Study]\nDusk, nobody about.\n\n---\n\nread it back",
+    );
+  });
+
+  it("sends a picture by the asset it already holds rather than by its bytes", () => {
+    const ask = askOf("answer", [PLATE], "what is in it");
+    expect(ask.request.inputs).toEqual([
+      { role: "reference", assetId: "asset-plate" },
+    ]);
+    expect(ask.request.prompt).toBe("what is in it");
+  });
+
+  it("leaves a card holding nothing out, and does not count it as left behind", () => {
+    const ask = askOf("answer", [BLANK], "anything");
+    expect(ask.request.prompt).toBe("anything");
+    expect(ask.references).toEqual([]);
+    expect(ask.leftOut).toBe(0);
+  });
+
+  it("remembers what a turn was about as a snapshot, not as a pointer", () => {
+    const ask = askOf("answer", [STUDY, PLATE], "compare these");
+    expect(ask.references).toEqual([
+      { nodeId: "n-study", title: "Study", kind: "text" },
+      {
+        nodeId: "n-plate",
+        title: "Plate",
+        kind: "image",
+        assetId: "asset-plate",
+      },
+    ]);
+  });
+
+  it("asks for an answer or for a rewrite by saying which", () => {
+    const asked = askOf("answer", [], "what happened").request.system;
+    const rewrote = askOf("rewrite", [], "shorter").request.system;
+    expect(asked).toContain("Answer from the cards");
+    expect(rewrote).toContain("Return only that text");
+    expect(rewrote).not.toBe(asked);
+  });
+
+  it("leaves a card that does not fit behind and says how many", () => {
+    const long = card("text", "n-long", "Long", {
+      content: "x".repeat(ASSISTANT_CONTEXT_CHARS),
+    });
+    const ask = askOf("answer", [long, STUDY], "both");
+    expect(ask.leftOut).toBe(1);
+    expect(ask.request.prompt).toContain("[Study]");
+    expect(ask.request.prompt).not.toContain("[Long]");
+    // A card that did not fit did not spend the room the next one needed.
+    expect(aboutIds(ask)).toEqual(["n-study"]);
+  });
+
+  it("sends at most so many pictures, and counts the rest", () => {
+    const plates = Array.from(
+      { length: ASSISTANT_PICTURE_LIMIT + 2 },
+      (_, at) =>
+        card("image", `n-${at}`, `Plate ${at}`, { assetId: `asset-${at}` }),
+    );
+    const ask = askOf("answer", plates, "all of them");
+    expect(ask.request.inputs).toHaveLength(ASSISTANT_PICTURE_LIMIT);
+    expect(ask.leftOut).toBe(2);
+    expect(ask.references).toHaveLength(ASSISTANT_PICTURE_LIMIT);
+  });
+});

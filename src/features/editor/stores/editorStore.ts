@@ -10,6 +10,15 @@ import type { BarEntry } from "./toolPrefs";
 
 export type EditorTool = "select" | "pan";
 
+/**
+ * What the column beside the canvas is showing.
+ *
+ * One column and a choice rather than two columns, since a canvas with a
+ * resources column, an inspector and a conversation beside it has very little
+ * of itself left to look at.
+ */
+export type SidePanelTab = "inspector" | "assistant";
+
 export interface Selection {
   nodeIds: NodeId[];
   edgeIds: EdgeId[];
@@ -107,7 +116,9 @@ interface EditorState {
   /** Last known pointer position in world coordinates (paste-at-pointer). */
   pointerWorld: Point | null;
   resourcesPanelOpen: boolean;
-  inspectorOpen: boolean;
+  /** Whether the column beside the canvas is showing at all. */
+  sidePanelOpen: boolean;
+  sidePanelTab: SidePanelTab;
   contextMenu: ContextMenuState | null;
   nodeMenu: NodeMenuState | null;
   renaming: { nodeId: NodeId } | null;
@@ -157,7 +168,12 @@ interface EditorState {
   setPointerWorld: (point: Point | null) => void;
   toggleResourcesPanel: () => void;
   openResourcesPanel: () => void;
-  toggleInspector: () => void;
+  /**
+   * Brings the column up on one of its two faces, or folds it away where it is
+   * up on that one already.
+   */
+  toggleSidePanel: (tab: SidePanelTab) => void;
+  setSidePanelTab: (tab: SidePanelTab) => void;
   openContextMenu: (menu: ContextMenuState) => void;
   closeContextMenu: () => void;
   openNodeMenu: (menu: NodeMenuState) => void;
@@ -195,7 +211,8 @@ export const useEditorStore = create<EditorState>()((set) => ({
   gesture: { kind: "idle" },
   pointerWorld: null,
   resourcesPanelOpen: true,
-  inspectorOpen: true,
+  sidePanelOpen: true,
+  sidePanelTab: "inspector",
   contextMenu: null,
   nodeMenu: null,
   renaming: null,
@@ -229,8 +246,13 @@ export const useEditorStore = create<EditorState>()((set) => ({
   toggleResourcesPanel: () =>
     set((state) => ({ resourcesPanelOpen: !state.resourcesPanelOpen })),
   openResourcesPanel: () => set({ resourcesPanelOpen: true }),
-  toggleInspector: () =>
-    set((state) => ({ inspectorOpen: !state.inspectorOpen })),
+  toggleSidePanel: (tab) =>
+    set((state) =>
+      state.sidePanelOpen && state.sidePanelTab === tab
+        ? { sidePanelOpen: false }
+        : { sidePanelOpen: true, sidePanelTab: tab },
+    ),
+  setSidePanelTab: (tab) => set({ sidePanelOpen: true, sidePanelTab: tab }),
   openContextMenu: (menu) => set({ contextMenu: menu }),
   closeContextMenu: () => set({ contextMenu: null }),
   openNodeMenu: (menu) => set({ nodeMenu: menu }),

@@ -15,10 +15,10 @@ import {
 import {
   MENTION_HOVER_CHARS,
   mentionBeingTyped,
-  mentionChoices,
   mentionToken,
   narrowMentions,
   type MentionChoice,
+  type MentionGroup,
 } from "../canvas/mentions";
 
 /** What a chip summons when it is hovered: the picture, or the start of a text. */
@@ -71,7 +71,7 @@ interface OfferRow {
  */
 export function MentionField({
   canvas,
-  node,
+  choices,
   resources,
   issues,
   value,
@@ -85,7 +85,14 @@ export function MentionField({
   onOffer,
 }: {
   canvas: CanvasDocument;
-  node: WorkflowNode;
+  /**
+   * What may be mentioned, worked out by whoever owns the field.
+   *
+   * Offered rather than derived here because a field that belongs to a node and
+   * a field that belongs to a conversation do not mean the same thing by "near":
+   * the one offers what is wired in, the other what the question is about.
+   */
+  choices: MentionGroup[];
   resources: ReadonlyMap<AssetId, ResourceEntry>;
   issues: ReadonlyMap<AssetId, MediaState>;
   value: string;
@@ -114,12 +121,8 @@ export function MentionField({
   const [looked, setLooked] = useState<number | null>(null);
 
   const groups = useMemo(
-    () =>
-      narrowMentions(
-        mentionChoices(canvas, node, resources, issues),
-        typed?.query ?? "",
-      ),
-    [canvas, node, resources, issues, typed],
+    () => narrowMentions(choices, typed?.query ?? ""),
+    [choices, typed],
   );
   const rows = useMemo<OfferRow[]>(() => {
     const out: OfferRow[] = [];

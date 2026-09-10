@@ -27,6 +27,7 @@ import {
   MENTION_SUMMARY_CHARS,
   mentionBeingTyped,
   mentionChoices,
+  mentionGroups,
   mentionToken,
   narrowMentions,
 } from "./canvas/mentions";
@@ -118,10 +119,10 @@ function Field({ initial = "" }: { initial?: string }) {
   return (
     <MentionField
       canvas={SHEET}
+      choices={choicesOf()}
       inputRef={areaRef}
       issues={ISSUES}
       label="Prompt"
-      node={TARGET}
       onChange={(next) => {
         changed.push(next);
         setValue(next);
@@ -272,6 +273,38 @@ describe("what may be mentioned", () => {
       { id: "n-brief", origin: "upstream" },
       { id: "n-plate", origin: "reference" },
     ]);
+  });
+
+  it("groups a list named by hand the same way, for a caller that is not a node", () => {
+    const groups = mentionGroups(
+      SHEET,
+      [
+        { id: "n-plate", origin: "reference" },
+        { id: "n-brief", origin: "upstream" },
+      ],
+      RESOURCES,
+      ISSUES,
+    );
+    expect(groups.map((group) => group.label)).toEqual(["Text", "Image"]);
+    expect(groups[0].choices[0].node.id).toBe("n-brief");
+    expect(groups[1].choices[0].origin).toBe("reference");
+  });
+
+  it("leaves out of a list by hand what is not there, and what holds nothing", () => {
+    const groups = mentionGroups(
+      SHEET,
+      [
+        { id: "n-gone", origin: "canvas" },
+        { id: "n-blank", origin: "canvas" },
+        { id: "n-brief", origin: "canvas" },
+        { id: "n-brief", origin: "upstream" },
+      ],
+      RESOURCES,
+      ISSUES,
+    );
+    expect(
+      groups.flatMap((group) => group.choices.map((choice) => choice.node.id)),
+    ).toEqual(["n-brief"]);
   });
 });
 

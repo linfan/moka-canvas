@@ -7,6 +7,7 @@ import {
   type MokaFile,
 } from "../../shared/domain";
 import { useProviderStore } from "../settings/providerStore";
+import { AssistantPanel } from "../assistant/AssistantPanel";
 import { redo, undo } from "./commands/execute";
 import { CanvasSurface } from "./canvas/CanvasSurface";
 import { clientToWorld, zoomTo } from "./canvas/canvasControl";
@@ -87,7 +88,8 @@ export function EditorPage() {
   const resourcesPanelOpen = useEditorStore(
     (state) => state.resourcesPanelOpen,
   );
-  const inspectorOpen = useEditorStore((state) => state.inspectorOpen);
+  const sidePanelOpen = useEditorStore((state) => state.sidePanelOpen);
+  const sidePanelTab = useEditorStore((state) => state.sidePanelTab);
   const promptPanelOnSelect = useEditorStore(
     (state) => state.promptPanelOnSelect,
   );
@@ -384,7 +386,12 @@ export function EditorPage() {
               : "No canvas"}
           </p>
         </main>
-        {inspectorOpen && <InspectorPanel />}
+        {sidePanelOpen &&
+          (sidePanelTab === "assistant" ? (
+            <AssistantPanel />
+          ) : (
+            <InspectorPanel />
+          ))}
       </div>
 
       <ContextMenu />
@@ -470,11 +477,23 @@ export function EditorPage() {
             Resources
           </button>
           <button
-            aria-pressed={inspectorOpen}
-            onClick={() => useEditorStore.getState().toggleInspector()}
+            aria-pressed={sidePanelOpen && sidePanelTab === "inspector"}
+            onClick={() =>
+              useEditorStore.getState().toggleSidePanel("inspector")
+            }
             type="button"
           >
             Inspector
+          </button>
+          <button
+            aria-pressed={sidePanelOpen && sidePanelTab === "assistant"}
+            onClick={() =>
+              useEditorStore.getState().toggleSidePanel("assistant")
+            }
+            title="Ask about the cards on this canvas"
+            type="button"
+          >
+            Assistant
           </button>
           <button
             aria-pressed={promptPanelOnSelect}

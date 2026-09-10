@@ -64,17 +64,29 @@ export interface MentionGroup {
 }
 
 /** The order groups are read in: words first, then what they are about. */
-const GROUP_ORDER = ["text", "image", "video", "audio", "group"] as const;
+export const GROUP_ORDER = [
+  "text",
+  "image",
+  "video",
+  "audio",
+  "group",
+] as const;
 
-type GroupKey = (typeof GROUP_ORDER)[number];
+export type GroupKey = (typeof GROUP_ORDER)[number];
 
-const GROUP_LABELS: Record<GroupKey, string> = {
+export const GROUP_LABELS: Record<GroupKey, string> = {
   text: CAPABILITY_LABELS.text,
   image: CAPABILITY_LABELS.image,
   video: CAPABILITY_LABELS.video,
   audio: CAPABILITY_LABELS.audio,
   group: "Group",
 };
+
+/** A node offered as a candidate, and why it is being offered. */
+export interface MentionWanted {
+  id: string;
+  origin: MentionOrigin;
+}
 
 /** A sentence's first line, cut to a length that fits one row. */
 function oneLine(text: string, limit: number): string {
@@ -134,37 +146,23 @@ function summaryFor(
 }
 
 /**
- * What may be mentioned from this node, grouped by the kind of thing it is.
+ * The listed nodes as candidate rows, grouped by the kind of thing each is.
  *
- * Offered in the order a reader would look: what is wired into the node first,
- * then what it was pointed at by hand, then everything else on the canvas that
- * holds something. A node reached two ways is offered once, as the nearer of
- * the two, since being asked twice for the same card is noise rather than
- * emphasis.
+ * Offered in the order the list was given, and a node listed twice is offered
+ * once as the nearer of the two, since being asked twice for the same card is
+ * noise rather than emphasis.
  */
-export function mentionChoices(
+export function mentionGroups(
   canvas: CanvasDocument,
-  node: WorkflowNode,
+  wanted: readonly MentionWanted[],
   resources: ReadonlyMap<AssetId, ResourceEntry>,
   issues: ReadonlyMap<AssetId, MediaState>,
 ): MentionGroup[] {
-  const spec = (node.data as { generation?: GenerationSpec }).generation;
-  const wanted: { id: string; origin: MentionOrigin }[] = [];
-  const seen = new Set<string>([node.id]);
-  const take = (id: string, origin: MentionOrigin) => {
-    if (seen.has(id)) return;
-    seen.add(id);
-    wanted.push({ id, origin });
-  };
-
-  for (const edge of canvas.edges) {
-    if (edge.target.nodeId === node.id) take(edge.source.nodeId, "upstream");
-  }
-  for (const id of spec?.referenceNodeIds ?? []) take(id, "reference");
-  for (const other of canvas.nodes) take(other.id, "canvas");
-
   const grouped = new Map<GroupKey, MentionChoice[]>();
+  const seen = new Set<string>();
   for (const { id, origin } of wanted) {
+    if (seen.has(id)) continue;
+    seen.add(id);
     const found = findNode(canvas, id);
     if (!found) continue;
     const key = groupOf(canvas, found);
@@ -185,6 +183,38 @@ export function mentionChoices(
     label: GROUP_LABELS[key],
     choices: grouped.get(key) ?? [],
   }));
+}
+
+/**
+ * What may be mentioned from this node, grouped by the kind of thing it is.
+ *
+ * Offered in the order a reader would look: what is wired into the node first,
+ * then what it was pointed at by hand, then everything else on the canvas that
+ * holds something. The node itself is not among them, since a card that mentions
+ * itself is asking for what it already says.
+ */
+export function mentionChoices(
+  canvas: CanvasDocument,
+  node: WorkflowNode,
+  resources: ReadonlyMap<AssetId, ResourceEntry>,
+  issues: ReadonlyMap<AssetId, MediaState>,
+): MentionGroup[] {
+  const spec = (node.data as { generation?: GenerationSpec }).generation;
+  const wanted: MentionWanted[] = [];
+  const seen = new Set<string>([node.id]);
+  const take = (id: string, origin: MentionOrigin) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    wanted.push({ id, origin });
+  };
+
+  for (const edge of canvas.edges) {
+    if (edge.target.nodeId === node.id) take(edge.source.nodeId, "upstream");
+  }
+  for (const id of spec?.referenceNodeIds ?? []) take(id, "reference");
+  for (const other of canvas.nodes) take(other.id, "canvas");
+
+  return mentionGroups(canvas, wanted, resources, issues);
 }
 
 /** The groups that answer to what has been typed since the `@`. */

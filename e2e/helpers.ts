@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { expect, type Locator, type Page } from "@playwright/test";
+import { PROVIDER_ADDRESS } from "./mock-provider";
 
 /** The server under test, for the calls a test makes beside the browser's. */
 export const APP = `http://127.0.0.1:${process.env.MOKA_E2E_PORT ?? 8971}`;
@@ -99,4 +100,48 @@ export async function backToLauncher(page: Page) {
   await expect(page.getByRole("heading", { name: "Moka Canvas" })).toBeVisible({
     timeout: 10_000,
   });
+}
+
+/** The channel the stand-in is reached through, and the credential it is sent. */
+export const CHANNEL = "stand-in";
+export const CHANNEL_KEY = "e2e-stand-in-credential";
+
+/**
+ * Points one channel at the stand-in and makes a written answer the default.
+ *
+ * Only the text side, since a conversation asks for words: a test that also
+ * needs a picture configures both itself. An upsert replaces rather than
+ * appends, so two specs pointing the same channel never race over a revision.
+ */
+export async function configureTextChannel(model: string): Promise<void> {
+  const put = await fetch(`${APP}/api/v1/providers/channels`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: CHANNEL,
+      name: "Stand-in",
+      baseUrl: PROVIDER_ADDRESS,
+      protocol: "openai",
+      enabled: true,
+      models: [
+        { id: model, capability: "text", alias: "Storyteller", enabled: true },
+      ],
+      apiKey: CHANNEL_KEY,
+    }),
+  });
+  if (!put.ok) {
+    throw new Error(
+      `configuring the channel: ${put.status} ${await put.text()}`,
+    );
+  }
+  const defaults = await fetch(`${APP}/api/v1/providers/defaults`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: `${CHANNEL}::${model}` }),
+  });
+  if (!defaults.ok) {
+    throw new Error(
+      `setting the default: ${defaults.status} ${await defaults.text()}`,
+    );
+  }
 }
