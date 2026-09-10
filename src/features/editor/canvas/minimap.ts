@@ -24,7 +24,7 @@ export class MinimapView {
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
       cornerRadius: 10,
-      fill: "#17181cd9",
+      fill: canvasTheme.minimapFill,
       stroke: canvasTheme.nodeStroke,
       strokeWidth: 1,
       data: { role: "minimap" },
@@ -35,7 +35,7 @@ export class MinimapView {
       width: 10,
       height: 10,
       cornerRadius: 3,
-      fill: "#ffffff1f",
+      fill: canvasTheme.minimapViewport,
       stroke: canvasTheme.selection,
       strokeWidth: 1,
       hittable: false,
@@ -82,6 +82,16 @@ export class MinimapView {
     this.group.set({
       x: MAP_MARGIN,
       y: size.height - MAP_HEIGHT - MAP_MARGIN,
+    });
+    // Re-read rather than only at construction: the palette can be switched
+    // while the map is on screen, and this is where the next frame goes out.
+    this.frame.set({
+      fill: canvasTheme.minimapFill,
+      stroke: canvasTheme.nodeStroke,
+    });
+    this.viewport.set({
+      fill: canvasTheme.minimapViewport,
+      stroke: canvasTheme.selection,
     });
 
     if (nodes.length === 0) {

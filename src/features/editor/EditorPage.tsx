@@ -4,6 +4,7 @@ import { unreferencedAssets, type MokaFile } from "../../shared/domain";
 import { AssistantPanel } from "../assistant/AssistantPanel";
 import { CanvasSurface } from "./canvas/CanvasSurface";
 import { clientToWorld, zoomReset, zoomTo } from "./canvas/canvasControl";
+import { CANVAS_THEME_LABELS, CANVAS_THEME_NAMES } from "./canvas/theme";
 import {
   ASSET_DRAG_MIME,
   addAssetNode,
@@ -12,6 +13,7 @@ import {
   importFiles,
 } from "./interactions/actions";
 import { useEditorKeyboard } from "./interactions/keyboard";
+import { useAppearance } from "./stores/appearance";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
@@ -62,6 +64,7 @@ export function EditorPage() {
   const selectedCount = useEditorStore(
     (state) => state.selection.nodeIds.length,
   );
+  const theme = useAppearance((state) => state.theme);
   const tool = useEffectiveTool();
   const resourcesPanelOpen = useEditorStore(
     (state) => state.resourcesPanelOpen,
@@ -348,6 +351,19 @@ export function EditorPage() {
             value={Math.round(zoom * 100)}
           />
           <span className="zoom-readout">{Math.round(zoom * 100)}%</span>
+        </div>
+        <div aria-label="Theme" className="tool-group" role="group">
+          {CANVAS_THEME_NAMES.map((name) => (
+            <button
+              aria-pressed={theme === name}
+              className={theme === name ? "is-active" : ""}
+              key={name}
+              onClick={() => useAppearance.getState().setTheme(name)}
+              type="button"
+            >
+              {CANVAS_THEME_LABELS[name]}
+            </button>
+          ))}
         </div>
         <div aria-label="Panels" className="tool-group" role="group">
           <button

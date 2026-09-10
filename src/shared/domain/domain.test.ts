@@ -486,6 +486,38 @@ describe("document commands", () => {
     expect(next.canvas[0].viewport.zoom).toBe(5);
   });
 
+  it("changes a canvas's own view settings and restores them", () => {
+    const moka = buildGoldenMokaFile();
+    const canvasId = moka.canvas[0].id;
+    const { next, inverse } = apply(moka, {
+      type: "setCanvasSettings",
+      canvasId,
+      settings: { showMinimap: false },
+    });
+    // Only what was named moved; the background it was left as stayed.
+    expect(next.canvas[0].settings).toEqual({
+      background: "dots",
+      showMinimap: false,
+      snapToGrid: true,
+    });
+    const undone = apply(next, ...inverse).next;
+    expect(undone.canvas[0].settings).toEqual(moka.canvas[0].settings);
+  });
+
+  it("refuses a background that is not one of the three", () => {
+    const moka = buildGoldenMokaFile();
+    const canvasId = moka.canvas[0].id;
+    expect(
+      codeOf(() =>
+        apply(moka, {
+          type: "setCanvasSettings",
+          canvasId,
+          settings: { background: "checks" as never },
+        }),
+      ),
+    ).toBe("VALIDATION_FAILED");
+  });
+
   it("adds, renames, reorders, and removes canvases", () => {
     const moka = buildGoldenMokaFile();
     const canvas = createCanvas("Scratch");

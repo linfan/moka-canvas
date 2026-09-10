@@ -3,6 +3,7 @@ import type {
   AssetCategory,
   AssetId,
   AssetProvenance,
+  BackgroundMode,
   CanvasDocument,
   GenerationSpec,
   MokaFile,
@@ -14,6 +15,7 @@ import type {
   WorkflowNode,
 } from "../../../shared/domain";
 import {
+  BACKGROUND_MODES,
   CAPABILITY_LABELS,
   PROVIDER_EXECUTOR_KEY,
   executorKeyForNode,
@@ -54,6 +56,7 @@ import {
   linkAsset,
   renameNode,
   requestDeleteAsset,
+  setCanvasViewSettings,
   setNodeGeneration,
 } from "../interactions/actions";
 import { BAR_ENTRIES, TOOL_LABELS } from "../stores/toolPrefs";
@@ -861,6 +864,56 @@ function EdgeInspector({
   );
 }
 
+const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
+  dots: "Dots",
+  lines: "Lines",
+  blank: "Blank",
+};
+
+/**
+ * The canvas's own settings, shown when nothing on it is selected.
+ *
+ * With no node to describe, the panel says what the surface behind the nodes
+ * is drawn with. Both choices are the document's, so they are written into it
+ * and undo like any other edit rather than being a way this machine happens to
+ * be looking at it.
+ */
+function CanvasViewSection({ canvas }: { canvas: CanvasDocument }) {
+  const { background, showMinimap } = canvas.settings;
+  return (
+    <section className="inspector-section">
+      <h3>Canvas view</h3>
+      <div className="inspector-row">
+        <span>Background</span>
+        <div aria-label="Canvas background" className="tool-group" role="group">
+          {BACKGROUND_MODES.map((mode) => (
+            <button
+              aria-pressed={background === mode}
+              className={background === mode ? "is-active" : ""}
+              key={mode}
+              onClick={() => setCanvasViewSettings({ background: mode })}
+              type="button"
+            >
+              {BACKGROUND_LABELS[mode]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="inspector-row">
+        <span>Minimap</span>
+        <button
+          aria-pressed={showMinimap}
+          className={showMinimap ? "is-active" : ""}
+          onClick={() => setCanvasViewSettings({ showMinimap: !showMinimap })}
+          type="button"
+        >
+          Show minimap
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function InspectorPanel() {
   const selection = useEditorStore((state) => state.selection);
   const activeCanvas = useActiveCanvas();
@@ -886,7 +939,12 @@ export function InspectorPanel() {
   ) {
     body = <EdgeInspector canvas={activeCanvas} edge={selectedEdges[0]} />;
   } else if (selectedNodes.length === 0 && selectedEdges.length === 0) {
-    body = <p className="inspector-empty">Nothing selected</p>;
+    body = (
+      <>
+        <p className="inspector-empty">Nothing selected</p>
+        {activeCanvas && <CanvasViewSection canvas={activeCanvas} />}
+      </>
+    );
   } else {
     body = (
       <ul className="inspector-list">

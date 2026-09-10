@@ -13,6 +13,7 @@ import {
   portTypesIntersect,
   validateEdgeCandidate,
   type AssetId,
+  type BackgroundMode,
   type CanvasDocument,
   type CanvasId,
   type DocumentCommand,
@@ -365,6 +366,44 @@ export function ungroupSelection() {
       .setSelection({ nodeIds: formerMembers, edgeIds: [] });
     announce("Ungrouped");
   }
+}
+
+/**
+ * A change to how the canvas itself is shown.
+ *
+ * Not every change to a document is about what is in it: which way the
+ * background is drawn and whether the map is up are the canvas's own settings,
+ * so they travel in the file and undo like anything else. What already reads
+ * the way it is asked for writes nothing at all.
+ */
+export function setCanvasViewSettings(patch: {
+  background?: BackgroundMode;
+  showMinimap?: boolean;
+}) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const changed: { background?: BackgroundMode; showMinimap?: boolean } = {};
+  if (
+    patch.background !== undefined &&
+    patch.background !== canvas.settings.background
+  ) {
+    changed.background = patch.background;
+  }
+  if (
+    patch.showMinimap !== undefined &&
+    patch.showMinimap !== canvas.settings.showMinimap
+  ) {
+    changed.showMinimap = patch.showMinimap;
+  }
+  if (Object.keys(changed).length === 0) return;
+  const said: string[] = [];
+  if (changed.background) said.push(`background to ${changed.background}`);
+  if (changed.showMinimap !== undefined) {
+    said.push(changed.showMinimap ? "the minimap up" : "the minimap away");
+  }
+  execute(`Canvas ${said.join(", ")}`, [
+    { type: "setCanvasSettings", canvasId: canvas.id, settings: changed },
+  ]);
 }
 
 /** The edge an arrangement lines the selected nodes up on. */

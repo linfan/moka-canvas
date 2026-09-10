@@ -1,4 +1,5 @@
 import {
+  BACKGROUND_MODES,
   CANVAS_SCHEMA_VERSION,
   MAX_ASSISTANT_MESSAGE_LENGTH,
   MAX_ASSISTANT_MESSAGES_PER_SESSION,
@@ -16,6 +17,7 @@ import type {
   AssistantSession,
   CanvasDocument,
   DocumentCommand,
+  DocumentSettings,
   MokaFile,
   NodeId,
   WorkflowEdge,
@@ -470,6 +472,40 @@ function applyOne(
             type: "setViewport",
             canvasId: command.canvasId,
             viewport: previous,
+          },
+        ],
+      };
+    }
+
+    case "setCanvasSettings": {
+      const canvas = canvasOf(moka, command.canvasId);
+      const settings: DocumentSettings = {
+        ...canvas.settings,
+        ...command.settings,
+      };
+      if (!BACKGROUND_MODES.includes(settings.background))
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "Background mode is not one of the three",
+        );
+      if (typeof settings.showMinimap !== "boolean")
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "Minimap preference is not a boolean",
+        );
+      if (typeof settings.snapToGrid !== "boolean")
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "Snap preference is not a boolean",
+        );
+      const previous = { ...canvas.settings };
+      return {
+        next: replaceCanvas(moka, { ...canvas, settings }),
+        inverse: [
+          {
+            type: "setCanvasSettings",
+            canvasId: command.canvasId,
+            settings: previous,
           },
         ],
       };

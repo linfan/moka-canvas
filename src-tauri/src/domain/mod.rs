@@ -246,6 +246,18 @@ impl Default for DocumentSettings {
     }
 }
 
+/// A change to some of a canvas's own view settings; what is left out stays.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<BackgroundMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_minimap: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snap_to_grid: Option<bool>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NodeKind {
@@ -833,6 +845,14 @@ pub enum DocumentCommand {
     SetViewport {
         canvas_id: CanvasId,
         viewport: Viewport,
+    },
+    /// A change to how the canvas itself is shown. Only what is named moves, so
+    /// a caller changing the background leaves the minimap preference where it
+    /// was.
+    #[serde(rename_all = "camelCase")]
+    SetCanvasSettings {
+        canvas_id: CanvasId,
+        settings: SettingsPatch,
     },
     /// A canvas's conversations. Lines are added and taken away rather than the
     /// list rewritten, so a turn carries only what it said: a conversation is kept

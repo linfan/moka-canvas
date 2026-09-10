@@ -101,8 +101,10 @@ export interface AssetProvenance {
 
 export type ResourceRegistry = Record<AssetCategory, ResourceEntry[]>;
 
+export type BackgroundMode = "dots" | "lines" | "blank";
+
 export interface DocumentSettings {
-  background: "dots" | "lines" | "blank";
+  background: BackgroundMode;
   showMinimap: boolean;
   snapToGrid: boolean;
 }
@@ -350,6 +352,15 @@ export type DocumentCommand =
       childNodeIds: NodeId[];
     }
   | { type: "setViewport"; canvasId: CanvasId; viewport: Viewport }
+  /**
+   * A change to how the canvas itself is shown. Only what is named moves, so a
+   * caller changing the background leaves the minimap preference where it was.
+   */
+  | {
+      type: "setCanvasSettings";
+      canvasId: CanvasId;
+      settings: Partial<DocumentSettings>;
+    }
   /**
    * A canvas's conversations. Lines are added and taken away rather than the
    * list rewritten, so a turn carries only what it said: a conversation is kept

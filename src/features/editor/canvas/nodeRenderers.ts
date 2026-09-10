@@ -235,9 +235,9 @@ function syncMedia(
     // Missing / changed / empty: a distinct broken-media wash.
     view.media.thumb = new Rect({
       cornerRadius: 8,
-      fill: "#2a1e21",
+      fill: canvasTheme.alertFill,
       dashPattern: [4, 3],
-      stroke: "#ff8a80",
+      stroke: canvasTheme.portRejected,
       strokeWidth: 1,
       hittable: false,
     });
@@ -248,7 +248,10 @@ function syncMedia(
     view.media.badge = new Text({
       text: media.state === "ready" ? media.label : `⚠ ${media.label}`,
       fontSize: 11,
-      fill: media.state === "ready" ? canvasTheme.nodeTitle : "#ff8a80",
+      fill:
+        media.state === "ready"
+          ? canvasTheme.nodeTitle
+          : canvasTheme.portRejected,
       fontFamily: canvasTheme.fontFamily,
       textOverflow: "…",
       hittable: false,
@@ -278,12 +281,12 @@ export function createNodeView(
     fill: canvasTheme.nodeFill,
     stroke: canvasTheme.nodeStroke,
     strokeWidth: 1,
-    shadow: { x: 0, y: 8, blur: 20, color: "#00000066" },
+    shadow: { x: 0, y: 8, blur: 20, color: canvasTheme.nodeShadow },
     data: { role: "body", nodeId: node.id },
   });
   if (node.kind === "group") {
     frame.set({
-      fill: "#ffffff08",
+      fill: canvasTheme.groupFill,
       dashPattern: [6, 4],
     });
   }
@@ -502,7 +505,7 @@ function syncRunMarks(
         y: PROGRESS_TOP,
         height: PROGRESS_HEIGHT,
         cornerRadius: PROGRESS_HEIGHT / 2,
-        fill: "#ffffff14",
+        fill: canvasTheme.progressTrack,
         hittable: false,
       });
       const fill = new Rect({

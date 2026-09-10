@@ -292,6 +292,74 @@ async fn commands_apply_and_revision_conflicts_surface() {
 }
 
 #[tokio::test]
+async fn canvas_settings_change_a_part_and_keep_the_rest() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let created = create_project(&app, &temp.path().join("projects"), "View").await;
+    let canvas_id = created["moka"]["canvas"][0]["id"].as_str().unwrap();
+    let revision = created["moka"]["metadata"]["revision"].as_i64().unwrap();
+
+    // Only the background is named, so the minimap preference stays where it was.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/commands",
+            json!({
+                "expectedRevision": revision,
+                "commands": [
+                    {
+                        "type": "setCanvasSettings",
+                        "canvasId": canvas_id,
+                        "settings": { "background": "blank" }
+                    }
+                ]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/projects/current")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let current = body_json(response).await;
+    let settings = &current["moka"]["canvas"][0]["settings"];
+    assert_eq!(settings["background"], "blank");
+    assert_eq!(settings["showMinimap"], true);
+    assert_eq!(settings["snapToGrid"], true);
+
+    // A background nothing recognises is refused before it reaches the document.
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/commands",
+            json!({
+                "expectedRevision": revision + 1,
+                "commands": [
+                    {
+                        "type": "setCanvasSettings",
+                        "canvasId": canvas_id,
+                        "settings": { "background": "stripes" }
+                    }
+                ]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let problem = body_json(response).await;
+    assert_eq!(problem["code"], "VALIDATION_FAILED");
+}
+
+#[tokio::test]
 async fn asset_upload_stream_range_and_delete() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());

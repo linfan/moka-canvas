@@ -45,7 +45,7 @@ import {
   type NodeView,
 } from "./nodeRenderers";
 import { mediaInfoForNode, mediaSignature } from "./mediaCards";
-import { canvasTheme } from "./theme";
+import { applyCanvasTheme, canvasTheme, type CanvasThemeName } from "./theme";
 
 /** Screen-pixel radius in which an input port snaps a pending connection. */
 const CONNECT_PORT_SNAP_PX = 40;
@@ -114,6 +114,8 @@ export interface SceneState {
   related: { nodeIds: NodeId[]; edgeIds: EdgeId[] } | null;
   background: GridMode;
   showMinimap: boolean;
+  /** The palette this scene is drawn in; the controller applies it. */
+  theme: CanvasThemeName;
   /** Asset registry lookup for media cards. */
   resources: ReadonlyMap<AssetId, ResourceEntry>;
   /** Self-check issue reason per asset id (missing/changed/empty). */
@@ -202,6 +204,7 @@ export class LeaferEditorController {
   private lastBackground: GridMode = "dots";
   private lastNodes: WorkflowNode[] = [];
   private lastShowMinimap = true;
+  private lastTheme: CanvasThemeName | null = null;
   private lastGroups = new Map<NodeId, NodeId[]>();
 
   private grid = new GridBackground();
@@ -309,6 +312,18 @@ export class LeaferEditorController {
     if (scene.canvasId !== this.canvasId) {
       this.canvasId = scene.canvasId;
       this.clearScene();
+    }
+
+    // A palette is read while views are being built, so a switch has to happen
+    // before them: everything already drawn was drawn in the old one and is
+    // rebuilt below rather than patched in place.
+    applyCanvasTheme(scene.theme);
+    if (scene.theme !== this.lastTheme) {
+      this.lastTheme = scene.theme;
+      this.clearScene();
+      // The workspace itself is painted by the canvas element rather than by a
+      // view, so its background is taken by hand.
+      this.leafer.set({ fill: canvasTheme.background });
     }
 
     this.camera = scene.camera;

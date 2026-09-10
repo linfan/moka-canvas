@@ -1,4 +1,9 @@
-import type { DataType, NodeKind, PortDefinition } from "./types";
+import type {
+  BackgroundMode,
+  DataType,
+  NodeKind,
+  PortDefinition,
+} from "./types";
 
 export const MOKA_MAGIC = [0x4d, 0x4f, 0x4b, 0x41] as const;
 export const MOKA_FILE_VERSION = "v1" as const;
@@ -7,6 +12,12 @@ export const PACKAGE_FORMAT_VERSION = 2;
 
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 5.0;
+/** The three ways a canvas draws what is behind its nodes. */
+export const BACKGROUND_MODES: readonly BackgroundMode[] = [
+  "dots",
+  "lines",
+  "blank",
+];
 export const GRID_BASE_SPACING = 48;
 export const GRID_FADE_ZOOM = 0.12;
 export const LOW_DETAIL_ZOOM = 0.35;

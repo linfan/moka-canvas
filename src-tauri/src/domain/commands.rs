@@ -8,7 +8,7 @@ use super::validate::{
 };
 use super::{
     AssistantMessage, AssistantSession, CanvasDocument, DocumentCommand, GroupMembership,
-    MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue, WorkflowNode,
+    MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue, SettingsPatch, WorkflowNode,
 };
 use thiserror::Error;
 
@@ -558,6 +558,36 @@ fn apply_one(
                 vec![DocumentCommand::SetViewport {
                     canvas_id: canvas_id.clone(),
                     viewport: previous,
+                }],
+            ))
+        }
+
+        DocumentCommand::SetCanvasSettings {
+            canvas_id,
+            settings,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let previous = canvas.settings.clone();
+            let mut next = moka.clone();
+            let target = next.canvas_mut(canvas_id).expect("canvas checked above");
+            if let Some(background) = settings.background {
+                target.settings.background = background;
+            }
+            if let Some(show_minimap) = settings.show_minimap {
+                target.settings.show_minimap = show_minimap;
+            }
+            if let Some(snap_to_grid) = settings.snap_to_grid {
+                target.settings.snap_to_grid = snap_to_grid;
+            }
+            Ok((
+                next,
+                vec![DocumentCommand::SetCanvasSettings {
+                    canvas_id: canvas_id.clone(),
+                    settings: SettingsPatch {
+                        background: Some(previous.background),
+                        show_minimap: Some(previous.show_minimap),
+                        snap_to_grid: Some(previous.snap_to_grid),
+                    },
                 }],
             ))
         }

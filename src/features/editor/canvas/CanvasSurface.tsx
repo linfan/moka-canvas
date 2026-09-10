@@ -17,6 +17,7 @@ import {
   resolveInputPick,
   selectNodeWithMembers,
 } from "../interactions/actions";
+import { useAppearance } from "../stores/appearance";
 import { useEditorStore, type ContextMenuTarget } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 import { nodeRunViews, useRunStore } from "../stores/runStore";
@@ -201,6 +202,7 @@ export function CanvasSurface() {
           related: relatedHighlight(),
           background: canvas.settings.background,
           showMinimap: canvas.settings.showMinimap,
+          theme: useAppearance.getState().theme,
           resources: moka ? buildResourceIndex(moka) : new Map(),
           issues: buildIssueIndex(selfCheck),
           pick: editor.inputPick
@@ -220,10 +222,12 @@ export function CanvasSurface() {
       const unsubscribeProject = useProjectStore.subscribe(push);
       const unsubscribeEditor = useEditorStore.subscribe(push);
       const unsubscribeRuns = useRunStore.subscribe(words.fire);
+      const unsubscribeAppearance = useAppearance.subscribe(push);
       unsubscribe = () => {
         unsubscribeProject();
         unsubscribeEditor();
         unsubscribeRuns();
+        unsubscribeAppearance();
         words.stop();
       };
       push();
