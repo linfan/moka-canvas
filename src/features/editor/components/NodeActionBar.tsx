@@ -15,7 +15,7 @@ const GAP = 6;
 /** How tall the row of buttons is, which is all the bar ever is. */
 const BAR_HEIGHT = 30;
 /** The widest the bar gets, which is with every tool it has showing. */
-const BAR_WIDTH = 400;
+const BAR_WIDTH = 470;
 
 /** What each tool does, said where it is offered rather than after it is used. */
 const TOOL_HINTS: Record<BarEntry, string> = {
@@ -26,6 +26,8 @@ const TOOL_HINTS: Record<BarEntry, string> = {
   tilt: "Turn it in perspective, as a plate to show a model",
   repaint:
     "Mark the part that may change and say what it should become. A model does the repainting, so it costs what an ask costs.",
+  describe:
+    "Ask a model to read this picture back as the words that would make it. The words become a text node wired into its prompt, so it costs what an ask costs.",
 };
 
 /**

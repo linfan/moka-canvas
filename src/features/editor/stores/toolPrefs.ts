@@ -13,14 +13,38 @@ export const PICTURE_TOOLS: readonly PictureTool[] = [
 /**
  * Everything the bar can offer, in the order it offers them.
  *
- * Wider than the local tools: a repaint asks a model rather than working the
- * pixels here, but it is offered in the same row, hidden by the same setting and
- * answered in the same kind of dialog, because from the node it is one more way
- * of getting a picture out of the one that is there.
+ * Wider than the local tools: a repaint and a reading-back both ask a model
+ * rather than working the pixels here, but they are offered in the same row and
+ * hidden by the same setting, because from the node each is one more way of
+ * getting something out of the picture that is there.
  */
-export type BarEntry = PictureTool | "repaint";
+export type BarEntry = PictureTool | "repaint" | "describe";
 
-export const BAR_ENTRIES: readonly BarEntry[] = [...PICTURE_TOOLS, "repaint"];
+export const BAR_ENTRIES: readonly BarEntry[] = [
+  ...PICTURE_TOOLS,
+  "repaint",
+  "describe",
+];
+
+/**
+ * The entries answered by a dialog of their own.
+ *
+ * What each of them asks for is not a set of numbers: one is a region drawn on
+ * the picture, and the other is a question put to a model that can see it. Both
+ * are asked of a picture and both end in a model, which is what makes them one
+ * kind of thing apart from the four that work the pixels here.
+ */
+export const ASKING_A_MODEL: readonly BarEntry[] = ["repaint", "describe"];
+
+/**
+ * Whether an entry is one of the four that work the pixels here.
+ *
+ * Asked rather than compared against a list of four, so an entry added to either
+ * side moves both answers with it.
+ */
+export function isPictureTool(entry: BarEntry): entry is PictureTool {
+  return !ASKING_A_MODEL.includes(entry);
+}
 
 /**
  * What each entry is called on the bar.
@@ -36,6 +60,7 @@ export const TOOL_LABELS: Record<BarEntry, string> = {
   resize: "Resample",
   tilt: "Tilt",
   repaint: "Repaint",
+  describe: "Describe",
 };
 
 /** The ratios the crop field offers before anything is typed into it. */

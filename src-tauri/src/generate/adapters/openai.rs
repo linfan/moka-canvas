@@ -3,9 +3,10 @@
 //!
 //! Four capabilities over five endpoints. Text prefers the newer answer
 //! endpoint and falls back to chat completions, which every compatible gateway
-//! has; an image with references travels as a multipart body rather than as
-//! JSON; audio arrives as the bytes themselves; and video is a job started here
-//! and collected later.
+//! has, and carries the pictures a question is asked about in whichever of the
+//! two shapes the endpoint reads one as; an image with references travels as a
+//! multipart body rather than as JSON; audio arrives as the bytes themselves; and
+//! video is a job started here and collected later.
 
 use std::time::Duration;
 
@@ -65,7 +66,7 @@ impl ProviderAdapter for OpenAiAdapter {
         cancel: &Cancel,
     ) -> Result<GenerateResult, ProviderError> {
         match request.capability {
-            Capability::Text => text(call, request, &DeltaSink::default(), cancel).await,
+            Capability::Text => text(call, request, inputs, &DeltaSink::default(), cancel).await,
             Capability::Image => image(call, request, inputs, cancel).await,
             Capability::Audio => speech(call, request, cancel).await,
             // Starting a job answers at once, but waiting it out inside one
@@ -81,12 +82,12 @@ impl ProviderAdapter for OpenAiAdapter {
         &self,
         call: &ChannelCall,
         request: &GenerateRequest,
-        _inputs: &[MediaInput],
+        inputs: &[MediaInput],
         sink: &DeltaSink,
         cancel: &Cancel,
     ) -> Result<GenerateResult, ProviderError> {
         match request.capability {
-            Capability::Text => text(call, request, sink, cancel).await,
+            Capability::Text => text(call, request, inputs, sink, cancel).await,
             // Nothing else arrives in pieces. Saying so keeps a mistaken call
             // from quietly dropping every delta it was handed a sink for.
             other => Err(ProviderError::invalid(format!(
@@ -234,7 +235,7 @@ fn missing_endpoint(status: u16) -> bool {
 /// of those and a `match` on the path would repeat the pairing at every use.
 struct TextEndpoint {
     path: &'static str,
-    body: fn(&ChannelCall, &GenerateRequest, bool) -> Value,
+    body: fn(&ChannelCall, &GenerateRequest, &[MediaInput], bool) -> Value,
     event: fn(&Value) -> StreamEvent,
     result: fn(Value) -> GenerateResult,
 }
@@ -264,6 +265,7 @@ enum Tried {
 async fn text(
     call: &ChannelCall,
     request: &GenerateRequest,
+    inputs: &[MediaInput],
     sink: &DeltaSink,
     cancel: &Cancel,
 ) -> Result<GenerateResult, ProviderError> {
@@ -279,7 +281,7 @@ async fn text(
     // after the first delta would show the answer twice.
     let mut missing: Option<ProviderError> = None;
     for endpoint in endpoints {
-        match attempt(call, endpoint, request, sink, cancel, deadline).await {
+        match attempt(call, endpoint, request, inputs, sink, cancel, deadline).await {
             Ok(result) => return Ok(result),
             Err(Tried::Missing(error)) => missing = Some(error),
             Err(Tried::Failed(error)) => return Err(error),
@@ -294,11 +296,12 @@ async fn attempt(
     call: &ChannelCall,
     endpoint: &TextEndpoint,
     request: &GenerateRequest,
+    inputs: &[MediaInput],
     sink: &DeltaSink,
     cancel: &Cancel,
     deadline: Duration,
 ) -> Result<GenerateResult, Tried> {
-    let body = (endpoint.body)(call, request, sink.is_streaming());
+    let body = (endpoint.body)(call, request, inputs, sink.is_streaming());
     cancel.check().map_err(Tried::Failed)?;
 
     if sink.is_streaming() {
@@ -340,8 +343,36 @@ fn refusal(reply: Reply, api_key: &str) -> Tried {
     }
 }
 
-fn answers_body(call: &ChannelCall, request: &GenerateRequest, streaming: bool) -> Value {
+/// The pictures a written question is asked about, in the order they arrived.
+///
+/// Only pictures: neither text endpoint here has a field for anything else, and
+/// an audio reference left out is better than one sent as a picture no model can
+/// hear.
+fn pictures(inputs: &[MediaInput]) -> Vec<&MediaInput> {
+    inputs.iter().filter(|input| input.is_image()).collect()
+}
+
+fn answers_body(
+    call: &ChannelCall,
+    request: &GenerateRequest,
+    inputs: &[MediaInput],
+    streaming: bool,
+) -> Value {
     let mut body = opening(call, "input", request);
+    // A question with a picture beside it is a message of parts, which is what
+    // this endpoint reads a picture as; the words alone stay a bare string, since
+    // that is the shape every gateway behind it accepts.
+    let seen = pictures(inputs);
+    if !seen.is_empty() {
+        let mut parts = vec![json!({ "type": "input_text", "text": request.prompt })];
+        for picture in seen {
+            parts.push(json!({ "type": "input_image", "image_url": picture.data_url() }));
+        }
+        body.insert(
+            "input".into(),
+            json!([{ "type": "message", "role": "user", "content": parts }]),
+        );
+    }
     if let Some(system) = request.instruction() {
         body.insert("instructions".into(), json!(system));
     }
@@ -420,12 +451,33 @@ fn answer_parts(payload: &Value) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
-fn chat_body(call: &ChannelCall, request: &GenerateRequest, streaming: bool) -> Value {
+fn chat_body(
+    call: &ChannelCall,
+    request: &GenerateRequest,
+    inputs: &[MediaInput],
+    streaming: bool,
+) -> Value {
     let mut messages = Vec::new();
     if let Some(system) = request.instruction() {
         messages.push(json!({ "role": "system", "content": system }));
     }
-    messages.push(json!({ "role": "user", "content": request.prompt }));
+    // A picture travels as a part beside the words, which is how this endpoint
+    // reads one; with nothing to look at the words stay a bare string, the shape
+    // a gateway that cannot see pictures still accepts.
+    let seen = pictures(inputs);
+    let asked = if seen.is_empty() {
+        json!(request.prompt)
+    } else {
+        let mut parts = vec![json!({ "type": "text", "text": request.prompt })];
+        for picture in seen {
+            parts.push(json!({
+                "type": "image_url",
+                "image_url": { "url": picture.data_url() },
+            }));
+        }
+        json!(parts)
+    };
+    messages.push(json!({ "role": "user", "content": asked }));
 
     let mut body = Map::from_iter([
         ("model".to_string(), json!(call.model_id)),
@@ -855,7 +907,7 @@ mod tests {
         let call = channel("gpt-5.5");
         let plain = generation(Capability::Text, "a lighthouse", json!({}));
         assert_eq!(
-            answers_body(&call, &plain, false),
+            answers_body(&call, &plain, &[], false),
             json!({ "model": "gpt-5.5", "input": "a lighthouse" })
         );
 
@@ -868,7 +920,7 @@ mod tests {
         // A count that arrives quoted is still a count: dropping it here would
         // silently ignore a setting the user made.
         assert_eq!(
-            answers_body(&call, &tuned, true),
+            answers_body(&call, &tuned, &[], true),
             json!({
                 "model": "gpt-5.5",
                 "input": "a lighthouse",
@@ -887,7 +939,7 @@ mod tests {
         let mut tuned = generation(Capability::Text, "a lighthouse", json!({ "maxTokens": 64 }));
         tuned.system = Some("Be brief.".into());
         assert_eq!(
-            chat_body(&call, &tuned, false),
+            chat_body(&call, &tuned, &[], false),
             json!({
                 "model": "llama-3.3",
                 "messages": [
@@ -896,6 +948,78 @@ mod tests {
                 ],
                 "max_tokens": 64,
             })
+        );
+    }
+
+    #[test]
+    fn a_question_about_a_picture_sends_it_beside_the_words() {
+        let call = channel("llama-3.3");
+        let asked = generation(Capability::Text, "what is in this picture", json!({}));
+        // Each endpoint reads a picture in its own shape, and neither is sent
+        // the words alone once there is something to look at: a body that dropped
+        // the picture would be answered as though the question were about
+        // nothing, which no model says it is doing.
+        assert_eq!(
+            chat_body(
+                &call,
+                &asked,
+                &[media("photo", InputRole::Reference)],
+                false
+            )
+            .pointer("/messages/0/content"),
+            Some(&json!([
+                { "type": "text", "text": "what is in this picture" },
+                {
+                    "type": "image_url",
+                    "image_url": { "url": "data:image/png;base64,cG5n" },
+                },
+            ]))
+        );
+
+        let newer = channel("gpt-5.5");
+        assert_eq!(
+            answers_body(
+                &newer,
+                &asked,
+                &[media("photo", InputRole::Reference)],
+                false
+            )
+            .get("input"),
+            Some(&json!([{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    { "type": "input_text", "text": "what is in this picture" },
+                    { "type": "input_image", "image_url": "data:image/png;base64,cG5n" },
+                ],
+            }]))
+        );
+    }
+
+    #[test]
+    fn only_a_picture_is_sent_to_a_text_endpoint() {
+        let call = channel("llama-3.3");
+        let asked = generation(Capability::Text, "describe the shot", json!({}));
+        let tone = MediaInput {
+            mime: "audio/wav".into(),
+            ..media("voice", InputRole::ControlAudio)
+        };
+        // Left out rather than sent as something it is not: this protocol's text
+        // endpoints have no field for anything but a picture.
+        assert_eq!(
+            chat_body(&call, &asked, &[tone], false).pointer("/messages/0/content"),
+            Some(&json!("describe the shot"))
+        );
+        // And a picture beside it still travels, with nothing else in the way.
+        assert_eq!(
+            pictures(&[
+                media("photo", InputRole::Reference),
+                media("plate", InputRole::Mask)
+            ])
+            .iter()
+            .map(|input| input.asset_id.as_str())
+            .collect::<Vec<&str>>(),
+            ["photo", "plate"]
         );
     }
 

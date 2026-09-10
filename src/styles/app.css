@@ -258,6 +258,20 @@ h2 {
   font-size: 13px;
 }
 
+/* An answer shown as it arrives. Bounded, because the words are the product of
+   the dialog that holds them and a long answer would push the buttons off it. */
+.dialog-answer {
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
 .dialog-choice {
   align-items: start;
   display: flex;

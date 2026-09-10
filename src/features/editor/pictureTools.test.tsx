@@ -217,7 +217,7 @@ describe("the tools offered on a picture node", () => {
       within(bar)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["Crop", "Split", "Resample", "Tilt", "Repaint"]);
+    ).toEqual(["Crop", "Split", "Resample", "Tilt", "Repaint", "Describe"]);
 
     act(() => {
       useEditorStore
@@ -277,12 +277,12 @@ describe("the tools offered on a picture node", () => {
       within(bar)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["Crop", "Split", "Repaint"]);
+    ).toEqual(["Crop", "Split", "Repaint", "Describe"]);
     // Kept here rather than in the document: a bar somebody tidied stays tidied
     // without the tidying travelling with the project.
     expect(
       JSON.parse(localStorage.getItem("moka-canvas:picture-tools")!).shown,
-    ).toEqual(["crop", "split", "repaint"]);
+    ).toEqual(["crop", "split", "repaint", "describe"]);
   });
 });
 

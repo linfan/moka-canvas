@@ -13,6 +13,7 @@ import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 import {
   CROP_RATIOS,
+  isPictureTool,
   MAX_DIVISIONS_PER_SIDE,
   SPLIT_GRIDS,
   TOOL_LABELS,
@@ -305,18 +306,20 @@ function starting(): Draft {
  */
 export function PictureToolDialog() {
   const opened = useEditorStore((state) => state.pictureTool);
-  // Standing aside for the marking entry has to be complete, keys included: an
-  // Escape listener left running here would close the dialog that is open as
-  // well as the one that is not.
-  const asked = opened?.tool === "repaint" ? null : opened;
+  // Standing aside for an entry with a dialog of its own has to be complete,
+  // keys included: an Escape listener left running here would close the dialog
+  // that is open as well as the one that is not. What each of those two asks for
+  // is not a set of numbers — one is a region drawn on the picture and the other
+  // is a question put to a model that can see it.
+  const tool = opened && isPictureTool(opened.tool) ? opened.tool : null;
+  const asked = tool === null ? null : opened;
   const moka = useProjectStore((state) => state.moka);
   const [draft, setDraft] = useState<Draft>(starting);
   const [size, setSize] = useState<Size | null>(null);
   const [unread, setUnread] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const tool = asked?.tool ?? null;
-  const key = asked ? `${asked.nodeId}:${asked.assetId}:${asked.tool}` : null;
+  const key = asked ? `${asked.nodeId}:${asked.assetId}:${tool}` : null;
 
   useEffect(() => {
     if (!asked) return;
@@ -361,9 +364,7 @@ export function PictureToolDialog() {
     });
   }, [size]);
 
-  // The marking entry has a dialog of its own, since what it asks for is a region
-  // drawn on the picture rather than one written in numbers.
-  if (!asked || tool === null || tool === "repaint") return null;
+  if (!asked || tool === null) return null;
   const entry = moka ? buildResourceIndex(moka).get(asked.assetId) : undefined;
   if (!entry) return null;
 

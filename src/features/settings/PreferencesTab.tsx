@@ -14,6 +14,7 @@ import {
 } from "../../shared/domain";
 import { useProviderStore } from "./providerStore";
 import {
+  ASKING_A_MODEL,
   BAR_ENTRIES,
   PICTURE_TOOLS,
   TOOL_LABELS,
@@ -302,8 +303,10 @@ function NodeToolChoices() {
       <p className="settings-hint">
         {PICTURE_TOOLS.map((tool) => TOOL_LABELS[tool]).join(", ")} work on the
         pixels a picture already has, so they cost nothing and give the same
-        answer twice. {TOOL_LABELS.repaint} is the one that does not: it marks a
-        region and hands it to a model, so it costs what an ask costs.
+        answer twice.{" "}
+        {ASKING_A_MODEL.map((tool) => TOOL_LABELS[tool]).join(" and ")} do not:
+        each hands the picture to a model, one with a region marked on it and
+        one with a question about it, so each costs what an ask costs.
       </p>
       <p className="settings-hint">
         None of them rewrites the file a node holds: what they make is filed

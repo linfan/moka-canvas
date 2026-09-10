@@ -926,6 +926,86 @@ export async function fileRepaint(ask: RepaintAsk): Promise<NodeId | null> {
   return node.id;
 }
 
+/** The port the words read out of a picture are fed back through. */
+const PROMPT_PORT = "prompt";
+
+export interface DescriptionAsk {
+  nodeId: NodeId;
+  /** The name of the picture the words were read out of. */
+  sourceName: string;
+  /** What the model said, which is what gets filed. */
+  words: string;
+}
+
+/**
+ * Files the words a model read out of a picture as a text node of their own,
+ * wired back into the picture's prompt.
+ *
+ * Filed as a node rather than written into the picture's own ask, so that what a
+ * model guessed is on the canvas where it can be read, corrected and let go of
+ * rather than hiding in a field: a description is a first draft of a prompt and
+ * rarely the last word on one. Wiring it back is what makes the picture askable
+ * again from the words it was read back as, which is the whole of the point.
+ *
+ * A prompt takes as many wires as it is given, so a second reading joins the
+ * first rather than taking it over — and nothing already wired in is touched,
+ * since one of those wires may be a node the reader wrote by hand.
+ *
+ * Null when nothing was filed: a subject this canvas has lost, or a refusal
+ * from the document, which is said out loud here rather than left to be read in
+ * the dialog that asked.
+ */
+export function fileDescription(ask: DescriptionAsk): NodeId | null {
+  const canvas = activeCanvas();
+  const subject = canvas ? findNode(canvas, ask.nodeId) : undefined;
+  if (!canvas || !subject) return null;
+  const sink = subject.ports.find((port) => port.id === PROMPT_PORT);
+  if (!sink) return null;
+
+  // To the left, where an input comes from, and below whatever already feeds this
+  // prompt: a picture read back twice over has two sets of words on the canvas
+  // and the second has to land where a reader can see it.
+  const fed = canvas.edges
+    .filter(
+      (edge) =>
+        edge.target.nodeId === subject.id && edge.target.portId === sink.id,
+    )
+    .map((edge) => findNode(canvas, edge.source.nodeId))
+    .filter((node): node is WorkflowNode => Boolean(node));
+  const node = createNode("text", {
+    x: subject.bounds.x - BESIDE_GAP_PX - DEFAULT_NODE_WIDTH,
+    y:
+      fed.length === 0
+        ? subject.bounds.y
+        : Math.max(...fed.map((entry) => entry.bounds.y)) + CASCADE_DROP_OFFSET,
+  });
+  node.title = `Words for ${ask.sourceName}`;
+  node.data = { content: ask.words.slice(0, MAX_TEXT_CONTENT_LENGTH) };
+  const out = node.ports.find((port) => port.direction === "output");
+  if (!out) return null;
+
+  const filed = execute("Read a picture back as words", [
+    { type: "addNode", canvasId: canvas.id, node },
+    {
+      type: "addEdge",
+      canvasId: canvas.id,
+      edge: {
+        id: newId(),
+        source: { nodeId: node.id, portId: out.id },
+        target: { nodeId: subject.id, portId: sink.id },
+        createdAt: nowIso(),
+      },
+    },
+  ]);
+  if (!filed) return null;
+
+  // Selected rather than the picture: what a reader wants next is the words, and
+  // they are on this node.
+  useEditorStore.getState().selectOnly(node.id);
+  announce(`Read ${ask.sourceName} back as words`);
+  return node.id;
+}
+
 /**
  * Fills a node that is waiting for something with an asset the project already
  * holds, which is the other way to fill one: nothing is asked for, so nothing

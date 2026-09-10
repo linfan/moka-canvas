@@ -49,6 +49,7 @@ import { TextEditOverlay } from "./components/TextEditOverlay";
 import { PromptPanel } from "./components/PromptPanel";
 import { RunHint } from "./components/RunHint";
 import { NodeActionBar } from "./components/NodeActionBar";
+import { DescribeDialog } from "./components/DescribeDialog";
 import { PictureToolDialog } from "./components/PictureToolDialog";
 import { RepaintDialog } from "./components/RepaintDialog";
 
@@ -392,6 +393,7 @@ export function EditorPage() {
       <AssetPreviewDialog />
       <PictureToolDialog />
       <RepaintDialog />
+      <DescribeDialog />
       {exportOpen && (
         <ExportDialog
           busy={exportBusy}
