@@ -367,6 +367,128 @@ export function ungroupSelection() {
   }
 }
 
+/** The edge an arrangement lines the selected nodes up on. */
+export type AlignEdge =
+  "left" | "center" | "right" | "top" | "middle" | "bottom";
+
+/** Which way an arrangement spreads the selected nodes out. */
+export type ArrangeAxis = "horizontal" | "vertical";
+
+/** Which dimension an arrangement levels off. */
+export type SizeAxis = "width" | "height";
+
+/**
+ * The selected nodes an arrangement works on. Group frames are left out the way
+ * they are left out of grouping: a frame stands for its members, and they are in
+ * the selection themselves, so moving the frame as well would count them twice
+ * and leave it describing a place its members no longer fill.
+ */
+function selectedArrangement(canvas: CanvasDocument): WorkflowNode[] {
+  const { nodeIds } = useEditorStore.getState().selection;
+  return nodeIds
+    .map((nodeId) => findNode(canvas, nodeId))
+    .filter(
+      (node): node is WorkflowNode =>
+        node !== undefined && node.kind !== "group",
+    );
+}
+
+/** Lines the selected nodes up on one edge of the room they take up together. */
+export function alignNodes(edge: AlignEdge) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const nodes = selectedArrangement(canvas);
+  if (nodes.length < 2) return;
+  const frame = unionBounds(nodes.map((node) => node.bounds));
+  const positions: Record<NodeId, Point> = {};
+  for (const node of nodes) {
+    const { x, y, width, height } = node.bounds;
+    let moved: Point = { x, y };
+    if (edge === "left") moved = { x: frame.x, y };
+    else if (edge === "center")
+      moved = { x: frame.x + (frame.width - width) / 2, y };
+    else if (edge === "right") moved = { x: frame.x + frame.width - width, y };
+    else if (edge === "top") moved = { x, y: frame.y };
+    else if (edge === "middle")
+      moved = { x, y: frame.y + (frame.height - height) / 2 };
+    else moved = { x, y: frame.y + frame.height - height };
+    if (moved.x !== x || moved.y !== y) positions[node.id] = moved;
+  }
+  if (Object.keys(positions).length === 0) return;
+  const commands: DocumentCommand[] = [
+    { type: "moveNodes", canvasId: canvas.id, positions },
+  ];
+  if (execute(`Align ${edge}`, commands)) {
+    announce(`Aligned ${nodes.length} nodes`);
+  }
+}
+
+/**
+ * Spreads the nodes between the two ends so the room from one to the next is
+ * the same. The ends stay put, which is what makes this a tidy-up rather than a
+ * second arrangement.
+ */
+export function distributeNodes(axis: ArrangeAxis) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const nodes = selectedArrangement(canvas);
+  if (nodes.length < 3) return;
+  const along = axis === "horizontal" ? "x" : "y";
+  const extent = (node: WorkflowNode) =>
+    axis === "horizontal" ? node.bounds.width : node.bounds.height;
+  const sorted = [...nodes].sort((a, b) => a.bounds[along] - b.bounds[along]);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const start = first.bounds[along];
+  const end = last.bounds[along] + extent(last);
+  const taken = sorted.reduce((total, node) => total + extent(node), 0);
+  const gap = (end - start - taken) / (sorted.length - 1);
+  const positions: Record<NodeId, Point> = {};
+  let cursor = start;
+  for (const node of sorted) {
+    const { x, y } = node.bounds;
+    const moved: Point =
+      axis === "horizontal" ? { x: cursor, y } : { x, y: cursor };
+    cursor += extent(node) + gap;
+    if (moved.x !== x || moved.y !== y) positions[node.id] = moved;
+  }
+  if (Object.keys(positions).length === 0) return;
+  const commands: DocumentCommand[] = [
+    { type: "moveNodes", canvasId: canvas.id, positions },
+  ];
+  if (execute(`Distribute ${axis}`, commands)) {
+    announce(`Spread ${nodes.length} nodes evenly`);
+  }
+}
+
+/** Gives every selected node the width — or the height — of the widest one. */
+export function equalizeNodes(axis: SizeAxis) {
+  const canvas = activeCanvas();
+  if (!canvas) return;
+  const nodes = selectedArrangement(canvas);
+  if (nodes.length < 2) return;
+  const extent = (node: WorkflowNode) =>
+    axis === "width" ? node.bounds.width : node.bounds.height;
+  const target = Math.max(...nodes.map(extent));
+  const commands: DocumentCommand[] = [];
+  for (const node of nodes) {
+    if (extent(node) === target) continue;
+    commands.push({
+      type: "resizeNode",
+      canvasId: canvas.id,
+      nodeId: node.id,
+      bounds:
+        axis === "width"
+          ? { ...node.bounds, width: target }
+          : { ...node.bounds, height: target },
+    });
+  }
+  if (commands.length === 0) return;
+  if (execute(`Same ${axis}`, commands)) {
+    announce(`Gave ${nodes.length} nodes the same ${axis}`);
+  }
+}
+
 /**
  * Commits a port-to-port connection. An occupied cardinality-one input is
  * replaced explicitly: the old edge is removed in the same history entry.

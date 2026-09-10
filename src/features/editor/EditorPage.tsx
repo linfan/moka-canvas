@@ -39,6 +39,7 @@ import { TextEditOverlay } from "./components/TextEditOverlay";
 import { PromptPanel } from "./components/PromptPanel";
 import { RunHint } from "./components/RunHint";
 import { NodeActionBar } from "./components/NodeActionBar";
+import { SelectionActionBar } from "./components/SelectionActionBar";
 import { DescribeDialog } from "./components/DescribeDialog";
 import { PictureToolDialog } from "./components/PictureToolDialog";
 import { RepaintDialog } from "./components/RepaintDialog";
@@ -235,6 +236,7 @@ export function EditorPage() {
         >
           <CanvasSurface />
           <NodeActionBar />
+          <SelectionActionBar />
           <RenameOverlay />
           <TextEditOverlay />
           <PromptPanel />

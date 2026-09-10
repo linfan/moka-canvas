@@ -20,12 +20,15 @@ import { useHistoryStore } from "../stores/historyStore";
 import { useProjectStore } from "../stores/projectStore";
 import {
   addNodeAt,
+  alignNodes,
   checkConnection,
   chooseResult,
   choosableResults,
   connectPorts,
   copySelection,
+  distributeNodes,
   editTextContent,
+  equalizeNodes,
   groupSelection,
   marqueeSelect,
   moveNodes,
@@ -583,6 +586,113 @@ describe("chooseResult", () => {
     chooseResult(ids.image, "result");
 
     expect(useHistoryStore.getState().undoStack).toHaveLength(0);
+  });
+});
+
+describe("arranging a selection", () => {
+  function select(nodeIds: string[]) {
+    useEditorStore.getState().setSelection({ nodeIds, edgeIds: [] });
+  }
+
+  function boundsOf(nodeId: string) {
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    return findNode(canvas, nodeId)!.bounds;
+  }
+
+  it("lines the selected nodes up on the edge asked for", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    select([ids.text, ids.operation]);
+
+    alignNodes("left");
+
+    expect(boundsOf(ids.operation)).toMatchObject({ x: -320, y: -120 });
+    expect(boundsOf(ids.text)).toMatchObject({ x: -320, y: -120 });
+    undo();
+    expect(boundsOf(ids.operation).x).toBe(40);
+  });
+
+  it("writes nothing when everyone is already on the line", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    select([ids.text, ids.operation]);
+    const before = useHistoryStore.getState().undoStack.length;
+
+    alignNodes("top");
+
+    expect(useHistoryStore.getState().undoStack.length).toBe(before);
+  });
+
+  it("spreads the middle nodes so the room between neighbours matches", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    moveNodes({ [ids.export]: { x: 700, y: -120 } });
+    select([ids.text, ids.operation, ids.export]);
+
+    distributeNodes("horizontal");
+
+    // The ends stay put and the node between them takes the middle it leaves.
+    expect(boundsOf(ids.text).x).toBe(-320);
+    expect(boundsOf(ids.operation).x).toBe(180);
+    expect(boundsOf(ids.export).x).toBe(700);
+  });
+
+  it("leaves two nodes to the ends they already have", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    select([ids.text, ids.operation]);
+    const before = useHistoryStore.getState().undoStack.length;
+
+    distributeNodes("horizontal");
+
+    expect(useHistoryStore.getState().undoStack.length).toBe(before);
+  });
+
+  it("gives every selected node the widest node's width", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    select([ids.text, ids.operation]);
+
+    equalizeNodes("width");
+
+    expect(boundsOf(ids.text)).toMatchObject({
+      x: -320,
+      y: -120,
+      width: 300,
+      height: 200,
+    });
+    expect(boundsOf(ids.operation).width).toBe(300);
+    undo();
+    expect(boundsOf(ids.text).width).toBe(280);
+  });
+
+  it("levels the height the same way", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    select([ids.text, ids.operation]);
+
+    equalizeNodes("height");
+
+    expect(boundsOf(ids.text).height).toBe(220);
+    expect(boundsOf(ids.operation).height).toBe(220);
+  });
+
+  it("arranges the members of a selection rather than a frame over them", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    select([ids.text, ids.image]);
+    groupSelection();
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    const groupId = canvas.groups[0].groupId;
+    const frame = { ...boundsOf(groupId) };
+
+    select([groupId, ids.operation]);
+    equalizeNodes("width");
+    alignNodes("left");
+
+    // One member is nothing to arrange, so neither act touched anything.
+    expect(boundsOf(groupId)).toEqual(frame);
+    expect(boundsOf(ids.operation).x).toBe(40);
   });
 });
 
