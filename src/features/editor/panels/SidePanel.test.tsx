@@ -160,4 +160,47 @@ describe("the resource shelf", () => {
     expect(JSON.parse(String(options?.body))).toEqual({ favorite: true });
     expect(useProjectStore.getState().moka?.metadata.revision).toBe(12);
   });
+
+  it("refiles an entry with the words and note written on its row", async () => {
+    const moka = openShelf(buildShelfMokaFile());
+    const text = moka.resources.texts[0] as ResourceEntry;
+    fetchMock.mockImplementation((_input, init) => {
+      const edit = JSON.parse(String(init?.body)) as Partial<ResourceEntry>;
+      return Promise.resolve(
+        json({
+          entry: { ...text, ...edit },
+          revision: 13,
+          updatedAt: "2026-01-02T00:00:00.000Z",
+        }),
+      );
+    });
+    render(<SidePanel />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Tag opening-lines.md" }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Words to file opening-lines.md under"),
+      { target: { value: "openers, dusk, openers" } },
+    );
+    fireEvent.change(screen.getByLabelText("Note about opening-lines.md"), {
+      target: { value: "Worth an opening." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(useProjectStore.getState().moka?.resources.texts[0].note).toBe(
+        "Worth an opening.",
+      );
+    });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain(`/api/v1/projects/current/assets/${text.id}`);
+    expect(options?.method).toBe("PATCH");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      tags: ["openers", "dusk"],
+      note: "Worth an opening.",
+    });
+    expect(useProjectStore.getState().moka?.resources.texts[0].tags).toEqual([
+      "openers",
+      "dusk",
+    ]);
+  });
 });

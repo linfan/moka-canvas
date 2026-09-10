@@ -15,6 +15,7 @@ import { buildIssueIndex, formatBytes } from "../canvas/mediaCards";
 import {
   ASSET_DRAG_MIME,
   assetReferencingNodeIds,
+  editShelfEntry,
   fitSelectionAction,
   importFiles,
   markAssetKeeper,
@@ -111,6 +112,60 @@ function thumbOf(entry: ResourceEntry): string | null {
   return entry.mime === "video/mp4" && poster ? assetUrl(poster) : null;
 }
 
+/**
+ * The words an entry is filed under and whatever was noted about it, offered
+ * right on the row. Only the registry entry is written, so adding a word costs
+ * nothing of the file it names.
+ */
+function ShelfEditor({
+  entry,
+  onDone,
+}: {
+  entry: ResourceEntry;
+  onDone: () => void;
+}) {
+  const [tags, setTags] = useState(() => (entry.tags ?? []).join(", "));
+  const [note, setNote] = useState(entry.note ?? "");
+  return (
+    <form
+      className="resource-editor"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const words = tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean);
+        void editShelfEntry(entry, {
+          tags: [...new Set(words)],
+          note: note.trim(),
+        });
+        onDone();
+      }}
+    >
+      <input
+        aria-label={`Words to file ${entry.name} under`}
+        className="resource-editor-tags"
+        onChange={(event) => setTags(event.target.value)}
+        placeholder="Words, comma separated"
+        value={tags}
+      />
+      <textarea
+        aria-label={`Note about ${entry.name}`}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder="What is worth remembering"
+        rows={2}
+        value={note}
+      />
+      <div className="resource-editor-actions">
+        <button type="submit">Save</button>
+        <button onClick={onDone} type="button">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function ResourceRow({
   entry,
   broken,
@@ -120,6 +175,7 @@ function ResourceRow({
 }) {
   const openPreview = useEditorStore((state) => state.openPreview);
   const moka = useProjectStore((state) => state.moka);
+  const [editing, setEditing] = useState(false);
   const uses = assetReferencingNodeIds(entry.id).length;
   const maker = makerOf(moka, entry.provenance?.operationNodeId);
   const keeper = entry.favorite === true;
@@ -167,6 +223,16 @@ function ResourceRow({
           ★
         </button>
         <button
+          aria-label={`Tag ${entry.name}`}
+          aria-pressed={editing}
+          className={`resource-action${editing ? " is-active" : ""}`}
+          onClick={() => setEditing((current) => !current)}
+          title="Words and notes"
+          type="button"
+        >
+          Tag
+        </button>
+        <button
           aria-label={`Preview ${entry.name}`}
           className="resource-action"
           onClick={() => openPreview(entry.id)}
@@ -204,6 +270,9 @@ function ResourceRow({
           </button>
         )}
       </span>
+      {editing && (
+        <ShelfEditor entry={entry} onDone={() => setEditing(false)} />
+      )}
     </li>
   );
 }

@@ -747,8 +747,35 @@ h2 {
   display: grid;
   grid-template-areas:
     "thumb main main"
-    "said said actions";
+    "said said actions"
+    "editor editor editor";
   grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.resource-editor {
+  display: grid;
+  gap: 4px;
+  grid-area: editor;
+  padding: 6px 0 2px;
+}
+
+.resource-editor input,
+.resource-editor textarea {
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 100%;
+}
+
+.resource-editor-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.resource-editor-actions button {
+  font-size: 11px;
+  padding: 2px 8px;
 }
 
 .resource-main {

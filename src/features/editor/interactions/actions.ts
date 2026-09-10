@@ -27,7 +27,7 @@ import {
   type ResourceEntry,
   type WorkflowNode,
 } from "../../../shared/domain";
-import { assetsApi, assetUrl } from "../../../api";
+import { assetsApi, assetUrl, type AssetShelfEdit } from "../../../api";
 import {
   toolsApi,
   type PictureTool,
@@ -578,6 +578,28 @@ export async function markAssetKeeper(
       updatedAt: change.updatedAt,
     });
     announce(`${entry.name} ${keeper ? "is a keeper" : "is no keeper"}`);
+  } catch (error) {
+    toastError(
+      error instanceof Error ? error.message : "Could not write to the shelf",
+    );
+  }
+}
+
+/**
+ * Writes down the words an entry is filed under and whatever was noted about
+ * it. The file underneath is not touched.
+ */
+export async function editShelfEntry(
+  entry: ResourceEntry,
+  edit: AssetShelfEdit,
+): Promise<void> {
+  try {
+    const change = await assetsApi.patchShelf(entry.id, edit);
+    useProjectStore.getState().integrateAssetEntry(change.entry, {
+      revision: change.revision,
+      updatedAt: change.updatedAt,
+    });
+    announce(`Refiled ${change.entry.name}`);
   } catch (error) {
     toastError(
       error instanceof Error ? error.message : "Could not write to the shelf",
