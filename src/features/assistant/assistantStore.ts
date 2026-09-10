@@ -6,6 +6,7 @@ import type {
   CanvasId,
   DocumentCommand,
   NodeId,
+  NodeKind,
   RunId,
   SessionId,
   WorkflowNode,
@@ -77,6 +78,18 @@ interface AssistantState {
     canvas: CanvasDocument;
     chosen: readonly NodeId[];
   }) => Promise<void>;
+  /**
+   * Asks the card a line named to do its work over, and keeps only the answer.
+   *
+   * The question is already in the conversation and the card is already on the
+   * canvas, so a retry writes one line rather than a whole turn: repeating the
+   * ask would put a second card where one already stands and pay for it.
+   */
+  retry: (
+    canvas: CanvasDocument,
+    sessionId: SessionId,
+    line: AssistantMessage,
+  ) => Promise<void>;
   stop: () => void;
 }
 
@@ -104,7 +117,7 @@ function lineCount(canvasId: CanvasId, sessionId: SessionId): number | null {
 }
 
 /**
- * Writes a finished turn to the document, as one thing to undo.
+ * Writes what a turn ended with to the document, as one thing to undo.
  *
  * A first turn starts the conversation it is the first of and is named after
  * what was asked, so a conversation is never in the document with nothing in
@@ -118,30 +131,31 @@ function lineCount(canvasId: CanvasId, sessionId: SessionId): number | null {
 function keep(
   canvas: CanvasDocument,
   target: SessionTarget,
-  question: AssistantMessage,
-  answer: AssistantMessage,
+  label: string,
+  lines: readonly [AssistantMessage, ...AssistantMessage[]],
 ): void {
-  const lines = [question, answer];
   const before = target.opening ? null : lineCount(canvas.id, target.id);
+  const first = lines[0];
+  const last = lines[lines.length - 1];
   const command: DocumentCommand = target.opening
     ? {
         type: "addSession",
         canvasId: canvas.id,
         session: {
           id: target.id,
-          title: titleFor(question.text),
-          messages: lines,
-          createdAt: question.createdAt,
-          updatedAt: answer.createdAt,
+          title: titleFor(first.text),
+          messages: [...lines],
+          createdAt: first.createdAt,
+          updatedAt: last.createdAt,
         },
       }
     : {
         type: "appendMessages",
         canvasId: canvas.id,
         sessionId: target.id,
-        messages: lines,
+        messages: [...lines],
       };
-  if (!execute("Ask the assistant", [command])) return;
+  if (!execute(label, [command])) return;
   if (before === null) return;
   const lost = before + lines.length - (lineCount(canvas.id, target.id) ?? 0);
   if (lost > 0) {
@@ -151,6 +165,49 @@ function keep(
         : `${lost} old lines let go to keep the conversation readable. Undo brings them back.`;
     useEditorStore.getState().announce(words);
   }
+}
+
+/**
+ * The line a run is recorded as having said, once it has ended.
+ *
+ * Shared by the ask that made the run and the one that asked for it again, so
+ * both answer in the same words about the same card, and neither reads as a
+ * different kind of turn from the other.
+ */
+async function lineOfRun(options: {
+  runId: RunId;
+  nodeId: NodeId;
+  kind: NodeKind;
+}): Promise<AssistantMessage> {
+  const { runId, nodeId, kind } = options;
+  const settled = await untilRunEnds(runId);
+  // The record says a run is over before the document it changed does: what a
+  // run made arrives by the server rewriting it, and a turn written onto the
+  // reading that is on its way out would be replaced by it a moment later.
+  await useProjectStore.getState().untilAdopted();
+  const step = settled?.steps.find((entry) => entry.nodeId === nodeId);
+  const summary = madeWords(kind, step?.outputAssetIds?.length ?? 0);
+  if (settled?.status === "succeeded") {
+    return lineFromRun({ summary, runId, nodeId, at: nowIso() });
+  }
+  const stopped = settled?.status === "cancelled";
+  return lineFromRun({
+    summary,
+    runId,
+    nodeId,
+    at: nowIso(),
+    failure: {
+      message: stopped
+        ? "Stopped. The card is on the canvas to ask again."
+        : (step?.error ??
+          settled?.error ??
+          "The card did not come back with anything."),
+      code: stopped ? "GENERATION_CANCELLED" : "PROVIDER_UNAVAILABLE",
+      // A run that did not finish is asked again from the record, which is
+      // what the line names, so nothing is spent twice by accident.
+      retryable: true,
+    },
+  });
 }
 
 /**
@@ -215,44 +272,9 @@ async function answerByCard(options: {
     return { question, answer: lineFailed(error, nowIso()) };
   }
 
-  const settled = await untilRunEnds(runId);
-  // The record says a run is over before the document it changed does: what a
-  // run made arrives by the server rewriting it, and a turn written onto the
-  // reading that is on its way out would be replaced by it a moment later.
-  await useProjectStore.getState().untilAdopted();
-  const step = settled?.steps.find((entry) => entry.nodeId === plan.nodeId);
-  const summary = madeWords(ask.kind, step?.outputAssetIds?.length ?? 0);
-  if (settled?.status === "succeeded") {
-    return {
-      question,
-      answer: lineFromRun({
-        summary,
-        runId,
-        nodeId: plan.nodeId,
-        at: nowIso(),
-      }),
-    };
-  }
-  const stopped = settled?.status === "cancelled";
   return {
     question,
-    answer: lineFromRun({
-      summary,
-      runId,
-      nodeId: plan.nodeId,
-      at: nowIso(),
-      failure: {
-        message: stopped
-          ? "Stopped. The card is on the canvas to ask again."
-          : (step?.error ??
-            settled?.error ??
-            "The card did not come back with anything."),
-        code: stopped ? "GENERATION_CANCELLED" : "PROVIDER_UNAVAILABLE",
-        // A run that did not finish is asked again from the record, which is
-        // what the line names, so nothing is spent twice by accident.
-        retryable: true,
-      },
-    }),
+    answer: await lineOfRun({ runId, nodeId: plan.nodeId, kind: ask.kind }),
   };
 }
 
@@ -383,7 +405,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
               set({ saying: words }),
             )
           : await answerByCard({ canvas, nodes, ask, sessionId: target.id });
-      keep(canvas, target, turn.question, turn.answer);
+      keep(canvas, target, "Ask the assistant", [turn.question, turn.answer]);
       // A conversation the turn opened is one the reader is now in: left
       // unnamed, the next turn would open a second one beside it.
       if (target.opening) set({ shown: target.id });
@@ -391,6 +413,54 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       going = null;
       goingRun = null;
       set({ busy: false, asking: null, saying: "" });
+    }
+  },
+
+  retry: async (canvas, sessionId, line) => {
+    if (going !== null) return;
+    const made = line.toolCalls?.[0];
+    const nodeId = made?.nodeId;
+    if (!made || !nodeId) return;
+    const card = canvas.nodes.find((node) => node.id === nodeId);
+    if (!card) {
+      useEditorStore
+        .getState()
+        .announce("The card that answer named is no longer on the canvas.");
+      return;
+    }
+    // Saying what is paid for again, because the card was not: it is the making
+    // that failed, and the ask that failed with it is still in this conversation.
+    if (
+      !window.confirm(
+        `Ask “${card.title}” to make it again? The card is already on the canvas, so only the making is paid for.`,
+      )
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    going = controller;
+    set({ busy: true });
+    try {
+      const record = await useRunStore.getState().retry(made.runId);
+      goingRun = record.id;
+      const answer = await lineOfRun({
+        runId: record.id,
+        nodeId,
+        kind: card.kind,
+      });
+      // Only the answer: the question was kept the first time and is still the
+      // line above, and a second copy of it would read as a second ask.
+      keep(canvas, { id: sessionId, opening: false }, "Ask the card again", [
+        answer,
+      ]);
+    } catch {
+      // The run layer has already said why the retry was refused. Writing a line
+      // about it would be two failures for one ask that never started.
+    } finally {
+      going = null;
+      goingRun = null;
+      set({ busy: false });
     }
   },
 

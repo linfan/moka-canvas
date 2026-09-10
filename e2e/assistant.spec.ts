@@ -263,6 +263,44 @@ test("an answer goes back onto the canvas, over a card or as one of its own", as
   expect(laid?.data?.content).toBe(SENTENCE);
 });
 
+test("a question already asked can be had back without asking it twice", async ({
+  page,
+}) => {
+  await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
+  await configureTextChannel(STORYTELLER);
+
+  await openWithWords(
+    page,
+    "Asked Back Into The Field",
+    join(projectHome("assistant-again"), "project"),
+    "A lantern floats over a quiet lake at dusk.",
+  );
+  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+
+  const asked = "What does the brief say?";
+  const field = page.getByLabel("Ask about this canvas");
+  await field.fill(asked);
+  await page.getByRole("button", { name: "Send: Ask" }).click();
+  await expect(page.locator(".assistant-line.is-assistant")).toContainText(
+    SENTENCE,
+    { timeout: 15_000 },
+  );
+
+  await page
+    .locator(".assistant-line.is-user")
+    .getByRole("button", { name: "Ask again" })
+    .click();
+  await expect(field).toHaveValue(asked);
+  // Having the words back is not an ask: nothing was sent and nothing was kept,
+  // so the conversation is still the one turn it was.
+  expect(await providerCalls()).toHaveLength(1);
+  await expect
+    .poll(async () => (await servedSessions())[0]?.messages.length, {
+      timeout: 10_000,
+    })
+    .toBe(2);
+});
+
 test("a canvas holds several conversations, and reads the one it was pointed at", async ({
   page,
 }) => {

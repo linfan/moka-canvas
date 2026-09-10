@@ -105,22 +105,41 @@ function Line({
   );
 }
 
+/** The last thing asked at or above a line, which is what asking again repeats. */
+function askedAbove(lines: readonly AssistantMessage[], index: number): string {
+  for (let at = index; at >= 0; at -= 1) {
+    if (lines[at].role === "user") return lines[at].text;
+  }
+  return "";
+}
+
 /**
  * What a kept line can be done with.
  *
  * Only kept lines: an answer still arriving has nothing to file yet, and a
  * question is already on the canvas as the cards it was about.
+ *
+ * A question can be had back rather than re-typed, and a card whose making came
+ * back empty can be asked to make again — but not the question with it, since
+ * the card already stands on the canvas and paying for a second one is not what
+ * a retry means.
  */
 function LineActions({
   canvas,
   chosen,
   line,
   filed,
+  asked,
+  onAskAgain,
+  onRetry,
 }: {
   canvas: CanvasDocument;
   chosen: readonly NodeId[];
   line: AssistantMessage;
   filed: Map<RunId, readonly ResourceEntry[]>;
+  asked: string;
+  onAskAgain: (words: string) => void;
+  onRetry: (line: AssistantMessage) => void;
 }) {
   const made = line.toolCalls?.[0];
   if (made) {
@@ -140,10 +159,38 @@ function LineActions({
             Show in assets
           </button>
         )}
+        {onto !== undefined && line.failure?.retryable && (
+          <button
+            onClick={() => onRetry(line)}
+            title="Ask this card to make it again, paying for the making and not for a second card"
+            type="button"
+          >
+            Ask the card again
+          </button>
+        )}
       </div>
     );
   }
-  if (line.role !== "assistant" || line.text.trim() === "") return null;
+  if (line.role === "user") {
+    return (
+      <div className="assistant-line-actions">
+        <button onClick={() => onAskAgain(line.text)} type="button">
+          Ask again
+        </button>
+      </div>
+    );
+  }
+  if (line.role === "error") {
+    if (asked.trim() === "") return null;
+    return (
+      <div className="assistant-line-actions">
+        <button onClick={() => onAskAgain(asked)} type="button">
+          Ask again
+        </button>
+      </div>
+    );
+  }
+  if (line.text.trim() === "") return null;
   const target = overwriteTarget(canvas, chosen);
   const file = answerFile(line.text);
   return (
@@ -369,7 +416,8 @@ export function AssistantPanel() {
     }
   }, [asking, saying]);
 
-  const lines = canvas ? (sessionShown(canvas, shown)?.messages ?? []) : [];
+  const carrying = canvas ? sessionShown(canvas, shown) : null;
+  const lines = carrying?.messages ?? [];
   const summary = referenceSummary(planned?.references ?? []);
   const capability = capabilityFor(intent);
   const noModel =
@@ -386,6 +434,22 @@ export function AssistantPanel() {
   const send = () => {
     if (!canvas || !canAsk) return;
     void useAssistantStore.getState().ask({ canvas, chosen });
+  };
+
+  // A question had back is put in the field rather than sent, because it travels
+  // as the words that were kept and what it named may no longer be there.
+  const askAgain = (words: string) => {
+    useAssistantStore.getState().setDraft(words);
+    areaRef.current?.focus();
+    useEditorStore
+      .getState()
+      .announce("The question is back in the field, nothing sent yet.");
+  };
+
+  const retryLine = (line: AssistantMessage) => {
+    if (canvas && carrying) {
+      void useAssistantStore.getState().retry(canvas, carrying.id, line);
+    }
   };
 
   return (
@@ -411,15 +475,18 @@ export function AssistantPanel() {
               </p>
             )}
             <ol>
-              {lines.map((line) => (
+              {lines.map((line, index) => (
                 <Line
                   about={line.references}
                   actions={
                     <LineActions
+                      asked={askedAbove(lines, index)}
                       canvas={canvas}
                       chosen={chosen}
                       filed={filed}
                       line={line}
+                      onAskAgain={askAgain}
+                      onRetry={retryLine}
                     />
                   }
                   key={line.id}

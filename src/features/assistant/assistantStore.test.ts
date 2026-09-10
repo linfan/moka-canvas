@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  AssistantMessage,
   AssistantSession,
   DocumentCommand,
   MokaFile,
@@ -119,6 +120,9 @@ function sessionsOf() {
  * brings what the run made. The last returns what the store is already holding,
  * which is what lets a test see whether a line written after the run landed on
  * the document the run changed or on the reading that was there before it.
+ *
+ * A run asked again from one that did not finish is served as its own record,
+ * which is what a retry waits on rather than on the failure it came from.
  */
 function stubRunServer(
   options: {
@@ -127,10 +131,14 @@ function stubRunServer(
     stepError?: string;
     /** Keeps the record unreadable until the test says, so a wait can be stopped. */
     holdRecord?: boolean;
+    /** What the run asked again from the first one comes back as. */
+    retryStatus?: RunStatus;
+    retryMade?: number;
   } = {},
 ) {
   const T = "2026-01-01T00:00:00.000Z";
   const runId = "r-asked";
+  const againId = "r-asked-again";
   const order: string[] = [];
   const started: { nodeIds: NodeId[]; askedBy: SessionId | null } = {
     nodeIds: [],
@@ -140,8 +148,8 @@ function stubRunServer(
   let held: Promise<void> = Promise.resolve();
   const settled = options.status ?? "succeeded";
 
-  const record = (status: RunStatus): RunRecord => ({
-    id: runId,
+  const record = (status: RunStatus, id: string, made: number): RunRecord => ({
+    id,
     projectId: "p-1",
     canvasId: board(useProjectStore.getState().moka!).id,
     requestedNodeIds: started.nodeIds,
@@ -154,10 +162,10 @@ function stubRunServer(
       nodeId,
       status,
       ...(options.stepError ? { error: options.stepError } : {}),
-      ...(status === "succeeded" && (options.made ?? 0) > 0
+      ...(status === "succeeded" && made > 0
         ? {
             outputAssetIds: Array.from(
-              { length: options.made ?? 0 },
+              { length: made },
               (_, at) => `asset-made-${at}`,
             ),
           }
@@ -195,16 +203,30 @@ function stubRunServer(
           land = resolve;
         });
       }
-      return json(record("queued"));
+      return json(record("queued", runId, 0));
+    }
+    if (method === "POST" && path.endsWith("/retry")) {
+      order.push("retry");
+      return json(record("queued", againId, 0));
     }
     if (method === "POST" && path.endsWith("/cancel")) {
       order.push("cancel");
-      return json(record("cancelled"));
+      return json(record("cancelled", runId, 0));
     }
     if (method === "GET" && /\/current\/runs\/[^/]+$/.test(path)) {
       order.push("record");
       await held;
-      return json(record(settled));
+      const id = decodeURIComponent(path.split("/").pop() ?? "");
+      const again = id === againId;
+      return json(
+        record(
+          again ? (options.retryStatus ?? settled) : settled,
+          id,
+          again
+            ? (options.retryMade ?? options.made ?? 0)
+            : (options.made ?? 0),
+        ),
+      );
     }
     if (method === "GET" && path.endsWith("/projects/current")) {
       order.push("current");
@@ -217,7 +239,7 @@ function stubRunServer(
     throw new Error(`Nothing was stubbed for ${method} ${path}`);
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { order, started, runId, release: () => land() };
+  return { order, started, runId, againId, release: () => land() };
 }
 
 function cardOf(title: string) {
@@ -885,5 +907,119 @@ describe("keeping the conversations", () => {
     useAssistantStore.getState().removeEvery(board(moka));
 
     expect(asked).not.toHaveBeenCalled();
+  });
+});
+
+describe("asking a card again", () => {
+  it("keeps only the answer, on the run the retry made", async () => {
+    const moka = hydrate();
+    const ids = goldenNodeIds();
+    const asked = "A wider shot of the lake";
+    const server = stubRunServer({
+      status: "failed",
+      stepError: "No model would take the ask.",
+      retryStatus: "succeeded",
+      retryMade: 2,
+    });
+    useAssistantStore.getState().setIntent("image");
+    useAssistantStore.getState().setDraft(asked);
+    await useAssistantStore
+      .getState()
+      .ask({ canvas: board(moka), chosen: [ids.text] });
+
+    const card = cardOf(asked);
+    const held = sessionsOf()[0];
+    const failed = held.messages[1];
+    expect(failed.role).toBe("error");
+    const confirm = askedToConfirm(true);
+
+    await useAssistantStore
+      .getState()
+      .retry(board(useProjectStore.getState().moka!), held.id, failed);
+
+    expect(confirm).toHaveBeenCalledWith(
+      `Ask “${asked}” to make it again? The card is already on the canvas, so only the making is paid for.`,
+    );
+    // The question is already the line above, so a retry adds an answer and
+    // nothing else: a second question would read as a second ask.
+    const lines = sessionsOf()[0].messages;
+    expect(lines.map((line) => line.role)).toEqual([
+      "user",
+      "error",
+      "assistant",
+    ]);
+    expect(lines[2].text).toBe("Made 2 images");
+    expect(lines[2].toolCalls).toEqual([
+      { runId: server.againId, nodeId: card.id, summary: "Made 2 images" },
+    ]);
+    // The card that stands is the one asked again — no second one was made.
+    expect(
+      board(useProjectStore.getState().moka!).nodes.filter(
+        (node) => node.title === asked,
+      ),
+    ).toHaveLength(1);
+    expect(server.order).toContain("retry");
+    expect(useHistoryStore.getState().undoStack).toHaveLength(3);
+    expect(undo()).toBe(true);
+    expect(sessionsOf()[0].messages).toHaveLength(2);
+  });
+
+  it("says so when the card an answer named has gone", async () => {
+    hydrate();
+    seed(talked("s-1", "The first ask", 1));
+    const server = stubRunServer();
+    const asked = askedToConfirm(true);
+    const ghost: AssistantMessage = {
+      id: "m-ghost",
+      role: "error",
+      text: "The card did not come back with anything.",
+      createdAt: WHEN,
+      toolCalls: [
+        { runId: "r-gone", nodeId: "n-gone", summary: "Made nothing" },
+      ],
+      failure: { code: "PROVIDER_UNAVAILABLE", retryable: true },
+    };
+
+    await useAssistantStore
+      .getState()
+      .retry(board(useProjectStore.getState().moka!), "s-1", ghost);
+
+    expect(asked).not.toHaveBeenCalled();
+    expect(server.order).not.toContain("retry");
+    expect(sessionsOf()[0].messages).toHaveLength(1);
+    expect(useEditorStore.getState().announcement).toBe(
+      "The card that answer named is no longer on the canvas.",
+    );
+  });
+
+  it("writes nothing when the retry is answered no", async () => {
+    const moka = hydrate();
+    const ids = goldenNodeIds();
+    const asked = "A wider shot of the lake";
+    const server = stubRunServer({
+      status: "failed",
+      stepError: "No model would take the ask.",
+    });
+    useAssistantStore.getState().setIntent("image");
+    useAssistantStore.getState().setDraft(asked);
+    await useAssistantStore
+      .getState()
+      .ask({ canvas: board(moka), chosen: [ids.text] });
+
+    askedToConfirm(false);
+    const held = sessionsOf()[0];
+    await useAssistantStore
+      .getState()
+      .retry(
+        board(useProjectStore.getState().moka!),
+        held.id,
+        held.messages[1],
+      );
+
+    // A second failure line for one ask that never started would be two things
+    // to read about nothing having happened.
+    expect(server.order).not.toContain("retry");
+    expect(sessionsOf()[0].messages).toHaveLength(2);
+    expect(useAssistantStore.getState().busy).toBe(false);
   });
 });
