@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ChannelModel, ChannelView } from "../../api";
 import {
-  CAPABILITY_LABELS,
   MAX_CHANNEL_ID_LENGTH,
   MAX_CHANNEL_NAME_LENGTH,
-  MODEL_CAPABILITIES,
   PROVIDER_PROTOCOLS,
   type Capability,
   type ProviderProtocol,
@@ -12,13 +10,10 @@ import {
 import { CandidateList } from "./CandidateList";
 import { coverageOf, firstMissing } from "./coverage";
 import { CoverageChips } from "./CoverageChips";
+import { newRow, toRow, type ModelRow } from "./modelRow";
+import { ModelRows } from "./ModelRows";
 import { useProviderStore } from "./providerStore";
 import { SecretStorageNote } from "./SecretStorageNote";
-
-/** A model row plus the identity that keeps it mounted while rows come and go. */
-interface ModelRow extends ChannelModel {
-  key: number;
-}
 
 interface Form {
   id: string;
@@ -28,16 +23,6 @@ interface Form {
   enabled: boolean;
   apiKey: string;
   models: ModelRow[];
-}
-
-let nextRowKey = 1;
-
-function toRow(model: ChannelModel): ModelRow {
-  return { ...model, key: nextRowKey++ };
-}
-
-function newRow(capability: Capability = "text"): ModelRow {
-  return { id: "", capability, alias: "", enabled: true, key: nextRowKey++ };
 }
 
 function initialForm(channel: ChannelView | null): Form {
@@ -265,63 +250,11 @@ export function ChannelEditor({ channel, onDone }: Props) {
         ) : (
           <CoverageChips models={form.models} />
         )}
-        <ul className="model-list">
-          {form.models.map((model, position) => (
-            <li className="model-row" key={model.key}>
-              <input
-                aria-label={`Model ${position + 1} identifier`}
-                maxLength={MAX_CHANNEL_ID_LENGTH}
-                onChange={(event) =>
-                  editModel(model.key, { id: event.target.value })
-                }
-                placeholder="model-id"
-                value={model.id}
-              />
-              <select
-                aria-label={`Model ${position + 1} capability`}
-                onChange={(event) =>
-                  editModel(model.key, {
-                    capability: event.target.value as Capability,
-                  })
-                }
-                value={model.capability}
-              >
-                {MODEL_CAPABILITIES.map((capability) => (
-                  <option key={capability} value={capability}>
-                    {CAPABILITY_LABELS[capability]}
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label={`Model ${position + 1} display name`}
-                onChange={(event) =>
-                  editModel(model.key, { alias: event.target.value })
-                }
-                placeholder="Shown as"
-                value={model.alias}
-              />
-              <label className="settings-check">
-                <input
-                  aria-label={`Model ${position + 1} is available`}
-                  checked={model.enabled}
-                  onChange={(event) =>
-                    editModel(model.key, { enabled: event.target.checked })
-                  }
-                  type="checkbox"
-                />
-                <span>On</span>
-              </label>
-              <button
-                aria-label={`Remove model ${model.id || position + 1}`}
-                className="settings-close"
-                onClick={() => removeModel(model.key)}
-                type="button"
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
+        <ModelRows
+          models={form.models}
+          onEdit={editModel}
+          onRemove={removeModel}
+        />
 
         <div className="settings-row">
           <button

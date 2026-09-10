@@ -8,7 +8,12 @@ import {
   waitFor,
 } from "@testing-library/react";
 import App from "../../App";
-import type { ChannelDraft, ChannelView, ProvidersView } from "../../api";
+import type {
+  ChannelDraft,
+  ChannelView,
+  ModelCandidate,
+  ProvidersView,
+} from "../../api";
 import { useProviderStore } from "./providerStore";
 
 const CONFIG = {
@@ -36,6 +41,9 @@ interface Call {
 
 let view: ProvidersView;
 let calls: Call[];
+/** What the stand-in provider offers when it is asked, and how it refuses. */
+let offered: ModelCandidate[];
+let inspectRefusal: string | null;
 /** Lets a test make the next write fail the way the server would. */
 let refuseNextWrite: { status: number; code: string; message: string } | null;
 
@@ -134,6 +142,36 @@ function route(url: string, method: string, body: unknown): Response {
   if (url === "/api/v1/recent-projects") return json([]);
 
   if (path === "/api/v1/providers" && method === "GET") return json(view);
+
+  // Derives the channel identity from the address the way the server does, so
+  // the wizard can be driven through the whole path without one.
+  if (path === "/api/v1/providers/inspect" && method === "POST") {
+    const request = body as {
+      baseUrl: string;
+      apiKey?: string | null;
+      protocol?: string | null;
+    };
+    const host = request.baseUrl.replace(/^https?:\/\//, "").split("/")[0];
+    const id = host
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    return json({
+      channelId: id,
+      channelName: host,
+      baseUrl: request.baseUrl,
+      protocol:
+        request.protocol ?? (host.includes("googleapis") ? "gemini" : "openai"),
+      ok: inspectRefusal === null,
+      latencyMs: 12,
+      ...(inspectRefusal === null
+        ? {}
+        : {
+            error: { code: "PROVIDER_AUTH", message: inspectRefusal },
+          }),
+      models: inspectRefusal === null ? offered : [],
+    });
+  }
 
   if (path === "/api/v1/providers/channels" && method === "PUT") {
     if (refuseNextWrite) {
@@ -249,6 +287,11 @@ beforeEach(() => {
   view = fixture();
   calls = [];
   refuseNextWrite = null;
+  offered = [
+    { id: "painter", capability: "image" },
+    { id: "scribe", capability: null },
+  ];
+  inspectRefusal = null;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
@@ -315,7 +358,9 @@ describe("provider settings", () => {
     await openSettings();
     await screen.findByText(/No channels yet/);
 
-    fireEvent.click(screen.getByRole("button", { name: "New channel" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Write one out in full" }),
+    );
     fireEvent.change(await screen.findByLabelText("Identifier"), {
       target: { value: "example" },
     });
@@ -349,21 +394,160 @@ describe("provider settings", () => {
     expect(document.body.textContent).not.toContain(KEY);
   });
 
-  it("adds a channel from an address alone", async () => {
+  it("adds a provider by asking its address what it offers", async () => {
     await openSettings();
-    fireEvent.change(await screen.findByLabelText("Provider address"), {
-      target: { value: "https://generativelanguage.googleapis.com/v1beta/" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add a provider" }),
+    );
 
-    await screen.findByText("generativelanguage.googleapis.com");
-    const [write] = writesTo("/api/v1/providers/import");
-    expect(write.body).toMatchObject({
-      baseUrl: "https://generativelanguage.googleapis.com/v1beta/",
-      apiKey: null,
-      expectedRevision: 1,
+    fireEvent.change(await screen.findByLabelText("Provider address"), {
+      target: { value: "https://api.example.com/v1" },
     });
-    expect(screen.getByText("gemini")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: KEY },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask what it offers" }));
+
+    // Asking stores nothing, so a wrong answer costs a message and not a
+    // channel to find and delete.
+    expect((await screen.findByTestId("wizard-reached")).textContent).toContain(
+      "2 models offered",
+    );
+    expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose models" }));
+    // The offer is grouped by what each model can make, and a kind is taken
+    // whole rather than one row at a time.
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Add all image models offered",
+      }),
+    );
+    expect(
+      (screen.getByLabelText("Model 1 identifier") as HTMLInputElement).value,
+    ).toBe("painter");
+    expect(
+      (screen.getByLabelText("Model 1 capability") as HTMLSelectElement).value,
+    ).toBe("image");
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    // One image model and no image default is an unambiguous answer, so it is
+    // offered rather than asked for.
+    expect(
+      (screen.getByLabelText("Default Image model") as HTMLSelectElement).value,
+    ).toBe("api-example-com::painter");
+    fireEvent.click(screen.getByRole("button", { name: "Add the channel" }));
+
+    await screen.findByText("api.example.com added");
+    const [channel] = writesTo("/api/v1/providers/channels");
+    expect(channel.body).toMatchObject({
+      id: "api-example-com",
+      name: "api.example.com",
+      baseUrl: "https://api.example.com/v1",
+      protocol: "openai",
+      apiKey: KEY,
+      models: [
+        { id: "painter", capability: "image", alias: "", enabled: true },
+      ],
+    } as Partial<ChannelDraft>);
+    // The channel and the default it was offered for are both written.
+    expect(writesTo("/api/v1/providers/defaults")[0].body).toEqual({
+      image: "api-example-com::painter",
+      expectedRevision: 2,
+    });
+    expect(document.body.textContent).not.toContain(KEY);
+  });
+
+  it("keeps going when a provider will not list its models", async () => {
+    inspectRefusal = "Incorrect API key provided";
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add a provider" }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Provider address"), {
+      target: { value: "https://api.example.com/v1" },
+    });
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: "sk-wrong" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask what it offers" }));
+
+    // The refusal is reported beside the fields that caused it, and the path
+    // continues rather than ending: a provider that will not list its models
+    // can still be configured by hand.
+    const refused = await screen.findByTestId("wizard-refused");
+    expect(refused.textContent).toContain("Incorrect API key provided");
+    const onward = screen.getByRole("button", { name: "Continue anyway" });
+    expect((onward as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(onward);
+    expect(screen.getByTestId("wizard-models-gap").textContent).toContain(
+      "will serve nothing",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add a model by hand" }),
+    );
+    fireEvent.change(screen.getByLabelText("Model 1 identifier"), {
+      target: { value: "director" },
+    });
+    fireEvent.change(screen.getByLabelText("Model 1 capability"), {
+      target: { value: "video" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Default Video model")).toHaveProperty(
+      "value",
+      "api-example-com::director",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add the channel" }));
+
+    await screen.findByText("api.example.com added");
+    const [channel] = writesTo("/api/v1/providers/channels");
+    expect(channel.body).toMatchObject({
+      models: [
+        { id: "director", capability: "video", alias: "", enabled: true },
+      ],
+    });
+  });
+
+  it("leaves a default somebody else chose alone", async () => {
+    // The fixture's own image model is already the default, so adding a second
+    // image model must not quietly take that over.
+    view.defaults = { ...view.defaults, image: "main::painter" };
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add a provider" }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Provider address"), {
+      target: { value: "https://api.example.com/v1" },
+    });
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: KEY },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask what it offers" }));
+    await screen.findByTestId("wizard-reached");
+    fireEvent.click(screen.getByRole("button", { name: "Choose models" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Add all image models offered",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    const picker = screen.getByLabelText(
+      "Default Image model",
+    ) as HTMLSelectElement;
+    expect(picker.value).toBe("main::painter");
+    expect(picker.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add the channel" }));
+    await screen.findByText("api.example.com added");
+    expect(writesTo("/api/v1/providers/channels")).toHaveLength(1);
+    // Nothing to set, so nothing is written over it.
+    expect(writesTo("/api/v1/providers/defaults")).toHaveLength(0);
   });
 
   it("offers each capability only the models that can serve it", async () => {

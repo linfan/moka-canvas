@@ -1,56 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import type { ChannelView } from "../../api";
+import { AddProviderWizard } from "./AddProviderWizard";
 import { ChannelEditor } from "./ChannelEditor";
 import { CoverageChips } from "./CoverageChips";
 import { useProviderStore } from "./providerStore";
 import { SecretStorageNote } from "./SecretStorageNote";
-
-/**
- * The address-and-key shortcut. Everything else about the channel is derived
- * from the address, so this stays usable next to the full editor without the
- * two ever disagreeing: importing an address that is already configured
- * updates that channel rather than adding a second copy of it.
- */
-function QuickImport({ disabled }: { disabled: boolean }) {
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const ready = !disabled && baseUrl.trim().length > 0;
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!ready) return;
-    const saved = await useProviderStore.getState().importChannel({
-      baseUrl: baseUrl.trim(),
-      apiKey: apiKey.trim() || null,
-    });
-    if (saved) {
-      setBaseUrl("");
-      setApiKey("");
-    }
-  };
-
-  return (
-    <form className="settings-inline" onSubmit={(event) => void submit(event)}>
-      <input
-        aria-label="Provider address"
-        onChange={(event) => setBaseUrl(event.target.value)}
-        placeholder="https://api.example.com/v1"
-        type="url"
-        value={baseUrl}
-      />
-      <input
-        aria-label="API key"
-        onChange={(event) => setApiKey(event.target.value)}
-        placeholder="API key (optional)"
-        type="password"
-        value={apiKey}
-      />
-      <button disabled={!ready} type="submit">
-        Add
-      </button>
-    </form>
-  );
-}
 
 function ChannelRow({
   channel,
@@ -152,6 +106,9 @@ function ChannelRow({
 export function ChannelsTab() {
   const view = useProviderStore((state) => state.view);
   const saving = useProviderStore((state) => state.saving);
+  // Local rather than in the store: nothing outside this tab has a reason to
+  // open the wizard, while a channel's editor is reached from a node.
+  const [adding, setAdding] = useState(false);
   // Held in the store rather than here: a node that cannot run has to be able
   // to open the editor on the channel that would serve it, from outside this
   // tab, and that is not a thing a local state can be asked to do.
@@ -174,16 +131,29 @@ export function ChannelsTab() {
     }
   }
 
+  if (adding) {
+    return <AddProviderWizard onClose={() => setAdding(false)} />;
+  }
+
   const channels = view?.channels ?? [];
 
   return (
     <div className="settings-section">
-      <QuickImport disabled={saving} />
+      <div className="settings-row">
+        <button
+          className="primary"
+          disabled={saving}
+          onClick={() => setAdding(true)}
+          type="button"
+        >
+          Add a provider
+        </button>
+      </div>
 
       {channels.length === 0 ? (
         <p className="settings-hint">
-          No channels yet. Add one by address above, or fill in a channel in
-          full.
+          No channels yet. Add one above: an address and a key are asked what
+          they offer before anything is stored.
         </p>
       ) : (
         <ul className="channel-list">
@@ -201,9 +171,10 @@ export function ChannelsTab() {
         <button
           disabled={saving}
           onClick={() => useProviderStore.getState().editChannel("new")}
+          title="Fill in a channel without asking its provider anything, for an address that lists no models"
           type="button"
         >
-          New channel
+          Write one out in full
         </button>
       </div>
 

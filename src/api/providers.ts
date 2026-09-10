@@ -88,6 +88,32 @@ export interface ProbeReport {
   error?: { code: string; message: string };
 }
 
+/**
+ * What an address and a credential answer before they become a channel.
+ *
+ * Asking stores nothing, so a wrong address or a wrong key cannot leave a
+ * channel behind holding them. The credential is used for the one request and
+ * dropped: it is not in this answer and not in the server's log.
+ */
+export interface Inspection {
+  /** The identity the address would be stored under. */
+  channelId: string;
+  channelName: string;
+  baseUrl: string;
+  protocol: ProviderProtocol;
+  ok: boolean;
+  latencyMs: number;
+  error?: { code: string; message: string };
+  /** Empty when the provider could not be asked. */
+  models: ModelCandidate[];
+}
+
+export interface InspectChannelRequest {
+  baseUrl: string;
+  apiKey?: string | null;
+  protocol?: ProviderProtocol | null;
+}
+
 export interface ChannelDraft {
   id: string;
   name: string;
@@ -175,6 +201,14 @@ export const providersApi = {
   },
 
   /** Lists what a channel offers and stores nothing. */
+  /** Asks an address what it offers, storing nothing. */
+  inspect(request: InspectChannelRequest): Promise<Inspection> {
+    return http.request<Inspection>("/api/v1/providers/inspect", {
+      method: "POST",
+      body: request,
+    });
+  },
+
   fetchModels(id: string): Promise<ModelCandidate[]> {
     return http
       .request<{ models: ModelCandidate[] }>(channelPath(id, "/models"))

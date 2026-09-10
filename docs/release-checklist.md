@@ -90,8 +90,16 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
    id, method, path, status, duration, and error code; no payloads, no
    filesystem internals beyond project paths, no secrets.
 8. Open the settings dialog from the launcher and from the editor: add a
-   channel from a provider address, edit its models and capabilities,
-   run a connectivity test, choose per-capability default models, and
+   provider through **Add a provider**, which asks the address and key
+   what they offer before storing anything — confirm that a wrong key
+   reports the provider's own refusal beside the fields and still lets
+   you continue, that what comes back is grouped by what each model can
+   make, that a kind guessed from an identifier can be corrected on its
+   row, that a model can be added by hand for a provider that lists
+   none, and that a default is offered only where that provider is the
+   only answer and none was set before. Then edit a stored channel's
+   models and capabilities, run a connectivity test, refresh its model
+   list against the provider, choose per-capability default models, and
    adjust generation preferences; save, reload, and confirm everything
    persisted. Editing the same channel in two windows at once surfaces a
    conflict notice in the loser instead of silently overwriting.

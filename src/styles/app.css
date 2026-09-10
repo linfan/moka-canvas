@@ -545,6 +545,23 @@ h2 {
   gap: 12px;
 }
 
+/* The three steps of adding a provider, named so the path is visible. */
+.wizard-steps {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wizard-step.is-current {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 /* One capability's default, with the gap it leaves named underneath. */
 .default-row {
   display: grid;

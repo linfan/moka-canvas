@@ -109,9 +109,18 @@ recover a superseded key.
 
 ### Where a key is allowed to travel
 
-A generation request is the only place a plaintext key leaves this process, and
-the rules around it are deliberately narrow:
+A key leaves this process only towards the host it belongs to, and the rules
+around that are deliberately narrow:
 
+- It goes out on a generation request, on a connectivity probe, on a listing of
+  what a channel offers, and on an inspection of an address that is not a
+  channel yet. Nothing else carries one.
+- An inspected credential is used for that one request and dropped. It is not
+  written to the metadata store, not returned in the answer — which reports the
+  provider's own complaint, never the key that provoked it — and not logged, the
+  request log carrying the method, the path, and the status only. That is why
+  asking an address what it offers is a separate call from importing it: a wrong
+  address or a wrong key must not leave a channel behind holding them.
 - The plaintext is decrypted at send time and lives only inside that one
   in-flight request. Configuration holds ciphertext, the gateway decrypts once
   per call, and the task registry holds no credential at all — polling a video
