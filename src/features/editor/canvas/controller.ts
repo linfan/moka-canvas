@@ -1,5 +1,14 @@
-import { Group, Leafer, Line, PointerEvent, Rect } from "leafer-ui";
-import type { ILeaf, IPointerEvent } from "leafer-ui";
+import {
+  Creator,
+  Group,
+  Leafer,
+  Line,
+  Matrix,
+  Platform,
+  PointerEvent,
+  Rect,
+} from "leafer-ui";
+import type { IBoundsData, ILeaf, IPointerEvent } from "leafer-ui";
 import {
   CLICK_DRAG_THRESHOLD_PX,
   FIT_ANIMATION_MS,
@@ -61,6 +70,12 @@ const SNAP_INCREMENT = GRID_BASE_SPACING / 4;
 /** Two taps within this window and pixel distance count as a double-tap. */
 const DOUBLE_TAP_MS = 400;
 const DOUBLE_TAP_PX = 6;
+/** Snapshot density: twice the diagram's own pixels, so text stays crisp. */
+const SNAPSHOT_PIXEL_RATIO = 2;
+/** The most pixels one snapshot may hold, about 4096². */
+const SNAPSHOT_MAX_PIXELS = 4096 * 4096;
+/** The longest edge a browser canvas may have. */
+const SNAPSHOT_MAX_SIDE = 16384;
 
 export type ConnectionCheck = "ok" | "replace" | "invalid";
 
@@ -453,6 +468,80 @@ export class LeaferEditorController {
     );
     const target = centerOn({ ...this.camera, zoom }, bounds);
     this.animateCamera(target);
+  }
+
+  /**
+   * A PNG of everything the canvas holds, drawn in the diagram's own
+   * coordinates rather than through the camera, so what is saved does not
+   * depend on how the canvas happens to be scrolled or zoomed. Marks that
+   * exist only for the hand — the selection outline, a connection being
+   * pulled, the minimap — stay out of the picture.
+   */
+  async renderSnapshot(): Promise<Blob> {
+    const leafer = this.leafer;
+    if (!leafer || this.nodeViews.size === 0) {
+      throw new Error("There is nothing to export yet");
+    }
+    // Bounds are read from the views themselves so that everything drawn —
+    // strokes, shadows, run badges — fits inside the picture.
+    this.world.updateLayout();
+    const boxes: IBoundsData[] = [this.nodeLayer.getBounds("render", "inner")];
+    if (this.edgeViews.size > 0) {
+      boxes.push(this.edgeLayer.getBounds("render", "inner"));
+    }
+    const left = Math.min(...boxes.map((box) => box.x));
+    const top = Math.min(...boxes.map((box) => box.y));
+    const width = Math.ceil(
+      Math.max(...boxes.map((box) => box.x + box.width)) - left,
+    );
+    const height = Math.ceil(
+      Math.max(...boxes.map((box) => box.y + box.height)) - top,
+    );
+    if (width < 1 || height < 1) {
+      throw new Error("There is nothing to export yet");
+    }
+
+    // One picture rather than tiles: the density gives way as the diagram
+    // grows, so the browser is never asked for a canvas it cannot hold.
+    const density = Math.min(
+      SNAPSHOT_PIXEL_RATIO,
+      Math.sqrt(SNAPSHOT_MAX_PIXELS / (width * height)),
+      SNAPSHOT_MAX_SIDE / Math.max(width, height),
+    );
+    const canvas = Creator.canvas!({ width, height, pixelRatio: density });
+    const hidden = [
+      this.grid.canvas,
+      this.minimap.group,
+      this.interactionLayer,
+      this.selectionLayer,
+    ];
+    const wasVisible = hidden.map((leaf) => leaf.visible);
+    hidden.forEach((leaf) => (leaf.visible = false));
+    let blob: Blob | null = null;
+    try {
+      // The matrix cancels the camera, so every view draws where the document
+      // puts it. The workspace colour comes from the leafer's own canvas
+      // element rather than from any view, so it is put back here by hand.
+      const matrix = new Matrix(this.world.worldTransform)
+        .invert()
+        .translate(-left, -top);
+      canvas.save();
+      Platform.render!(leafer, canvas, { exporting: true, matrix });
+      canvas.restore();
+      canvas.fillWorld(
+        canvas.bounds,
+        canvasTheme.background,
+        "destination-over",
+      );
+      blob = await new Promise<Blob | null>((resolve) =>
+        (canvas.view as HTMLCanvasElement).toBlob(resolve, "image/png"),
+      );
+    } finally {
+      hidden.forEach((leaf, index) => (leaf.visible = wasVisible[index]));
+      canvas.destroy();
+    }
+    if (!blob) throw new Error("The browser could not encode the image");
+    return blob;
   }
 
   /** Ends any active gesture, clearing previews without committing. */

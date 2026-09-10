@@ -51,6 +51,14 @@ export function fitBounds(bounds: Rect) {
   active?.fitBoundsAnimated(bounds);
 }
 
+/**
+ * A PNG of everything the canvas holds. Null when no canvas is mounted
+ * (environments without a canvas implementation, like jsdom).
+ */
+export function renderSnapshot(): Promise<Blob> | null {
+  return active?.renderSnapshot() ?? null;
+}
+
 export function focusNode(nodeId: string) {
   active?.focusNode(nodeId);
 }

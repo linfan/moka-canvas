@@ -52,7 +52,11 @@ import {
   writeFragment,
   type CanvasFragment,
 } from "./clipboard";
-import { fitBounds, viewCenterWorld } from "../canvas/canvasControl";
+import {
+  fitBounds,
+  renderSnapshot,
+  viewCenterWorld,
+} from "../canvas/canvasControl";
 import { buildResourceIndex } from "../canvas/mediaCards";
 import { maskName } from "../canvas/repaint";
 import type { ConnectionCheck } from "../canvas/controller";
@@ -1771,6 +1775,45 @@ export function fitSelectionAction() {
     return;
   }
   fitBounds(unionBounds(nodes.map((node) => node.bounds)));
+}
+
+/**
+ * Saves the whole canvas as a PNG. The picture is drawn by the canvas itself
+ * in the diagram's own coordinates, so it holds every node rather than the
+ * part that happens to be on screen.
+ */
+export async function exportCanvasImage(): Promise<void> {
+  const canvas = activeCanvas();
+  if (!canvas || canvas.nodes.length === 0) return;
+  const pending = renderSnapshot();
+  if (!pending) {
+    toastError("The canvas is not ready");
+    return;
+  }
+  try {
+    const blob = await pending;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeFileName(canvas.name)}.png`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    // The file is read from the URL after the click returns, so it is let go
+    // on the next turn rather than under the download's feet.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    announce("Canvas image exported");
+  } catch (error) {
+    toastError(
+      error instanceof Error
+        ? error.message
+        : "The canvas could not be exported",
+    );
+  }
+}
+
+function safeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]+/g, "-");
 }
 
 function unionBounds(rects: Rect[]): Rect {

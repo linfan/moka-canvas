@@ -8,6 +8,7 @@ import { useProviderStore } from "../../settings/providerStore";
 import { viewCenterWorld } from "../canvas/canvasControl";
 import { redo, undo } from "../commands/execute";
 import {
+  exportCanvasImage,
   groupSelection,
   importFiles,
   ungroupSelection,
@@ -238,6 +239,14 @@ export function TopBar({ onBack, onExport }: TopBarProps) {
       </button>
       <button onClick={onExport} type="button">
         Export
+      </button>
+      <button
+        disabled={!canvasDoc || canvasDoc.nodes.length === 0}
+        onClick={() => void exportCanvasImage()}
+        title="Save the canvas as a PNG image"
+        type="button"
+      >
+        Export image
       </button>
     </header>
   );
