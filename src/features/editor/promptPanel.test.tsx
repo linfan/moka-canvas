@@ -487,6 +487,30 @@ describe("the generation panel", () => {
     );
     await settle();
     expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+    // With no channel at all the answer is "add one", which is the editor
+    // rather than a list to search.
+    expect(screen.getByRole("heading", { name: "New channel" })).toBeTruthy();
+  });
+
+  it("goes to the channel that would serve the node, not to a list of them", async () => {
+    // A channel that serves images only: an image node is fine, a text node has
+    // nothing to be pointed at, and the way out leads to this channel.
+    api.providers = providers([
+      {
+        ...PAINTER,
+        models: PAINTER.models.filter((model) => model.capability === "image"),
+      },
+    ]);
+    await openEditor();
+    selectNode(ids.text);
+    await settle();
+
+    fireEvent.click(
+      within(panel()).getByRole("button", { name: "Configure models" }),
+    );
+    await settle();
+    expect(screen.getByRole("heading", { name: "Edit Demo" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Models" })).toBeTruthy();
   });
 
   it("saves what was typed before asking for the run", async () => {

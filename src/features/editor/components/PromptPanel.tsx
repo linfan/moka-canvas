@@ -588,7 +588,14 @@ export function PromptPanel() {
             yet.
           </p>
           <button
-            onClick={() => useProviderStore.getState().openSettings("channels")}
+            onClick={() =>
+              // Straight to the channel that would serve this node, rather than
+              // to a list to be searched: the node named a model, or the default
+              // did, and that is the one with nothing to offer.
+              useProviderStore
+                .getState()
+                .openChannelForCapability(capability, spec.model || null)
+            }
             type="button"
           >
             Configure models
