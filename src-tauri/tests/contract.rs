@@ -1,10 +1,12 @@
 use moka_canvas::domain::validate::{
     mention_node_ids, mention_spans, model_reference_shaped, resource_path_valid,
-    topological_order, validate_canvas, validate_moka_file, MAX_PROMPT_LENGTH, MAX_RESULT_SLOTS,
+    topological_order, validate_canvas, validate_moka_file, MAX_ASSISTANT_MESSAGES_PER_SESSION,
+    MAX_ASSISTANT_SESSIONS_PER_CANVAS, MAX_PROMPT_LENGTH, MAX_RESULT_SLOTS,
 };
 use moka_canvas::domain::{
-    CanvasDocument, Capability, EdgeEndpoint, GenerationInputMode, GenerationMode, GenerationSpec,
-    MokaFile, ResultSlot, ResultSlotStatus, WorkflowEdge, WorkflowNode,
+    AssistantMessage, AssistantReference, AssistantRole, AssistantSession, CanvasDocument,
+    Capability, EdgeEndpoint, GenerationInputMode, GenerationMode, GenerationSpec, MokaFile,
+    NodeKind, ResultSlot, ResultSlotStatus, WorkflowEdge, WorkflowNode,
 };
 use moka_canvas::project::codec::{decode_moka_file, encode_moka_file, CodecError};
 use std::path::PathBuf;
@@ -37,6 +39,31 @@ fn re_encode_is_byte_canonical() {
     assert_eq!(
         bytes, reencoded,
         "Rust re-encode must reproduce the golden bytes exactly"
+    );
+}
+
+/// The document the other language writes when it has a conversation to keep,
+/// as the model it says the binary holds.
+fn conversation_from_json() -> MokaFile {
+    let raw = std::fs::read_to_string(fixture_path("conversation.moka.json")).unwrap();
+    serde_json::from_str(&raw).unwrap()
+}
+
+#[test]
+fn conversation_binary_decodes_to_conversation_json_model() {
+    let bytes = std::fs::read(fixture_path("conversation.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(decoded, conversation_from_json());
+}
+
+#[test]
+fn conversation_re_encode_is_byte_canonical() {
+    let bytes = std::fs::read(fixture_path("conversation.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(
+        bytes,
+        encode_moka_file(&decoded, None).unwrap(),
+        "a conversation is written the same bytes whichever language writes it"
     );
 }
 
@@ -276,6 +303,103 @@ fn enforces_the_result_slot_limit() {
             .collect(),
     );
     assert!(flagged(&canvas, OPERATION_NODE, "RESULT_SLOT_LIMIT"));
+}
+
+const SAID_AT: &str = "2026-01-01T00:00:00.000Z";
+
+fn line(index: usize) -> AssistantMessage {
+    AssistantMessage {
+        id: format!("message-{index}"),
+        role: AssistantRole::User,
+        text: format!("Line {index}"),
+        created_at: SAID_AT.into(),
+        references: None,
+        tool_calls: None,
+        failure: None,
+    }
+}
+
+fn conversation(index: usize) -> AssistantSession {
+    AssistantSession {
+        id: format!("conversation-{index}"),
+        title: format!("Conversation {index}"),
+        messages: Vec::new(),
+        created_at: SAID_AT.into(),
+        updated_at: SAID_AT.into(),
+    }
+}
+
+#[test]
+fn golden_document_carries_no_conversations() {
+    // The field came in without a schema version of its own, so a document
+    // stored before it existed has to read as carrying none and write back the
+    // bytes it arrived with — otherwise opening an old project would quietly
+    // rewrite it.
+    let canvas = golden_canvas();
+    assert_eq!(canvas.sessions, None);
+    assert!(validate_canvas(&canvas).is_empty());
+}
+
+#[test]
+fn reports_a_canvas_carrying_more_conversations_than_it_can() {
+    let mut canvas = golden_canvas();
+    canvas.sessions = Some(
+        (0..MAX_ASSISTANT_SESSIONS_PER_CANVAS + 1)
+            .map(conversation)
+            .collect(),
+    );
+    // The words are the contract: what a document is wrong about is said the
+    // same way whichever language read it.
+    assert_eq!(
+        messages(&canvas, "VALIDATION_FAILED"),
+        vec![format!(
+            "Canvas exceeds the session limit ({MAX_ASSISTANT_SESSIONS_PER_CANVAS})"
+        )]
+    );
+}
+
+#[test]
+fn reports_a_conversation_too_long_to_read_through() {
+    let mut canvas = golden_canvas();
+    let mut too_long = conversation(0);
+    too_long.messages = (0..MAX_ASSISTANT_MESSAGES_PER_SESSION + 1)
+        .map(line)
+        .collect();
+    let mut repeated = conversation(1);
+    repeated.id = too_long.id.clone();
+    canvas.sessions = Some(vec![too_long, repeated]);
+
+    assert_eq!(
+        messages(&canvas, "VALIDATION_FAILED"),
+        vec![
+            format!(
+                "Session \"Conversation 0\" exceeds the message limit \
+                 ({MAX_ASSISTANT_MESSAGES_PER_SESSION})"
+            ),
+            "Duplicate session id conversation-0".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn a_line_naming_a_card_that_has_gone_is_not_a_fault_in_the_document() {
+    // The line kept the card's title and kind for exactly this case, so what it
+    // says is still what was asked about; only the card is gone, and saying so
+    // is the reader's job.
+    let mut canvas = golden_canvas();
+    let mut asked = conversation(0);
+    asked.messages = vec![AssistantMessage {
+        references: Some(vec![AssistantReference {
+            node_id: "a-node-that-was-deleted".into(),
+            title: "The lake".into(),
+            kind: NodeKind::Image,
+            asset_id: Some("an-asset-that-was-deleted".into()),
+        }]),
+        ..line(0)
+    }];
+    canvas.sessions = Some(vec![asked]);
+
+    assert!(validate_canvas(&canvas).is_empty());
 }
 
 #[test]

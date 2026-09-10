@@ -10,6 +10,7 @@ import {
 } from "./constants";
 import type { Capability } from "./constants";
 import type {
+  AssistantSession,
   CanvasDocument,
   GenerationInputMode,
   GenerationMode,
@@ -38,6 +39,11 @@ export function createCanvas(name: string): CanvasDocument {
     groups: [],
     settings: { background: "dots", showMinimap: true, snapToGrid: true },
   };
+}
+
+export function createSession(title: string): AssistantSession {
+  const now = nowIso();
+  return { id: newId(), title, messages: [], createdAt: now, updatedAt: now };
 }
 
 export function createProject(name: string): MokaFile {

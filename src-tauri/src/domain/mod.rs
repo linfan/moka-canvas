@@ -10,6 +10,8 @@ pub type NodeId = String;
 pub type EdgeId = String;
 pub type AssetId = String;
 pub type RunId = String;
+pub type SessionId = String;
+pub type MessageId = String;
 pub type IsoTimestamp = String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -72,6 +74,12 @@ pub struct AssetProvenance {
     pub canvas_id: Option<CanvasId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_node_id: Option<NodeId>,
+    /// The conversation that asked for this, when one did.
+    ///
+    /// Like a run, it is a reference only the machine that made it can honour:
+    /// conversations travel with a full backup and not with a package of the work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_asset_ids: Option<Vec<AssetId>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -571,6 +579,87 @@ pub struct GroupMembership {
     pub child_node_ids: Vec<NodeId>,
 }
 
+/// Who a line of a conversation is from: the reader, a model, or a failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssistantRole {
+    User,
+    Assistant,
+    Error,
+}
+
+/// A card a line was asked about, as that line remembered it; mirrors the
+/// TypeScript `AssistantReference` field for field, including key order.
+///
+/// The title and the kind are kept beside the id because the card may be gone by
+/// the time the line is read again, and a line that can say only "a card that no
+/// longer exists" tells nobody what was asked about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantReference {
+    pub node_id: NodeId,
+    pub title: String,
+    pub kind: NodeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<AssetId>,
+}
+
+/// A run a line set going, noted so the line can say what it started; mirrors the
+/// TypeScript `AssistantToolCall` field for field, including key order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantToolCall {
+    pub run_id: RunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    pub summary: String,
+}
+
+/// Why a line that failed failed, and whether asking again could work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantFailure {
+    pub code: String,
+    pub retryable: bool,
+}
+
+/// One line of a conversation; mirrors the TypeScript `AssistantMessage` field
+/// for field, including key order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantMessage {
+    pub id: MessageId,
+    pub role: AssistantRole,
+    pub text: String,
+    pub created_at: IsoTimestamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<Vec<AssistantReference>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<AssistantToolCall>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<AssistantFailure>,
+}
+
+/// One conversation about one canvas, carried by the canvas itself; mirrors the
+/// TypeScript `AssistantSession` field for field, including key order.
+///
+/// A canvas holds its own and never another's: what was asked about the cards on
+/// this board belongs to this board, so opening a document opens onto the
+/// conversations that were had over it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantSession {
+    pub id: SessionId,
+    pub title: String,
+    pub messages: Vec<AssistantMessage>,
+    pub created_at: IsoTimestamp,
+    /// When something was last said, which is how the newest conversation is found.
+    ///
+    /// Only ever moves forward: taking a line back does not put this back with it,
+    /// since a conversation just taken back out of is still the one to open onto.
+    pub updated_at: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasDocument {
@@ -582,6 +671,14 @@ pub struct CanvasDocument {
     pub edges: Vec<WorkflowEdge>,
     pub groups: Vec<GroupMembership>,
     pub settings: DocumentSettings,
+    /// The conversations had over this canvas.
+    ///
+    /// Left off rather than left empty on a document written before conversations
+    /// existed, so that reading such a document and writing it back gives the bytes
+    /// it arrived with. It came in without a schema version of its own for the same
+    /// reason: nothing stored had to change to make room for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions: Option<Vec<AssistantSession>>,
 }
 
 impl CanvasDocument {
@@ -603,6 +700,7 @@ impl CanvasDocument {
             edges: Vec::new(),
             groups: Vec::new(),
             settings: DocumentSettings::default(),
+            sessions: None,
         }
     }
 }
@@ -714,6 +812,43 @@ pub enum DocumentCommand {
     SetViewport {
         canvas_id: CanvasId,
         viewport: Viewport,
+    },
+    /// A canvas's conversations. Lines are added and taken away rather than the
+    /// list rewritten, so a turn carries only what it said: a conversation is kept
+    /// to a length that can be read through, and sending the whole of one across
+    /// for every line would cost more than the line.
+    #[serde(rename_all = "camelCase")]
+    AddSession {
+        canvas_id: CanvasId,
+        session: AssistantSession,
+        index: Option<usize>,
+    },
+    #[serde(rename_all = "camelCase")]
+    RenameSession {
+        canvas_id: CanvasId,
+        session_id: SessionId,
+        title: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    RemoveSession {
+        canvas_id: CanvasId,
+        session_id: SessionId,
+    },
+    /// `at` is where the lines land in the list as it stands when the command is
+    /// applied, and is the tail when left off. It exists for the undo of a
+    /// conversation that had to let its oldest lines go to make room.
+    #[serde(rename_all = "camelCase")]
+    AppendMessages {
+        canvas_id: CanvasId,
+        session_id: SessionId,
+        messages: Vec<AssistantMessage>,
+        at: Option<usize>,
+    },
+    #[serde(rename_all = "camelCase")]
+    RemoveMessages {
+        canvas_id: CanvasId,
+        session_id: SessionId,
+        message_ids: Vec<MessageId>,
     },
     #[serde(rename_all = "camelCase")]
     AddCanvas {

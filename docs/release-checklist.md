@@ -42,7 +42,11 @@ npm run test:e2e  # Playwright: critical path, provider settings, a
      gone from the document while the prompt and parameters it was
      asked with stay, the inspector says the record did not come with
      the project, and **Run again** starts a new run rather than
-     retrying one that is not there.
+     retrying one that is not there. The conversations had over each
+     canvas travel on the same choice: unticked, `canvas.moka` holds
+     neither a `sessions` list nor an `assistantSessionId`, and the
+     imported project opens onto an empty assistant rather than onto
+     somebody else's asking.
    - Tick the referenced-assets-only choice on a project holding an
      asset no node points at. The question counts that asset and its
      size before the choice is made, and after the import the

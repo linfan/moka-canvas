@@ -4,8 +4,8 @@ use base64::Engine;
 use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
 use moka_canvas::domain::{
-    derive_ports, AssetProvenance, DocumentCommand, MokaFile, NodeData, NodeKind, Rect,
-    WorkflowNode, PACKAGE_MANIFEST_VERSION,
+    derive_ports, AssetProvenance, AssistantMessage, AssistantRole, AssistantSession,
+    DocumentCommand, MokaFile, NodeData, NodeKind, Rect, WorkflowNode, PACKAGE_MANIFEST_VERSION,
 };
 use moka_canvas::metadata::{crypto, docs};
 use moka_canvas::project::codec::decode_moka_file;
@@ -524,6 +524,9 @@ async fn a_run_record_travels_only_in_a_package_that_asked_for_it() {
 /// The run that made the fixture's asset.
 const MADE_BY_RUN: &str = "0192b7d4-2222-7000-8000-000000000002";
 
+/// The conversation that asked for it.
+const ASKED_IN_SESSION: &str = "0192b7d4-2222-7000-8000-000000000003";
+
 /// A project with an asset on a canvas and one on the shelf.
 struct StagedProject {
     store: FsProjectStore,
@@ -562,6 +565,7 @@ async fn stage_generated_project(root: &Path) -> StagedProject {
                 run_id: Some(MADE_BY_RUN.to_string()),
                 canvas_id: Some(canvas_id.clone()),
                 operation_node_id: Some("node-1".to_string()),
+                assistant_session_id: Some(ASKED_IN_SESSION.to_string()),
                 input_asset_ids: None,
                 parameter_snapshot: Some(json!({
                     "model": "a-model",
@@ -598,28 +602,60 @@ async fn stage_generated_project(root: &Path) -> StagedProject {
     store
         .apply_commands(
             revision,
-            vec![DocumentCommand::AddNode {
-                canvas_id,
-                node: WorkflowNode {
-                    id: "node-1".to_string(),
-                    kind: NodeKind::Image,
-                    title: "Lake".to_string(),
-                    bounds: Rect {
-                        x: 0.0,
-                        y: 0.0,
-                        width: 280.0,
-                        height: 200.0,
+            vec![
+                DocumentCommand::AddNode {
+                    canvas_id: canvas_id.clone(),
+                    node: WorkflowNode {
+                        id: "node-1".to_string(),
+                        kind: NodeKind::Image,
+                        title: "Lake".to_string(),
+                        bounds: Rect {
+                            x: 0.0,
+                            y: 0.0,
+                            width: 280.0,
+                            height: 200.0,
+                        },
+                        z_index: 0,
+                        ports: derive_ports(NodeKind::Image),
+                        data: NodeData {
+                            asset_id: Some(made.entry.id.clone()),
+                            ..NodeData::default()
+                        },
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
                     },
-                    z_index: 0,
-                    ports: derive_ports(NodeKind::Image),
-                    data: NodeData {
-                        asset_id: Some(made.entry.id.clone()),
-                        ..NodeData::default()
-                    },
-                    created_at: now.clone(),
-                    updated_at: now,
                 },
-            }],
+                DocumentCommand::AddSession {
+                    canvas_id,
+                    session: AssistantSession {
+                        id: ASKED_IN_SESSION.to_string(),
+                        title: "The lake at dusk".to_string(),
+                        messages: vec![
+                            AssistantMessage {
+                                id: "message-asked".to_string(),
+                                role: AssistantRole::User,
+                                text: "Paint the lake at dusk".to_string(),
+                                created_at: now.clone(),
+                                references: None,
+                                tool_calls: None,
+                                failure: None,
+                            },
+                            AssistantMessage {
+                                id: "message-answered".to_string(),
+                                role: AssistantRole::Assistant,
+                                text: "Here is the lake, at dusk.".to_string(),
+                                created_at: now.clone(),
+                                references: None,
+                                tool_calls: None,
+                                failure: None,
+                            },
+                        ],
+                        created_at: now.clone(),
+                        updated_at: now,
+                    },
+                    index: None,
+                },
+            ],
         )
         .await
         .unwrap();
@@ -1227,4 +1263,14 @@ async fn export_never_contains_personal_or_secret_data() {
         hits.is_empty(),
         "not even a backup carries a credential: {hits:?}"
     );
+
+    // The record of what was asked here is what a backup is for. Saying so keeps
+    // the guarantee above honest: a needle that never turned up anywhere would
+    // pass it without anything having been kept out.
+    for needle in ["sessions", ASKED_IN_SESSION, "Paint the lake at dusk"] {
+        assert!(
+            !found_in(&entries, &[needle]).is_empty(),
+            "a full backup carries {needle}"
+        );
+    }
 }

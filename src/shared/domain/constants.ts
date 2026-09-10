@@ -23,6 +23,24 @@ export const MAX_EDGES_PER_CANVAS = 10_000;
 export const MAX_CANVASES_PER_PROJECT = 64;
 export const MAX_RESOURCES_PER_CATEGORY = 10_000;
 
+/** How many conversations one canvas carries. */
+export const MAX_ASSISTANT_SESSIONS_PER_CANVAS = 16;
+/**
+ * How many lines one conversation is kept to.
+ *
+ * A ceiling rather than a refusal: a conversation that ran past it would be one
+ * nobody could read through, and the oldest lines are the ones to lose. Losing
+ * them is said, and undoing the turn that pushed past it gives them back.
+ */
+export const MAX_ASSISTANT_MESSAGES_PER_SESSION = 200;
+export const MAX_ASSISTANT_TITLE_LENGTH = 120;
+/**
+ * The most one line of a conversation holds, which is the most a text card
+ * holds: an answer is offered the chance to become one, and an answer too long
+ * for a card could not be put on the canvas whole.
+ */
+export const MAX_ASSISTANT_MESSAGE_LENGTH = MAX_TEXT_CONTENT_LENGTH;
+
 /** The most pixels one picture tool will work on, coming or going. */
 export const MAX_OPERATED_PIXELS = 40_000_000;
 /** The most pieces one division makes. */
@@ -223,6 +241,8 @@ export const PROBLEM_CODES = [
   "EDGE_NOT_FOUND",
   "CANVAS_NOT_FOUND",
   "GROUP_INVALID",
+  "SESSION_NOT_FOUND",
+  "MESSAGE_NOT_FOUND",
   "BOUNDS_INVALID",
   "ASSET_INVALID",
   "ASSET_MISSING",

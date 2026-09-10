@@ -1,6 +1,7 @@
 import { CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION } from "./constants";
 import { derivePorts } from "./factories";
 import type {
+  AssistantMessage,
   MokaFile,
   ResourceEntry,
   ResultSlot,
@@ -432,4 +433,87 @@ export function buildGenerationMokaFile(): MokaFile {
       },
     ],
   };
+}
+
+export function conversationIds() {
+  return {
+    session: fixtureId(40),
+    asked: fixtureId(41),
+    answered: fixtureId(42),
+    failed: fixtureId(43),
+    run: fixtureId(44),
+  };
+}
+
+/**
+ * The golden document with a conversation carried on its first canvas, and the
+ * asset that conversation asked for naming it back.
+ *
+ * Each of the three lines fills in a different part of what a line can carry,
+ * so one fixture pins the encoding of all of them: the asking names the card it
+ * was about, the answer names the run it set going, and the failure says why it
+ * failed and whether asking again could work. The second canvas carries no
+ * conversations at all, which pins that the field is left off rather than left
+ * empty.
+ */
+export function buildConversationMokaFile(): MokaFile {
+  const ids = goldenNodeIds();
+  const said = conversationIds();
+  const moka = buildGoldenMokaFile();
+
+  moka.resources.images[0].provenance = {
+    runId: said.run,
+    canvasId: ids.canvasMain,
+    operationNodeId: ids.image,
+    assistantSessionId: said.session,
+    parameterSnapshot: { model: "demo::painter" },
+    createdAt: T1,
+  };
+
+  const asked: AssistantMessage = {
+    id: said.asked,
+    role: "user",
+    text: "What is over the lake?",
+    createdAt: T0,
+    references: [
+      {
+        nodeId: ids.image,
+        title: "Reference image",
+        kind: "image",
+        assetId: ids.assetImage,
+      },
+    ],
+  };
+  const answered: AssistantMessage = {
+    id: said.answered,
+    role: "assistant",
+    text: "A lantern, drifting over it at dusk.",
+    createdAt: T1,
+    toolCalls: [
+      {
+        runId: said.run,
+        nodeId: ids.image,
+        summary: "Painted a poster of it",
+      },
+    ],
+  };
+  const failed: AssistantMessage = {
+    id: said.failed,
+    role: "error",
+    text: "The painter did not answer.",
+    createdAt: T1,
+    failure: { code: "PROVIDER_UNAVAILABLE", retryable: true },
+  };
+
+  moka.canvas[0].sessions = [
+    {
+      id: said.session,
+      title: "What is over the lake",
+      messages: [asked, answered, failed],
+      createdAt: T0,
+      updatedAt: T1,
+    },
+  ];
+
+  return moka;
 }

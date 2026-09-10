@@ -15,6 +15,19 @@ pub const MAX_PROMPT_LENGTH: usize = 20_000;
 pub const MAX_RESULT_SLOTS: usize = 16;
 pub const ZOOM_MIN: f64 = 0.05;
 pub const ZOOM_MAX: f64 = 5.0;
+/// How many conversations one canvas carries.
+pub const MAX_ASSISTANT_SESSIONS_PER_CANVAS: usize = 16;
+/// How many lines one conversation is kept to.
+///
+/// A ceiling rather than a refusal: a conversation that ran past it would be one
+/// nobody could read through, and the oldest lines are the ones to lose. Losing
+/// them is said, and undoing the turn that pushed past it gives them back.
+pub const MAX_ASSISTANT_MESSAGES_PER_SESSION: usize = 200;
+pub const MAX_ASSISTANT_TITLE_LENGTH: usize = 120;
+/// The most a line of a conversation holds, which is the most a text card holds:
+/// an answer is offered the chance to become one, and an answer too long for a
+/// card could not be put on the canvas whole.
+pub const MAX_ASSISTANT_MESSAGE_LENGTH: usize = 50_000;
 
 pub fn bounds_valid(bounds: &super::Rect) -> bool {
     bounds.x.is_finite()
@@ -398,6 +411,46 @@ fn generation_issues(
     issues
 }
 
+/// What is wrong with the conversations a canvas carries.
+///
+/// A line naming a card that has since been deleted is not among them. The line
+/// kept that card's title and kind for exactly this case, so what it says is
+/// still what was asked about; only the card is gone, and saying so is the
+/// reader's job rather than a fault in the document.
+fn session_issues(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
+    let mut issues = Vec::new();
+    let issue = |message: String| ValidationIssue {
+        code: "VALIDATION_FAILED".into(),
+        message,
+        canvas_id: Some(canvas.id.clone()),
+        node_id: None,
+        port_id: None,
+        edge_id: None,
+    };
+
+    let sessions = canvas.sessions.as_deref().unwrap_or(&[]);
+    if sessions.len() > MAX_ASSISTANT_SESSIONS_PER_CANVAS {
+        issues.push(issue(format!(
+            "Canvas exceeds the session limit ({MAX_ASSISTANT_SESSIONS_PER_CANVAS})"
+        )));
+    }
+
+    let mut session_ids = HashSet::new();
+    for session in sessions {
+        if !session_ids.insert(session.id.as_str()) {
+            issues.push(issue(format!("Duplicate session id {}", session.id)));
+        }
+        if session.messages.len() > MAX_ASSISTANT_MESSAGES_PER_SESSION {
+            issues.push(issue(format!(
+                "Session \"{}\" exceeds the message limit ({MAX_ASSISTANT_MESSAGES_PER_SESSION})",
+                session.title
+            )));
+        }
+    }
+
+    issues
+}
+
 pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     let canvas_id = Some(canvas.id.clone());
@@ -422,6 +475,7 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
             edge_id: None,
         });
     }
+    issues.extend(session_issues(canvas));
 
     let mut node_ids = HashSet::new();
     for node in &canvas.nodes {

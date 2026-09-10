@@ -169,6 +169,7 @@ fn provenance(
         run_id: Some(run.id.clone()),
         canvas_id: Some(run.canvas_id.clone()),
         operation_node_id: Some(node.id.clone()),
+        assistant_session_id: None,
         input_asset_ids: if consumed.is_empty() {
             None
         } else {

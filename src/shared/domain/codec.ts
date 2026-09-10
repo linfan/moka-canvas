@@ -5,12 +5,20 @@ import {
   MOKA_MAGIC,
   PROJECT_ASSET_CATEGORIES,
 } from "./constants";
+import type { ProblemCode } from "./constants";
 import { reconcilePorts } from "./factories";
 import type {
+  AssistantFailure,
+  AssistantMessage,
+  AssistantReference,
+  AssistantRole,
+  AssistantSession,
+  AssistantToolCall,
   CanvasDocument,
   GroupMembership,
   MokaFile,
   NodeData,
+  NodeKind,
   ProjectMetadata,
   ResourceEntry,
   ResultSlot,
@@ -163,8 +171,56 @@ function encodeGroup(group: GroupMembership): Record<string, unknown> {
   return { groupId: group.groupId, childNodeIds: [...group.childNodeIds] };
 }
 
-function encodeCanvas(canvas: CanvasDocument): Record<string, unknown> {
+function encodeReference(
+  reference: AssistantReference,
+): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    nodeId: reference.nodeId,
+    title: reference.title,
+    kind: reference.kind,
+  };
+  if (reference.assetId !== undefined) doc.assetId = reference.assetId;
+  return doc;
+}
+
+function encodeToolCall(call: AssistantToolCall): Record<string, unknown> {
+  const doc: Record<string, unknown> = { runId: call.runId };
+  if (call.nodeId !== undefined) doc.nodeId = call.nodeId;
+  doc.summary = call.summary;
+  return doc;
+}
+
+function encodeMessage(message: AssistantMessage): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    createdAt: message.createdAt,
+  };
+  if (message.references !== undefined)
+    doc.references = message.references.map(encodeReference);
+  if (message.toolCalls !== undefined)
+    doc.toolCalls = message.toolCalls.map(encodeToolCall);
+  if (message.failure !== undefined)
+    doc.failure = {
+      code: message.failure.code,
+      retryable: message.failure.retryable,
+    };
+  return doc;
+}
+
+function encodeSession(session: AssistantSession): Record<string, unknown> {
   return {
+    id: session.id,
+    title: session.title,
+    messages: session.messages.map(encodeMessage),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function encodeCanvas(canvas: CanvasDocument): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
     id: canvas.id,
     name: canvas.name,
     schemaVersion: canvas.schemaVersion,
@@ -178,6 +234,9 @@ function encodeCanvas(canvas: CanvasDocument): Record<string, unknown> {
       snapToGrid: canvas.settings.snapToGrid,
     },
   };
+  if (canvas.sessions !== undefined)
+    doc.sessions = canvas.sessions.map(encodeSession);
+  return doc;
 }
 
 function encodeProbe(
@@ -209,6 +268,8 @@ function encodeProvenance(
   if (provenance.canvasId !== undefined) doc.canvasId = provenance.canvasId;
   if (provenance.operationNodeId !== undefined)
     doc.operationNodeId = provenance.operationNodeId;
+  if (provenance.assistantSessionId !== undefined)
+    doc.assistantSessionId = provenance.assistantSessionId;
   if (provenance.inputAssetIds !== undefined)
     doc.inputAssetIds = [...provenance.inputAssetIds];
   if (provenance.parameterSnapshot !== undefined)
@@ -373,6 +434,7 @@ function decodeProvenance(value: unknown): ResourceEntry["provenance"] {
     runId: optionalString(doc.runId),
     canvasId: optionalString(doc.canvasId),
     operationNodeId: optionalString(doc.operationNodeId),
+    assistantSessionId: optionalString(doc.assistantSessionId),
     inputAssetIds: Array.isArray(doc.inputAssetIds)
       ? (doc.inputAssetIds as string[])
       : undefined,
@@ -456,6 +518,73 @@ function decodeEdge(value: unknown): WorkflowEdge {
   };
 }
 
+function decodeReference(value: unknown): AssistantReference {
+  const doc = asRecord(value, "references[]");
+  return {
+    nodeId: asString(doc.nodeId, "references[].nodeId"),
+    title: asString(doc.title, "references[].title"),
+    kind: asString(doc.kind, "references[].kind") as NodeKind,
+    assetId: optionalString(doc.assetId),
+  };
+}
+
+function decodeToolCall(value: unknown): AssistantToolCall {
+  const doc = asRecord(value, "toolCalls[]");
+  return {
+    runId: asString(doc.runId, "toolCalls[].runId"),
+    nodeId: optionalString(doc.nodeId),
+    summary: asString(doc.summary, "toolCalls[].summary"),
+  };
+}
+
+function decodeFailure(value: unknown): AssistantFailure | undefined {
+  if (value === undefined || value === null) return undefined;
+  const doc = asRecord(value, "failure");
+  return {
+    code: asString(doc.code, "failure.code") as ProblemCode,
+    retryable: Boolean(doc.retryable),
+  };
+}
+
+function decodeMessage(value: unknown): AssistantMessage {
+  const doc = asRecord(value, "messages[]");
+  return {
+    id: asString(doc.id, "messages[].id"),
+    role: asString(doc.role, "messages[].role") as AssistantRole,
+    text: asString(doc.text, "messages[].text"),
+    createdAt: asString(doc.createdAt, "messages[].createdAt"),
+    references: Array.isArray(doc.references)
+      ? doc.references.map(decodeReference)
+      : undefined,
+    toolCalls: Array.isArray(doc.toolCalls)
+      ? doc.toolCalls.map(decodeToolCall)
+      : undefined,
+    failure: decodeFailure(doc.failure),
+  };
+}
+
+function decodeSession(value: unknown): AssistantSession {
+  const doc = asRecord(value, "sessions[]");
+  return {
+    id: asString(doc.id, "sessions[].id"),
+    title: asString(doc.title, "sessions[].title"),
+    messages: asArray(doc.messages, "sessions[].messages").map(decodeMessage),
+    createdAt: asString(doc.createdAt, "sessions[].createdAt"),
+    updatedAt: asString(doc.updatedAt, "sessions[].updatedAt"),
+  };
+}
+
+/**
+ * The conversations a canvas carries, or undefined when it carries none.
+ *
+ * Undefined and not an empty list, so that a document written before
+ * conversations existed is read and written back as the bytes it arrived with.
+ */
+function decodeSessions(value: unknown): AssistantSession[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return asArray(value, "sessions").map(decodeSession);
+}
+
 function migrateCanvas(canvas: CanvasDocument): CanvasDocument {
   if (canvas.schemaVersion > CANVAS_SCHEMA_VERSION) {
     throw new MokaCodecError(
@@ -498,6 +627,7 @@ function decodeCanvas(value: unknown): CanvasDocument {
       showMinimap: Boolean(settings.showMinimap),
       snapToGrid: Boolean(settings.snapToGrid),
     },
+    sessions: decodeSessions(doc.sessions),
   });
 }
 

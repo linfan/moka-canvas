@@ -1,6 +1,8 @@
 import {
   COORDINATE_LIMIT,
   GENERATION_PARAM_KEYS,
+  MAX_ASSISTANT_MESSAGES_PER_SESSION,
+  MAX_ASSISTANT_SESSIONS_PER_CANVAS,
   MAX_EDGES_PER_CANVAS,
   MAX_NODES_PER_CANVAS,
   MAX_PROMPT_LENGTH,
@@ -416,6 +418,46 @@ function generationIssues(
   return issues;
 }
 
+/**
+ * What is wrong with the conversations a canvas carries.
+ *
+ * A line naming a card that has since been deleted is not among them. The line
+ * kept that card's title and kind for exactly this case, so what it says is
+ * still what was asked about; only the card is gone, and saying so is the
+ * reader's job rather than a fault in the document.
+ */
+function sessionIssues(canvas: CanvasDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const canvasId = canvas.id;
+  const sessions = canvas.sessions ?? [];
+  if (sessions.length > MAX_ASSISTANT_SESSIONS_PER_CANVAS) {
+    issues.push({
+      code: "VALIDATION_FAILED",
+      message: `Canvas exceeds the session limit (${MAX_ASSISTANT_SESSIONS_PER_CANVAS})`,
+      canvasId,
+    });
+  }
+  const seen = new Set<string>();
+  for (const session of sessions) {
+    if (seen.has(session.id)) {
+      issues.push({
+        code: "VALIDATION_FAILED",
+        message: `Duplicate session id ${session.id}`,
+        canvasId,
+      });
+    }
+    seen.add(session.id);
+    if (session.messages.length > MAX_ASSISTANT_MESSAGES_PER_SESSION) {
+      issues.push({
+        code: "VALIDATION_FAILED",
+        message: `Session "${session.title}" exceeds the message limit (${MAX_ASSISTANT_MESSAGES_PER_SESSION})`,
+        canvasId,
+      });
+    }
+  }
+  return issues;
+}
+
 export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const canvasId = canvas.id;
@@ -434,6 +476,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
       canvasId,
     });
   }
+  issues.push(...sessionIssues(canvas));
 
   const nodeIds = new Set<string>();
   for (const node of canvas.nodes) {

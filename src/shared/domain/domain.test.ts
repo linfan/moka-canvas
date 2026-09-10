@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { applyCommands, CommandError } from "./commands";
 import {
+  MAX_ASSISTANT_MESSAGE_LENGTH,
+  MAX_ASSISTANT_MESSAGES_PER_SESSION,
+  MAX_ASSISTANT_SESSIONS_PER_CANVAS,
   MAX_PROMPT_LENGTH,
   MAX_RESULT_SLOTS,
   PROVIDER_EXECUTOR_KEY,
@@ -12,11 +15,15 @@ import {
   createCanvas,
   createNode,
   createProject,
+  createSession,
   executorKeyForNode,
   generationSpecFromSnapshot,
 } from "./factories";
 import { newId } from "./ids";
 import type {
+  AssistantMessage,
+  AssistantRole,
+  AssistantSession,
   CanvasDocument,
   DocumentCommand,
   GenerationSpec,
@@ -526,6 +533,244 @@ describe("document commands", () => {
         }),
       ),
     ).toBe("GROUP_INVALID");
+  });
+});
+
+describe("conversations a canvas carries", () => {
+  function apply(moka: MokaFile, ...commands: DocumentCommand[]) {
+    return applyCommands(moka, commands);
+  }
+
+  /** A moment after the one before it, so recency can be told apart. */
+  function at(second: number): string {
+    return new Date(Date.UTC(2026, 0, 1, 0, 0, second)).toISOString();
+  }
+
+  function line(role: AssistantRole, text: string, second: number) {
+    return { id: newId(), role, text, createdAt: at(second) };
+  }
+
+  function said(canvas: CanvasDocument | undefined, index = 0): string[] {
+    return (canvas?.sessions?.[index]?.messages ?? []).map(
+      (message) => message.text,
+    );
+  }
+
+  function opened(moka: MokaFile, title: string) {
+    const canvasId = moka.canvas[0].id;
+    const session: AssistantSession = {
+      ...createSession(title),
+      createdAt: at(0),
+      updatedAt: at(0),
+    };
+    return {
+      canvasId,
+      session,
+      next: apply(moka, { type: "addSession", canvasId, session }).next,
+    };
+  }
+
+  it("adds, renames, and removes a conversation with exact inverses", () => {
+    const moka = buildGoldenMokaFile();
+    const canvasId = moka.canvas[0].id;
+    const session = createSession("Over the lake");
+
+    const { next, inverse } = apply(moka, {
+      type: "addSession",
+      canvasId,
+      session,
+    });
+    expect(next.canvas[0].sessions?.map((one) => one.id)).toEqual([session.id]);
+
+    const renamed = apply(next, {
+      type: "renameSession",
+      canvasId,
+      sessionId: session.id,
+      title: "The lantern",
+    });
+    expect(renamed.next.canvas[0].sessions?.[0].title).toBe("The lantern");
+    // What a conversation is called is not something said in it, so the moment
+    // something was last said is left alone: the newest one is found by it.
+    expect(renamed.next.canvas[0].sessions?.[0].updatedAt).toBe(
+      session.updatedAt,
+    );
+
+    const undone = apply(renamed.next, ...renamed.inverse, ...inverse).next;
+    expect(undone.canvas[0]).toEqual(moka.canvas[0]);
+  });
+
+  it("puts a conversation back where it was among the others", () => {
+    const moka = buildGoldenMokaFile();
+    const canvasId = moka.canvas[0].id;
+    const first = createSession("First");
+    const second = createSession("Second");
+    const both = apply(
+      apply(moka, { type: "addSession", canvasId, session: first }).next,
+      { type: "addSession", canvasId, session: second },
+    ).next;
+    expect(both.canvas[0].sessions?.map((one) => one.title)).toEqual([
+      "First",
+      "Second",
+    ]);
+
+    const removed = apply(both, {
+      type: "removeSession",
+      canvasId,
+      sessionId: first.id,
+    });
+    const undone = apply(removed.next, ...removed.inverse).next;
+    expect(undone.canvas[0].sessions?.map((one) => one.title)).toEqual([
+      "First",
+      "Second",
+    ]);
+  });
+
+  it("appends what was said and takes it back", () => {
+    const moka = buildGoldenMokaFile();
+    const { canvasId, session, next } = opened(moka, "Over the lake");
+
+    const asked = line("user", "What is on the card?", 0);
+    const answered = line("assistant", "A lantern.", 1);
+    const appended = apply(next, {
+      type: "appendMessages",
+      canvasId,
+      sessionId: session.id,
+      messages: [asked, answered],
+    });
+    expect(said(appended.next.canvas[0])).toEqual([asked.text, answered.text]);
+    expect(appended.next.canvas[0].sessions?.[0].updatedAt).toBe(
+      answered.createdAt,
+    );
+
+    const undone = apply(appended.next, ...appended.inverse).next;
+    expect(said(undone.canvas[0])).toEqual([]);
+    // The moment something was last said only moves forward, so it stays where
+    // the turn put it: a conversation just taken back out of is still the one to
+    // open onto.
+    expect(undone.canvas[0].sessions?.[0].updatedAt).toBe(answered.createdAt);
+  });
+
+  /**
+   * The ceiling is a trim rather than a refusal, and the trim reaches the
+   * document, so undoing the turn that pushed past it has to give the lost lines
+   * back and not only the new one away.
+   */
+  it("lets the oldest lines go at the ceiling and gives them back on undo", () => {
+    const moka = buildGoldenMokaFile();
+    const canvasId = moka.canvas[0].id;
+    const session = createSession("A long one");
+    const full: AssistantMessage[] = Array.from(
+      { length: MAX_ASSISTANT_MESSAGES_PER_SESSION },
+      (_, index) => line("user", `Line ${index}`, index),
+    );
+    const filled = apply(moka, {
+      type: "addSession",
+      canvasId,
+      session: { ...session, messages: full },
+    }).next;
+
+    const appended = apply(filled, {
+      type: "appendMessages",
+      canvasId,
+      sessionId: session.id,
+      messages: [
+        line("assistant", "One more", MAX_ASSISTANT_MESSAGES_PER_SESSION),
+      ],
+    });
+    const trimmed = appended.next.canvas[0].sessions?.[0].messages ?? [];
+    expect(trimmed).toHaveLength(MAX_ASSISTANT_MESSAGES_PER_SESSION);
+    expect(trimmed[0].text).toBe("Line 1");
+    expect(trimmed.at(-1)?.text).toBe("One more");
+
+    const undone = apply(appended.next, ...appended.inverse).next;
+    const restored = undone.canvas[0].sessions?.[0].messages ?? [];
+    expect(restored.map((message) => message.id)).toEqual(
+      full.map((message) => message.id),
+    );
+  });
+
+  it("refuses a conversation the canvas has no room for", () => {
+    const moka = buildGoldenMokaFile();
+    const canvasId = moka.canvas[0].id;
+    let full = moka;
+    for (let index = 0; index < MAX_ASSISTANT_SESSIONS_PER_CANVAS; index += 1) {
+      full = apply(full, {
+        type: "addSession",
+        canvasId,
+        session: createSession(`Talk ${index}`),
+      }).next;
+    }
+    expect(full.canvas[0].sessions).toHaveLength(
+      MAX_ASSISTANT_SESSIONS_PER_CANVAS,
+    );
+    expect(
+      codeOf(() =>
+        apply(full, {
+          type: "addSession",
+          canvasId,
+          session: createSession("One too many"),
+        }),
+      ),
+    ).toBe("VALIDATION_FAILED");
+  });
+
+  it("refuses a conversation that is not there and a line that is not there", () => {
+    const moka = buildGoldenMokaFile();
+    const { canvasId, session, next } = opened(moka, "Over the lake");
+    expect(
+      codeOf(() =>
+        apply(moka, {
+          type: "appendMessages",
+          canvasId,
+          sessionId: session.id,
+          messages: [line("user", "Hello", 0)],
+        }),
+      ),
+    ).toBe("SESSION_NOT_FOUND");
+    expect(
+      codeOf(() =>
+        apply(next, {
+          type: "removeMessages",
+          canvasId,
+          sessionId: session.id,
+          messageIds: [newId()],
+        }),
+      ),
+    ).toBe("MESSAGE_NOT_FOUND");
+  });
+
+  it("refuses a line too long to become a card", () => {
+    const moka = buildGoldenMokaFile();
+    const { canvasId, session, next } = opened(moka, "Over the lake");
+    expect(
+      codeOf(() =>
+        apply(next, {
+          type: "appendMessages",
+          canvasId,
+          sessionId: session.id,
+          messages: [
+            line("assistant", "a".repeat(MAX_ASSISTANT_MESSAGE_LENGTH + 1), 0),
+          ],
+        }),
+      ),
+    ).toBe("VALIDATION_FAILED");
+  });
+
+  it("reports a conversation past its ceiling as a fault in the document", () => {
+    const canvas = buildGoldenMokaFile().canvas[0];
+    expect(validateCanvas(canvas)).toEqual([]);
+    canvas.sessions = [
+      {
+        ...createSession("Too long"),
+        messages: Array.from(
+          { length: MAX_ASSISTANT_MESSAGES_PER_SESSION + 1 },
+          (_, index) => line("user", `Line ${index}`, index),
+        ),
+      },
+    ];
+    expect(validateCanvas(canvas).map((issue) => issue.message)).toEqual([
+      `Session "Too long" exceeds the message limit (${MAX_ASSISTANT_MESSAGES_PER_SESSION})`,
+    ]);
   });
 });
 

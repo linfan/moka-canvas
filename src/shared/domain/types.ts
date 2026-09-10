@@ -1,4 +1,4 @@
-import type { AssetCategory, Capability } from "./constants";
+import type { AssetCategory, Capability, ProblemCode } from "./constants";
 
 export type ProjectId = string;
 export type CanvasId = string;
@@ -6,6 +6,8 @@ export type NodeId = string;
 export type EdgeId = string;
 export type AssetId = string;
 export type RunId = string;
+export type SessionId = string;
+export type MessageId = string;
 export type IsoTimestamp = string;
 export type ProjectRelativePath = string;
 
@@ -67,6 +69,13 @@ export interface AssetProvenance {
   runId?: RunId;
   canvasId?: CanvasId;
   operationNodeId?: NodeId;
+  /**
+   * The conversation that asked for this, when one did.
+   *
+   * Like a run, it is a reference only the machine that made it can honour:
+   * conversations travel with a full backup and not with a package of the work.
+   */
+  assistantSessionId?: SessionId;
   inputAssetIds?: AssetId[];
   parameterSnapshot?: Record<string, unknown>;
   createdAt: IsoTimestamp;
@@ -89,11 +98,81 @@ export interface CanvasDocument {
   edges: WorkflowEdge[];
   groups: GroupMembership[];
   settings: DocumentSettings;
+  /**
+   * The conversations had over this canvas.
+   *
+   * Left off rather than left empty on a document written before conversations
+   * existed, so that reading such a document and writing it back gives the bytes
+   * it arrived with. It came in without a schema version of its own for the same
+   * reason: nothing stored had to change to make room for it.
+   */
+  sessions?: AssistantSession[];
 }
 
 export interface GroupMembership {
   groupId: NodeId;
   childNodeIds: NodeId[];
+}
+
+/** Who a line of a conversation is from: the reader, a model, or a failure. */
+export type AssistantRole = "user" | "assistant" | "error";
+
+/**
+ * A card a line was asked about, as that line remembered it.
+ *
+ * The title and the kind are kept beside the id because the card may be gone by
+ * the time the line is read again, and a line that can say only "a card that no
+ * longer exists" tells nobody what was asked about.
+ */
+export interface AssistantReference {
+  nodeId: NodeId;
+  title: string;
+  kind: NodeKind;
+  assetId?: AssetId;
+}
+
+/** A run a line set going, noted so the line can say what it started. */
+export interface AssistantToolCall {
+  runId: RunId;
+  nodeId?: NodeId;
+  summary: string;
+}
+
+/** Why a line that failed failed, and whether asking again could work. */
+export interface AssistantFailure {
+  code: ProblemCode;
+  retryable: boolean;
+}
+
+export interface AssistantMessage {
+  id: MessageId;
+  role: AssistantRole;
+  text: string;
+  createdAt: IsoTimestamp;
+  references?: AssistantReference[];
+  toolCalls?: AssistantToolCall[];
+  failure?: AssistantFailure;
+}
+
+/**
+ * One conversation about one canvas, carried by the canvas itself.
+ *
+ * A canvas holds its own and never another's: what was asked about the cards on
+ * this board belongs to this board, so opening a document opens onto the
+ * conversations that were had over it.
+ */
+export interface AssistantSession {
+  id: SessionId;
+  title: string;
+  messages: AssistantMessage[];
+  createdAt: IsoTimestamp;
+  /**
+   * When something was last said, which is how the newest conversation is found.
+   *
+   * Only ever moves forward: taking a line back does not put this back with it,
+   * since a conversation just taken back out of is still the one to open onto.
+   */
+  updatedAt: IsoTimestamp;
 }
 
 export type NodeKind =
@@ -253,6 +332,43 @@ export type DocumentCommand =
       childNodeIds: NodeId[];
     }
   | { type: "setViewport"; canvasId: CanvasId; viewport: Viewport }
+  /**
+   * A canvas's conversations. Lines are added and taken away rather than the
+   * list rewritten, so a turn carries only what it said: a conversation is kept
+   * to a length that can be read through, and sending the whole of one across
+   * for every line would cost more than the line.
+   */
+  | {
+      type: "addSession";
+      canvasId: CanvasId;
+      session: AssistantSession;
+      index?: number;
+    }
+  | {
+      type: "renameSession";
+      canvasId: CanvasId;
+      sessionId: SessionId;
+      title: string;
+    }
+  | { type: "removeSession"; canvasId: CanvasId; sessionId: SessionId }
+  /**
+   * `at` is where the lines land in the list as it stands when the command is
+   * applied, and is the tail when left off. It exists for the undo of a
+   * conversation that had to let its oldest lines go to make room.
+   */
+  | {
+      type: "appendMessages";
+      canvasId: CanvasId;
+      sessionId: SessionId;
+      messages: AssistantMessage[];
+      at?: number;
+    }
+  | {
+      type: "removeMessages";
+      canvasId: CanvasId;
+      sessionId: SessionId;
+      messageIds: MessageId[];
+    }
   | { type: "addCanvas"; canvas: CanvasDocument; index?: number }
   | { type: "renameCanvas"; canvasId: CanvasId; name: string }
   | { type: "reorderCanvas"; canvasId: CanvasId; index: number }

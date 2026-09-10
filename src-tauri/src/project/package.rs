@@ -288,7 +288,17 @@ fn carried_document(moka: &MokaFile, scope: &PackageScope) -> MokaFile {
                 // inside the package, and asking the same way again is built from
                 // them — so only the dangling one goes.
                 provenance.run_id = None;
+                // The conversation that asked for it went with the run, so the
+                // reference to it goes for the same reason.
+                provenance.assistant_session_id = None;
             }
+        }
+        // What was said over a board is not part of the work on it: a package
+        // holds the cards, the wires and the assets, and whoever opens it starts
+        // their own conversation. The making of the cards survives in what is
+        // placed, which is the part worth handing over.
+        for canvas in &mut document.canvas {
+            canvas.sessions = None;
         }
     }
     if scope.referenced_assets_only {
@@ -646,8 +656,9 @@ pub fn asset_categories() -> &'static [&'static str] {
 mod tests {
     use super::*;
     use crate::domain::{
-        derive_ports, AssetProvenance, CanvasDocument, NodeData, NodeKind, ProjectMetadata, Rect,
-        ResourceEntry, ResourceRegistry, WorkflowNode, MOKA_FILE_VERSION,
+        derive_ports, AssetProvenance, AssistantMessage, AssistantReference, AssistantRole,
+        AssistantSession, AssistantToolCall, CanvasDocument, NodeData, NodeKind, ProjectMetadata,
+        Rect, ResourceEntry, ResourceRegistry, WorkflowNode, MOKA_FILE_VERSION,
     };
 
     /// The package an export makes unless it is asked for more.
@@ -732,6 +743,9 @@ mod tests {
     /// The run that made one of the fixture's assets.
     const RUN: &str = "0192b7d4-0000-7000-8000-000000000001";
 
+    /// The conversation that asked for it.
+    const SESSION: &str = "0192b7d4-0000-7000-8000-000000000002";
+
     fn entry(id: &str, name: &str, provenance: Option<AssetProvenance>) -> ResourceEntry {
         ResourceEntry {
             id: id.to_string(),
@@ -747,8 +761,21 @@ mod tests {
         }
     }
 
-    /// A project holding an asset a run made and placed on a canvas, and one
-    /// somebody brought in and left on the shelf.
+    fn line(id: &str, role: AssistantRole, text: &str, second: u32) -> AssistantMessage {
+        AssistantMessage {
+            id: id.to_string(),
+            role,
+            text: text.to_string(),
+            created_at: format!("2026-01-01T00:00:{second:02}Z"),
+            references: None,
+            tool_calls: None,
+            failure: None,
+        }
+    }
+
+    /// A project holding an asset a run made and placed on a canvas, one
+    /// somebody brought in and left on the shelf, and the conversation the work
+    /// was asked for in.
     fn fixture() -> MokaFile {
         let made = entry(
             "asset-made",
@@ -757,6 +784,7 @@ mod tests {
                 run_id: Some(RUN.to_string()),
                 canvas_id: Some("canvas-1".to_string()),
                 operation_node_id: Some("node-1".to_string()),
+                assistant_session_id: Some(SESSION.to_string()),
                 input_asset_ids: Some(vec!["asset-brought".to_string()]),
                 parameter_snapshot: Some(serde_json::json!({
                     "model": "a-model",
@@ -787,6 +815,39 @@ mod tests {
             created_at: now.clone(),
             updated_at: now.clone(),
         }];
+        canvas.sessions = Some(vec![AssistantSession {
+            id: SESSION.to_string(),
+            title: "The lake at dusk".to_string(),
+            messages: vec![
+                line(
+                    "message-asked",
+                    AssistantRole::User,
+                    "Paint the lake at dusk",
+                    0,
+                ),
+                AssistantMessage {
+                    references: Some(vec![AssistantReference {
+                        node_id: "node-1".to_string(),
+                        title: "Lake".to_string(),
+                        kind: NodeKind::Image,
+                        asset_id: Some("asset-made".to_string()),
+                    }]),
+                    tool_calls: Some(vec![AssistantToolCall {
+                        run_id: RUN.to_string(),
+                        node_id: Some("node-1".to_string()),
+                        summary: "Painted the lake".to_string(),
+                    }]),
+                    ..line(
+                        "message-answered",
+                        AssistantRole::Assistant,
+                        "Here is the lake, at dusk.",
+                        1,
+                    )
+                },
+            ],
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:01Z".to_string(),
+        }]);
         MokaFile {
             version: MOKA_FILE_VERSION.to_string(),
             metadata: ProjectMetadata {
@@ -825,6 +886,12 @@ mod tests {
             // record stayed on the machine that made it.
             ("runId", false, true),
             (RUN, false, true),
+            // What was said over the board is the record of asking rather than
+            // part of what was asked for, and it goes with the run.
+            ("sessions", false, true),
+            (SESSION, false, true),
+            ("assistantSessionId", false, true),
+            ("Paint the lake at dusk", false, true),
             // How it was asked for is the reusable part, which is the reason a
             // package of the work is worth handing over at all.
             ("parameterSnapshot", true, true),

@@ -568,6 +568,7 @@ mod tests {
                 .collect(),
             groups: Vec::new(),
             settings: DocumentSettings::default(),
+            sessions: None,
         }
     }
 

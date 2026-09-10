@@ -1,11 +1,14 @@
+use std::collections::{HashMap, HashSet};
+
 use super::validate::{
-    bounds_valid, resource_path_valid, validate_edge_candidate, MAX_CANVASES_PER_PROJECT,
-    MAX_CANVAS_NAME_LENGTH, MAX_EDGES_PER_CANVAS, MAX_NODES_PER_CANVAS, MAX_TITLE_LENGTH, ZOOM_MAX,
-    ZOOM_MIN,
+    bounds_valid, resource_path_valid, validate_edge_candidate, MAX_ASSISTANT_MESSAGES_PER_SESSION,
+    MAX_ASSISTANT_MESSAGE_LENGTH, MAX_ASSISTANT_SESSIONS_PER_CANVAS, MAX_ASSISTANT_TITLE_LENGTH,
+    MAX_CANVASES_PER_PROJECT, MAX_CANVAS_NAME_LENGTH, MAX_EDGES_PER_CANVAS, MAX_NODES_PER_CANVAS,
+    MAX_TITLE_LENGTH, ZOOM_MAX, ZOOM_MIN,
 };
 use super::{
-    CanvasDocument, DocumentCommand, GroupMembership, MokaFile, NodeData, NodeId, NodeKind,
-    PointValue, WorkflowNode,
+    AssistantMessage, AssistantSession, CanvasDocument, DocumentCommand, GroupMembership,
+    MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue, WorkflowNode,
 };
 use thiserror::Error;
 
@@ -38,6 +41,42 @@ fn canvas_of<'a>(moka: &'a MokaFile, canvas_id: &str) -> Result<&'a CanvasDocume
 
 fn clamp_zoom(zoom: f64) -> f64 {
     zoom.clamp(ZOOM_MIN, ZOOM_MAX)
+}
+
+fn session_of<'a>(
+    canvas: &'a CanvasDocument,
+    session_id: &str,
+) -> Result<&'a AssistantSession, CommandError> {
+    canvas
+        .sessions
+        .iter()
+        .flatten()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| CommandError::new("SESSION_NOT_FOUND", "Session not found"))
+}
+
+/// A canvas carrying these conversations, or carrying the field not at all when
+/// there are none.
+///
+/// A canvas emptied of its conversations writes what it would have written had
+/// nobody ever asked it anything, which is the honest reading of it: there is
+/// nothing left to say about, and an empty list would claim a place was made.
+fn with_sessions(canvas: &CanvasDocument, sessions: Vec<AssistantSession>) -> CanvasDocument {
+    let mut next = canvas.clone();
+    next.sessions = if sessions.is_empty() {
+        None
+    } else {
+        Some(sessions)
+    };
+    next
+}
+
+fn with_session(canvas: &CanvasDocument, session: AssistantSession) -> CanvasDocument {
+    let mut sessions = canvas.sessions.clone().unwrap_or_default();
+    if let Some(slot) = sessions.iter_mut().find(|held| held.id == session.id) {
+        *slot = session;
+    }
+    with_sessions(canvas, sessions)
 }
 
 fn sync_group_node_data(canvas: &mut CanvasDocument) {
@@ -521,6 +560,246 @@ fn apply_one(
                     viewport: previous,
                 }],
             ))
+        }
+
+        DocumentCommand::AddSession {
+            canvas_id,
+            session,
+            index,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let sessions: Vec<AssistantSession> = canvas.sessions.clone().unwrap_or_default();
+            if sessions.iter().any(|held| held.id == session.id) {
+                return Err(CommandError::new("CONFLICT", "Session id already exists"));
+            }
+            if sessions.len() + 1 > MAX_ASSISTANT_SESSIONS_PER_CANVAS {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Canvas session limit reached",
+                ));
+            }
+            if session.title.is_empty() {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Session title is empty",
+                ));
+            }
+            if session.title.chars().count() > MAX_ASSISTANT_TITLE_LENGTH {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Session title is too long",
+                ));
+            }
+            if session.messages.len() > MAX_ASSISTANT_MESSAGES_PER_SESSION {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Session message limit reached",
+                ));
+            }
+            let inserted_at = (*index).unwrap_or(sessions.len()).min(sessions.len());
+            let mut list = sessions;
+            list.insert(inserted_at, session.clone());
+            let mut next = moka.clone();
+            *next.canvas_mut(canvas_id).expect("canvas checked above") =
+                with_sessions(canvas, list);
+            Ok((
+                next,
+                vec![DocumentCommand::RemoveSession {
+                    canvas_id: canvas_id.clone(),
+                    session_id: session.id.clone(),
+                }],
+            ))
+        }
+
+        DocumentCommand::RenameSession {
+            canvas_id,
+            session_id,
+            title,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let session = session_of(canvas, session_id)?;
+            if title.is_empty() {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Session title is empty",
+                ));
+            }
+            if title.chars().count() > MAX_ASSISTANT_TITLE_LENGTH {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Session title is too long",
+                ));
+            }
+            let previous = session.title.clone();
+            // What a conversation is called is not something said in it, so renaming
+            // leaves the moment something was last said alone: the newest conversation
+            // is found by it, and a rename would otherwise make this one that.
+            let mut renamed = session.clone();
+            renamed.title = title.clone();
+            let mut next = moka.clone();
+            *next.canvas_mut(canvas_id).expect("canvas checked above") =
+                with_session(canvas, renamed);
+            Ok((
+                next,
+                vec![DocumentCommand::RenameSession {
+                    canvas_id: canvas_id.clone(),
+                    session_id: session_id.clone(),
+                    title: previous,
+                }],
+            ))
+        }
+
+        DocumentCommand::RemoveSession {
+            canvas_id,
+            session_id,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let mut list = canvas.sessions.clone().unwrap_or_default();
+            let index = list
+                .iter()
+                .position(|session| &session.id == session_id)
+                .ok_or_else(|| CommandError::new("SESSION_NOT_FOUND", "Session not found"))?;
+            let removed = list.remove(index);
+            let mut next = moka.clone();
+            *next.canvas_mut(canvas_id).expect("canvas checked above") =
+                with_sessions(canvas, list);
+            Ok((
+                next,
+                vec![DocumentCommand::AddSession {
+                    canvas_id: canvas_id.clone(),
+                    session: removed,
+                    index: Some(index),
+                }],
+            ))
+        }
+
+        DocumentCommand::AppendMessages {
+            canvas_id,
+            session_id,
+            messages: incoming,
+            at,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let session = session_of(canvas, session_id)?;
+            if incoming.is_empty() {
+                return Err(CommandError::new("VALIDATION_FAILED", "Nothing to append"));
+            }
+            let mut known: HashSet<&str> = session
+                .messages
+                .iter()
+                .map(|line| line.id.as_str())
+                .collect();
+            for message in incoming {
+                if !known.insert(message.id.as_str()) {
+                    return Err(CommandError::new("CONFLICT", "Message id already exists"));
+                }
+                if message.text.chars().count() > MAX_ASSISTANT_MESSAGE_LENGTH {
+                    return Err(CommandError::new(
+                        "VALIDATION_FAILED",
+                        "Message is too long",
+                    ));
+                }
+            }
+
+            let mut messages = session.messages.clone();
+            let inserted_at = (*at).unwrap_or(messages.len()).min(messages.len());
+            for (offset, message) in incoming.iter().enumerate() {
+                messages.insert(inserted_at + offset, message.clone());
+            }
+
+            // The oldest lines go to keep a conversation a length that can still be
+            // read through. They go from the document and not only from the screen, so
+            // the undo that takes the new lines back gives these back too, each at the
+            // place it held: putting them back oldest first lands them where they were.
+            let overflow = messages
+                .len()
+                .saturating_sub(MAX_ASSISTANT_MESSAGES_PER_SESSION);
+            let dropped: Vec<AssistantMessage> = messages.drain(..overflow).collect();
+            let kept: HashSet<&str> = messages.iter().map(|line| line.id.as_str()).collect();
+            let appended: Vec<MessageId> = incoming
+                .iter()
+                .map(|message| message.id.clone())
+                .filter(|id| kept.contains(id.as_str()))
+                .collect();
+
+            let mut inverse = Vec::new();
+            if !appended.is_empty() {
+                inverse.push(DocumentCommand::RemoveMessages {
+                    canvas_id: canvas_id.clone(),
+                    session_id: session_id.clone(),
+                    message_ids: appended,
+                });
+            }
+            for (held_at, message) in dropped.into_iter().enumerate() {
+                inverse.push(DocumentCommand::AppendMessages {
+                    canvas_id: canvas_id.clone(),
+                    session_id: session_id.clone(),
+                    messages: vec![message],
+                    at: Some(held_at),
+                });
+            }
+
+            let mut updated = session.clone();
+            // Only ever moves forward, so taking a line back does not put this back
+            // with it: a conversation just taken back out of is still the one to
+            // open onto.
+            if let Some(spoken_at) = messages.last().map(|line| line.created_at.clone()) {
+                if spoken_at > session.updated_at {
+                    updated.updated_at = spoken_at;
+                }
+            }
+            updated.messages = messages;
+            let mut next = moka.clone();
+            *next.canvas_mut(canvas_id).expect("canvas checked above") =
+                with_session(canvas, updated);
+            Ok((next, inverse))
+        }
+
+        DocumentCommand::RemoveMessages {
+            canvas_id,
+            session_id,
+            message_ids,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?;
+            let session = session_of(canvas, session_id)?;
+            let removing: HashSet<&str> = message_ids.iter().map(|id| id.as_str()).collect();
+            let removed: Vec<AssistantMessage> = session
+                .messages
+                .iter()
+                .filter(|line| removing.contains(line.id.as_str()))
+                .cloned()
+                .collect();
+            if removed.len() != removing.len() {
+                return Err(CommandError::new(
+                    "MESSAGE_NOT_FOUND",
+                    "Some messages not found",
+                ));
+            }
+            let held: HashMap<&str, usize> = session
+                .messages
+                .iter()
+                .enumerate()
+                .map(|(position, line)| (line.id.as_str(), position))
+                .collect();
+            let mut updated = session.clone();
+            updated
+                .messages
+                .retain(|line| !removing.contains(line.id.as_str()));
+            // Each line goes back to the place it held, oldest first, which is the
+            // order that lands them all where they were.
+            let inverse = removed
+                .into_iter()
+                .map(|message| DocumentCommand::AppendMessages {
+                    canvas_id: canvas_id.clone(),
+                    session_id: session_id.clone(),
+                    at: held.get(message.id.as_str()).copied(),
+                    messages: vec![message],
+                })
+                .collect();
+            let mut next = moka.clone();
+            *next.canvas_mut(canvas_id).expect("canvas checked above") =
+                with_session(canvas, updated);
+            Ok((next, inverse))
         }
 
         DocumentCommand::AddCanvas { canvas, index } => {

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CANVAS_SCHEMA_VERSION } from "./constants";
 import {
+  buildConversationMokaFile,
   buildGenerationMokaFile,
   buildGoldenMokaFile,
   buildLegacyV1MokaFile,
@@ -18,6 +19,8 @@ const FIXTURE_DIR = join(
 );
 const GOLDEN_JSON = join(FIXTURE_DIR, "minimal.moka.json");
 const GOLDEN_BINARY = join(FIXTURE_DIR, "minimal.canvas.moka");
+const CONVERSATION_JSON = join(FIXTURE_DIR, "conversation.moka.json");
+const CONVERSATION_BINARY = join(FIXTURE_DIR, "conversation.canvas.moka");
 const LEGACY_BINARY = join(FIXTURE_DIR, "v1-legacy.moka");
 
 function normalize(value: unknown): unknown {
@@ -241,5 +244,55 @@ describe("moka codec", () => {
     } catch (error) {
       expect((error as MokaCodecError).code).toBe("MOKA_TOO_LARGE");
     }
+  });
+
+  it("round-trips the conversations a canvas carries", () => {
+    const carried = buildConversationMokaFile();
+    const decoded = decodeMokaFile(encodeMokaFile(carried));
+    expect(normalize(decoded)).toEqual(normalize(carried));
+  });
+
+  /**
+   * The shared pair the other language reads: it decodes the binary to this
+   * model and writes the binary back byte for byte, so what a conversation
+   * looks like on the disk is one contract rather than two opinions about it.
+   */
+  it("matches the shared conversation fixtures", () => {
+    const carried = buildConversationMokaFile();
+    const encoded = encodeMokaFile(carried);
+    const json = `${JSON.stringify(carried, null, 2)}\n`;
+
+    if (
+      process.env.UPDATE_FIXTURES === "1" ||
+      !existsSync(CONVERSATION_BINARY)
+    ) {
+      mkdirSync(FIXTURE_DIR, { recursive: true });
+      writeFileSync(CONVERSATION_BINARY, encoded);
+      writeFileSync(CONVERSATION_JSON, json);
+    }
+
+    expect(
+      Buffer.from(readFileSync(CONVERSATION_BINARY)).equals(
+        Buffer.from(encoded),
+      ),
+    ).toBe(true);
+    expect(readFileSync(CONVERSATION_JSON, "utf8")).toBe(json);
+  });
+
+  /**
+   * The field came in without a schema version of its own, so a document stored
+   * before it existed has to read as carrying no conversations and write back
+   * unchanged — otherwise opening an old project would quietly rewrite it.
+   */
+  it("reads a document stored before conversations existed as carrying none", () => {
+    const stored = new Uint8Array(readFileSync(GOLDEN_BINARY));
+    const decoded = decodeMokaFile(stored);
+    expect(decoded.canvas.map((canvas) => canvas.sessions)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(
+      Buffer.from(encodeMokaFile(decoded)).equals(Buffer.from(stored)),
+    ).toBe(true);
   });
 });

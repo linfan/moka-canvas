@@ -1,5 +1,9 @@
 import {
   CANVAS_SCHEMA_VERSION,
+  MAX_ASSISTANT_MESSAGE_LENGTH,
+  MAX_ASSISTANT_MESSAGES_PER_SESSION,
+  MAX_ASSISTANT_SESSIONS_PER_CANVAS,
+  MAX_ASSISTANT_TITLE_LENGTH,
   MAX_CANVAS_NAME_LENGTH,
   MAX_CANVASES_PER_PROJECT,
   MAX_EDGES_PER_CANVAS,
@@ -9,6 +13,7 @@ import {
   ZOOM_MIN,
 } from "./constants";
 import type {
+  AssistantSession,
   CanvasDocument,
   DocumentCommand,
   MokaFile,
@@ -58,6 +63,42 @@ function replaceCanvas(moka: MokaFile, canvas: CanvasDocument): MokaFile {
     ...moka,
     canvas: moka.canvas.map((c) => (c.id === canvas.id ? canvas : c)),
   };
+}
+
+function sessionOf(
+  canvas: CanvasDocument,
+  sessionId: string,
+): AssistantSession {
+  const session = canvas.sessions?.find((s) => s.id === sessionId);
+  if (!session)
+    throw new CommandError("SESSION_NOT_FOUND", "Session not found");
+  return session;
+}
+
+/**
+ * A canvas carrying these conversations, or carrying the field not at all when
+ * there are none.
+ *
+ * A canvas emptied of its conversations writes what it would have written had
+ * nobody ever asked it anything, which is the honest reading of it: there is
+ * nothing left to say about, and an empty list would claim a place was made.
+ */
+function withSessions(
+  canvas: CanvasDocument,
+  sessions: AssistantSession[],
+): CanvasDocument {
+  return { ...canvas, sessions: sessions.length > 0 ? sessions : undefined };
+}
+
+function withSession(
+  canvas: CanvasDocument,
+  session: AssistantSession,
+): CanvasDocument {
+  const sessions = canvas.sessions ?? [];
+  return withSessions(
+    canvas,
+    sessions.map((s) => (s.id === session.id ? session : s)),
+  );
 }
 
 function clampZoom(zoom: number): number {
@@ -431,6 +472,203 @@ function applyOne(
             viewport: previous,
           },
         ],
+      };
+    }
+
+    case "addSession": {
+      const canvas = canvasOf(moka, command.canvasId);
+      const sessions = canvas.sessions ?? [];
+      if (sessions.some((s) => s.id === command.session.id))
+        throw new CommandError("CONFLICT", "Session id already exists");
+      if (sessions.length + 1 > MAX_ASSISTANT_SESSIONS_PER_CANVAS)
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "Canvas session limit reached",
+        );
+      if (command.session.title.length === 0)
+        throw new CommandError("VALIDATION_FAILED", "Session title is empty");
+      if (command.session.title.length > MAX_ASSISTANT_TITLE_LENGTH)
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "Session title is too long",
+        );
+      if (command.session.messages.length > MAX_ASSISTANT_MESSAGES_PER_SESSION)
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "Session message limit reached",
+        );
+      const index = Math.min(
+        Math.max(command.index ?? sessions.length, 0),
+        sessions.length,
+      );
+      const list = [...sessions];
+      list.splice(index, 0, command.session);
+      return {
+        next: replaceCanvas(moka, withSessions(canvas, list)),
+        inverse: [
+          {
+            type: "removeSession",
+            canvasId: command.canvasId,
+            sessionId: command.session.id,
+          },
+        ],
+      };
+    }
+
+    case "renameSession": {
+      const canvas = canvasOf(moka, command.canvasId);
+      const session = sessionOf(canvas, command.sessionId);
+      if (command.title.length === 0)
+        throw new CommandError("VALIDATION_FAILED", "Session title is empty");
+      if (command.title.length > MAX_ASSISTANT_TITLE_LENGTH)
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "Session title is too long",
+        );
+      const previous = session.title;
+      // What a conversation is called is not something said in it, so renaming
+      // leaves the moment something was last said alone: the newest conversation
+      // is found by it, and a rename would otherwise make this one that.
+      return {
+        next: replaceCanvas(
+          moka,
+          withSession(canvas, { ...session, title: command.title }),
+        ),
+        inverse: [
+          {
+            type: "renameSession",
+            canvasId: command.canvasId,
+            sessionId: command.sessionId,
+            title: previous,
+          },
+        ],
+      };
+    }
+
+    case "removeSession": {
+      const canvas = canvasOf(moka, command.canvasId);
+      const sessions = canvas.sessions ?? [];
+      const index = sessions.findIndex((s) => s.id === command.sessionId);
+      if (index < 0)
+        throw new CommandError("SESSION_NOT_FOUND", "Session not found");
+      return {
+        next: replaceCanvas(
+          moka,
+          withSessions(
+            canvas,
+            sessions.filter((s) => s.id !== command.sessionId),
+          ),
+        ),
+        inverse: [
+          {
+            type: "addSession",
+            canvasId: command.canvasId,
+            session: sessions[index],
+            index,
+          },
+        ],
+      };
+    }
+
+    case "appendMessages": {
+      const canvas = canvasOf(moka, command.canvasId);
+      const session = sessionOf(canvas, command.sessionId);
+      if (command.messages.length === 0)
+        throw new CommandError("VALIDATION_FAILED", "Nothing to append");
+      const known = new Set(session.messages.map((message) => message.id));
+      for (const message of command.messages) {
+        if (known.has(message.id))
+          throw new CommandError("CONFLICT", "Message id already exists");
+        known.add(message.id);
+        if (message.text.length > MAX_ASSISTANT_MESSAGE_LENGTH)
+          throw new CommandError("VALIDATION_FAILED", "Message is too long");
+      }
+
+      const messages = [...session.messages];
+      const at = Math.min(
+        Math.max(command.at ?? messages.length, 0),
+        messages.length,
+      );
+      messages.splice(at, 0, ...command.messages);
+
+      // The oldest lines go to keep a conversation a length that can still be
+      // read through. They go from the document and not only from the screen, so
+      // the undo that takes the new lines back gives these back too, each at the
+      // place it held: putting them back oldest first lands them where they were.
+      const overflow = messages.length - MAX_ASSISTANT_MESSAGES_PER_SESSION;
+      const dropped = overflow > 0 ? messages.splice(0, overflow) : [];
+      const kept = new Set(messages.map((message) => message.id));
+      const appended = command.messages
+        .map((message) => message.id)
+        .filter((id) => kept.has(id));
+
+      const inverse: DocumentCommand[] = [];
+      if (appended.length > 0) {
+        inverse.push({
+          type: "removeMessages",
+          canvasId: command.canvasId,
+          sessionId: session.id,
+          messageIds: appended,
+        });
+      }
+      for (const [position, message] of dropped.entries()) {
+        inverse.push({
+          type: "appendMessages",
+          canvasId: command.canvasId,
+          sessionId: session.id,
+          messages: [message],
+          at: position,
+        });
+      }
+
+      const spokenAt = messages.at(-1)?.createdAt;
+      return {
+        next: replaceCanvas(
+          moka,
+          withSession(canvas, {
+            ...session,
+            messages,
+            updatedAt:
+              spokenAt !== undefined && spokenAt > session.updatedAt
+                ? spokenAt
+                : session.updatedAt,
+          }),
+        ),
+        inverse,
+      };
+    }
+
+    case "removeMessages": {
+      const canvas = canvasOf(moka, command.canvasId);
+      const session = sessionOf(canvas, command.sessionId);
+      const removing = new Set(command.messageIds);
+      const removed = session.messages.filter((message) =>
+        removing.has(message.id),
+      );
+      if (removed.length !== removing.size)
+        throw new CommandError("MESSAGE_NOT_FOUND", "Some messages not found");
+      const held = new Map(
+        session.messages.map((message, position) => [message.id, position]),
+      );
+      return {
+        next: replaceCanvas(
+          moka,
+          withSession(canvas, {
+            ...session,
+            messages: session.messages.filter(
+              (message) => !removing.has(message.id),
+            ),
+          }),
+        ),
+        // Each line goes back to the place it held, oldest first, which is the
+        // order that lands them all where they were.
+        inverse: removed.map((message) => ({
+          type: "appendMessages" as const,
+          canvasId: command.canvasId,
+          sessionId: command.sessionId,
+          messages: [message],
+          at: held.get(message.id),
+        })),
       };
     }
 

@@ -1,6 +1,10 @@
 use moka_canvas::config::{parse_test_config, AppConfig};
 use moka_canvas::domain::commands::{apply_commands, make_node};
-use moka_canvas::domain::{new_id, DocumentCommand, NodeKind, PointValue};
+use moka_canvas::domain::validate::MAX_ASSISTANT_MESSAGES_PER_SESSION;
+use moka_canvas::domain::{
+    new_id, AssistantMessage, AssistantReference, AssistantRole, AssistantSession,
+    AssistantToolCall, CanvasDocument, DocumentCommand, NodeKind, PointValue,
+};
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{CreateProject, ProjectStore, StagedAsset};
 use std::collections::BTreeMap;
@@ -487,6 +491,246 @@ async fn commands_module_applies_group_dissolve() {
     assert_eq!(dissolved.canvas[0].groups.len(), 0);
     assert!(!dissolved.canvas[0].nodes.iter().any(|n| n.id == group.id));
     assert!(dissolved.canvas[0].nodes.iter().any(|n| n.id == node_a.id));
+}
+
+/// A moment after the one before it, so recency can be told apart.
+fn at(second: u32) -> String {
+    format!("2026-01-01T00:{:02}:{:02}Z", second / 60, second % 60)
+}
+
+fn line(role: AssistantRole, text: &str, second: u32) -> AssistantMessage {
+    AssistantMessage {
+        id: new_id(),
+        role,
+        text: text.to_string(),
+        created_at: at(second),
+        references: None,
+        tool_calls: None,
+        failure: None,
+    }
+}
+
+/// A conversation nobody has said anything in yet, opened at the first moment so
+/// that whatever is said in it is later.
+fn conversation(title: &str) -> AssistantSession {
+    AssistantSession {
+        id: new_id(),
+        title: title.to_string(),
+        messages: Vec::new(),
+        created_at: at(0),
+        updated_at: at(0),
+    }
+}
+
+fn said(canvas: &CanvasDocument) -> Vec<String> {
+    canvas
+        .sessions
+        .iter()
+        .flatten()
+        .flat_map(|session| session.messages.iter().map(|line| line.text.clone()))
+        .collect()
+}
+
+fn held(canvas: &CanvasDocument) -> Vec<String> {
+    canvas
+        .sessions
+        .iter()
+        .flatten()
+        .flat_map(|session| session.messages.iter().map(|line| line.id.clone()))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_conversation_survives_the_disk_and_undoes_to_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let opened = store.current().await.unwrap().unwrap();
+    let canvas_id = opened.moka.canvas[0].id.clone();
+    assert_eq!(
+        opened.moka.canvas[0].sessions, None,
+        "a canvas nobody has asked anything of carries no conversations"
+    );
+
+    let session = conversation("What is over the lake");
+    let card = make_node(NodeKind::Image, "Lake".into(), 0.0, 0.0);
+    // Every part of a line that can be left off is filled in, so the round trip
+    // through the disk is a round trip through all of them.
+    let answered = AssistantMessage {
+        references: Some(vec![AssistantReference {
+            node_id: card.id.clone(),
+            title: card.title.clone(),
+            kind: NodeKind::Image,
+            asset_id: Some("asset-made".to_string()),
+        }]),
+        tool_calls: Some(vec![AssistantToolCall {
+            run_id: new_id(),
+            node_id: Some(card.id.clone()),
+            summary: "Painted it".to_string(),
+        }]),
+        ..line(AssistantRole::Assistant, "A lake, at dusk.", 2)
+    };
+    let turn = vec![
+        DocumentCommand::AddNode {
+            canvas_id: canvas_id.clone(),
+            node: card,
+        },
+        DocumentCommand::AddSession {
+            canvas_id: canvas_id.clone(),
+            session: session.clone(),
+            index: None,
+        },
+        DocumentCommand::AppendMessages {
+            canvas_id: canvas_id.clone(),
+            session_id: session.id.clone(),
+            messages: vec![
+                line(AssistantRole::User, "What is over the lake?", 1),
+                answered,
+            ],
+            at: None,
+        },
+    ];
+
+    let (spoken, inverse) = apply_commands(&opened.moka, &turn).unwrap();
+    assert_eq!(
+        said(&spoken.canvas[0]),
+        vec!["What is over the lake?", "A lake, at dusk."]
+    );
+    assert_eq!(
+        spoken.canvas[0].sessions.as_ref().unwrap()[0].updated_at,
+        at(2),
+        "the newest conversation is found by when something was last said in it"
+    );
+
+    store.apply_commands(0, turn).await.unwrap();
+    let reopened = store.open_project(&root).await.unwrap();
+    assert_eq!(
+        reopened.moka.canvas[0], spoken.canvas[0],
+        "what was said is what comes back off the disk"
+    );
+
+    let (taken_back, _) = apply_commands(&spoken, &inverse).unwrap();
+    assert_eq!(
+        taken_back.canvas[0], opened.moka.canvas[0],
+        "and taking it back leaves the canvas as it was, conversations and all"
+    );
+}
+
+#[tokio::test]
+async fn the_oldest_lines_go_at_the_ceiling_and_come_back_on_undo() {
+    let tmp = TempDir::new().unwrap();
+    let (store, _root) = create_store(&tmp).await;
+    let opened = store.current().await.unwrap().unwrap();
+    let canvas_id = opened.moka.canvas[0].id.clone();
+
+    let mut filled = conversation("A long one");
+    for index in 0..MAX_ASSISTANT_MESSAGES_PER_SESSION {
+        let second = u32::try_from(index + 1).unwrap();
+        filled.messages.push(line(
+            AssistantRole::User,
+            &format!("Line {}", index + 1),
+            second,
+        ));
+    }
+    let (full, _) = apply_commands(
+        &opened.moka,
+        &[DocumentCommand::AddSession {
+            canvas_id: canvas_id.clone(),
+            session: filled,
+            index: None,
+        }],
+    )
+    .unwrap();
+
+    let one_more = line(
+        AssistantRole::User,
+        "One more",
+        u32::try_from(MAX_ASSISTANT_MESSAGES_PER_SESSION + 1).unwrap(),
+    );
+    let (trimmed, inverse) = apply_commands(
+        &full,
+        &[DocumentCommand::AppendMessages {
+            canvas_id,
+            session_id: full.canvas[0].sessions.as_ref().unwrap()[0].id.clone(),
+            messages: vec![one_more],
+            at: None,
+        }],
+    )
+    .unwrap();
+
+    let messages = &trimmed.canvas[0].sessions.as_ref().unwrap()[0].messages;
+    assert_eq!(
+        messages.len(),
+        MAX_ASSISTANT_MESSAGES_PER_SESSION,
+        "a conversation is kept to a length that can be read through"
+    );
+    assert_eq!(
+        messages[0].text, "Line 2",
+        "and the oldest line is the one that goes"
+    );
+    assert_eq!(messages.last().unwrap().text, "One more");
+
+    let (given_back, _) = apply_commands(&trimmed, &inverse).unwrap();
+    assert_eq!(
+        held(&given_back.canvas[0]),
+        held(&full.canvas[0]),
+        "each line comes back to the place it held"
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_nobody_had_is_not_there_to_say_something_in() {
+    let tmp = TempDir::new().unwrap();
+    let (store, _root) = create_store(&tmp).await;
+    let opened = store.current().await.unwrap().unwrap();
+    let canvas_id = opened.moka.canvas[0].id.clone();
+    let session = conversation("Asked and answered");
+    let (spoken, _) = apply_commands(
+        &opened.moka,
+        &[DocumentCommand::AddSession {
+            canvas_id: canvas_id.clone(),
+            session: session.clone(),
+            index: None,
+        }],
+    )
+    .unwrap();
+
+    let refused = |command: DocumentCommand| -> &'static str {
+        apply_commands(&spoken, &[command]).unwrap_err().code
+    };
+    assert_eq!(
+        refused(DocumentCommand::AppendMessages {
+            canvas_id: canvas_id.clone(),
+            session_id: new_id(),
+            messages: vec![line(AssistantRole::User, "Anything?", 1)],
+            at: None,
+        }),
+        "SESSION_NOT_FOUND"
+    );
+    assert_eq!(
+        refused(DocumentCommand::RemoveMessages {
+            canvas_id: canvas_id.clone(),
+            session_id: session.id.clone(),
+            message_ids: vec![new_id()],
+        }),
+        "MESSAGE_NOT_FOUND"
+    );
+    assert_eq!(
+        refused(DocumentCommand::AppendMessages {
+            canvas_id: canvas_id.clone(),
+            session_id: session.id.clone(),
+            messages: Vec::new(),
+            at: None,
+        }),
+        "VALIDATION_FAILED"
+    );
+    assert_eq!(
+        refused(DocumentCommand::AddSession {
+            canvas_id,
+            session,
+            index: None,
+        }),
+        "CONFLICT"
+    );
 }
 
 /// Generates a deterministic 64x64 PNG without external fixtures.
