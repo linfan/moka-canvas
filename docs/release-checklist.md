@@ -29,6 +29,32 @@ npm run test:e2e  # Playwright: critical path, provider settings, and a
    asset file externally before reopening: the self-check dialog offers
    locate-replacement, open-with-missing, and cancel; export without
    restoring offers the incomplete-manifest route.
+   - The export dialog asks two questions and both start off. With
+     neither ticked, unpack the `.mokapkg.zip` and confirm it holds
+     `canvas.moka`, `assets/**`, and `moka-package.json` only — no
+     `history/` — and that the manifest has `personalHistory: false`
+     with every rule that skipped a file listed beside its count and
+     the bytes it freed.
+   - Tick the run-history choice and confirm `history/runs/**` arrives
+     and the manifest says `personalHistory: true`. Unticked, the
+     pointer from each generated asset back to the run that made it is
+     gone from the document while the prompt and parameters it was
+     asked with stay, the inspector says the record did not come with
+     the project, and **Run again** starts a new run rather than
+     retrying one that is not there.
+   - Tick the referenced-assets-only choice on a project holding an
+     asset no node points at. The question counts that asset and its
+     size before the choice is made, and after the import the
+     self-check reports nothing — the registry entry and its file went
+     out together, which is the part most easily got wrong.
+   - Search the unpacked bytes of both kinds for `sk-`, `apiKey`,
+     `cipher`, `secrets.json`, `master.key`, and the metadata directory
+     path: none appear in either. The automated equivalent is
+     `cargo test --test package export_never_contains_personal_or_secret_data`.
+   - Import a package written by the previous build (manifest
+     `formatVersion: 1`) and confirm it is accepted and cleaned to what
+     this build keeps, and that a manifest naming a later version is
+     refused with the range this build reads in the message.
 7. Check the server log: one structured line per API request with request
    id, method, path, status, duration, and error code; no payloads, no
    filesystem internals beyond project paths, no secrets.
@@ -227,6 +253,19 @@ live in the platform application-data directory, never in the program tree. See
 2. A long undo/redo session (30+ operations) neither leaks memory nor
    degrades responsiveness.
 3. Autosave never blocks pointer input while a save is in flight.
+
+## Known limitations
+
+Intended behaviour, recorded here so a tester does not file it as a defect.
+
+1. **Importing one package twice keeps one project id.** An import does not
+   give the arriving document a new id, so two directories unpacked from the
+   same package describe the same project. The recent-project list is keyed
+   by that id and holds one entry for it: opening the second copy replaces
+   the first in the list rather than sitting beside it, though both
+   directories remain on disk and each still opens. Keeping several
+   independent copies of one package means giving the document a new id,
+   which this build does not do on your behalf.
 
 ## Sign-off
 

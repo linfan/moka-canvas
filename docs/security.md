@@ -127,6 +127,17 @@ these guards are a second line of defence rather than the only one. The
 exclusion rules appear in the package manifest, so an importer can see what was
 left out.
 
+What the two kinds of package differ in is whose machine they describe, and that
+is personal data rather than a credential. The package of the work — what an
+export makes unless asked otherwise — takes the record of the run that made each
+generated asset out of the document, so the asset still says what it was asked
+for and with which parameters, but not which run answered on which machine. A
+full backup keeps those records, which means it carries every prompt this
+machine asked and the name of every model that answered, an internal channel
+alias included. That is a choice the export dialog puts to the user, off by
+default and saying what it keeps; it is not a leak, but it is a reason to think
+about where a full backup is sent.
+
 ## Damaged documents
 
 A document that fails to parse is renamed `<name>.corrupt.<timestamp>.json` and

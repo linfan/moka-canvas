@@ -1062,6 +1062,9 @@ describe("generation UI", () => {
       name: "Run again with the parameters of the last generation",
     });
     expect(inspected("Inputs")).toBe("plate.png");
+    // The record of the run that answered is not in this document, and the gap
+    // is explained rather than left for the reader to find.
+    expect(screen.getByText(/did not come with the project/)).toBeTruthy();
 
     api.calls = [];
     api.startResponse = () => ({
@@ -1098,6 +1101,20 @@ describe("generation UI", () => {
     });
     // Never a retry: the package this came from carries no run to retry.
     expect(api.calls.some((call) => call.url.includes("/retry"))).toBe(false);
+  });
+
+  it("says nothing about a missing record where the run is still here", async () => {
+    const moka = buildGeneratedMokaFile();
+    const poster = moka.resources.images[1]!;
+    poster.provenance = { ...poster.provenance!, runId: "run-made-here" };
+    api.moka = () => moka;
+    await openEditor();
+    selectNode(generated.image);
+
+    await screen.findByRole("button", {
+      name: "Run again with the parameters of the last generation",
+    });
+    expect(screen.queryByText(/did not come with the project/)).toBeNull();
   });
 
   it("shows how far a generation has got and what it has said so far", async () => {

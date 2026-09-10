@@ -451,6 +451,12 @@ function LastGeneration({
   return (
     <>
       <h3>Last generation</h3>
+      {!recorded.runId && (
+        <p className="inspector-note">
+          The record of the run that made this did not come with the project.
+          What it was asked for did, so it can be asked for again.
+        </p>
+      )}
       <Row label="Inputs" value={inputs} />
       <pre className="inspector-json">
         {JSON.stringify(recorded.parameterSnapshot, null, 2)}

@@ -825,9 +825,14 @@ h2 {
   z-index: 1;
 }
 
-.inspector-empty {
+.inspector-empty,
+.inspector-note {
   color: var(--muted);
   font-size: 13px;
+}
+
+.inspector-note {
+  margin: 0;
 }
 
 .inspector-list li {
