@@ -1,7 +1,9 @@
 import type { GenerateInput, GenerateRequest } from "../../api/generate";
 import type {
   AssetId,
+  AssistantMessage,
   AssistantReference,
+  AssistantRole,
   Capability,
   CanvasDocument,
   NodeId,
@@ -98,6 +100,51 @@ export const ASSISTANT_CONTEXT_CHARS = 24_000;
  * answered no better for the fortieth thumbnail than for the eighth.
  */
 export const ASSISTANT_PICTURE_LIMIT = 8;
+
+/**
+ * How far back a question may be sent with what was said before it.
+ *
+ * Chosen rather than counted out, because the reader is the one who knows whether
+ * the answer needs the earlier turns or only the cards: a conversation is a long
+ * thing to send and every character of it is paid for again by the model that
+ * reads it.
+ */
+export const HISTORY_CHOICES = [2, 4, 8] as const;
+
+export type HistoryChoice = (typeof HISTORY_CHOICES)[number];
+
+const HISTORY_WORDS: Record<AssistantRole, string> = {
+  user: "You",
+  assistant: "Assistant",
+  error: "Trouble",
+};
+
+/**
+ * The last few things said, oldest first, as the block a question travels with.
+ *
+ * Nothing at all unless it was asked for: a turn by itself carries the cards it
+ * names and no memory of the turns before it, which is what keeps a long
+ * conversation from growing the ask every time something is asked.
+ */
+export function earlierWords(
+  lines: readonly AssistantMessage[],
+  count: HistoryChoice | null,
+): string {
+  if (count === null) return "";
+  const said: string[] = [];
+  let room = ASSISTANT_CONTEXT_CHARS;
+  for (let at = lines.length - 1; at >= 0 && said.length < count; at -= 1) {
+    const line = lines[at];
+    const words = line.text.trim();
+    if (words === "") continue;
+    const entry = `${HISTORY_WORDS[line.role]}: ${words}`;
+    if (entry.length > room) break;
+    room -= entry.length;
+    said.unshift(entry);
+  }
+  if (said.length === 0) return "";
+  return `Earlier in this conversation:\n${said.join("\n")}`;
+}
 
 /**
  * Everything that feeds the given cards, however far back it starts.
@@ -257,21 +304,25 @@ export function askOf(
   intent: "answer" | "rewrite",
   nodes: readonly WorkflowNode[],
   asked: string,
+  earlier?: string,
 ): AssistantWordsAsk;
 export function askOf(
   intent: "image" | "video" | "audio",
   nodes: readonly WorkflowNode[],
   asked: string,
+  earlier?: string,
 ): AssistantCardAsk;
 export function askOf(
   intent: AssistantIntent,
   nodes: readonly WorkflowNode[],
   asked: string,
+  earlier?: string,
 ): AssistantAsk;
 export function askOf(
   intent: AssistantIntent,
   nodes: readonly WorkflowNode[],
   asked: string,
+  earlier = "",
 ): AssistantAsk {
   const kind = mediaKindFor(intent);
   const names = new Map<NodeId, string>(
@@ -329,7 +380,9 @@ export function askOf(
         request: {
           capability: "text",
           system: intent === "rewrite" ? REWRITE_SYSTEM : ANSWER_SYSTEM,
-          prompt: context === "" ? words : `${context}\n\n---\n\n${words}`,
+          prompt: [context, earlier, words]
+            .filter((part) => part !== "")
+            .join("\n\n---\n\n"),
           inputs,
         },
         ...about,

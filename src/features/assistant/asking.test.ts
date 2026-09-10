@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
+  AssistantMessage,
+  AssistantRole,
   CanvasDocument,
   WorkflowEdge,
   WorkflowNode,
@@ -11,6 +13,7 @@ import {
   ASSISTANT_PICTURE_LIMIT,
   askOf,
   capabilityFor,
+  earlierWords,
   referenceNodes,
   referenceSummary,
   upstreamOf,
@@ -235,6 +238,72 @@ describe("askOf", () => {
     expect(ask.request.inputs).toHaveLength(ASSISTANT_PICTURE_LIMIT);
     expect(ask.leftOut).toBe(2);
     expect(ask.references).toHaveLength(ASSISTANT_PICTURE_LIMIT);
+  });
+
+  it("carries what was said before only when it is handed over", () => {
+    const earlier = "Earlier in this conversation:\nYou: what happened";
+    const plain = askOf("answer", [SEED], "and the lake?");
+    const withMemory = askOf("answer", [SEED], "and the lake?", earlier);
+    expect(plain.request.prompt).not.toContain("Earlier in");
+    expect(withMemory.request.prompt).toContain(earlier);
+    // The question is still what is being asked, wherever the memory sits.
+    expect(withMemory.request.prompt?.endsWith("and the lake?")).toBe(true);
+    expect(withMemory.asked).toBe("and the lake?");
+  });
+});
+
+describe("earlierWords", () => {
+  let made = 0;
+  function said(role: AssistantRole, words: string): AssistantMessage {
+    made += 1;
+    return { id: `m-${made}`, role, text: words, createdAt: T };
+  }
+
+  it("says nothing before it has been asked for", () => {
+    expect(
+      earlierWords(
+        [said("user", "what happened"), said("assistant", "dusk")],
+        null,
+      ),
+    ).toBe("");
+  });
+
+  it("takes the last few, oldest first, and says who said each", () => {
+    const lines = [
+      said("user", "first?"),
+      said("assistant", "first."),
+      said("user", "second?"),
+      said("assistant", "second."),
+    ];
+    expect(earlierWords(lines, 2)).toBe(
+      "Earlier in this conversation:\nYou: second?\nAssistant: second.",
+    );
+  });
+
+  it("leaves a line with nothing in it out of the count", () => {
+    const lines = [
+      said("user", "first?"),
+      said("assistant", "   "),
+      said("user", "second?"),
+    ];
+    expect(earlierWords(lines, 2)).toBe(
+      "Earlier in this conversation:\nYou: first?\nYou: second?",
+    );
+  });
+
+  it("sends as much as the conversation holds when less was asked for", () => {
+    const lines = [said("user", "only one")];
+    expect(earlierWords(lines, 8)).toBe(
+      "Earlier in this conversation:\nYou: only one",
+    );
+  });
+
+  it("sends nothing that would not fit beside the question", () => {
+    const lines = [
+      said("user", "x".repeat(ASSISTANT_CONTEXT_CHARS + 1)),
+      said("assistant", "y".repeat(ASSISTANT_CONTEXT_CHARS + 1)),
+    ];
+    expect(earlierWords(lines, 2)).toBe("");
   });
 });
 

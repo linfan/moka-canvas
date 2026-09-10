@@ -310,6 +310,7 @@ beforeEach(() => {
     saying: "",
     busy: false,
     shown: "newest",
+    history: null,
   });
   useEditorStore.setState({ announcement: "" });
 });
@@ -558,6 +559,44 @@ describe("what is sent", () => {
       system: string;
     };
     expect(sent.system).toContain("Return only that text");
+  });
+
+  it("carries the lines before the question only once they are asked for", async () => {
+    const moka = hydrate();
+    stubAnswer("First.");
+    useAssistantStore.getState().setDraft("What is happening?");
+    await useAssistantStore.getState().ask({ canvas: board(moka), chosen: [] });
+
+    const second = stubAnswer("Second.");
+    useAssistantStore.getState().setDraft("And the lake?");
+    await useAssistantStore.getState().ask({
+      canvas: board(useProjectStore.getState().moka!),
+      chosen: [],
+    });
+    const bare = JSON.parse(second.calls.mock.calls[0][1]!.body as string) as {
+      prompt: string;
+    };
+    expect(bare.prompt).not.toContain("Earlier in this conversation");
+
+    useAssistantStore.getState().setHistory(2);
+    const third = stubAnswer("Third.");
+    useAssistantStore.getState().setDraft("And the lantern?");
+    await useAssistantStore.getState().ask({
+      canvas: board(useProjectStore.getState().moka!),
+      chosen: [],
+    });
+    const carried = JSON.parse(
+      third.calls.mock.calls[0][1]!.body as string,
+    ) as {
+      prompt: string;
+    };
+    // The last two things said, not the turn before them: a conversation is a
+    // long thing to send and the reader chose how much of it was worth it.
+    expect(carried.prompt).toContain(
+      "Earlier in this conversation:\nYou: And the lake?\nAssistant: Second.",
+    );
+    expect(carried.prompt).not.toContain("You: What is happening?");
+    expect(carried.prompt.endsWith("And the lantern?")).toBe(true);
   });
 });
 

@@ -1662,6 +1662,25 @@ button.danger:hover:not(:disabled) {
   overflow-y: auto;
 }
 
+/* A conversation is shown from its newest lines, so this is the way back to the
+   ones folded away — a step at the head of the list, not an action on a line. */
+.assistant-earlier {
+  background: none;
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  margin-bottom: 8px;
+  padding: 3px 6px;
+  width: 100%;
+}
+
+.assistant-earlier:hover {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
 .assistant-lines ol {
   display: grid;
   gap: 10px;
@@ -1712,6 +1731,24 @@ button.danger:hover:not(:disabled) {
   color: var(--muted);
   font-size: 10px;
   padding: 1px 7px;
+}
+
+/* Kept, and said to be gone: the line was about that card whether or not the
+   canvas still holds it, so the name stays and the dashes say the rest. */
+.assistant-line-about li.is-gone {
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.assistant-history {
+  display: grid;
+  flex: none;
+  gap: 4px;
+}
+
+.assistant-history > span {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 /* Under the words rather than beside them: an answer is read first, and only

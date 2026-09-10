@@ -22,10 +22,12 @@ import { useProjectStore } from "../editor/stores/projectStore";
 import { untilRunEnds, useRunStore } from "../editor/stores/runStore";
 import {
   askOf,
+  earlierWords,
   referenceNodes,
   type AssistantCardAsk,
   type AssistantIntent,
   type AssistantWordsAsk,
+  type HistoryChoice,
 } from "./asking";
 import { madeWords, planCard } from "./cards";
 import {
@@ -34,6 +36,7 @@ import {
   lineFailed,
   lineFromRun,
   lineSaid,
+  sessionShown,
   sessionTarget,
   titleFor,
   type SessionTarget,
@@ -67,9 +70,18 @@ interface AssistantState {
    * something was last said in, but one picked out of a list stays picked.
    */
   shown: ShownSession;
+  /**
+   * How many earlier lines travel with a question, or null when they do not.
+   *
+   * Nothing is sent by default: a conversation is long, and every character of it
+   * is paid for again by the model reading the ask, so the memory of a turn is
+   * something a reader asks for rather than something they are given.
+   */
+  history: HistoryChoice | null;
 
   setIntent: (intent: AssistantIntent) => void;
   setDraft: (draft: string) => void;
+  setHistory: (count: HistoryChoice | null) => void;
   show: (shown: ShownSession) => void;
   rename: (canvas: CanvasDocument, sessionId: SessionId, title: string) => void;
   remove: (canvas: CanvasDocument, sessionId: SessionId) => void;
@@ -320,9 +332,11 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   saying: "",
   busy: false,
   shown: "newest",
+  history: null,
 
   setIntent: (intent) => set({ intent }),
   setDraft: (draft) => set({ draft }),
+  setHistory: (count) => set({ history: count }),
   show: (shown) => set({ shown }),
 
   rename: (canvas, sessionId, title) => {
@@ -387,11 +401,15 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     // be written into the conversation before the one it interrupted, and read
     // as an answer to the wrong question.
     if (going !== null) return;
-    const { intent, draft, shown } = get();
+    const { intent, draft, shown, history } = get();
     if (draft.trim() === "") return;
 
     const nodes = referenceNodes(canvas, chosen, mentionNodeIds(draft));
-    const ask = askOf(intent, nodes, draft);
+    const earlier = earlierWords(
+      sessionShown(canvas, shown)?.messages ?? [],
+      history,
+    );
+    const ask = askOf(intent, nodes, draft, earlier);
     const target = sessionTarget(canvas, shown);
 
     const controller = new AbortController();

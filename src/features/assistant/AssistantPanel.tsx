@@ -31,11 +31,13 @@ import {
 } from "../editor/stores/projectStore";
 import {
   ASSISTANT_INTENTS,
+  HISTORY_CHOICES,
   INTENT_HINTS,
   INTENT_LABELS,
   INTENT_PLACEHOLDERS,
   askOf,
   capabilityFor,
+  earlierWords,
   referenceNodes,
   referenceSummary,
   upstreamOf,
@@ -57,6 +59,9 @@ const ROLE_WORDS: Record<AssistantRole, string> = {
   assistant: "Assistant",
   error: "Trouble",
 };
+
+/** How many lines a conversation shows at once, and in what steps more do. */
+const WINDOW_STEP = 50;
 
 /**
  * The select's value for a conversation nothing has been said in yet.
@@ -82,11 +87,13 @@ function Line({
   role,
   words,
   about,
+  live,
   actions,
 }: {
   role: AssistantRole;
   words: string;
   about?: readonly AssistantReference[];
+  live: ReadonlySet<NodeId>;
   actions?: ReactNode;
 }) {
   return (
@@ -95,9 +102,20 @@ function Line({
       <p className="assistant-line-words">{words}</p>
       {about && about.length > 0 && (
         <ul aria-label="What this was about" className="assistant-line-about">
-          {about.map((reference) => (
-            <li key={reference.nodeId}>{reference.title}</li>
-          ))}
+          {about.map((reference) => {
+            const gone = !live.has(reference.nodeId);
+            return (
+              <li
+                className={gone ? "is-gone" : ""}
+                key={reference.nodeId}
+                title={
+                  gone ? "This card is no longer on the canvas." : undefined
+                }
+              >
+                {gone ? `${reference.title} — gone` : reference.title}
+              </li>
+            );
+          })}
         </ul>
       )}
       {actions}
@@ -346,6 +364,10 @@ export function AssistantPanel() {
   const saying = useAssistantStore((state) => state.saying);
   const busy = useAssistantStore((state) => state.busy);
   const shown = useAssistantStore((state) => state.shown);
+  const history = useAssistantStore((state) => state.history);
+  // A card is asked of a run built from the canvas, which reads the wires rather
+  // than a message, so only a turn answered by words has anywhere to put memory.
+  const wordsWanted = capabilityFor(intent) === "text";
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const canvasId = canvas?.id ?? null;
@@ -364,6 +386,26 @@ export function AssistantPanel() {
     [moka],
   );
 
+  const carrying = canvas ? sessionShown(canvas, shown) : null;
+  const lines = useMemo(() => carrying?.messages ?? [], [carrying]);
+
+  // A conversation is read from the end of, so the oldest lines are folded away
+  // rather than built: a panel holding two hundred of them is one where the
+  // question just asked cannot be seen.
+  const [shownCount, setShownCount] = useState(WINDOW_STEP);
+  const held = carrying?.id ?? null;
+  useEffect(() => setShownCount(WINDOW_STEP), [held]);
+  const before = Math.max(0, lines.length - shownCount);
+  const visible = lines.slice(before);
+
+  // What a line was about may no longer be on the board. The line keeps saying
+  // what it was about, so a card that has gone is named as gone rather than as
+  // nothing at all.
+  const live = useMemo(
+    () => new Set<NodeId>((canvas?.nodes ?? []).map((node) => node.id)),
+    [canvas],
+  );
+
   // Keyed on what the question names rather than on its words. Finding what
   // feeds the chosen cards means walking the wires and looking each card up in
   // a list, which is worth doing when the set of cards changes and not on every
@@ -376,9 +418,15 @@ export function AssistantPanel() {
         : [],
     [canvas, chosen, named],
   );
+  // Worked out here rather than again where it is sent, so the number shown to a
+  // reader is the number of characters that go.
+  const earlier = useMemo(
+    () => earlierWords(lines, wordsWanted ? history : null),
+    [lines, history, wordsWanted],
+  );
   const planned = useMemo(
-    () => (canvas ? askOf(intent, about, draft) : null),
-    [canvas, intent, about, draft],
+    () => (canvas ? askOf(intent, about, draft, earlier) : null),
+    [canvas, intent, about, draft, earlier],
   );
 
   /**
@@ -416,8 +464,6 @@ export function AssistantPanel() {
     }
   }, [asking, saying]);
 
-  const carrying = canvas ? sessionShown(canvas, shown) : null;
-  const lines = carrying?.messages ?? [];
   const summary = referenceSummary(planned?.references ?? []);
   const capability = capabilityFor(intent);
   const noModel =
@@ -474,13 +520,22 @@ export function AssistantPanel() {
                   : "Nothing has been asked over this canvas yet."}
               </p>
             )}
+            {before > 0 && (
+              <button
+                className="assistant-earlier"
+                onClick={() => setShownCount(shownCount + WINDOW_STEP)}
+                type="button"
+              >
+                {`Show ${before} earlier ${before === 1 ? "line" : "lines"}`}
+              </button>
+            )}
             <ol>
-              {lines.map((line, index) => (
+              {visible.map((line, index) => (
                 <Line
                   about={line.references}
                   actions={
                     <LineActions
-                      asked={askedAbove(lines, index)}
+                      asked={askedAbove(lines, before + index)}
                       canvas={canvas}
                       chosen={chosen}
                       filed={filed}
@@ -490,12 +545,17 @@ export function AssistantPanel() {
                     />
                   }
                   key={line.id}
+                  live={live}
                   role={line.role}
                   words={line.text}
                 />
               ))}
-              {asking !== null && <Line role="user" words={asking} />}
-              {busy && <Line role="assistant" words={saying || "…"} />}
+              {asking !== null && (
+                <Line live={live} role="user" words={asking} />
+              )}
+              {busy && (
+                <Line live={live} role="assistant" words={saying || "…"} />
+              )}
             </ol>
             <div ref={endRef} />
           </div>
@@ -524,6 +584,44 @@ export function AssistantPanel() {
               </button>
             ))}
           </div>
+
+          {wordsWanted && (
+            <div className="assistant-history">
+              <span>Send earlier lines with this</span>
+              <div
+                aria-label="How many earlier lines to send"
+                className="prompt-panel-modes"
+                role="group"
+              >
+                {HISTORY_CHOICES.map((count) => (
+                  <button
+                    aria-pressed={history === count}
+                    className={history === count ? "is-active" : ""}
+                    key={count}
+                    onClick={() =>
+                      useAssistantStore
+                        .getState()
+                        .setHistory(history === count ? null : count)
+                    }
+                    title={`Send the last ${count} lines of this conversation along with the question`}
+                    type="button"
+                  >
+                    {count}
+                  </button>
+                ))}
+              </div>
+              <p
+                className="prompt-panel-note"
+                data-testid="assistant-history-note"
+              >
+                {history === null
+                  ? "Nothing said before this question is sent with it."
+                  : earlier === ""
+                    ? "Nothing has been said yet to send along."
+                    : `About ${earlier.length} characters of this conversation go with the ask.`}
+              </p>
+            </div>
+          )}
 
           {refusal !== null ? (
             <div className="prompt-panel-models">
