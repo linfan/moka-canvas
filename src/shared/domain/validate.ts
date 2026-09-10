@@ -1,6 +1,11 @@
 import {
+  ASSET_ORIGINS,
   COORDINATE_LIMIT,
   GENERATION_PARAM_KEYS,
+  MAX_ASSET_KEYWORD_LENGTH,
+  MAX_ASSET_NOTE_LENGTH,
+  MAX_ASSET_TAG_LENGTH,
+  MAX_ASSET_TAGS,
   MAX_ASSISTANT_MESSAGES_PER_SESSION,
   MAX_ASSISTANT_SESSIONS_PER_CANVAS,
   MAX_EDGES_PER_CANVAS,
@@ -608,6 +613,45 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
   return issues;
 }
 
+/**
+ * What a reader says about an asset, held to its sizes and its vocabulary.
+ *
+ * These are the only registry fields written by hand, so a document out of the
+ * wild can carry an asset too tagged to read through, or an origin nothing here
+ * recognises.
+ */
+function shelfIssues(entry: ResourceEntry): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const say = (message: string) =>
+    issues.push({ code: "VALIDATION_FAILED", message });
+  if (entry.tags) {
+    if (entry.tags.length > MAX_ASSET_TAGS) {
+      say(
+        `Asset "${entry.name}" carries more tags than the ${MAX_ASSET_TAGS} allowed`,
+      );
+    }
+    if (entry.tags.some((tag) => tag.length > MAX_ASSET_TAG_LENGTH)) {
+      say(
+        `Asset "${entry.name}" carries a tag over ${MAX_ASSET_TAG_LENGTH} characters`,
+      );
+    }
+  }
+  if (entry.note && entry.note.length > MAX_ASSET_NOTE_LENGTH) {
+    say(`Asset "${entry.name}" carries a note over ${MAX_ASSET_NOTE_LENGTH}`);
+  }
+  if (entry.keyword && entry.keyword.length > MAX_ASSET_KEYWORD_LENGTH) {
+    say(
+      `Asset "${entry.name}" carries a summary over ${MAX_ASSET_KEYWORD_LENGTH}`,
+    );
+  }
+  if (entry.origin !== undefined && !ASSET_ORIGINS.includes(entry.origin)) {
+    say(
+      `Asset "${entry.name}" says an origin nothing recognises: ${entry.origin}`,
+    );
+  }
+  return issues;
+}
+
 export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const canvasIds = new Set<string>();
@@ -638,6 +682,7 @@ export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
         message: `Resource path escapes the project root: ${entry.path}`,
       });
     }
+    issues.push(...shelfIssues(entry));
   }
 
   const refs = collectAssetReferences(moka);

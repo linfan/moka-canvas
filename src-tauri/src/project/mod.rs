@@ -84,6 +84,20 @@ pub struct AssetFile {
     pub range: Option<ByteRange>,
 }
 
+/// What a reader says about an asset, put right on its own.
+///
+/// A part left out is a part nobody spoke about, so it stands as it was — the
+/// shelf edits one corner of an entry at a time, and saying nothing is not the
+/// same as taking something back. An empty note or keyword does take it back:
+/// there is no other way to say so from a text field.
+#[derive(Debug, Clone, Default)]
+pub struct AssetShelfEdit {
+    pub tags: Option<Vec<String>>,
+    pub note: Option<String>,
+    pub favorite: Option<bool>,
+    pub keyword: Option<String>,
+}
+
 pub struct PackageReport {
     pub destination: PathBuf,
     pub entries: usize,
@@ -127,6 +141,14 @@ pub trait ProjectStore: Send + Sync {
         &self,
         id: &str,
         staged: StagedAsset,
+    ) -> Result<AssetChange, ProjectError>;
+    /// Writes what a reader says about an asset. The registry entry is all it
+    /// touches: the file underneath is neither read nor re-hashed, so a note
+    /// added to a video costs nothing of the video's.
+    async fn update_asset_shelf(
+        &self,
+        id: &str,
+        edit: AssetShelfEdit,
     ) -> Result<AssetChange, ProjectError>;
     async fn asset_file(
         &self,

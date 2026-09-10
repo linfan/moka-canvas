@@ -758,6 +758,11 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             probe: None,
             provenance,
+            tags: None,
+            note: None,
+            favorite: None,
+            origin: None,
+            keyword: None,
         }
     }
 

@@ -8,6 +8,7 @@ import {
   buildGenerationMokaFile,
   buildGoldenMokaFile,
   buildLegacyV1MokaFile,
+  buildShelfMokaFile,
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 import { derivePorts } from "./factories";
@@ -21,6 +22,8 @@ const GOLDEN_JSON = join(FIXTURE_DIR, "minimal.moka.json");
 const GOLDEN_BINARY = join(FIXTURE_DIR, "minimal.canvas.moka");
 const CONVERSATION_JSON = join(FIXTURE_DIR, "conversation.moka.json");
 const CONVERSATION_BINARY = join(FIXTURE_DIR, "conversation.canvas.moka");
+const SHELF_JSON = join(FIXTURE_DIR, "shelf.moka.json");
+const SHELF_BINARY = join(FIXTURE_DIR, "shelf.canvas.moka");
 const LEGACY_BINARY = join(FIXTURE_DIR, "v1-legacy.moka");
 
 function normalize(value: unknown): unknown {
@@ -294,5 +297,62 @@ describe("moka codec", () => {
     expect(
       Buffer.from(encodeMokaFile(decoded)).equals(Buffer.from(stored)),
     ).toBe(true);
+  });
+
+  it("round-trips what the shelf says about an asset", () => {
+    const shelf = buildShelfMokaFile();
+    const decoded = decodeMokaFile(encodeMokaFile(shelf));
+    expect(normalize(decoded)).toEqual(normalize(shelf));
+  });
+
+  /**
+   * The shared pair the other language reads: it decodes the binary to this
+   * model and writes the binary back byte for byte, so what the shelf looks
+   * like on the disk is one contract rather than two opinions about it.
+   */
+  it("matches the shared shelf fixtures", () => {
+    const shelf = buildShelfMokaFile();
+    const encoded = encodeMokaFile(shelf);
+    const json = `${JSON.stringify(shelf, null, 2)}\n`;
+
+    if (process.env.UPDATE_FIXTURES === "1" || !existsSync(SHELF_BINARY)) {
+      mkdirSync(FIXTURE_DIR, { recursive: true });
+      writeFileSync(SHELF_BINARY, encoded);
+      writeFileSync(SHELF_JSON, json);
+    }
+
+    expect(
+      Buffer.from(readFileSync(SHELF_BINARY)).equals(Buffer.from(encoded)),
+    ).toBe(true);
+    expect(readFileSync(SHELF_JSON, "utf8")).toBe(json);
+  });
+
+  it("reads an asset stored before the shelf existed as saying nothing", () => {
+    const stored = new Uint8Array(readFileSync(GOLDEN_BINARY));
+    const decoded = decodeMokaFile(stored);
+    const said = decoded.resources.images[0];
+    expect([
+      said.tags,
+      said.note,
+      said.favorite,
+      said.origin,
+      said.keyword,
+    ]).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    expect(
+      Buffer.from(encodeMokaFile(decoded)).equals(Buffer.from(stored)),
+    ).toBe(true);
+  });
+
+  /**
+   * A word the shelf does not know is written back as it was read rather than
+   * dropped: validation is the one that says it is wrong, and quietly rewriting
+   * a document to agree with a newer vocabulary would lose what it had in it.
+   */
+  it("carries an origin outside the vocabulary through unchanged", () => {
+    const shelf = buildShelfMokaFile();
+    const entry: { origin?: string } = shelf.resources.images[0];
+    entry.origin = "inherited";
+    const decoded = decodeMokaFile(encodeMokaFile(shelf));
+    expect(decoded.resources.images[0].origin).toBe("inherited");
   });
 });

@@ -1,7 +1,8 @@
 use moka_canvas::domain::validate::{
     mention_node_ids, mention_spans, model_reference_shaped, resource_path_valid,
-    topological_order, validate_canvas, validate_moka_file, MAX_ASSISTANT_MESSAGES_PER_SESSION,
-    MAX_ASSISTANT_SESSIONS_PER_CANVAS, MAX_PROMPT_LENGTH, MAX_RESULT_SLOTS,
+    topological_order, validate_canvas, validate_moka_file, MAX_ASSET_TAGS, MAX_ASSET_TAG_LENGTH,
+    MAX_ASSISTANT_MESSAGES_PER_SESSION, MAX_ASSISTANT_SESSIONS_PER_CANVAS, MAX_PROMPT_LENGTH,
+    MAX_RESULT_SLOTS,
 };
 use moka_canvas::domain::{
     AssistantMessage, AssistantReference, AssistantRole, AssistantSession, CanvasDocument,
@@ -65,6 +66,57 @@ fn conversation_re_encode_is_byte_canonical() {
         encode_moka_file(&decoded, None).unwrap(),
         "a conversation is written the same bytes whichever language writes it"
     );
+}
+
+/// What a reader says about its assets, as the other language wrote it to disk.
+fn shelf_from_json() -> MokaFile {
+    let raw = std::fs::read_to_string(fixture_path("shelf.moka.json")).unwrap();
+    serde_json::from_str(&raw).unwrap()
+}
+
+#[test]
+fn shelf_binary_decodes_to_shelf_json_model() {
+    let bytes = std::fs::read(fixture_path("shelf.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(decoded, shelf_from_json());
+}
+
+#[test]
+fn shelf_re_encode_is_byte_canonical() {
+    let bytes = std::fs::read(fixture_path("shelf.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(
+        bytes,
+        encode_moka_file(&decoded, None).unwrap(),
+        "what a reader says about an asset is written the same bytes whichever language writes it"
+    );
+}
+
+#[test]
+fn shelf_words_are_held_to_their_sizes_and_their_vocabulary() {
+    let mut crowded = shelf_from_json();
+    crowded.resources.images[0].tags = Some(
+        (0..=MAX_ASSET_TAGS)
+            .map(|index| index.to_string())
+            .collect(),
+    );
+    assert!(validate_moka_file(&crowded)
+        .iter()
+        .any(|issue| issue.message.contains("more tags than")));
+
+    let mut long_tag = shelf_from_json();
+    long_tag.resources.images[0].tags = Some(vec!["k".repeat(MAX_ASSET_TAG_LENGTH + 1)]);
+    assert!(validate_moka_file(&long_tag)
+        .iter()
+        .any(|issue| issue.message.contains("a tag over")));
+
+    let mut unknown_origin = shelf_from_json();
+    unknown_origin.resources.images[0].origin = Some("inherited".into());
+    assert!(validate_moka_file(&unknown_origin)
+        .iter()
+        .any(|issue| issue.message.contains("an origin nothing recognises")));
+
+    assert!(validate_moka_file(&shelf_from_json()).is_empty());
 }
 
 #[test]

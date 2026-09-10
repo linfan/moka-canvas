@@ -329,6 +329,11 @@ mod tests {
                 poster_asset_id: None,
             }),
             provenance: None,
+            tags: None,
+            note: None,
+            favorite: None,
+            origin: None,
+            keyword: None,
         }
     }
 

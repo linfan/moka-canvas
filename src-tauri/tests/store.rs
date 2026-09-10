@@ -1,12 +1,12 @@
 use moka_canvas::config::{parse_test_config, AppConfig};
 use moka_canvas::domain::commands::{apply_commands, make_node};
-use moka_canvas::domain::validate::MAX_ASSISTANT_MESSAGES_PER_SESSION;
+use moka_canvas::domain::validate::{MAX_ASSET_TAGS, MAX_ASSISTANT_MESSAGES_PER_SESSION};
 use moka_canvas::domain::{
     new_id, AssistantMessage, AssistantReference, AssistantRole, AssistantSession,
     AssistantToolCall, CanvasDocument, DocumentCommand, NodeKind, PointValue,
 };
 use moka_canvas::project::store::FsProjectStore;
-use moka_canvas::project::{CreateProject, ProjectStore, StagedAsset};
+use moka_canvas::project::{AssetShelfEdit, CreateProject, ProjectStore, StagedAsset};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -433,6 +433,156 @@ async fn replace_asset_bytes_clears_missing_state() {
     assert_eq!(updated.id, entry.id);
     let reopened = store.open_project(&root).await.unwrap();
     assert!(reopened.self_check.ok);
+}
+
+#[tokio::test]
+async fn what_a_reader_says_about_an_asset_reaches_the_disk() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let png = make_test_png();
+    let staging = root.join("tmp").join("upload-shelf.bin");
+    std::fs::write(&staging, &png).unwrap();
+    let entry = store
+        .add_asset(StagedAsset {
+            name: "lantern.png".into(),
+            tmp_path: staging,
+            declared_mime: None,
+            category_hint: None,
+            provenance: None,
+        })
+        .await
+        .unwrap()
+        .entry;
+    assert_eq!(entry.origin.as_deref(), Some("brought"));
+    assert!(entry.tags.is_none());
+    assert!(entry.note.is_none());
+    assert!(entry.favorite.is_none());
+    assert!(entry.keyword.is_none());
+
+    let said = store
+        .update_asset_shelf(
+            &entry.id,
+            AssetShelfEdit {
+                tags: Some(vec![" lake ".into(), "dusk".into(), "Lake".into()]),
+                note: Some("  Kept for the opening shot.  ".into()),
+                favorite: Some(true),
+                keyword: None,
+            },
+        )
+        .await
+        .unwrap()
+        .entry;
+    assert_eq!(
+        said.tags,
+        Some(vec!["lake".to_string(), "dusk".to_string()])
+    );
+    assert_eq!(said.note.as_deref(), Some("Kept for the opening shot."));
+    assert_eq!(said.favorite, Some(true));
+    assert!(said.keyword.is_none());
+    assert_eq!(said.sha256, entry.sha256);
+    assert_eq!(std::fs::read(root.join(&said.path)).unwrap(), png);
+
+    let unchecked = store
+        .update_asset_shelf(
+            &entry.id,
+            AssetShelfEdit {
+                favorite: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .entry;
+    assert_eq!(unchecked.favorite, Some(false));
+    assert_eq!(unchecked.tags, said.tags);
+    assert_eq!(unchecked.note, said.note);
+
+    let taken_back = store
+        .update_asset_shelf(
+            &entry.id,
+            AssetShelfEdit {
+                note: Some("   ".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .entry;
+    assert!(taken_back.note.is_none());
+    assert_eq!(taken_back.tags, unchecked.tags);
+
+    let reopened = store.open_project(&root).await.unwrap();
+    let on_disk = reopened
+        .moka
+        .resources
+        .find(&entry.id)
+        .expect("the asset is still registered");
+    assert_eq!(
+        on_disk.tags,
+        Some(vec!["lake".to_string(), "dusk".to_string()])
+    );
+    assert!(on_disk.note.is_none());
+    assert_eq!(on_disk.favorite, Some(false));
+    assert_eq!(on_disk.origin.as_deref(), Some("brought"));
+    assert!(reopened.self_check.ok);
+}
+
+#[tokio::test]
+async fn the_shelf_refuses_more_than_it_can_hold() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let staging = root.join("tmp").join("upload-crowded.bin");
+    std::fs::write(&staging, make_test_png()).unwrap();
+    let entry = store
+        .add_asset(StagedAsset {
+            name: "crowded.png".into(),
+            tmp_path: staging,
+            declared_mime: None,
+            category_hint: None,
+            provenance: None,
+        })
+        .await
+        .unwrap()
+        .entry;
+
+    let crowded: Vec<String> = (0..=MAX_ASSET_TAGS)
+        .map(|index| format!("word-{index}"))
+        .collect();
+    let result = store
+        .update_asset_shelf(
+            &entry.id,
+            AssetShelfEdit {
+                tags: Some(crowded),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert_eq!(result.unwrap_err().code(), "VALIDATION_FAILED");
+
+    let long_tag = "l".repeat(40);
+    let result = store
+        .update_asset_shelf(
+            &entry.id,
+            AssetShelfEdit {
+                tags: Some(vec![long_tag]),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert_eq!(result.unwrap_err().code(), "VALIDATION_FAILED");
+
+    let result = store
+        .update_asset_shelf("no-such-asset", AssetShelfEdit::default())
+        .await;
+    assert_eq!(result.unwrap_err().code(), "NOT_FOUND");
+
+    let current = store.current().await.unwrap().expect("a project is open");
+    let unchanged = current
+        .moka
+        .resources
+        .find(&entry.id)
+        .expect("the asset is still registered");
+    assert!(unchanged.tags.is_none());
 }
 
 #[tokio::test]

@@ -293,6 +293,11 @@ function encodeResource(entry: ResourceEntry): Record<string, unknown> {
   if (probe) doc.probe = probe;
   const provenance = encodeProvenance(entry.provenance);
   if (provenance) doc.provenance = provenance;
+  if (entry.tags !== undefined) doc.tags = [...entry.tags];
+  if (entry.note !== undefined) doc.note = entry.note;
+  if (entry.favorite !== undefined) doc.favorite = entry.favorite;
+  if (entry.origin !== undefined) doc.origin = entry.origin;
+  if (entry.keyword !== undefined) doc.keyword = entry.keyword;
   return doc;
 }
 
@@ -467,6 +472,11 @@ function decodeResource(value: unknown): ResourceEntry {
     updatedAt: asString(doc.updatedAt, "resources[].updatedAt"),
     probe: decodeProbe(doc.probe),
     provenance: decodeProvenance(doc.provenance),
+    tags: Array.isArray(doc.tags) ? (doc.tags as string[]) : undefined,
+    note: optionalString(doc.note),
+    favorite: typeof doc.favorite === "boolean" ? doc.favorite : undefined,
+    origin: optionalString(doc.origin) as ResourceEntry["origin"],
+    keyword: optionalString(doc.keyword),
   };
   return entry;
 }

@@ -95,9 +95,14 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/assets",
             post(routes::upload_asset),
         )
+        // What a reader says about an asset is written onto the entry itself, so
+        // it is the entry's own address that takes the patch; the bytes have a
+        // separate one.
         .route(
             "/api/v1/projects/current/assets/{id}",
-            get(routes::stream_asset).delete(routes::delete_asset),
+            get(routes::stream_asset)
+                .patch(routes::patch_asset_shelf)
+                .delete(routes::delete_asset),
         )
         .route(
             "/api/v1/projects/current/assets/{id}/content",

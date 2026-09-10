@@ -137,6 +137,19 @@ pub struct AssetChangeResponse {
     pub updated_at: String,
 }
 
+/// What a reader says about an asset, put right on its own.
+///
+/// A part left out of the body is a part nobody spoke about, so it stands as it
+/// was: writing the shelf edits one corner of an entry at a time.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetShelfRequest {
+    pub tags: Option<Vec<String>>,
+    pub note: Option<String>,
+    pub favorite: Option<bool>,
+    pub keyword: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageResponse {

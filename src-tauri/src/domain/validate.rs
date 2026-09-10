@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::{
     generation_capability_for, CanvasDocument, Capability, Cardinality, DataType, MokaFile, NodeId,
-    NodeKind, PortDirection, ValidationIssue, WorkflowEdge, WorkflowNode, ASSET_CATEGORIES,
+    NodeKind, PortDirection, ResourceEntry, ValidationIssue, WorkflowEdge, WorkflowNode,
+    ASSET_CATEGORIES, ASSET_ORIGINS,
 };
 
 pub const COORDINATE_LIMIT: f64 = 1_000_000.0;
@@ -28,6 +29,14 @@ pub const MAX_ASSISTANT_TITLE_LENGTH: usize = 120;
 /// an answer is offered the chance to become one, and an answer too long for a
 /// card could not be put on the canvas whole.
 pub const MAX_ASSISTANT_MESSAGE_LENGTH: usize = 50_000;
+/// How many words a reader may put on one asset to find it again.
+pub const MAX_ASSET_TAGS: usize = 24;
+/// How long one of those words may be.
+pub const MAX_ASSET_TAG_LENGTH: usize = 32;
+pub const MAX_ASSET_NOTE_LENGTH: usize = 2_000;
+/// What an asset is a picture of, in words: kept to the size of an ask rather
+/// than a document.
+pub const MAX_ASSET_KEYWORD_LENGTH: usize = 2_000;
 
 pub fn bounds_valid(bounds: &super::Rect) -> bool {
     bounds.x.is_finite()
@@ -626,6 +635,67 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
     issues
 }
 
+/// What a reader says about an asset, held to its sizes and its vocabulary.
+///
+/// These are the only registry fields written by hand, so a document out of the
+/// wild can carry an asset too tagged to read through, or an origin nothing here
+/// recognises.
+fn shelf_issues(entry: &ResourceEntry) -> Vec<ValidationIssue> {
+    let say = |message: String| ValidationIssue {
+        code: "VALIDATION_FAILED".into(),
+        message,
+        canvas_id: None,
+        node_id: None,
+        port_id: None,
+        edge_id: None,
+    };
+    let over = |text: &str, limit: usize| text.chars().count() > limit;
+    let mut issues = Vec::new();
+    if let Some(tags) = &entry.tags {
+        if tags.len() > MAX_ASSET_TAGS {
+            issues.push(say(format!(
+                "Asset \"{}\" carries more tags than the {MAX_ASSET_TAGS} allowed",
+                entry.name
+            )));
+        }
+        if tags.iter().any(|tag| over(tag, MAX_ASSET_TAG_LENGTH)) {
+            issues.push(say(format!(
+                "Asset \"{}\" carries a tag over {MAX_ASSET_TAG_LENGTH} characters",
+                entry.name
+            )));
+        }
+    }
+    if entry
+        .note
+        .as_deref()
+        .is_some_and(|note| over(note, MAX_ASSET_NOTE_LENGTH))
+    {
+        issues.push(say(format!(
+            "Asset \"{}\" carries a note over {MAX_ASSET_NOTE_LENGTH}",
+            entry.name
+        )));
+    }
+    if entry
+        .keyword
+        .as_deref()
+        .is_some_and(|word| over(word, MAX_ASSET_KEYWORD_LENGTH))
+    {
+        issues.push(say(format!(
+            "Asset \"{}\" carries a summary over {MAX_ASSET_KEYWORD_LENGTH}",
+            entry.name
+        )));
+    }
+    if let Some(origin) = &entry.origin {
+        if !ASSET_ORIGINS.contains(&origin.as_str()) {
+            issues.push(say(format!(
+                "Asset \"{}\" says an origin nothing recognises: {origin}",
+                entry.name
+            )));
+        }
+    }
+    issues
+}
+
 pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     let mut canvas_ids = HashSet::new();
@@ -665,6 +735,7 @@ pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
                 edge_id: None,
             });
         }
+        issues.extend(shelf_issues(entry));
     }
 
     for (asset_id, node_ids) in moka.asset_references() {

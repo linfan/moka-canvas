@@ -1,15 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { applyCommands, CommandError } from "./commands";
 import {
+  MAX_ASSET_KEYWORD_LENGTH,
+  MAX_ASSET_NOTE_LENGTH,
+  MAX_ASSET_TAG_LENGTH,
+  MAX_ASSET_TAGS,
   MAX_ASSISTANT_MESSAGE_LENGTH,
   MAX_ASSISTANT_MESSAGES_PER_SESSION,
   MAX_ASSISTANT_SESSIONS_PER_CANVAS,
   MAX_PROMPT_LENGTH,
   MAX_RESULT_SLOTS,
   PROVIDER_EXECUTOR_KEY,
+  type AssetOrigin,
   type Capability,
 } from "./constants";
-import { buildGoldenMokaFile, goldenNodeIds } from "./fixtures";
+import {
+  buildGoldenMokaFile,
+  buildShelfMokaFile,
+  goldenNodeIds,
+} from "./fixtures";
 import {
   boundsForShape,
   createCanvas,
@@ -178,6 +187,62 @@ describe("graph validation", () => {
     moka.resources.images = [];
     const issues = validateMokaFile(moka);
     expect(issues.some((i) => i.code === "ASSET_MISSING")).toBe(true);
+  });
+});
+
+describe("what a reader says about an asset", () => {
+  /** What the shelf has to say about one asset once it is said. */
+  function said(about: Partial<ResourceEntry>): string[] {
+    const moka = buildShelfMokaFile();
+    Object.assign(moka.resources.images[0], about);
+    return validateMokaFile(moka)
+      .filter((issue) => issue.code === "VALIDATION_FAILED")
+      .map((issue) => issue.message);
+  }
+
+  it("accepts the shelf as a reader leaves it", () => {
+    expect(validateMokaFile(buildShelfMokaFile())).toEqual([]);
+  });
+
+  it("holds the words an asset is filed under to their number", () => {
+    const many = Array.from({ length: MAX_ASSET_TAGS + 1 }, (_, index) =>
+      index.toString(),
+    );
+    expect(said({ tags: many })).toContainEqual(
+      expect.stringContaining("more tags than"),
+    );
+    const atTheLimit = Array.from({ length: MAX_ASSET_TAGS }, (_, index) =>
+      index.toString(),
+    );
+    expect(said({ tags: atTheLimit })).toEqual([]);
+  });
+
+  it("holds one of those words to a length worth reading", () => {
+    expect(
+      said({ tags: ["k".repeat(MAX_ASSET_TAG_LENGTH + 1)] }),
+    ).toContainEqual(expect.stringContaining("a tag over"));
+    expect(said({ tags: ["k".repeat(MAX_ASSET_TAG_LENGTH)] })).toEqual([]);
+  });
+
+  it("holds a note to its size", () => {
+    expect(
+      said({ note: "n".repeat(MAX_ASSET_NOTE_LENGTH + 1) }),
+    ).toContainEqual(expect.stringContaining("a note over"));
+    expect(said({ note: "n".repeat(MAX_ASSET_NOTE_LENGTH) })).toEqual([]);
+  });
+
+  it("holds a summary to its size", () => {
+    expect(
+      said({ keyword: "w".repeat(MAX_ASSET_KEYWORD_LENGTH + 1) }),
+    ).toContainEqual(expect.stringContaining("a summary over"));
+    expect(said({ keyword: "w".repeat(MAX_ASSET_KEYWORD_LENGTH) })).toEqual([]);
+  });
+
+  it("refuses an origin nothing recognises", () => {
+    expect(said({ origin: "inherited" as AssetOrigin })).toContainEqual(
+      expect.stringContaining("an origin nothing recognises"),
+    );
+    expect(said({ origin: "filed" })).toEqual([]);
   });
 });
 

@@ -384,6 +384,94 @@ async fn asset_upload_stream_range_and_delete() {
 }
 
 #[tokio::test]
+async fn an_asset_takes_what_a_reader_says_about_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    create_project(&app, &temp.path().join("projects"), "Shelf").await;
+    let png = make_test_png();
+
+    let response = app
+        .clone()
+        .oneshot(multipart_request(
+            "/api/v1/projects/current/assets",
+            ("lake.png", &png),
+            &[],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let asset_id = body_json(response).await["entry"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let shelf_uri = format!("/api/v1/projects/current/assets/{asset_id}");
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &shelf_uri,
+            json!({
+                "tags": ["lake", "dusk"],
+                "note": "Kept for the opening shot.",
+                "favorite": true,
+                "keyword": "A lantern floats over a quiet lake at dusk.",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let change = body_json(response).await;
+    let entry = &change["entry"];
+    assert_eq!(entry["tags"][0], "lake");
+    assert_eq!(entry["tags"][1], "dusk");
+    assert_eq!(entry["note"], "Kept for the opening shot.");
+    assert_eq!(entry["favorite"], true);
+    assert_eq!(
+        entry["keyword"],
+        "A lantern floats over a quiet lake at dusk."
+    );
+    assert_eq!(entry["origin"], "brought");
+    assert!(change["revision"].is_number());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(shelf_uri.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&bytes[..], &png[..]);
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &shelf_uri,
+            json!({ "note": "x".repeat(2001) }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(response).await["code"], "VALIDATION_FAILED");
+
+    let response = app
+        .oneshot(json_request(
+            "PATCH",
+            "/api/v1/projects/current/assets/no-such-asset",
+            json!({ "note": "said of something not on the shelf" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn reveal_unknown_asset_is_not_found() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());

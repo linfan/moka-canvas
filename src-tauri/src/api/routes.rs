@@ -1,10 +1,10 @@
 use super::dto::{
-    ApplyCommandsRequest, AssetChangeResponse, CapabilitiesResponse, ChannelKeyRequest,
-    CreateProjectRequest, DefaultsPatch, ExportRequest, GenerateResponse, GenerationPreviewRequest,
-    GenerationPreviewResponse, ImportChannelRequest, ImportProjectRequest, ModelListResponse,
-    OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput,
-    PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse, StartRunRequest,
-    UpsertChannelRequest,
+    ApplyCommandsRequest, AssetChangeResponse, AssetShelfRequest, CapabilitiesResponse,
+    ChannelKeyRequest, CreateProjectRequest, DefaultsPatch, ExportRequest, GenerateResponse,
+    GenerationPreviewRequest, GenerationPreviewResponse, ImportChannelRequest,
+    ImportProjectRequest, ModelListResponse, OpenProjectRequest, OpenProjectResponse,
+    PackageResponse, PreferencesPatch, PreviewInput, PublicConfigResponse, RevisionQuery,
+    RunStreamQuery, SaveResponse, StartRunRequest, UpsertChannelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
@@ -17,7 +17,7 @@ use crate::generate::{
 use crate::imaging::{operate, OperatorReport, OperatorRequest};
 use crate::metadata::RecentProject;
 use crate::project::{
-    ByteRange, CreateProject, OpenProject, PackageScope, ProjectStore, StagedAsset,
+    AssetShelfEdit, ByteRange, CreateProject, OpenProject, PackageScope, ProjectStore, StagedAsset,
 };
 use crate::workflow::events::RunEvent;
 use axum::{
@@ -344,6 +344,34 @@ pub async fn replace_asset(
                 declared_mime: upload.declared_mime,
                 category_hint: upload.category_hint,
                 provenance: None,
+            },
+        )
+        .await?;
+    Ok(Json(AssetChangeResponse {
+        entry: change.entry,
+        revision: change.revision,
+        updated_at: change.updated_at,
+    }))
+}
+
+/// Writes down what a reader says about an asset: the words it is filed under,
+/// what was noted about it, whether it is kept to hand, and what it is a picture
+/// of. The file underneath is not looked at, so saying a picture is a keeper
+/// costs nothing of the picture's and re-hashes nothing.
+pub async fn patch_asset_shelf(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    Json(request): Json<AssetShelfRequest>,
+) -> Result<Json<AssetChangeResponse>, Problem> {
+    let change = state
+        .store
+        .update_asset_shelf(
+            &id,
+            AssetShelfEdit {
+                tags: request.tags,
+                note: request.note,
+                favorite: request.favorite,
+                keyword: request.keyword,
             },
         )
         .await?;

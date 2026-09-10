@@ -517,3 +517,42 @@ export function buildConversationMokaFile(): MokaFile {
 
   return moka;
 }
+
+function shelfIds() {
+  return {
+    assetText: fixtureId(45),
+  };
+}
+
+/**
+ * The golden document with what a reader says about its assets written down.
+ *
+ * One entry carries every part of the shelf — the words it is filed under, the
+ * note, the keeper mark, where it came from, and what it is a picture of. The
+ * other says one word and nothing else, which is what pins that a part nobody
+ * spoke about is left off the document rather than left in as an empty answer.
+ */
+export function buildShelfMokaFile(): MokaFile {
+  const shelf = shelfIds();
+  const moka = buildGoldenMokaFile();
+
+  const picture = moka.resources.images[0];
+  picture.tags = ["lake", "dusk"];
+  picture.note = "Kept for the opening shot.";
+  picture.favorite = true;
+  picture.origin = "brought";
+  picture.keyword = "A lantern floats over a quiet lake at dusk.";
+
+  moka.resources.texts.push({
+    id: shelf.assetText,
+    name: "opening-lines.md",
+    path: "assets/texts/opening-lines-00000000.md",
+    mime: "text/markdown",
+    bytes: 46,
+    createdAt: T0,
+    updatedAt: T0,
+    tags: ["opening"],
+  });
+
+  return moka;
+}

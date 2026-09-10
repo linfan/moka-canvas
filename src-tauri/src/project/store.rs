@@ -1,6 +1,9 @@
 use crate::assets;
 use crate::config::AppConfig;
 use crate::domain::commands::{apply_commands, registry_errors};
+use crate::domain::validate::{
+    MAX_ASSET_KEYWORD_LENGTH, MAX_ASSET_NOTE_LENGTH, MAX_ASSET_TAGS, MAX_ASSET_TAG_LENGTH,
+};
 use crate::domain::{
     new_id, now_iso, CanvasDocument, DocumentCommand, MokaFile, ProjectMetadata, ResourceEntry,
     ResourceRegistry, RunRecord, RunStatus, SelfCheckIssue, SelfCheckNodeRef, SelfCheckReason,
@@ -8,8 +11,8 @@ use crate::domain::{
 };
 use crate::project::codec::{decode_moka_file, encode_moka_file};
 use crate::project::{
-    AssetChange, AssetFile, ByteRange, CreateProject, OpenProject, PackageReport, PackageScope,
-    ProjectError, ProjectStore, SaveResult, StagedAsset,
+    AssetChange, AssetFile, AssetShelfEdit, ByteRange, CreateProject, OpenProject, PackageReport,
+    PackageScope, ProjectError, ProjectStore, SaveResult, StagedAsset,
 };
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -362,6 +365,56 @@ fn sha256_of(path: &Path) -> std::io::Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+/// One of the reader's phrases about an asset, pared to what the shelf holds.
+///
+/// Blank once trimmed is a phrase taken back rather than a phrase never said,
+/// which is why the caller decides whether to write the answer down at all.
+fn shelf_phrase(text: &str, limit: usize, what: &str) -> Result<Option<String>, ProjectError> {
+    let trimmed = text.trim();
+    if trimmed.chars().count() > limit {
+        return Err(ProjectError::domain(
+            "VALIDATION_FAILED",
+            format!("A {what} of more than {limit} characters will not fit on the shelf"),
+        ));
+    }
+    Ok(if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    })
+}
+
+/// The words one asset is filed under. Two spellings of one word are kept as
+/// one, since a reader asking for `Lantern` means what a reader asking for
+/// `lantern` means.
+fn shelf_tags(tags: &[String]) -> Result<Vec<String>, ProjectError> {
+    let mut kept: Vec<String> = Vec::new();
+    for tag in tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.chars().count() > MAX_ASSET_TAG_LENGTH {
+            return Err(ProjectError::domain(
+                "VALIDATION_FAILED",
+                format!(
+                    "A tag of more than {MAX_ASSET_TAG_LENGTH} characters will not fit on the shelf"
+                ),
+            ));
+        }
+        if !kept.iter().any(|seen| seen.eq_ignore_ascii_case(trimmed)) {
+            kept.push(trimmed.to_string());
+        }
+    }
+    if kept.len() > MAX_ASSET_TAGS {
+        return Err(ProjectError::domain(
+            "VALIDATION_FAILED",
+            format!("An asset carries at most {MAX_ASSET_TAGS} tags"),
+        ));
+    }
+    Ok(kept)
+}
+
 #[async_trait::async_trait]
 impl ProjectStore for FsProjectStore {
     async fn create_project(
@@ -546,7 +599,16 @@ impl ProjectStore for FsProjectStore {
             created_at: now.clone(),
             updated_at: now,
             probe: Some(analysis.probe),
+            origin: if staged.provenance.is_some() {
+                None
+            } else {
+                Some("brought".into())
+            },
             provenance: staged.provenance,
+            tags: None,
+            note: None,
+            favorite: None,
+            keyword: None,
         };
 
         let mut guard = self.state.lock().expect("store poisoned");
@@ -629,6 +691,55 @@ impl ProjectStore for FsProjectStore {
         entry.bytes = Some(analysis.bytes as i64);
         entry.sha256 = Some(analysis.sha256);
         entry.probe = Some(analysis.probe);
+        entry.updated_at = now_iso();
+        let updated = entry.clone();
+        let saved = self.persist_locked(state)?;
+        Ok(AssetChange {
+            entry: updated,
+            revision: saved.revision,
+            updated_at: saved.updated_at,
+        })
+    }
+
+    async fn update_asset_shelf(
+        &self,
+        id: &str,
+        edit: AssetShelfEdit,
+    ) -> Result<AssetChange, ProjectError> {
+        let said_tags = match &edit.tags {
+            Some(tags) => Some(shelf_tags(tags)?),
+            None => None,
+        };
+        let said_note = match &edit.note {
+            Some(text) => Some(shelf_phrase(text, MAX_ASSET_NOTE_LENGTH, "note")?),
+            None => None,
+        };
+        let said_keyword = match &edit.keyword {
+            Some(text) => Some(shelf_phrase(text, MAX_ASSET_KEYWORD_LENGTH, "summary")?),
+            None => None,
+        };
+
+        let mut guard = self.state.lock().expect("store poisoned");
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?;
+        let entry = state
+            .moka
+            .resources
+            .find_mut(id)
+            .ok_or_else(|| ProjectError::domain("NOT_FOUND", "Asset not found"))?;
+        if let Some(tags) = said_tags {
+            entry.tags = Some(tags);
+        }
+        if let Some(note) = said_note {
+            entry.note = note;
+        }
+        if let Some(keyword) = said_keyword {
+            entry.keyword = keyword;
+        }
+        if let Some(favorite) = edit.favorite {
+            entry.favorite = Some(favorite);
+        }
         entry.updated_at = now_iso();
         let updated = entry.clone();
         let saved = self.persist_locked(state)?;

@@ -15,6 +15,19 @@ export interface UploadOptions {
   onUploadProgress?: (fraction: number) => void;
 }
 
+/**
+ * What a reader says about an asset, offered on its own.
+ *
+ * A part left out is a part left as it was, so a note written down cannot
+ * quietly clear the words the asset is filed under.
+ */
+export interface AssetShelfEdit {
+  tags?: string[];
+  note?: string;
+  favorite?: boolean;
+  keyword?: string;
+}
+
 export const assetsApi = {
   upload(file: File, options: UploadOptions = {}): Promise<AssetChange> {
     const formData = new FormData();
@@ -40,6 +53,18 @@ export const assetsApi = {
       `/api/v1/projects/current/assets/${id}/content`,
       { method: "PUT", formData, signal: options.signal },
     );
+  },
+
+  /**
+   * Writes down what a reader says about an asset. Only the parts given are
+   * touched, and the file underneath is left as it was — saying a picture is a
+   * keeper costs nothing of the picture's.
+   */
+  patchShelf(id: AssetId, edit: AssetShelfEdit): Promise<AssetChange> {
+    return http.request<AssetChange>(`/api/v1/projects/current/assets/${id}`, {
+      method: "PATCH",
+      body: edit,
+    });
   },
 
   remove(id: AssetId): Promise<SaveResult> {

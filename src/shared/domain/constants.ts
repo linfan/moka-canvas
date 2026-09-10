@@ -76,6 +76,29 @@ export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
   videos: "Videos",
 };
 
+/**
+ * Whether the project was handed the file or made it itself.
+ *
+ * What a generation, a tool, or a conversation produced is not said here:
+ * `provenance` already names the run, node, or conversation behind an asset,
+ * and saying it twice gives the two places a chance to disagree.
+ */
+export const ASSET_ORIGINS = ["brought", "filed"] as const;
+export type AssetOrigin = (typeof ASSET_ORIGINS)[number];
+
+/** How many words a reader may put on one asset to find it again. */
+export const MAX_ASSET_TAGS = 24;
+/** How long one of those words may be. */
+export const MAX_ASSET_TAG_LENGTH = 32;
+export const MAX_ASSET_NOTE_LENGTH = 2_000;
+/**
+ * What an asset is a picture of, in words — the summary a search reads.
+ *
+ * Kept to the size of a prompt rather than a document: it is meant to be the
+ * ask an asset came from, or the opening of the text it holds.
+ */
+export const MAX_ASSET_KEYWORD_LENGTH = 2_000;
+
 export const MODEL_CAPABILITIES = ["text", "image", "audio", "video"] as const;
 export type Capability = (typeof MODEL_CAPABILITIES)[number];
 

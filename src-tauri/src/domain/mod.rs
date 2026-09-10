@@ -105,7 +105,28 @@ pub struct ResourceEntry {
     pub probe: Option<AssetProbe>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<AssetProvenance>,
+    /// What a reader says about the asset, so the shelf can be searched by it.
+    ///
+    /// These came in without a schema version of their own: an entry stored
+    /// before they existed leaves them off rather than leaves them empty, so
+    /// reading such a project and writing it back gives the bytes it arrived
+    /// with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favorite: Option<bool>,
+    /// Whether the project was handed the file or made it itself. What a
+    /// generation or a conversation produced is said by `provenance` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// What the asset is a picture of, in words: the ask it came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyword: Option<String>,
 }
+
+pub const ASSET_ORIGINS: [&str; 2] = ["brought", "filed"];
 
 pub const ASSET_CATEGORIES: [&str; 5] = ["images", "music", "voice", "texts", "videos"];
 

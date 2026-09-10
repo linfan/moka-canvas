@@ -1,4 +1,9 @@
-import type { AssetCategory, Capability, ProblemCode } from "./constants";
+import type {
+  AssetCategory,
+  AssetOrigin,
+  Capability,
+  ProblemCode,
+} from "./constants";
 
 export type ProjectId = string;
 export type CanvasId = string;
@@ -50,6 +55,19 @@ export interface ResourceEntry {
   updatedAt: IsoTimestamp;
   probe?: AssetProbe;
   provenance?: AssetProvenance;
+  /**
+   * What a reader says about the asset, so the shelf can be searched by it.
+   *
+   * All of it came in without a schema version of its own: an entry stored
+   * before these existed leaves them off rather than leaves them empty, so
+   * reading such a project and writing it back gives the bytes it arrived with.
+   */
+  tags?: string[];
+  note?: string;
+  favorite?: boolean;
+  origin?: AssetOrigin;
+  /** What it is a picture of, in words: the ask it came from or the text it holds. */
+  keyword?: string;
 }
 
 export interface AssetProbe {
