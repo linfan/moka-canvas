@@ -283,6 +283,33 @@ pub struct ImportChannelRequest {
     pub expected_revision: Option<u64>,
 }
 
+/// Asks an address what it offers, storing nothing.
+///
+/// Carries no revision because it writes nothing, which is the distinction that
+/// keeps a wrong address from leaving a channel behind.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectChannelRequest {
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub protocol: Option<Protocol>,
+}
+
+/// Hand-written: a derived `Debug` would print the credential into a panic
+/// message, a log line, or an error that formats its request.
+impl std::fmt::Debug for InspectChannelRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("InspectChannelRequest")
+            .field("base_url", &self.base_url)
+            .field("protocol", &self.protocol)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .finish()
+    }
+}
+
 /// An optional revision carried in a query string, for the requests that have
 /// no body to put it in.
 #[derive(Debug, Deserialize)]

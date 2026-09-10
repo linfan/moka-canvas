@@ -2,14 +2,17 @@ use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, AssetShelfRequest, CapabilitiesResponse,
     ChannelKeyRequest, CreateProjectRequest, DefaultsPatch, ExportRequest, FileNodeRequest,
     FileNodeResponse, GenerateResponse, GenerationPreviewRequest, GenerationPreviewResponse,
-    ImportChannelRequest, ImportProjectRequest, ModelListResponse, OpenProjectRequest,
-    OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput, PublicConfigResponse,
-    RevisionQuery, RunStreamQuery, SaveResponse, StartRunRequest, UpsertChannelRequest,
+    ImportChannelRequest, ImportProjectRequest, InspectChannelRequest, ModelListResponse,
+    OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput,
+    PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse, StartRunRequest,
+    UpsertChannelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
 use crate::domain::{now_iso, DocumentCommand, ResourceRegistry, RunRecord, RunStatus};
-use crate::generate::providers::{ChannelImport, ProbeReport, ProvidersView};
+use crate::generate::providers::{
+    ChannelImport, Inspection, InspectionRequest, ProbeReport, ProvidersView,
+};
 use crate::generate::{
     collect_generation_inputs, Cancel, DeltaSink, GenerateInput, GenerateRequest, GenerateResult,
     ProviderError, TaskState,
@@ -1049,6 +1052,28 @@ pub async fn refresh_channel_models(
         .refresh_models(&id, revision.revision)
         .await?;
     providers_view(&state).await
+}
+
+/// Asks an address what it offers without storing anything.
+///
+/// The credential in the body is used for this one request and dropped. It is
+/// not written to the metadata store, not returned in the answer, and not
+/// logged: the request log carries the method, the path, and the status.
+pub async fn inspect_channel(
+    State(state): State<ApiState>,
+    json: Result<Json<InspectChannelRequest>, JsonRejection>,
+) -> Result<Json<Inspection>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    Ok(Json(
+        state
+            .providers
+            .inspect(InspectionRequest {
+                base_url: request.base_url,
+                api_key: request.api_key,
+                protocol: request.protocol,
+            })
+            .await?,
+    ))
 }
 
 /// Answers inside a successful response even when the channel is broken,

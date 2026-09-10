@@ -85,8 +85,9 @@ struct Harness {
 }
 
 /// Opens the app over a temporary directory that already holds a master key.
-/// Server mode refuses to invent one, and a generation cannot be placed without
-/// a credential to send.
+/// Server mode would create one on the first credential stored, but a
+/// generation cannot be placed without a credential to send, so the tier is
+/// fixed here rather than left incidental.
 fn harness() -> Harness {
     budgeted(|_| {})
 }

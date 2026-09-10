@@ -191,6 +191,42 @@ pub struct ModelCandidate {
     pub capability: Option<Capability>,
 }
 
+/// What an address answers before it is a channel: whether the credential
+/// reaches it, and what it offers.
+///
+/// Nothing here is stored. A key typed into a form that turns out to be wrong
+/// must not leave a channel behind holding it, and a listing that fails has to
+/// be readable beside the fields that caused it rather than as a half-made
+/// configuration to be cleaned up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Inspection {
+    /// The identity the address would be stored under, so the step that offers
+    /// the models can also say whose they would be.
+    pub channel_id: String,
+    pub channel_name: String,
+    pub base_url: String,
+    pub protocol: Protocol,
+    pub ok: bool,
+    pub latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ProbeFailure>,
+    /// Empty when the provider could not be asked. Never a stored list.
+    pub models: Vec<ModelCandidate>,
+}
+
+/// What an inspection is asked with.
+///
+/// The credential is used to make the request and then dropped: it is not
+/// written, not returned, and not logged. That is the whole reason this is a
+/// separate call from importing — the form can be wrong without costing a
+/// stored secret.
+pub struct InspectionRequest {
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub protocol: Option<Protocol>,
+}
+
 /// What a quick import is handed: an address, and optionally the credential
 /// and display name that belong to it. The identifier and the protocol are
 /// derived from the address unless the caller says otherwise.
@@ -495,6 +531,68 @@ impl ProviderRepo {
         Ok(match outcome {
             Ok(()) => ProbeReport::reachable(latency_ms),
             Err(error) => ProbeReport::failed(latency_ms, &error),
+        })
+    }
+
+    /// Asks an address what it offers before anything is stored.
+    ///
+    /// A provider that refuses is reported inside the body, as in [`probe`]: the
+    /// point is to show what an address and a key did, and an error status would
+    /// leave the form with nothing to put beside the fields that caused it. Only
+    /// an address that is not an address fails the request.
+    pub async fn inspect(&self, request: InspectionRequest) -> Result<Inspection, ProviderError> {
+        let base_url = normalize_base_url(&request.base_url)?;
+        let host = host_of(&base_url)?;
+        let protocol = request.protocol.unwrap_or_else(|| guess_protocol(&host));
+        let channel_id = identifier_from_host(&host);
+        let started = Instant::now();
+        // No credential is not a provider failure but it is not something to
+        // dial out for either, so it is answered locally, as `probe` answers a
+        // channel with no key.
+        let api_key = request
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty());
+        let outcome = match api_key {
+            Some(api_key) => adapters::list_models(protocol, &base_url, api_key).await,
+            None => Err(ProviderError::KeyMissing {
+                channel: channel_id.clone(),
+            }),
+        };
+        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let (ok, error, models) = match outcome {
+            Ok(fetched) => (
+                true,
+                None,
+                fetched
+                    .into_iter()
+                    .map(|id| ModelCandidate {
+                        capability: guess_capability(&id),
+                        id,
+                    })
+                    .collect(),
+            ),
+            // The key is not repeated: a provider's own complaint is quoted, and
+            // anything derived here names the channel rather than the credential.
+            Err(error) => (
+                false,
+                Some(ProbeFailure {
+                    code: error.code().to_string(),
+                    message: error.to_string(),
+                }),
+                Vec::new(),
+            ),
+        };
+        Ok(Inspection {
+            channel_id,
+            channel_name: host,
+            base_url,
+            protocol,
+            ok,
+            latency_ms,
+            error,
+            models,
         })
     }
 

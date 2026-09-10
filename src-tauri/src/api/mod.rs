@@ -213,5 +213,6 @@ fn provider_router() -> axum::Router<ApiState> {
             patch(routes::patch_preferences),
         )
         .route("/api/v1/providers/import", post(routes::import_channel))
+        .route("/api/v1/providers/inspect", post(routes::inspect_channel))
         .route_layer(DefaultBodyLimit::max(MAX_PROVIDER_BODY_BYTES))
 }

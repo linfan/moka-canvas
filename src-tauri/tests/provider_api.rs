@@ -34,9 +34,10 @@ struct Harness {
 
 /// Opens the app over a temporary directory that already holds a master key.
 ///
-/// Server mode refuses to invent one, and most of these tests store a
-/// credential. The key file is used rather than the environment variable,
-/// which is shared across test threads.
+/// Server mode would create one on the first credential stored, but these tests
+/// store credentials and want the tier fixed rather than incidental. The key
+/// file is used rather than the environment variable, which is shared across
+/// test threads.
 fn harness(root: &Path) -> Harness {
     let config = parse_test_config(root);
     let metadata = config
@@ -649,4 +650,130 @@ async fn a_quick_import_derives_a_channel_from_its_address() {
     assert_eq!(view["channels"].as_array().unwrap().len(), 1);
     assert_eq!(view["channels"][0]["name"], "Gemini");
     assert_eq!(view["channels"][0]["apiKey"]["masked"], MASKED_KEY);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_address_can_be_inspected_without_becoming_a_channel() {
+    let root = tempfile::tempdir().unwrap();
+    let harness = harness(root.path());
+    let address = serve_models(
+        StatusCode::OK,
+        json!({
+            "object": "list",
+            "data": [ { "id": "gpt-image-2" }, { "id": "scribe" } ]
+        }),
+    )
+    .await;
+
+    let (status, body) = send(
+        &harness.app,
+        json_request(
+            "POST",
+            "/api/v1/providers/inspect",
+            json!({ "baseUrl": address, "apiKey": API_KEY }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["protocol"], "openai");
+    // The identity it would be stored under, so the step that offers these
+    // models can say whose they would be.
+    assert_eq!(body["channelId"], "127-0-0-1");
+    assert_eq!(body["channelName"], "127.0.0.1");
+    assert_eq!(
+        body["models"],
+        json!([
+            { "id": "gpt-image-2", "capability": "image" },
+            { "id": "scribe", "capability": null }
+        ])
+    );
+    assert!(body["latencyMs"].is_number());
+
+    // The point of a separate call: an address that was only looked at is not
+    // an address that was configured, and a key given to look at it is not a
+    // key that was stored.
+    let (_, view) = send(&harness.app, plain_request("GET", "/api/v1/providers")).await;
+    assert_eq!(view["channels"], json!([]));
+    assert_eq!(view["revision"], 0);
+    let stored = std::fs::read_to_string(harness.metadata.join(PROVIDERS_DOC)).unwrap_or_default();
+    assert!(!stored.contains(API_KEY), "{stored}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_inspection_a_provider_refuses_reports_the_refusal_and_echoes_no_key() {
+    let root = tempfile::tempdir().unwrap();
+    let harness = harness(root.path());
+    let address = serve_models(
+        StatusCode::UNAUTHORIZED,
+        json!({ "error": { "message": "Incorrect API key provided" } }),
+    )
+    .await;
+
+    let (status, body) = send(
+        &harness.app,
+        json_request(
+            "POST",
+            "/api/v1/providers/inspect",
+            json!({ "baseUrl": address, "apiKey": API_KEY }),
+        ),
+    )
+    .await;
+    // Inside a successful response, as a probe reports: the form has to be able
+    // to show what happened next to the fields that caused it.
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["models"], json!([]));
+    assert_eq!(body["error"]["code"], "PROVIDER_AUTH");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Incorrect API key provided"),
+        "{body}"
+    );
+    // The credential is used and dropped, so it is not in the answer either.
+    assert!(!body.to_string().contains(API_KEY), "{body}");
+}
+
+#[tokio::test]
+async fn an_inspection_without_a_key_is_answered_locally() {
+    let root = tempfile::tempdir().unwrap();
+    let harness = harness(root.path());
+
+    // Nothing listens on this port. Dialling out would answer that it could not
+    // be reached; answering locally names the missing key instead, which is the
+    // thing the form can act on.
+    let (status, body) = send(
+        &harness.app,
+        json_request(
+            "POST",
+            "/api/v1/providers/inspect",
+            json!({ "baseUrl": "http://127.0.0.1:9/v1" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["error"]["code"], "PROVIDER_NOT_CONFIGURED");
+}
+
+#[tokio::test]
+async fn an_inspection_of_something_that_is_not_an_address_fails_the_request() {
+    let root = tempfile::tempdir().unwrap();
+    let harness = harness(root.path());
+
+    let (status, problem) = send(
+        &harness.app,
+        json_request(
+            "POST",
+            "/api/v1/providers/inspect",
+            json!({ "baseUrl": "not an address", "apiKey": API_KEY }),
+        ),
+    )
+    .await;
+    // Unlike a provider that refuses, this is a request that cannot be made at
+    // all, so it fails as one.
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["code"], "VALIDATION_FAILED");
 }

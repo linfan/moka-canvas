@@ -1100,8 +1100,9 @@ fn found_in(entries: &[(String, Vec<u8>)], needles: &[&str]) -> Vec<String> {
 async fn export_never_contains_personal_or_secret_data() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Server mode refuses to invent a master key, and this test stores a
-    // credential in order to prove it never travels.
+    // Server mode would create a master key on the first credential stored,
+    // and this test stores a credential in order to prove it never travels.
+    // The key is written here so the tier is fixed rather than incidental.
     let metadata = temp.path().join("metadata");
     std::fs::create_dir_all(&metadata).unwrap();
     std::fs::write(
