@@ -21,6 +21,7 @@ import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
 import { useRunStore, useRunsInFlight } from "./stores/runStore";
 import { ContextMenu } from "./panels/ContextMenu";
+import { HistoryPanel } from "./panels/HistoryPanel";
 import { InspectorPanel } from "./panels/InspectorPanel";
 import { NodeMenu } from "./panels/NodeMenu";
 import { SidePanel } from "./panels/SidePanel";
@@ -269,6 +270,8 @@ export function EditorPage() {
         {sidePanelOpen &&
           (sidePanelTab === "assistant" ? (
             <AssistantPanel />
+          ) : sidePanelTab === "history" ? (
+            <HistoryPanel />
           ) : (
             <InspectorPanel />
           ))}
@@ -404,6 +407,14 @@ export function EditorPage() {
             type="button"
           >
             Assistant
+          </button>
+          <button
+            aria-pressed={sidePanelOpen && sidePanelTab === "history"}
+            onClick={() => useEditorStore.getState().toggleSidePanel("history")}
+            title="What has been asked of this project, and the way to ask again"
+            type="button"
+          >
+            History
           </button>
           <button
             aria-pressed={promptPanelOnSelect}

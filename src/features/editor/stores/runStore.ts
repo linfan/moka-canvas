@@ -34,6 +34,15 @@ export interface NodeRun {
   step: RunStepRecord;
 }
 
+/** How a run's state reads, wherever one is listed. */
+export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
+  queued: "Queued",
+  running: "Running",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
 /**
  * The runs each node was asked in, newest first.
  *

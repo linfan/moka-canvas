@@ -299,6 +299,8 @@ beforeEach(() => {
     selection: { nodeIds: [], edgeIds: [] },
     inputPick: null,
     announcement: "",
+    sidePanelOpen: true,
+    sidePanelTab: "inspector",
   });
 });
 
@@ -928,6 +930,120 @@ describe("run UI", () => {
     expect(
       api.calls.some((call) => call.url.endsWith("/runs/run-1/retry")),
     ).toBe(true);
+  });
+});
+
+describe("history panel", () => {
+  async function openHistory() {
+    await openEditor();
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    return screen.findByTestId("history-panel");
+  }
+
+  it("lists each run with the nodes it asked and what they were asked with", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-1",
+        status: "succeeded",
+        parameters: { [ids.operation]: { style: "storyboard" } },
+        steps: [
+          { nodeId: ids.text, status: "succeeded" },
+          { nodeId: ids.operation, status: "succeeded" },
+        ],
+      }),
+    ];
+    const panel = await openHistory();
+
+    expect(panel.textContent).toContain("Succeeded");
+    expect(panel.textContent).toContain("Brief");
+    expect(panel.textContent).toContain("Generate frame");
+    // The snapshot is the run's own record of the parameters, not the node's
+    // current ones.
+    expect(panel.textContent).toContain("style");
+    expect(panel.textContent).toContain("storyboard");
+    expect(screen.getByLabelText("Filter by node")).toBeTruthy();
+  });
+
+  it("says nothing has been asked yet when nothing has", async () => {
+    const panel = await openHistory();
+    expect(panel.textContent).toContain("Nothing has been asked here yet.");
+    expect(screen.queryByLabelText("Filter by node")).toBeNull();
+  });
+
+  it("asks a run that finished again, as a run of its own", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-1",
+        status: "succeeded",
+        steps: [{ nodeId: ids.operation, status: "succeeded" }],
+      }),
+    ];
+    api.startResponse = () => ({
+      body: makeRun({ id: "run-2", status: "queued" }),
+      status: 201,
+    });
+    await openHistory();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run again" }));
+    await settle();
+
+    const startCall = api.calls.find(
+      (call) => call.url.endsWith("/runs") && call.method === "POST",
+    );
+    expect(startCall?.body).toEqual({
+      canvasId: ids.canvasMain,
+      nodeIds: [ids.operation],
+    });
+  });
+
+  it("retries a run that gave up rather than asking a new one", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-1",
+        status: "failed",
+        error: "deterministic failure",
+        steps: [{ nodeId: ids.operation, status: "failed", error: "boom" }],
+      }),
+    ];
+    const panel = await openHistory();
+    expect(panel.textContent).toContain("boom");
+
+    fireEvent.click(screen.getByRole("button", { name: "Run again" }));
+    await settle();
+
+    expect(
+      api.calls.some((call) => call.url.endsWith("/runs/run-1/retry")),
+    ).toBe(true);
+    expect(
+      api.calls.some(
+        (call) => call.url.endsWith("/runs") && call.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("narrows the list to one node's asks", async () => {
+    api.runs = [
+      makeRun({
+        id: "run-1",
+        status: "succeeded",
+        steps: [{ nodeId: ids.operation, status: "succeeded" }],
+      }),
+      makeRun({
+        id: "run-2",
+        status: "succeeded",
+        steps: [{ nodeId: ids.image, status: "succeeded" }],
+      }),
+    ];
+    await openHistory();
+    expect(screen.getByTestId("history-run-run-1")).toBeTruthy();
+    expect(screen.getByTestId("history-run-run-2")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Filter by node"), {
+      target: { value: ids.image },
+    });
+
+    expect(screen.queryByTestId("history-run-run-1")).toBeNull();
+    expect(screen.getByTestId("history-run-run-2")).toBeTruthy();
   });
 });
 

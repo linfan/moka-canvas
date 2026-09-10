@@ -10,7 +10,6 @@ import type {
   NodeKind,
   ResourceEntry,
   ResultSlot,
-  RunStatus,
   WorkflowEdge,
   WorkflowNode,
 } from "../../../shared/domain";
@@ -30,6 +29,7 @@ import {
 import { useEditorStore } from "../stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
 import {
+  RUN_STATUS_LABEL,
   retryRun,
   useLatestRunForNode,
   useNodeGenerationAssets,
@@ -419,14 +419,6 @@ function InputChip({
     </li>
   );
 }
-
-const RUN_STATUS_LABEL: Record<RunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  cancelled: "Cancelled",
-};
 
 function formatTime(iso?: string): string {
   if (!iso) return "";

@@ -1262,6 +1262,95 @@ h2 {
   width: 100%;
 }
 
+/* The history column: each run a card of its own, with its steps read inside. */
+.history-panel {
+  width: 300px;
+}
+
+.history-filter {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.history-list,
+.history-steps {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history-run {
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.history-run-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.history-run-when {
+  color: var(--muted);
+  flex: 1;
+  font-size: 11px;
+}
+
+.history-step {
+  display: grid;
+  gap: 2px 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.history-step-node {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-step-error {
+  color: var(--danger);
+  font-size: 11px;
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  word-break: break-word;
+}
+
+.history-params {
+  display: grid;
+  gap: 2px;
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+}
+
+.history-params div {
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.history-params dt {
+  color: var(--muted);
+}
+
+.history-params dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .preview-dialog {
   max-width: min(860px, calc(100vw - 48px));
   width: auto;

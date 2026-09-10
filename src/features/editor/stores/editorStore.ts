@@ -13,11 +13,11 @@ export type EditorTool = "select" | "pan";
 /**
  * What the column beside the canvas is showing.
  *
- * One column and a choice rather than two columns, since a canvas with a
- * resources column, an inspector and a conversation beside it has very little
- * of itself left to look at.
+ * One column and a choice rather than several columns, since a canvas with a
+ * resources column, an inspector, a conversation and a history beside it has
+ * very little of itself left to look at.
  */
-export type SidePanelTab = "inspector" | "assistant";
+export type SidePanelTab = "inspector" | "assistant" | "history";
 
 export interface Selection {
   nodeIds: NodeId[];
@@ -185,7 +185,7 @@ interface EditorState {
   toggleResourcesPanel: () => void;
   openResourcesPanel: () => void;
   /**
-   * Brings the column up on one of its two faces, or folds it away where it is
+   * Brings the column up on one of its faces, or folds it away where it is
    * up on that one already.
    */
   toggleSidePanel: (tab: SidePanelTab) => void;
