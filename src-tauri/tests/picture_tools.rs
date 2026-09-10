@@ -185,7 +185,7 @@ async fn a_cut_is_filed_beside_its_subject_and_the_subject_is_untouched() {
 
     assert_eq!(report.entries.len(), 1);
     let made = &report.entries[0];
-    assert_eq!(made.name, "harvest-20x10");
+    assert_eq!(made.name, "harvest-20x10.png");
     assert!(made.path.starts_with("assets/images/"), "{}", made.path);
     assert_ne!(made.path, subject.path, "filed beside, not in place of");
     assert!(root.join(&made.path).is_file());
@@ -280,10 +280,10 @@ async fn a_division_files_every_piece_in_reading_order() {
     assert_eq!(
         names,
         [
-            "harvest-2-2-1-1",
-            "harvest-2-2-1-2",
-            "harvest-2-2-2-1",
-            "harvest-2-2-2-2"
+            "harvest-2-2-1-1.png",
+            "harvest-2-2-1-2.png",
+            "harvest-2-2-2-1.png",
+            "harvest-2-2-2-2.png"
         ]
     );
     assert_eq!(
@@ -520,7 +520,7 @@ async fn a_turn_reports_the_words_it_was_made_from_and_keeps_its_size() {
 
     assert_eq!(report.entries.len(), 1);
     let made = &report.entries[0];
-    assert_eq!(made.name, "harvest-turned-20cw");
+    assert_eq!(made.name, "harvest-turned-20cw.png");
     assert_eq!(
         made.mime.as_deref(),
         Some("image/png"),

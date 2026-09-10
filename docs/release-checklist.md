@@ -8,9 +8,10 @@ Automated coverage (run these first, they gate the release):
 
 ```sh
 make check        # build + format + lint + typecheck + vitest + cargo tests
-npm run test:e2e  # Playwright: critical path, provider settings, and a
+npm run test:e2e  # Playwright: critical path, provider settings, a
                   # generation asked from the panel under a node and
-                  # driven against a stand-in provider
+                  # driven against a stand-in provider, and a picture
+                  # cropped from the row of tools over its card
 ```
 
 ## Web (`make package-web`)
@@ -161,6 +162,38 @@ npm run test:e2e  # Playwright: critical path, provider settings, and a
     wired to it, with its panel open and nothing asked for yet. Finally
     link an asset the project already holds to an empty image node from
     the inspector and confirm the node stops waiting without a run.
+13. Work on a picture the project already holds, which is the half of a
+    canvas that asks nobody for anything. Select one image node and
+    confirm a row of tools comes up over its card, and that it goes while
+    the card is being moved so the press that ends the move cannot land
+    on a tool. Hide two entries under **Settings** → **Preferences** →
+    _Picture tools on a node_, reload, and confirm the row is as it was
+    left while the document says nothing about it — the choice is kept on
+    this machine and travels in no package. Crop by a proportion and by a
+    region given in the picture's own pixels, divide into a grid,
+    resample to a named size and to one typed in, and tilt: each files a
+    new asset named after the picture it came from rather than rewriting
+    it, puts it on a card to the right wired back to what it was made
+    from, and leaves the subject's own bytes as they were. In the
+    inspector confirm the result says which tool made it and which
+    picture it was made from, with no run offered as an explanation, and
+    that a picture a run did make still names the run. Confirm a
+    division's pieces arrive in one undo step and all of them selected,
+    and that letting go takes the cards and the wires while leaving every
+    file filed. Refuse one: a region wider than the picture, a division
+    past its ceiling, a proportion nobody can read — each says so before
+    anything is written, and the dialog stays open with nothing spent.
+    Take an asset's file out of the project and confirm the bar says why
+    instead of offering a tool that would fail in a moment reading as the
+    tool breaking. Finally paint a region for **Repaint** and confirm the
+    marking is filed as an asset of its own, wired into the picture's
+    mask port, with the words written into that picture's ask and nothing
+    spent from the dialog; and ask **Describe** against a channel you
+    really configured, confirming the reading is shown as it arrives,
+    becomes a text node wired into the picture's prompt, and can be let
+    go of half way through. The automated equivalents are
+    `cargo test imaging`, `npm test`, and
+    `npx playwright test picture-tools`.
 
 ## macOS (`make package-macos`)
 

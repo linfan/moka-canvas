@@ -271,7 +271,7 @@ pub async fn operate(
             return Err(error.into());
         }
         staged.push(StagedAsset {
-            name: format!("{stem}-{}", piece.suffix),
+            name: result_name(&stem, &piece.suffix, encoding),
             tmp_path,
             declared_mime: Some(encoding.mime().to_string()),
             category_hint: None,
@@ -903,6 +903,14 @@ impl Encoding {
             Self::Lossy => "image/jpeg",
         }
     }
+
+    /// The ending a result's name carries for this container.
+    fn extension(&self) -> &'static str {
+        match self {
+            Self::Lossless => "png",
+            Self::Lossy => "jpg",
+        }
+    }
 }
 
 /// How much of a stored picture is read back to decide what it is called:
@@ -911,6 +919,17 @@ impl Encoding {
 fn subject_stem(name: &str) -> String {
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     stem.chars().take(40).collect()
+}
+
+/// What a result is called: the subject's own name, what the piece is, and the
+/// ending its container needs.
+///
+/// The registry reads an ending off a name to decide how to store the file, so a
+/// name without one leaves this the only picture in the project that does not
+/// say what it is — and anything offered for saving under that name is saved
+/// without an ending either.
+fn result_name(stem: &str, suffix: &str, encoding: Encoding) -> String {
+    format!("{stem}-{suffix}.{}", encoding.extension())
 }
 
 fn encode(pixels: &RgbaImage, encoding: Encoding) -> Result<Vec<u8>, ProjectError> {
@@ -1456,6 +1475,22 @@ mod tests {
         assert_eq!(subject_stem("no-extension"), "no-extension");
         assert_eq!(subject_stem("archive.tar.gz"), "archive.tar");
         assert_eq!(subject_stem(&"x".repeat(60)), "x".repeat(40));
+    }
+
+    #[test]
+    fn a_result_is_named_with_the_ending_its_container_needs() {
+        for encoding in [Encoding::Lossless, Encoding::Lossy] {
+            let name = result_name("holiday-plate", "48x48", encoding);
+            assert_eq!(
+                crate::assets::extension_for(&name, encoding.mime()),
+                encoding.extension(),
+                "{name} would be stored under an ending that is not its own"
+            );
+        }
+        assert_eq!(
+            result_name("holiday-plate", "2-2-1-1", Encoding::Lossless),
+            "holiday-plate-2-2-1-1.png"
+        );
     }
 
     #[test]

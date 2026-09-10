@@ -590,7 +590,10 @@ async fn a_picture_tool_answers_with_what_it_filed_and_not_with_the_picture() {
     let entries = report["entries"].as_array().expect("what was filed");
     assert_eq!(entries.len(), 1);
     let made = &entries[0];
-    assert_eq!(made["name"], "lake-32x16");
+    // Named the way an imported picture is: the registry reads an ending off a
+    // name to decide how to store the file, so one without it would leave this
+    // the only picture in the project whose name does not say what it is.
+    assert_eq!(made["name"], "lake-32x16.png");
     assert_eq!(made["probe"]["width"], 32);
     assert_eq!(made["probe"]["height"], 16);
     // Nothing was asked of anybody, so there is no run behind this and nothing
