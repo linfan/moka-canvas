@@ -14,7 +14,7 @@ import {
   fitSelectionAction,
   fitViewAction,
   groupSelection,
-  pasteAt,
+  pasteClipboard,
   selectAll,
   ungroupSelection,
 } from "./actions";
@@ -199,9 +199,6 @@ export function useEditorKeyboard() {
         } else if (key === "x") {
           event.preventDefault();
           void cutSelection();
-        } else if (key === "v") {
-          event.preventDefault();
-          void pasteAt();
         } else if (key === "d") {
           event.preventDefault();
           void duplicateSelection();
@@ -268,11 +265,32 @@ export function useEditorKeyboard() {
       }
     };
 
+    // Paste rides the event rather than the keydown: a keydown carries no
+    // clipboard, and only the event knows what a paste actually holds — files
+    // among it, several at once.
+    const onPaste = (event: ClipboardEvent) => {
+      const editor = useEditorStore.getState();
+      if (!useProjectStore.getState().moka) return;
+      if (
+        editor.assetDeletePrompt ||
+        editor.previewAssetId ||
+        editor.shortcutsOpen ||
+        editor.pictureTool
+      ) {
+        return;
+      }
+      // A field keeps its own paste; the browser knows what to put in it.
+      if (isEditableTarget(event.target)) return;
+      void pasteClipboard(event);
+    };
+
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("paste", onPaste);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("paste", onPaste);
     };
   }, []);
 }

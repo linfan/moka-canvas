@@ -3,6 +3,7 @@ import {
   DEFAULT_NODE_WIDTH,
   GROUP_DETACH_THRESHOLD_PX,
   MAX_TEXT_CONTENT_LENGTH,
+  MOKA_FRAGMENT_MIME,
   createNode,
   defaultGenerationSpec,
   findNode,
@@ -47,6 +48,7 @@ import { execute } from "../commands/execute";
 import {
   buildFragment,
   instantiateFragment,
+  parseFragment,
   readMemoryFragment,
   readSystemClipboard,
   writeFragment,
@@ -260,6 +262,52 @@ export async function pasteAt(at?: Point): Promise<void> {
   } else if (system.kind === "image" && system.image) {
     await pasteImage(system.image, anchor);
   }
+}
+
+/**
+ * Reads a paste out of the event that carried it.
+ *
+ * Files come first, because a paste is the one way files copied in another
+ * application reach the editor — any number of them, each filed and laid out
+ * as a node of its own. Otherwise the text is read: as one of this app's
+ * fragments where it is one, under the app's own MIME or inside the plain-text
+ * copy, and as words where it is not. A clipboard the event could not speak
+ * for falls back to the last copy made in this window, which works even where
+ * the system clipboard could not be written.
+ */
+export async function pasteClipboard(
+  event: ClipboardEvent,
+  at?: Point,
+): Promise<void> {
+  const data = event.clipboardData;
+  if (!data) return;
+  const anchor = at ??
+    useEditorStore.getState().pointerWorld ??
+    viewCenterWorld() ?? { x: 0, y: 0 };
+
+  const files = [...data.files];
+  if (files.length > 0) {
+    event.preventDefault();
+    await importFiles(files, { at: anchor, addNodes: true });
+    return;
+  }
+  const raw = data.getData(MOKA_FRAGMENT_MIME) || data.getData("text/plain");
+  if (!raw.trim()) {
+    const fragment = readMemoryFragment();
+    if (fragment) {
+      event.preventDefault();
+      pasteFragment(fragment, anchor);
+    }
+    return;
+  }
+  event.preventDefault();
+  const brace = raw.indexOf("{");
+  const fragment = brace >= 0 ? parseFragment(raw.slice(brace)) : null;
+  if (fragment) {
+    pasteFragment(fragment, anchor);
+    return;
+  }
+  addNodeAt(anchor, "text", null, raw.slice(0, MAX_TEXT_CONTENT_LENGTH));
 }
 
 async function pasteImage(blob: Blob, anchor: Point) {

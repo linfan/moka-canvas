@@ -736,6 +736,33 @@ describe("editor shell integration", () => {
     );
   });
 
+  it("takes files off a paste, filed and laid out like a drop", async () => {
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+
+    const consumed = fireEvent.paste(window, {
+      clipboardData: {
+        getData: () => "",
+        files: [new File(["x"], "drop.png", { type: "image/png" })],
+      },
+    });
+    await vi.waitFor(() => {
+      expect(
+        useProjectStore
+          .getState()
+          .moka!.canvas[0].nodes.some((n) => n.title === "drop.png"),
+      ).toBe(true);
+    });
+
+    // The editor answered for the paste rather than leaving it to the page.
+    expect(consumed).toBe(false);
+    const state = useProjectStore.getState();
+    expect(
+      state.moka!.resources.images.some((e) => e.id === "dropped-asset"),
+    ).toBe(true);
+    expect(state.moka!.canvas[0].nodes).toHaveLength(5);
+  });
+
   it("lists assets in the resource panel with use counts", async () => {
     await openGolden();
     await screen.findByRole("button", { name: "Canvas 1" });

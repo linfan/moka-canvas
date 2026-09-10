@@ -8,6 +8,7 @@ import {
 } from "../../../shared/domain/fixtures";
 import {
   GROUP_DETACH_THRESHOLD_PX,
+  MOKA_FRAGMENT_MIME,
   findNode,
   type GenerationSpec,
   type MokaFile,
@@ -18,6 +19,7 @@ import { useAppStore } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useHistoryStore } from "../stores/historyStore";
 import { useProjectStore } from "../stores/projectStore";
+import { buildFragment } from "./clipboard";
 import {
   addNodeAt,
   alignNodes,
@@ -33,6 +35,7 @@ import {
   marqueeSelect,
   moveNodes,
   pasteAt,
+  pasteClipboard,
   relatedHighlight,
   renameNode,
   resizeNodeTo,
@@ -391,6 +394,145 @@ describe("copy/paste fragment round trip", () => {
     expect(
       useAppStore.getState().toasts.some((toast) => toast.kind === "error"),
     ).toBe(true);
+  });
+});
+
+describe("pasteClipboard", () => {
+  /** Answers each upload with an entry filed under the file's own name. */
+  function serveUploads() {
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    fetchMock.mockImplementation((input, init) => {
+      const request = init as RequestInit;
+      if (
+        String(input) === "/api/v1/projects/current/assets" &&
+        request?.method === "POST"
+      ) {
+        const file = (request.body as FormData).get("file") as File;
+        return Promise.resolve(
+          json({
+            entry: {
+              id: `filed-${file.name}`,
+              name: file.name,
+              path: `assets/images/${file.name}`,
+              mime: "image/png",
+              bytes: 1,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+            revision: 3,
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          }),
+        );
+      }
+      return Promise.resolve(
+        json({ code: "NOT_FOUND", message: String(input), status: 404 }),
+      );
+    });
+  }
+
+  function pasteEvent(init: { files?: File[]; data?: Record<string, string> }) {
+    const preventDefault = vi.fn();
+    const event = {
+      preventDefault,
+      clipboardData: {
+        files: init.files ?? [],
+        getData: (type: string) => init.data?.[type] ?? "",
+      },
+    } as unknown as ClipboardEvent;
+    return { event, preventDefault };
+  }
+
+  it("files every file a paste carries and lays a node on each", async () => {
+    hydrate();
+    serveUploads();
+    const { event, preventDefault } = pasteEvent({
+      files: [
+        new File(["a"], "one.png", { type: "image/png" }),
+        new File(["b"], "two.png", { type: "image/png" }),
+      ],
+    });
+
+    await pasteClipboard(event, { x: 100, y: 100 });
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    const moka = useProjectStore.getState().moka!;
+    expect(moka.resources.images.map((entry) => entry.name)).toEqual([
+      "lake.png",
+      "one.png",
+      "two.png",
+    ]);
+    const made = moka.canvas[0].nodes.filter((node) =>
+      node.title.endsWith(".png"),
+    );
+    expect(made.map((node) => node.title)).toEqual(["one.png", "two.png"]);
+    // Laid out apart: a paste of several does not pile them on one spot.
+    expect(made[0].bounds.x).not.toBe(made[1].bounds.x);
+  });
+
+  it("reads a fragment under the app's own MIME and inside plain text", async () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    const fragment = buildFragment(useProjectStore.getState().moka!.canvas[0], [
+      ids.text,
+      ids.operation,
+    ])!;
+    const payload = JSON.stringify(fragment);
+
+    await pasteClipboard(
+      pasteEvent({ data: { [MOKA_FRAGMENT_MIME]: payload } }).event,
+      { x: 600, y: 300 },
+    );
+    let canvas = useProjectStore.getState().moka!.canvas[0];
+    expect(canvas.nodes).toHaveLength(6);
+    expect(canvas.edges).toHaveLength(3);
+
+    // The same JSON inside the readable copy, the way the app leaves it for a
+    // plain-text paste.
+    await pasteClipboard(
+      pasteEvent({
+        data: { "text/plain": `2 canvas nodes\n${payload}` },
+      }).event,
+      { x: 600, y: 300 },
+    );
+    canvas = useProjectStore.getState().moka!.canvas[0];
+    expect(canvas.nodes).toHaveLength(8);
+    expect(canvas.edges).toHaveLength(4);
+  });
+
+  it("falls back to the last copy made in this window", async () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    useEditorStore
+      .getState()
+      .setSelection({ nodeIds: [ids.export], edgeIds: [] });
+    await copySelection();
+    const { event, preventDefault } = pasteEvent({});
+
+    await pasteClipboard(event, { x: 0, y: 0 });
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(useProjectStore.getState().moka!.canvas[0].nodes).toHaveLength(5);
+  });
+
+  it("reads anything else as words", async () => {
+    hydrate();
+    const { event, preventDefault } = pasteEvent({
+      data: { "text/plain": "A lantern over a lake" },
+    });
+
+    await pasteClipboard(event, { x: 0, y: 0 });
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    expect(canvas.nodes).toHaveLength(5);
+    const texts = canvas.nodes.filter((node) => node.kind === "text");
+    expect((texts[1].data as { content: string }).content).toBe(
+      "A lantern over a lake",
+    );
   });
 });
 
