@@ -485,6 +485,7 @@ async fn the_channel_routes_refuse_an_identifier_that_is_not_there() {
 
     for (method, uri) in [
         ("GET", "/api/v1/providers/channels/nope/models"),
+        ("POST", "/api/v1/providers/channels/nope/models/refresh"),
         ("POST", "/api/v1/providers/channels/nope/probe"),
     ] {
         let (status, problem) = send(&harness.app, plain_request(method, uri)).await;
@@ -525,6 +526,53 @@ async fn a_model_list_arrives_as_a_suggestion_and_changes_nothing() {
     // and saving the channel is what records it.
     let (_, view) = send(&harness.app, plain_request("GET", "/api/v1/providers")).await;
     assert_eq!(view["channels"][0]["models"], json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refreshing_a_model_list_is_a_write_that_answers_with_the_view() {
+    let root = tempfile::tempdir().unwrap();
+    let harness = harness(root.path());
+    let address = serve_models(
+        StatusCode::OK,
+        json!({
+            "object": "list",
+            "data": [ { "id": "gpt-image-2" }, { "id": "gpt-5.5" } ]
+        }),
+    )
+    .await;
+    let before = connected(&harness, &address).await;
+    let revision = before["revision"].as_u64().expect("a revision");
+
+    let (status, view) = send(
+        &harness.app,
+        plain_request(
+            "POST",
+            &format!("/api/v1/providers/channels/main/models/refresh?revision={revision}"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    // The suggestions became the stored list, which is the whole difference
+    // between this and the read above.
+    assert_eq!(
+        view["channels"][0]["models"],
+        json!([
+            { "id": "gpt-5.5", "capability": "text", "alias": "", "enabled": true },
+            { "id": "gpt-image-2", "capability": "image", "alias": "", "enabled": true }
+        ])
+    );
+
+    // And it is checked against the revision like every other write.
+    let (status, problem) = send(
+        &harness.app,
+        plain_request(
+            "POST",
+            &format!("/api/v1/providers/channels/main/models/refresh?revision={revision}"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "METADATA_CONFLICT");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

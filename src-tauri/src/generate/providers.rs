@@ -465,12 +465,14 @@ impl ProviderRepo {
     pub async fn refresh_models(
         &self,
         channel_id: &str,
+        expected_revision: Option<u64>,
     ) -> Result<Vec<ChannelModel>, ProviderError> {
         let channel = self.channel(channel_id).await?;
         let api_key = self.credential(channel_id).await?;
         let fetched = adapters::list_models(channel.protocol, &channel.base_url, &api_key).await?;
         let merged = merge_models(&channel.models, &fetched);
-        self.replace_models(channel_id, &merged, None).await?;
+        self.replace_models(channel_id, &merged, expected_revision)
+            .await?;
         Ok(merged)
     }
 

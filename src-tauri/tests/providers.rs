@@ -306,7 +306,10 @@ async fn refreshing_a_model_list_stores_the_merged_result() {
     )
     .await;
 
-    let models = repo.refresh_models("main").await.expect("the list arrives");
+    let models = repo
+        .refresh_models("main", None)
+        .await
+        .expect("the list arrives");
     assert_eq!(
         models
             .iter()
@@ -335,6 +338,34 @@ async fn refreshing_a_model_list_stores_the_merged_result() {
         models,
         "the merged list is what got stored"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refreshing_a_model_list_honours_the_revision_it_was_asked_for() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo(root.path());
+    let base_url = provider(StatusCode::OK, json!({"data": [{"id": "painter"}]})).await;
+    connected(
+        &repo,
+        "main",
+        base_url,
+        vec![model("painter", Capability::Text)],
+    )
+    .await;
+
+    // A refresh writes, so it must not land on top of an edit made since this
+    // client read: the models it merges with would be the stale ones.
+    let stale = repo.snapshot().await.unwrap().revision - 1;
+    let error = repo
+        .refresh_models("main", Some(stale))
+        .await
+        .expect_err("a stale revision is refused");
+    assert_eq!(error.code(), "METADATA_CONFLICT");
+
+    let current = repo.snapshot().await.unwrap().revision;
+    repo.refresh_models("main", Some(current))
+        .await
+        .expect("the revision this client read is accepted");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -383,7 +414,7 @@ async fn a_channel_with_no_key_reports_the_gap_instead_of_dialling_out() {
         "PROVIDER_NOT_CONFIGURED"
     );
     assert_eq!(
-        repo.refresh_models("main").await.unwrap_err().code(),
+        repo.refresh_models("main", None).await.unwrap_err().code(),
         "PROVIDER_NOT_CONFIGURED"
     );
 }

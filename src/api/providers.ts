@@ -181,6 +181,16 @@ export const providersApi = {
       .then((body) => body.models);
   },
 
+  /**
+   * Stores what the provider lists, keeping the capability, alias, and switch
+   * already chosen for an identifier that is still listed.
+   */
+  refreshModels(id: string): Promise<ProvidersView> {
+    return http.request<ProvidersView>(channelPath(id, "/models/refresh"), {
+      method: "POST",
+    });
+  },
+
   /** Reports a broken channel inside a successful response. */
   probe(id: string): Promise<ProbeReport> {
     return http.request<ProbeReport>(channelPath(id, "/probe"), {

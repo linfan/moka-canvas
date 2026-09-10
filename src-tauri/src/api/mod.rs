@@ -200,6 +200,10 @@ fn provider_router() -> axum::Router<ApiState> {
             get(routes::fetch_channel_models),
         )
         .route(
+            "/api/v1/providers/channels/{id}/models/refresh",
+            post(routes::refresh_channel_models),
+        )
+        .route(
             "/api/v1/providers/channels/{id}/probe",
             post(routes::probe_channel),
         )

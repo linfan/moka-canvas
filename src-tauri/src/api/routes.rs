@@ -1034,6 +1034,23 @@ pub async fn fetch_channel_models(
     Ok(Json(ModelListResponse { models }))
 }
 
+/// Stores what a channel offers, keeping the capability, alias, and switch
+/// already chosen for an identifier the provider still lists.
+///
+/// A write, so it carries the same revision check as every other one: a refresh
+/// must not drop models somebody else added since this client last read.
+pub async fn refresh_channel_models(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    Query(revision): Query<RevisionQuery>,
+) -> Result<Json<ProvidersView>, Problem> {
+    state
+        .providers
+        .refresh_models(&id, revision.revision)
+        .await?;
+    providers_view(&state).await
+}
+
 /// Answers inside a successful response even when the channel is broken,
 /// because the point of a probe is to show which one failed and why.
 pub async fn probe_channel(
