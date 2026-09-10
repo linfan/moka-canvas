@@ -1010,12 +1010,17 @@ h2 {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.inspector-section h3 {
+.inspector-section h3,
+.inspector-section summary {
   color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.08em;
   margin: 0;
   text-transform: uppercase;
+}
+
+.inspector-section summary {
+  cursor: pointer;
 }
 
 .inspector-row {
@@ -1246,6 +1251,11 @@ h2 {
   padding: 8px 10px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* The whole node rather than one record, so it is given more room. */
+.inspector-json-section .inspector-json {
+  max-height: 320px;
 }
 
 .inspector-progress {

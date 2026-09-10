@@ -753,6 +753,41 @@ function ShelfSection({
   );
 }
 
+/**
+ * The node as the document holds it, for reading rather than editing.
+ *
+ * Everything above this is one reading of that object, and when a reading looks
+ * wrong the plain copy is what settles it — including the parts that have no
+ * row of their own. Folded away because it is for comparing against, not for
+ * looking at.
+ */
+function JsonSection({ node }: { node: WorkflowNode }) {
+  const json = JSON.stringify(node, null, 2);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(json);
+      useEditorStore.getState().announce("Node JSON copied");
+    } catch {
+      useAppStore
+        .getState()
+        .pushToast("error", "The clipboard is not available");
+    }
+  };
+  return (
+    <details className="inspector-section inspector-json-section">
+      <summary>JSON</summary>
+      <pre className="inspector-json" data-testid="node-json">
+        {json}
+      </pre>
+      <div className="inspector-actions">
+        <button onClick={() => void copy()} type="button">
+          Copy JSON
+        </button>
+      </div>
+    </details>
+  );
+}
+
 function NodeInspector({
   canvas,
   node,
@@ -787,6 +822,7 @@ function NodeInspector({
       <ShelfSection canvas={canvas} node={node} />
       <InputChips canvas={canvas} node={node} />
       <RunSection canvas={canvas} node={node} />
+      <JsonSection node={node} />
     </>
   );
 }

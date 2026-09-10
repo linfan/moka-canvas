@@ -1032,7 +1032,13 @@ describe("generation UI", () => {
     const excerpt =
       document.querySelector(".inspector-text-excerpt")?.textContent ?? "";
     expect(excerpt).toMatch(/as a poster\./);
-    expect(screen.getByText(/"count": 2/)).toBeTruthy();
+    // The node's own JSON carries these parameters too, so the snippet is read
+    // from the generation section rather than from anywhere in the panel.
+    const params =
+      [...document.querySelectorAll(".inspector-json")].find(
+        (entry) => !entry.closest(".inspector-json-section"),
+      )?.textContent ?? "";
+    expect(params).toMatch(/"count": 2/);
   });
 
   it("says why nothing can be generated where no provider is published", async () => {
