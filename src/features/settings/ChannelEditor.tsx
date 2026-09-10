@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ChannelModel, ChannelView } from "../../api";
 import {
   CAPABILITY_LABELS,
@@ -9,6 +9,9 @@ import {
   type Capability,
   type ProviderProtocol,
 } from "../../shared/domain";
+import { CandidateList } from "./CandidateList";
+import { coverageOf, firstMissing } from "./coverage";
+import { CoverageChips } from "./CoverageChips";
 import { useProviderStore } from "./providerStore";
 import { SecretStorageNote } from "./SecretStorageNote";
 
@@ -77,6 +80,34 @@ export function ChannelEditor({ channel, onDone }: Props) {
     (state) => state.activity[channel?.id ?? ""],
   );
   const [form, setForm] = useState<Form>(() => initialForm(channel));
+  const listing = activity?.listing === true;
+  const candidates = activity?.candidates ?? null;
+  const listingError = activity?.listingError ?? null;
+
+  /**
+   * Asks the provider what it offers the moment there is something to ask
+   * with, rather than leaving that to be discovered as a button.
+   *
+   * Only for a channel with a stored credential and no models: that is the
+   * state a quick import lands in, and the alternative to asking is a channel
+   * that looks configured and can serve nothing. Once for each channel, so
+   * re-rendering the form does not keep dialling out.
+   */
+  const askedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const id = channel?.id;
+    if (
+      id === undefined ||
+      channel === null ||
+      channel.models.length > 0 ||
+      !channel.apiKey.set ||
+      askedFor.current === id
+    ) {
+      return;
+    }
+    askedFor.current = id;
+    void useProviderStore.getState().listModels(id);
+  }, [channel]);
 
   const edit = (patch: Partial<Form>) =>
     setForm((state) => ({ ...state, ...patch }));
@@ -92,6 +123,14 @@ export function ChannelEditor({ channel, onDone }: Props) {
     );
 
   const addModel = (row: ModelRow) => editModels((models) => [...models, row]);
+
+  const addModels = (ids: string[], capability: Capability) =>
+    editModels((models) => [
+      ...models,
+      ...ids
+        .filter((id) => !models.some((model) => model.id === id))
+        .map((id) => ({ ...newRow(capability), id })),
+    ]);
 
   const removeModel = (key: number) =>
     editModels((models) => models.filter((model) => model.key !== key));
@@ -121,16 +160,6 @@ export function ChannelEditor({ channel, onDone }: Props) {
       apiKey: form.apiKey.trim() || null,
     });
     if (saved) onDone();
-  };
-
-  /**
-   * Adopts a listed model into the form rather than into the configuration:
-   * what each model is for is the decision being made here, so a capability
-   * nobody could guess lands on the row for the user to correct.
-   */
-  const adopt = (id: string, capability: Capability | null) => {
-    if (form.models.some((model) => model.id === id)) return;
-    addModel({ ...newRow(capability ?? "text"), id });
   };
 
   return (
@@ -225,10 +254,16 @@ export function ChannelEditor({ channel, onDone }: Props) {
 
       <section aria-label="Models" className="settings-section">
         <h3 className="settings-heading">Models</h3>
-        {form.models.length === 0 && (
-          <p className="settings-hint">
-            No models yet, so nothing can be pointed at this channel.
+        <p className="settings-hint">
+          A model serves the nodes of its own kind: an image model cannot be
+          pointed at a text node, and the run is refused if it is.
+        </p>
+        {form.models.length === 0 ? (
+          <p className="settings-hint" data-testid="models-gap">
+            No models yet, so no node can use this channel.
           </p>
+        ) : (
+          <CoverageChips models={form.models} />
         )}
         <ul className="model-list">
           {form.models.map((model, position) => (
@@ -289,19 +324,26 @@ export function ChannelEditor({ channel, onDone }: Props) {
         </ul>
 
         <div className="settings-row">
-          <button onClick={() => addModel(newRow())} type="button">
+          <button
+            onClick={() =>
+              addModel(newRow(firstMissing(coverageOf(form.models))))
+            }
+            title="A model serves the nodes of its own kind; the row starts on a kind this channel has nothing for yet"
+            type="button"
+          >
             Add model
           </button>
           {channel ? (
             <button
               aria-label={`Ask ${channel.name} which models it offers`}
-              disabled={saving || activity?.listing === true}
+              disabled={saving || listing}
               onClick={() =>
                 void useProviderStore.getState().listModels(channel.id)
               }
+              title="Asks the provider what it offers and lists it here to choose from, without changing anything stored"
               type="button"
             >
-              {activity?.listing ? "Listing…" : "List from provider"}
+              {listing ? "Listing…" : "List from provider"}
             </button>
           ) : (
             <span className="settings-hint">
@@ -311,30 +353,19 @@ export function ChannelEditor({ channel, onDone }: Props) {
           )}
         </div>
 
-        {activity?.candidates && activity.candidates.length > 0 && (
-          <ul
-            aria-label="Models offered by the provider"
-            className="model-list"
-          >
-            {activity.candidates.map((candidate) => (
-              <li className="model-row" key={candidate.id}>
-                <span className="candidate-id">{candidate.id}</span>
-                {candidate.capability && (
-                  <span className="channel-tag">
-                    {CAPABILITY_LABELS[candidate.capability]}
-                  </span>
-                )}
-                <button
-                  aria-label={`Add ${candidate.id} to this channel`}
-                  disabled={saving}
-                  onClick={() => adopt(candidate.id, candidate.capability)}
-                  type="button"
-                >
-                  +
-                </button>
-              </li>
-            ))}
-          </ul>
+        {listingError && (
+          <p className="dialog-error" data-testid="listing-error" role="alert">
+            {listingError}
+          </p>
+        )}
+
+        {candidates !== null && candidates.length > 0 && (
+          <CandidateList
+            added={new Set(form.models.map((model) => model.id))}
+            candidates={candidates}
+            disabled={saving}
+            onAdopt={addModels}
+          />
         )}
       </section>
 

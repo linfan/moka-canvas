@@ -210,6 +210,7 @@ function route(url: string, method: string, body: unknown): Response {
         models: [
           { id: "scribe-2", capability: null },
           { id: "illustrator-2", capability: "image" },
+          { id: "choir-1", capability: "audio" },
         ],
       });
     }
@@ -405,7 +406,7 @@ describe("provider settings", () => {
     });
   });
 
-  it("lists models as a suggestion and adopts one only into the form", async () => {
+  it("offers what a provider lists grouped by what each model can make", async () => {
     await openSettings();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     fireEvent.click(
@@ -414,24 +415,75 @@ describe("provider settings", () => {
       }),
     );
 
-    const suggested = await screen.findByRole("list", {
-      name: "Models offered by the provider",
+    // The decision is "which of these can make a picture", so the offer arrives
+    // grouped that way rather than as one long list of names.
+    const image = await screen.findByRole("region", {
+      name: "Image models offered",
     });
-    expect(suggested.textContent).toContain("illustrator-2");
+    expect(image.textContent).toContain("illustrator-2");
+    expect(
+      screen.getByRole("region", { name: "Audio models offered" }).textContent,
+    ).toContain("choir-1");
+    // A name the guess could not place is text, and the group says it guessed.
+    const text = screen.getByRole("region", { name: "Text models offered" });
+    expect(text.textContent).toContain("scribe-2");
+    expect(text.textContent).toContain("guessing");
     // A listing reads, so nothing has been stored by it.
     expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Add illustrator-2 to this channel" }),
+      screen.getByRole("button", {
+        name: "Add illustrator-2 to the image models",
+      }),
     );
-    expect(screen.getByLabelText("Model 3 identifier")).toBeTruthy();
     expect(
       (screen.getByLabelText("Model 3 identifier") as HTMLInputElement).value,
     ).toBe("illustrator-2");
-    // The capability came from the listing, and is still the user's to change.
+    // The capability came from the grouping, and is still the user's to change.
     expect(
       (screen.getByLabelText("Model 3 capability") as HTMLSelectElement).value,
     ).toBe("image");
+    // Adopted into the form, not into the configuration.
+    expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
+    // And it is now visibly taken, so it cannot be added twice.
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Add all image models offered",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+  });
+
+  it("takes a whole capability at once and narrows the offer by name", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Ask Example Inc which models it offers",
+      }),
+    );
+    await screen.findByRole("region", { name: "Audio models offered" });
+
+    fireEvent.change(
+      screen.getByLabelText("Filter the models the provider offers"),
+      { target: { value: "choir" } },
+    );
+    // Only the matching group is left, so "Add all" cannot sweep in models
+    // nobody filtered for.
+    expect(
+      screen.queryByRole("region", { name: "Image models offered" }),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add all audio models offered" }),
+    );
+
+    expect(
+      (screen.getByLabelText("Model 3 identifier") as HTMLInputElement).value,
+    ).toBe("choir-1");
+    expect(
+      (screen.getByLabelText("Model 3 capability") as HTMLSelectElement).value,
+    ).toBe("audio");
     expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
   });
 

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import type { ChannelView } from "../../api";
 import { ChannelEditor } from "./ChannelEditor";
+import { CoverageChips } from "./CoverageChips";
 import { useProviderStore } from "./providerStore";
 import { SecretStorageNote } from "./SecretStorageNote";
 
@@ -90,6 +91,20 @@ function ChannelRow({
         {" · "}
         {channel.models.length} model{channel.models.length === 1 ? "" : "s"}
       </p>
+      {channel.models.length === 0 ? (
+        <p className="channel-gap" data-testid="channel-gap">
+          No models yet, so no node can use this channel.
+          <button
+            disabled={saving}
+            onClick={onEdit}
+            type="button"
+          >
+            Add models
+          </button>
+        </p>
+      ) : (
+        <CoverageChips models={channel.models} />
+      )}
       {probe && (
         <p
           className={probe.ok ? "channel-probe" : "channel-probe is-failed"}
@@ -104,6 +119,19 @@ function ChannelRow({
         <button disabled={saving} onClick={onEdit} type="button">
           Edit
         </button>
+        {channel.models.length > 0 && channel.apiKey.set && (
+          <button
+            aria-label={`Refresh the models ${channel.name} offers`}
+            disabled={saving}
+            onClick={() =>
+              void useProviderStore.getState().refreshModels(channel.id)
+            }
+            title="Stores what the provider lists now, keeping the kind, name and switch you chose for a model it still lists"
+            type="button"
+          >
+            Refresh models
+          </button>
+        )}
         <button
           aria-label={`Test the connection to ${channel.name}`}
           disabled={saving || activity?.probing === true}
@@ -128,15 +156,26 @@ function ChannelRow({
 export function ChannelsTab() {
   const view = useProviderStore((state) => state.view);
   const saving = useProviderStore((state) => state.saving);
-  const [editing, setEditing] = useState<ChannelView | "new" | null>(null);
+  // Held in the store rather than here: a node that cannot run has to be able
+  // to open the editor on the channel that would serve it, from outside this
+  // tab, and that is not a thing a local state can be asked to do.
+  const editing = useProviderStore((state) => state.editing);
 
   if (editing !== null) {
-    return (
-      <ChannelEditor
-        channel={editing === "new" ? null : editing}
-        onDone={() => setEditing(null)}
-      />
-    );
+    const channel =
+      editing === "new"
+        ? null
+        : (view?.channels.find((entry) => entry.id === editing) ?? null);
+    // A channel that has been deleted since the editor opened is not one to
+    // keep a form open on.
+    if (editing === "new" || channel !== null) {
+      return (
+        <ChannelEditor
+          channel={channel}
+          onDone={() => useProviderStore.getState().closeEditor()}
+        />
+      );
+    }
   }
 
   const channels = view?.channels ?? [];
@@ -156,7 +195,7 @@ export function ChannelsTab() {
             <ChannelRow
               channel={channel}
               key={channel.id}
-              onEdit={() => setEditing(channel)}
+              onEdit={() => useProviderStore.getState().editChannel(channel.id)}
             />
           ))}
         </ul>
@@ -165,7 +204,7 @@ export function ChannelsTab() {
       <div className="settings-row">
         <button
           disabled={saving}
-          onClick={() => setEditing("new")}
+          onClick={() => useProviderStore.getState().editChannel("new")}
           type="button"
         >
           New channel

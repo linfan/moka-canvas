@@ -492,6 +492,75 @@ h2 {
   white-space: nowrap;
 }
 
+/* What a set of models covers. The gaps are the point: a capability with
+   nothing behind it is what a node of that kind will refuse for. */
+.coverage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.coverage-chip {
+  align-items: center;
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
+  padding: 1px 8px;
+}
+
+.coverage-chip.is-gap {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.coverage-count {
+  background: var(--primary);
+  border-radius: 999px;
+  color: var(--on-primary);
+  font-size: 10px;
+  min-width: 15px;
+  padding: 0 4px;
+  text-align: center;
+}
+
+/* A channel that cannot serve anything says so where it is listed, with the
+   way out beside it. */
+.channel-gap {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+  margin: 0;
+}
+
+.candidate-picker {
+  display: grid;
+  gap: 12px;
+}
+
+/* A heading with its own count and a bulk action on the same line. */
+.candidate-picker .settings-heading {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.candidate-picker .settings-heading .settings-hint {
+  font-size: 11px;
+  letter-spacing: 0;
+  margin-left: 6px;
+  text-transform: none;
+}
+
 .missing-asset-list {
   display: grid;
   gap: 10px;
