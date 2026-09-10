@@ -700,11 +700,8 @@ h2 {
 }
 
 .side-resource-list li {
-  align-items: center;
   color: var(--muted);
-  display: flex;
   font-size: 13px;
-  justify-content: space-between;
   padding: 4px 2px;
 }
 
@@ -746,14 +743,18 @@ h2 {
 
 .resource-row {
   align-items: center;
-  display: flex;
-  gap: 4px;
+  column-gap: 4px;
+  display: grid;
+  grid-template-areas:
+    "thumb main main"
+    "said said actions";
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .resource-main {
   display: grid;
-  flex: 1;
   gap: 2px;
+  grid-area: main;
   min-width: 0;
   padding: 6px 8px;
   text-align: left;
@@ -775,16 +776,16 @@ h2 {
 .resource-action {
   flex: none;
   font-size: 11px;
-  padding: 4px 7px;
+  padding: 2px 5px;
 }
 
 .resource-origin {
   color: var(--muted);
   flex: none;
   font-size: 11px;
-  max-width: 45%;
+  max-width: 100%;
   overflow: hidden;
-  padding: 4px 7px;
+  padding: 2px 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -859,6 +860,7 @@ h2 {
   display: flex;
   flex: none;
   font-size: 13px;
+  grid-area: thumb;
   height: 30px;
   justify-content: center;
   overflow: hidden;
@@ -871,10 +873,20 @@ h2 {
   width: 100%;
 }
 
-.resource-tags {
+.resource-said {
+  align-items: center;
+  color: var(--muted);
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
+  font-size: 10px;
+  gap: 2px;
+  grid-area: said;
+  min-width: 0;
+}
+
+.resource-where {
+  color: var(--muted);
+  flex: none;
 }
 
 .resource-tag {
@@ -882,18 +894,16 @@ h2 {
   border: 1px solid var(--stroke);
   border-radius: 999px;
   color: var(--muted);
-  font-size: 10px;
-  padding: 0 6px;
-}
-
-.resource-where {
-  color: var(--muted);
   flex: none;
   font-size: 10px;
-  max-width: 34%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.resource-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  grid-area: actions;
 }
 
 .side-import-jobs {

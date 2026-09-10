@@ -154,56 +154,56 @@ function ResourceRow({
           {formatBytes(entry.bytes)}
           {uses > 0 ? ` · ${uses} use${uses === 1 ? "" : "s"}` : ""}
         </span>
-        {(entry.tags?.length ?? 0) > 0 && (
-          <span className="resource-tags">
-            {entry.tags?.map((tag) => (
-              <span className="resource-tag" key={tag}>
-                {tag}
-              </span>
-            ))}
-          </span>
-        )}
       </button>
-      <span className="resource-where" data-testid="resource-where">
-        {SHELF_WHERE_LABELS[where]}
-      </span>
-      {maker && (
+      <span className="resource-actions">
         <button
-          aria-label={`Go to ${maker.title}, which made ${entry.name}`}
-          className="resource-origin"
-          onClick={() => focusGeneratingNode(maker.id)}
-          title={`Made by ${maker.title}`}
+          aria-label={`${keeper ? "Stop keeping" : "Keep"} ${entry.name} to hand`}
+          aria-pressed={keeper}
+          className={`resource-action keeper${keeper ? " is-active" : ""}`}
+          onClick={() => void markAssetKeeper(entry, !keeper)}
+          title={keeper ? "Kept to hand" : "Not kept to hand"}
           type="button"
         >
-          Made by {maker.title}
+          ★
         </button>
-      )}
-      <button
-        aria-label={`${keeper ? "Stop keeping" : "Keep"} ${entry.name} to hand`}
-        aria-pressed={keeper}
-        className={`resource-action keeper${keeper ? " is-active" : ""}`}
-        onClick={() => void markAssetKeeper(entry, !keeper)}
-        title={keeper ? "Kept to hand" : "Not kept to hand"}
-        type="button"
-      >
-        ★
-      </button>
-      <button
-        aria-label={`Preview ${entry.name}`}
-        className="resource-action"
-        onClick={() => openPreview(entry.id)}
-        type="button"
-      >
-        View
-      </button>
-      <button
-        aria-label={`Delete ${entry.name}`}
-        className="resource-action danger"
-        onClick={() => void requestDeleteAsset(entry.id)}
-        type="button"
-      >
-        ✕
-      </button>
+        <button
+          aria-label={`Preview ${entry.name}`}
+          className="resource-action"
+          onClick={() => openPreview(entry.id)}
+          type="button"
+        >
+          View
+        </button>
+        <button
+          aria-label={`Delete ${entry.name}`}
+          className="resource-action danger"
+          onClick={() => void requestDeleteAsset(entry.id)}
+          type="button"
+        >
+          ✕
+        </button>
+      </span>
+      <span className="resource-said">
+        <span className="resource-where" data-testid="resource-where">
+          {SHELF_WHERE_LABELS[where]}
+        </span>
+        {entry.tags?.map((tag) => (
+          <span className="resource-tag" key={tag}>
+            {tag}
+          </span>
+        ))}
+        {maker && (
+          <button
+            aria-label={`Go to ${maker.title}, which made ${entry.name}`}
+            className="resource-origin"
+            onClick={() => focusGeneratingNode(maker.id)}
+            title={`Made by ${maker.title}`}
+            type="button"
+          >
+            Made by {maker.title}
+          </button>
+        )}
+      </span>
     </li>
   );
 }
