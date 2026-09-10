@@ -242,8 +242,11 @@ export const useProviderStore = create<ProviderState>()((set, get) => {
       const known = (id: string | null | undefined) =>
         id !== null && id !== undefined && channels.some((c) => c.id === id);
       const channelOf = (reference: string | null) => {
-        const split = reference === null ? null : splitModelReference(reference);
-        return split !== null && known(split.channelId) ? split.channelId : null;
+        const split =
+          reference === null ? null : splitModelReference(reference);
+        return split !== null && known(split.channelId)
+          ? split.channelId
+          : null;
       };
       const serves = (id: string) =>
         channels.some(

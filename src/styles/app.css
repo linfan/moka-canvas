@@ -545,6 +545,19 @@ h2 {
   gap: 12px;
 }
 
+/* One capability's default, with the gap it leaves named underneath. */
+.default-row {
+  display: grid;
+  gap: 6px;
+}
+
+.default-row .settings-hint {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* A heading with its own count and a bulk action on the same line. */
 .candidate-picker .settings-heading {
   align-items: baseline;

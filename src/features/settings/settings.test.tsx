@@ -52,6 +52,7 @@ function fixture(): ProvidersView {
         enabled: true,
         models: [
           { id: "writer", capability: "text", alias: "", enabled: true },
+          { id: "scribe", capability: "text", alias: "", enabled: true },
           { id: "painter", capability: "image", alias: "", enabled: true },
         ],
         apiKey: { set: true, masked: MASKED },
@@ -284,6 +285,9 @@ describe("provider settings", () => {
   });
 
   it("keeps a stored credential when an edit does not mention it", async () => {
+    // Read before the write: the mock adopts the request body, so counting
+    // afterwards would only compare the write with itself.
+    const storedModels = view.channels[0].models.length;
     await openSettings();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
 
@@ -300,9 +304,9 @@ describe("provider settings", () => {
       apiKey: null,
       expectedRevision: 1,
     });
-    // Two models went out, so the edit replaced the channel rather than
-    // quietly dropping the half of it the form does not show.
-    expect((write.body as ChannelDraft).models).toHaveLength(2);
+    // Every stored model went out, so the edit replaced the channel rather
+    // than quietly dropping the part of it the form does not show.
+    expect((write.body as ChannelDraft).models).toHaveLength(storedModels);
     expect(storedKeyLine()).toBeTruthy();
   });
 
@@ -386,6 +390,49 @@ describe("provider settings", () => {
     expect(write.body).toEqual({ image: "main::painter", expectedRevision: 1 });
   });
 
+  it("names a default nobody set and offers the only model that could fill it", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Defaults" }));
+
+    // One image model, so the gap has a single answer and the tab offers it
+    // instead of only describing the hole.
+    const image = await screen.findByTestId("image-gap");
+    expect(image.textContent).toContain("1 image model available");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use Example Inc · painter" }),
+    );
+    expect((screen.getByLabelText("Image") as HTMLSelectElement).value).toBe(
+      "main::painter",
+    );
+    // Offered as a choice to make, not a write already performed.
+    expect(writesTo("/api/v1/providers/defaults")).toHaveLength(0);
+
+    // Two text models is a choice the tab must not make for the user: it says
+    // the gap and leaves the picker as the way to close it.
+    const text = screen.getByTestId("text-gap");
+    expect(text.textContent).toContain(
+      "2 text models available and none of them is the default",
+    );
+    expect(
+      screen.queryByRole("button", { name: /^Use Example Inc · writer$/ }),
+    ).toBeNull();
+
+    // A capability nothing serves says so, and leads to where it would change.
+    expect(screen.getByTestId("video-gap").textContent).toContain(
+      "No video model in any enabled channel",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    await waitFor(() =>
+      expect(writesTo("/api/v1/providers/defaults")).toHaveLength(1),
+    );
+    // Only the capability that moved.
+    expect(writesTo("/api/v1/providers/defaults")[0].body).toEqual({
+      image: "main::painter",
+      expectedRevision: 1,
+    });
+  });
+
   it("sends only the preference group that moved", async () => {
     await openSettings();
     fireEvent.click(await screen.findByRole("tab", { name: "Preferences" }));
@@ -437,11 +484,11 @@ describe("provider settings", () => {
       }),
     );
     expect(
-      (screen.getByLabelText("Model 3 identifier") as HTMLInputElement).value,
+      (screen.getByLabelText("Model 4 identifier") as HTMLInputElement).value,
     ).toBe("illustrator-2");
     // The capability came from the grouping, and is still the user's to change.
     expect(
-      (screen.getByLabelText("Model 3 capability") as HTMLSelectElement).value,
+      (screen.getByLabelText("Model 4 capability") as HTMLSelectElement).value,
     ).toBe("image");
     // Adopted into the form, not into the configuration.
     expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
@@ -479,10 +526,10 @@ describe("provider settings", () => {
     );
 
     expect(
-      (screen.getByLabelText("Model 3 identifier") as HTMLInputElement).value,
+      (screen.getByLabelText("Model 4 identifier") as HTMLInputElement).value,
     ).toBe("choir-1");
     expect(
-      (screen.getByLabelText("Model 3 capability") as HTMLSelectElement).value,
+      (screen.getByLabelText("Model 4 capability") as HTMLSelectElement).value,
     ).toBe("audio");
     expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
   });

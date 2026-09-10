@@ -94,11 +94,7 @@ function ChannelRow({
       {channel.models.length === 0 ? (
         <p className="channel-gap" data-testid="channel-gap">
           No models yet, so no node can use this channel.
-          <button
-            disabled={saving}
-            onClick={onEdit}
-            type="button"
-          >
+          <button disabled={saving} onClick={onEdit} type="button">
             Add models
           </button>
         </p>
