@@ -150,6 +150,29 @@ pub struct AssetShelfRequest {
     pub keyword: Option<String>,
 }
 
+/// Which node to put on the shelf.
+///
+/// The node is named rather than its contents sent: a text node's words are
+/// already in the document the server holds, so they do not travel up again.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileNodeRequest {
+    pub canvas_id: String,
+    pub node_id: String,
+}
+
+/// The entry a node's work landed on. `created` says whether this call is what
+/// wrote it, which is how filing the same text node twice is told apart from
+/// filing two different ones.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileNodeResponse {
+    pub entry: ResourceEntry,
+    pub revision: i32,
+    pub updated_at: String,
+    pub created: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageResponse {

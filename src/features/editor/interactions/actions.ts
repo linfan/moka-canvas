@@ -585,6 +585,52 @@ export async function markAssetKeeper(
   }
 }
 
+/** Whether a node holds work the shelf could take as it stands. */
+export function filingPossible(node: WorkflowNode): boolean {
+  if (node.kind === "text") {
+    const content = (node.data as { content?: string }).content ?? "";
+    return content.trim() !== "";
+  }
+  if (node.kind === "image" || node.kind === "audio" || node.kind === "video") {
+    return Boolean((node.data as { assetId?: AssetId }).assetId);
+  }
+  return false;
+}
+
+/**
+ * Keeps a node's work to hand.
+ *
+ * The server reads the node from the document on disk, so anything still on
+ * its way there is saved first: a text node filed the moment its words were
+ * typed would otherwise be filed as they were a moment before.
+ */
+export async function fileNodeAsAsset(
+  canvasId: CanvasId,
+  nodeId: NodeId,
+): Promise<void> {
+  try {
+    await useProjectStore.getState().flush();
+    if (useProjectStore.getState().pending.length > 0) {
+      toastError("Changes are still saving — try again in a moment");
+      return;
+    }
+    const filed = await assetsApi.fileNode(canvasId, nodeId);
+    useProjectStore.getState().integrateAssetEntry(filed.entry, {
+      revision: filed.revision,
+      updatedAt: filed.updatedAt,
+    });
+    announce(
+      filed.created
+        ? `${filed.entry.name} saved to the shelf`
+        : `${filed.entry.name} is already on the shelf`,
+    );
+  } catch (error) {
+    toastError(
+      error instanceof Error ? error.message : "Could not save to the shelf",
+    );
+  }
+}
+
 /**
  * Delete flow: unreferenced assets go straight to the server; referenced
  * ones open a confirmation that also removes the referencing nodes.

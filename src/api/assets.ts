@@ -16,6 +16,14 @@ export interface UploadOptions {
 }
 
 /**
+ * Result of filing a node's work. `created` is false when the call answered
+ * with the entry an earlier filing of the same node had already made.
+ */
+export interface FiledAsset extends AssetChange {
+  created: boolean;
+}
+
+/**
  * What a reader says about an asset, offered on its own.
  *
  * A part left out is a part left as it was, so a note written down cannot
@@ -65,6 +73,18 @@ export const assetsApi = {
       method: "PATCH",
       body: edit,
     });
+  },
+
+  /**
+   * Keeps a node's work to hand. A text node's words are written to the shelf
+   * as they stand; anything that already holds a file just gets marked as kept,
+   * and the file underneath is not read again.
+   */
+  fileNode(canvasId: string, nodeId: string): Promise<FiledAsset> {
+    return http.request<FiledAsset>(
+      "/api/v1/projects/current/assets/from-node",
+      { method: "POST", body: { canvasId, nodeId } },
+    );
   },
 
   remove(id: AssetId): Promise<SaveResult> {

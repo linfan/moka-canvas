@@ -49,6 +49,8 @@ import {
   choosableResults,
   deleteSelection,
   disconnectEdge,
+  fileNodeAsAsset,
+  filingPossible,
   linkAsset,
   renameNode,
   requestDeleteAsset,
@@ -712,6 +714,42 @@ function RunSection({
   );
 }
 
+/**
+ * The way a node's work is kept to hand.
+ *
+ * A node that already holds a file is only marked as kept, and one whose words
+ * are its own gets them written out; either way the shelf comes away with an
+ * entry rather than a second copy of anything.
+ */
+function ShelfSection({
+  canvas,
+  node,
+}: {
+  canvas: CanvasDocument;
+  node: WorkflowNode;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (!filingPossible(node)) return null;
+  const save = async () => {
+    setBusy(true);
+    try {
+      await fileNodeAsAsset(canvas.id, node.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="inspector-section">
+      <h3>Shelf</h3>
+      <div className="inspector-actions">
+        <button disabled={busy} onClick={() => void save()} type="button">
+          {busy ? "Saving…" : "Save as material"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function NodeInspector({
   canvas,
   node,
@@ -743,6 +781,7 @@ function NodeInspector({
       )}
       <GenerationSection node={node} />
       <MediaAssetSection node={node} />
+      <ShelfSection canvas={canvas} node={node} />
       <InputChips canvas={canvas} node={node} />
       <RunSection canvas={canvas} node={node} />
     </>

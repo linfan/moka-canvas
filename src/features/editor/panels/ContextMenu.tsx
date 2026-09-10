@@ -12,6 +12,8 @@ import {
   cutSelection,
   deleteSelection,
   duplicateSelection,
+  fileNodeAsAsset,
+  filingPossible,
   fitViewAction,
   generateFrom,
   groupSelection,
@@ -152,6 +154,12 @@ export function ContextMenu() {
             action: () => chooseResult(targetId, choice.slotId),
           });
         }
+      }
+      if (canvas && filingPossible(targetNode)) {
+        items.push({
+          label: "Save as material",
+          action: () => void fileNodeAsAsset(canvas.id, targetId),
+        });
       }
     }
     items.push(

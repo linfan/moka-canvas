@@ -1,10 +1,10 @@
 use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, AssetShelfRequest, CapabilitiesResponse,
-    ChannelKeyRequest, CreateProjectRequest, DefaultsPatch, ExportRequest, GenerateResponse,
-    GenerationPreviewRequest, GenerationPreviewResponse, ImportChannelRequest,
-    ImportProjectRequest, ModelListResponse, OpenProjectRequest, OpenProjectResponse,
-    PackageResponse, PreferencesPatch, PreviewInput, PublicConfigResponse, RevisionQuery,
-    RunStreamQuery, SaveResponse, StartRunRequest, UpsertChannelRequest,
+    ChannelKeyRequest, CreateProjectRequest, DefaultsPatch, ExportRequest, FileNodeRequest,
+    FileNodeResponse, GenerateResponse, GenerationPreviewRequest, GenerationPreviewResponse,
+    ImportChannelRequest, ImportProjectRequest, ModelListResponse, OpenProjectRequest,
+    OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput, PublicConfigResponse,
+    RevisionQuery, RunStreamQuery, SaveResponse, StartRunRequest, UpsertChannelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
@@ -380,6 +380,36 @@ pub async fn patch_asset_shelf(
         revision: change.revision,
         updated_at: change.updated_at,
     }))
+}
+
+/// Puts what a node holds onto the shelf.
+///
+/// A text node's words are read out of the document on this side and written
+/// into the project as a file of their own, so what the node says does not
+/// travel up from the browser a second time. A node that already holds a file
+/// keeps it: there is nothing to write, so the entry is marked as one to hand.
+pub async fn file_node_asset(
+    State(state): State<ApiState>,
+    Json(request): Json<FileNodeRequest>,
+) -> Result<(StatusCode, Json<FileNodeResponse>), Problem> {
+    let filed = state
+        .store
+        .file_node_as_asset(request.canvas_id.trim(), request.node_id.trim())
+        .await?;
+    let status = if filed.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(FileNodeResponse {
+            entry: filed.change.entry,
+            revision: filed.change.revision,
+            updated_at: filed.change.updated_at,
+            created: filed.created,
+        }),
+    ))
 }
 
 pub async fn delete_asset(

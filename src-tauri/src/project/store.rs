@@ -5,14 +5,14 @@ use crate::domain::validate::{
     MAX_ASSET_KEYWORD_LENGTH, MAX_ASSET_NOTE_LENGTH, MAX_ASSET_TAGS, MAX_ASSET_TAG_LENGTH,
 };
 use crate::domain::{
-    new_id, now_iso, CanvasDocument, DocumentCommand, MokaFile, ProjectMetadata, ResourceEntry,
-    ResourceRegistry, RunRecord, RunStatus, SelfCheckIssue, SelfCheckNodeRef, SelfCheckReason,
-    SelfCheckReport, MOKA_FILE_VERSION,
+    new_id, now_iso, AssetProvenance, CanvasDocument, DocumentCommand, MokaFile, NodeKind,
+    ProjectMetadata, ResourceEntry, ResourceRegistry, RunRecord, RunStatus, SelfCheckIssue,
+    SelfCheckNodeRef, SelfCheckReason, SelfCheckReport, MOKA_FILE_VERSION,
 };
 use crate::project::codec::{decode_moka_file, encode_moka_file};
 use crate::project::{
-    AssetChange, AssetFile, AssetShelfEdit, ByteRange, CreateProject, OpenProject, PackageReport,
-    PackageScope, ProjectError, ProjectStore, SaveResult, StagedAsset,
+    AssetChange, AssetFile, AssetShelfEdit, ByteRange, CreateProject, FiledAsset, OpenProject,
+    PackageReport, PackageScope, ProjectError, ProjectStore, SaveResult, StagedAsset,
 };
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -355,6 +355,44 @@ impl FsProjectStore {
             updated_at: state.moka.metadata.updated_at.clone(),
         })
     }
+
+    /// Keeps the file a node already holds.
+    ///
+    /// This is what a picture, a piece of music, or a video has to offer the
+    /// shelf: there is no second copy to write, so the entry the file is
+    /// already registered under is marked as one to hand.
+    fn keep_node_file(
+        &self,
+        state: &mut OpenState,
+        asset_id: &Option<String>,
+        asked: &str,
+    ) -> Result<FiledAsset, ProjectError> {
+        let asset_id = asset_id.as_deref().ok_or_else(|| {
+            ProjectError::domain(
+                "VALIDATION_FAILED",
+                "The node holds nothing that can be filed",
+            )
+        })?;
+        let said = opening_for_search(asked, MAX_ASSET_KEYWORD_LENGTH);
+        let entry = state.moka.resources.find_mut(asset_id).ok_or_else(|| {
+            ProjectError::domain("NOT_FOUND", "The node's file is not in the project")
+        })?;
+        entry.favorite = Some(true);
+        if entry.keyword.is_none() {
+            entry.keyword = said;
+        }
+        entry.updated_at = now_iso();
+        let updated = entry.clone();
+        let saved = self.persist_locked(state)?;
+        Ok(FiledAsset {
+            change: AssetChange {
+                entry: updated,
+                revision: saved.revision,
+                updated_at: saved.updated_at,
+            },
+            created: false,
+        })
+    }
 }
 
 fn sha256_of(path: &Path) -> std::io::Result<String> {
@@ -382,6 +420,21 @@ fn shelf_phrase(text: &str, limit: usize, what: &str) -> Result<Option<String>, 
     } else {
         Some(trimmed.to_string())
     })
+}
+
+/// The opening of a longer piece of text, kept so the shelf can be searched by
+/// what a file says without the whole file being read.
+///
+/// Unlike a phrase a reader typed, this is clipped rather than refused: a long
+/// text node is filed all the same, and a summary shorter than the file it
+/// describes is no reason to turn it away.
+fn opening_for_search(text: &str, limit: usize) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let opening: String = trimmed.chars().take(limit).collect();
+    Some(opening.trim_end().to_string())
 }
 
 /// The words one asset is filed under. Two spellings of one word are kept as
@@ -748,6 +801,155 @@ impl ProjectStore for FsProjectStore {
             revision: saved.revision,
             updated_at: saved.updated_at,
         })
+    }
+
+    async fn file_node_as_asset(
+        &self,
+        canvas_id: &str,
+        node_id: &str,
+    ) -> Result<FiledAsset, ProjectError> {
+        let mut guard = self.state.lock().expect("store poisoned");
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?;
+        let root = state.root.clone();
+
+        // The node is read out before anything is written so the borrow of the
+        // document ends here: what follows edits the registry.
+        let (kind, title, content, asset_id, asked) = {
+            let canvas = state
+                .moka
+                .canvas
+                .iter()
+                .find(|canvas| canvas.id == canvas_id)
+                .ok_or_else(|| ProjectError::domain("NOT_FOUND", "Canvas not found"))?;
+            let node = canvas
+                .node(node_id)
+                .ok_or_else(|| ProjectError::domain("NOT_FOUND", "Node not found"))?;
+            (
+                node.kind,
+                node.title.clone(),
+                node.data.content.clone().unwrap_or_default(),
+                node.data.asset_id.clone(),
+                node.data
+                    .generation
+                    .as_ref()
+                    .map(|spec| spec.prompt.clone())
+                    .unwrap_or_default(),
+            )
+        };
+
+        if kind != NodeKind::Text {
+            return self.keep_node_file(state, &asset_id, &asked);
+        }
+        if content.trim().is_empty() {
+            return Err(ProjectError::domain(
+                "VALIDATION_FAILED",
+                "The node holds nothing that can be filed",
+            ));
+        }
+
+        let bytes = content.as_bytes();
+        let sha256 = {
+            use sha2::Digest;
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(bytes);
+            hex::encode(hasher.finalize())
+        };
+
+        // The same words from the same node are one file, however many times
+        // they are filed.
+        let already = state
+            .moka
+            .resources
+            .all()
+            .find(|entry| {
+                entry.sha256.as_deref() == Some(sha256.as_str())
+                    && entry
+                        .provenance
+                        .as_ref()
+                        .and_then(|origin| origin.operation_node_id.as_deref())
+                        == Some(node_id)
+            })
+            .cloned();
+        if let Some(entry) = already {
+            return Ok(FiledAsset {
+                change: AssetChange {
+                    entry,
+                    revision: state.revision,
+                    updated_at: state.moka.metadata.updated_at.clone(),
+                },
+                created: false,
+            });
+        }
+
+        let id = new_id();
+        let name = if title.trim().is_empty() {
+            "text".to_string()
+        } else {
+            title.trim().to_string()
+        };
+        let filename = assets::asset_filename(&name, "text/markdown", &id);
+        let tmp_path = assets::new_tmp_path(&root)?;
+        if let Err(error) = std::fs::write(&tmp_path, bytes) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(error.into());
+        }
+        let relative = match assets::promote(&root, &tmp_path, "texts", &filename) {
+            Ok(relative) => relative,
+            Err(error) => {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(error);
+            }
+        };
+
+        let now = now_iso();
+        let entry = ResourceEntry {
+            id,
+            name: format!("{name}.md"),
+            path: relative,
+            mime: Some("text/markdown".into()),
+            bytes: Some(bytes.len() as i64),
+            sha256: Some(sha256),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            probe: None,
+            provenance: Some(AssetProvenance {
+                run_id: None,
+                canvas_id: Some(canvas_id.to_string()),
+                operation_node_id: Some(node_id.to_string()),
+                assistant_session_id: None,
+                input_asset_ids: None,
+                parameter_snapshot: None,
+                created_at: now,
+            }),
+            tags: None,
+            note: None,
+            favorite: Some(true),
+            origin: Some("filed".into()),
+            keyword: opening_for_search(&content, MAX_ASSET_KEYWORD_LENGTH),
+        };
+        state
+            .moka
+            .resources
+            .category_mut("texts")
+            .expect("texts is an asset category")
+            .push(entry.clone());
+        match self.persist_locked(state) {
+            Ok(saved) => Ok(FiledAsset {
+                change: AssetChange {
+                    entry,
+                    revision: saved.revision,
+                    updated_at: saved.updated_at,
+                },
+                created: true,
+            }),
+            Err(error) => {
+                state.moka.resources.remove(&entry.id);
+                let _ = std::fs::remove_file(root.join(&entry.path));
+                Err(error)
+            }
+        }
     }
 
     async fn asset_file(

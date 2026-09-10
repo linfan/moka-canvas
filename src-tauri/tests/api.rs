@@ -2,6 +2,8 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
 use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
+use moka_canvas::domain::commands::make_node;
+use moka_canvas::domain::NodeKind;
 use serde_json::{json, Value};
 use std::path::Path;
 use tower::ServiceExt;
@@ -469,6 +471,105 @@ async fn an_asset_takes_what_a_reader_says_about_it() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_text_node_is_filed_once_and_its_words_come_back() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let created = create_project(&app, &temp.path().join("projects"), "Filed").await;
+    let canvas_id = created["moka"]["canvas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let revision = created["moka"]["metadata"]["revision"].as_i64().unwrap();
+
+    let mut node = make_node(NodeKind::Text, "Filed line".into(), 0.0, 0.0);
+    node.data.content = Some("Filed from the document.".into());
+    let node_id = node.id.clone();
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/commands",
+            json!({
+                "expectedRevision": revision,
+                "commands": [
+                    {
+                        "type": "addNode",
+                        "canvasId": canvas_id.clone(),
+                        "node": serde_json::to_value(&node).unwrap(),
+                    }
+                ]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let filed = json!({ "canvasId": canvas_id.clone(), "nodeId": node_id.clone() });
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/assets/from-node",
+            filed.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = body_json(response).await;
+    assert_eq!(body["created"], true);
+    let entry = &body["entry"];
+    assert_eq!(entry["origin"], "filed");
+    assert_eq!(entry["favorite"], true);
+    assert_eq!(entry["name"], "Filed line.md");
+    assert_eq!(entry["mime"], "text/markdown");
+    assert_eq!(entry["provenance"]["operationNodeId"], node_id);
+    assert!(entry["path"].as_str().unwrap().starts_with("assets/texts/"));
+    let asset_id = entry["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/projects/current/assets/{asset_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&bytes[..], b"Filed from the document.");
+
+    // Filing the same words from the same node answers with the entry it made
+    // the first time rather than a second copy of it.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/assets/from-node",
+            filed,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let again = body_json(response).await;
+    assert_eq!(again["created"], false);
+    assert_eq!(again["entry"]["id"], asset_id);
+
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/assets/from-node",
+            json!({ "canvasId": canvas_id, "nodeId": "no-such-node" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(body_json(response).await["code"], "NOT_FOUND");
 }
 
 #[tokio::test]

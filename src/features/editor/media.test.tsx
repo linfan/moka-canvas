@@ -396,6 +396,30 @@ describe("editor shell integration", () => {
           updatedAt: "2026-01-01T00:00:04.000Z",
         });
       }
+      if (
+        url === "/api/v1/projects/current/assets/from-node" &&
+        init?.method === "POST"
+      ) {
+        return json(
+          {
+            entry: {
+              id: "filed-brief",
+              name: "Brief.md",
+              path: "assets/texts/brief-00000000.md",
+              mime: "text/markdown",
+              bytes: 42,
+              createdAt: "2026-01-02T00:00:00.000Z",
+              updatedAt: "2026-01-02T00:00:00.000Z",
+              favorite: true,
+              origin: "filed",
+            },
+            revision: 7,
+            updatedAt: "2026-01-01T00:00:05.000Z",
+            created: true,
+          },
+          201,
+        );
+      }
       return json({ code: "NOT_FOUND", message: url, status: 404 }, 404);
     };
   }
@@ -430,6 +454,35 @@ describe("editor shell integration", () => {
     expect(inspector.textContent).toContain("2.0 KB");
     expect(screen.getByRole("button", { name: "Reveal" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Download" })).toBeTruthy();
+  });
+
+  it("files a text node's words to the shelf from the inspector", async () => {
+    const ids = goldenNodeIds();
+    await openGolden();
+    await screen.findByRole("button", { name: "Canvas 1" });
+    act(() => {
+      useEditorStore
+        .getState()
+        .setSelection({ nodeIds: [ids.text], edgeIds: [] });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save as material" }));
+    await act(() => Promise.resolve());
+    const call = fetchMock.mock.calls.find(
+      ([url]) => url === "/api/v1/projects/current/assets/from-node",
+    );
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({
+      canvasId: ids.canvasMain,
+      nodeId: ids.text,
+    });
+    expect(useEditorStore.getState().announcement).toContain(
+      "Brief.md saved to the shelf",
+    );
+    expect(
+      useProjectStore
+        .getState()
+        .moka!.resources.texts.some((entry) => entry.id === "filed-brief"),
+    ).toBe(true);
   });
 
   it("renders input chips and disconnects a single edge", async () => {

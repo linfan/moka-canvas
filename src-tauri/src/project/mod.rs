@@ -61,6 +61,16 @@ pub struct AssetChange {
     pub updated_at: String,
 }
 
+/// Result of putting a node's work on the shelf.
+///
+/// Filing the same text node twice answers with the entry the first call made
+/// rather than a second copy of it, so `created` says which call this was.
+#[derive(Debug)]
+pub struct FiledAsset {
+    pub change: AssetChange,
+    pub created: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ByteRange {
     pub start: u64,
@@ -150,6 +160,18 @@ pub trait ProjectStore: Send + Sync {
         id: &str,
         edit: AssetShelfEdit,
     ) -> Result<AssetChange, ProjectError>;
+    /// Puts what a node holds onto the shelf.
+    ///
+    /// A text node's words are read from the document and written into the
+    /// project as a file of their own, so they do not have to travel up from
+    /// the browser a second time. A node that already holds a file keeps that
+    /// file and is marked as kept to hand. Filing the same text node again
+    /// answers with the entry the first call made.
+    async fn file_node_as_asset(
+        &self,
+        canvas_id: &str,
+        node_id: &str,
+    ) -> Result<FiledAsset, ProjectError>;
     async fn asset_file(
         &self,
         id: &str,

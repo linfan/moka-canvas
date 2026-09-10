@@ -95,6 +95,12 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/assets",
             post(routes::upload_asset),
         )
+        // A node's own work goes on the shelf through a route of its own: the
+        // words are read out of the document here rather than sent up again.
+        .route(
+            "/api/v1/projects/current/assets/from-node",
+            post(routes::file_node_asset),
+        )
         // What a reader says about an asset is written onto the entry itself, so
         // it is the entry's own address that takes the patch; the bytes have a
         // separate one.

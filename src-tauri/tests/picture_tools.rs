@@ -12,8 +12,8 @@ use moka_canvas::domain::{DocumentCommand, ResourceEntry, RunRecord};
 use moka_canvas::imaging::{operate, Operator, OperatorRequest};
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{
-    AssetChange, AssetFile, AssetShelfEdit, ByteRange, CreateProject, OpenProject, PackageReport,
-    PackageScope, ProjectError, ProjectStore, SaveResult, StagedAsset,
+    AssetChange, AssetFile, AssetShelfEdit, ByteRange, CreateProject, FiledAsset, OpenProject,
+    PackageReport, PackageScope, ProjectError, ProjectStore, SaveResult, StagedAsset,
 };
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -358,6 +358,13 @@ impl ProjectStore for RefusesAfter {
         edit: AssetShelfEdit,
     ) -> Result<AssetChange, ProjectError> {
         self.inner.update_asset_shelf(id, edit).await
+    }
+    async fn file_node_as_asset(
+        &self,
+        canvas_id: &str,
+        node_id: &str,
+    ) -> Result<FiledAsset, ProjectError> {
+        self.inner.file_node_as_asset(canvas_id, node_id).await
     }
     async fn asset_file(
         &self,

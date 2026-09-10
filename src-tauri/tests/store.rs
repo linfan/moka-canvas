@@ -3,7 +3,8 @@ use moka_canvas::domain::commands::{apply_commands, make_node};
 use moka_canvas::domain::validate::{MAX_ASSET_TAGS, MAX_ASSISTANT_MESSAGES_PER_SESSION};
 use moka_canvas::domain::{
     new_id, AssistantMessage, AssistantReference, AssistantRole, AssistantSession,
-    AssistantToolCall, CanvasDocument, DocumentCommand, NodeKind, PointValue,
+    AssistantToolCall, CanvasDocument, Capability, DocumentCommand, GenerationInputMode,
+    GenerationMode, GenerationSpec, NodeKind, PointValue,
 };
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{AssetShelfEdit, CreateProject, ProjectStore, StagedAsset};
@@ -583,6 +584,197 @@ async fn the_shelf_refuses_more_than_it_can_hold() {
         .find(&entry.id)
         .expect("the asset is still registered");
     assert!(unchanged.tags.is_none());
+}
+
+#[tokio::test]
+async fn filing_a_text_node_writes_its_words_once() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let current = store.current().await.unwrap().unwrap();
+    let canvas_id = current.moka.canvas[0].id.clone();
+
+    let mut node = make_node(NodeKind::Text, "Opening line".into(), 40.0, 60.0);
+    node.data.content = Some("A lantern floats over a quiet lake at dusk.".into());
+    store
+        .apply_commands(
+            current.moka.metadata.revision,
+            vec![DocumentCommand::AddNode {
+                canvas_id: canvas_id.clone(),
+                node: node.clone(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let filed = store
+        .file_node_as_asset(&canvas_id, &node.id)
+        .await
+        .unwrap();
+    assert!(filed.created);
+    let entry = filed.change.entry;
+    assert_eq!(entry.origin.as_deref(), Some("filed"));
+    assert_eq!(entry.mime.as_deref(), Some("text/markdown"));
+    assert_eq!(entry.favorite, Some(true));
+    assert_eq!(entry.name, "Opening line.md");
+    assert!(entry.path.starts_with("assets/texts/"), "{}", entry.path);
+    assert_eq!(
+        entry.keyword.as_deref(),
+        Some("A lantern floats over a quiet lake at dusk.")
+    );
+    assert_eq!(
+        entry
+            .provenance
+            .as_ref()
+            .and_then(|origin| origin.operation_node_id.as_deref()),
+        Some(node.id.as_str())
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join(&entry.path)).unwrap(),
+        "A lantern floats over a quiet lake at dusk."
+    );
+
+    // The same words from the same node are one file, not a second copy.
+    let again = store
+        .file_node_as_asset(&canvas_id, &node.id)
+        .await
+        .unwrap();
+    assert!(!again.created);
+    assert_eq!(again.change.entry.id, entry.id);
+
+    let reopened = store
+        .create_project(
+            &root,
+            CreateProject {
+                name: "Ignored".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(reopened.moka.resources.texts.len(), 1);
+    assert_eq!(
+        reopened.moka.resources.texts[0].id, entry.id,
+        "a reopen reads the filed words back"
+    );
+}
+
+#[tokio::test]
+async fn filing_a_picture_keeps_the_picture_it_already_has() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let staging = root.join("tmp").join("upload-lantern.bin");
+    std::fs::write(&staging, make_test_png()).unwrap();
+    let entry = store
+        .add_asset(StagedAsset {
+            name: "lantern.png".into(),
+            tmp_path: staging,
+            declared_mime: None,
+            category_hint: None,
+            provenance: None,
+        })
+        .await
+        .unwrap()
+        .entry;
+    let before = std::fs::read(root.join(&entry.path)).unwrap();
+
+    let current = store.current().await.unwrap().unwrap();
+    let canvas_id = current.moka.canvas[0].id.clone();
+    let mut node = make_node(NodeKind::Image, "Lantern".into(), 0.0, 0.0);
+    node.data.asset_id = Some(entry.id.clone());
+    node.data.generation = Some(GenerationSpec {
+        capability: Capability::Image,
+        mode: GenerationMode::Generate,
+        prompt: "A lantern lit at night".into(),
+        input_mode: GenerationInputMode::Manual,
+        ..Default::default()
+    });
+    store
+        .apply_commands(
+            current.moka.metadata.revision,
+            vec![DocumentCommand::AddNode {
+                canvas_id: canvas_id.clone(),
+                node: node.clone(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let filed = store
+        .file_node_as_asset(&canvas_id, &node.id)
+        .await
+        .unwrap();
+    assert!(!filed.created, "the file was already in the project");
+    assert_eq!(filed.change.entry.id, entry.id);
+    assert_eq!(filed.change.entry.favorite, Some(true));
+    assert_eq!(
+        filed.change.entry.keyword.as_deref(),
+        Some("A lantern lit at night"),
+        "the shelf can be searched by the ask that made it"
+    );
+    assert_eq!(filed.change.entry.sha256, entry.sha256);
+    assert_eq!(
+        std::fs::read(root.join(&filed.change.entry.path)).unwrap(),
+        before,
+        "keeping a picture costs nothing of the picture's"
+    );
+}
+
+#[tokio::test]
+async fn a_node_with_nothing_in_it_cannot_be_filed() {
+    let tmp = TempDir::new().unwrap();
+    let (store, _root) = create_store(&tmp).await;
+    let current = store.current().await.unwrap().unwrap();
+    let canvas_id = current.moka.canvas[0].id.clone();
+
+    let empty = make_node(NodeKind::Text, "Blank".into(), 0.0, 0.0);
+    let grouped = make_node(NodeKind::Group, "A group".into(), 0.0, 0.0);
+    store
+        .apply_commands(
+            current.moka.metadata.revision,
+            vec![
+                DocumentCommand::AddNode {
+                    canvas_id: canvas_id.clone(),
+                    node: empty.clone(),
+                },
+                DocumentCommand::AddNode {
+                    canvas_id: canvas_id.clone(),
+                    node: grouped.clone(),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+    let result = store.file_node_as_asset(&canvas_id, &empty.id).await;
+    assert_eq!(result.unwrap_err().code(), "VALIDATION_FAILED");
+    let result = store.file_node_as_asset(&canvas_id, &grouped.id).await;
+    assert_eq!(result.unwrap_err().code(), "VALIDATION_FAILED");
+    let result = store.file_node_as_asset(&canvas_id, "no-such-node").await;
+    assert_eq!(result.unwrap_err().code(), "NOT_FOUND");
+    let result = store.file_node_as_asset("no-such-canvas", &empty.id).await;
+    assert_eq!(result.unwrap_err().code(), "NOT_FOUND");
+
+    // A picture whose file is no longer registered has nothing to keep.
+    let mut lost = make_node(NodeKind::Image, "Lost".into(), 0.0, 0.0);
+    lost.data.asset_id = Some("asset-that-went-away".into());
+    store
+        .apply_commands(
+            store
+                .current()
+                .await
+                .unwrap()
+                .unwrap()
+                .moka
+                .metadata
+                .revision,
+            vec![DocumentCommand::AddNode {
+                canvas_id: canvas_id.clone(),
+                node: lost.clone(),
+            }],
+        )
+        .await
+        .unwrap();
+    let result = store.file_node_as_asset(&canvas_id, &lost.id).await;
+    assert_eq!(result.unwrap_err().code(), "NOT_FOUND");
 }
 
 #[tokio::test]
