@@ -56,6 +56,15 @@ export function zoomAtPoint(
   };
 }
 
+/**
+ * Zoom factor for one wheel event. `fine` marks the held-modifier step — a
+ * quarter of the usual one — which is also what a Mac trackpad pinch sends,
+ * for aiming at a detail without overshooting it.
+ */
+export function wheelZoomFactor(deltaY: number, fine: boolean): number {
+  return Math.pow(1.0015, -deltaY * (fine ? 0.25 : 1));
+}
+
 /** Pan by a screen-space pixel delta. */
 export function panByPixels(camera: Camera, dx: number, dy: number): Camera {
   return {

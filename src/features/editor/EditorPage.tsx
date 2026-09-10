@@ -3,10 +3,11 @@ import { isApiError, projectsApi } from "../../api";
 import { unreferencedAssets, type MokaFile } from "../../shared/domain";
 import { AssistantPanel } from "../assistant/AssistantPanel";
 import { CanvasSurface } from "./canvas/CanvasSurface";
-import { clientToWorld, zoomTo } from "./canvas/canvasControl";
+import { clientToWorld, zoomReset, zoomTo } from "./canvas/canvasControl";
 import {
   ASSET_DRAG_MIME,
   addAssetNode,
+  fitSelectionAction,
   fitViewAction,
   importFiles,
 } from "./interactions/actions";
@@ -58,6 +59,9 @@ export function EditorPage() {
   const saveStatus = useProjectStore((state) => state.saveStatus);
   const activeCanvas = useActiveCanvas();
   const liveZoom = useEditorStore((state) => state.camera?.zoom);
+  const selectedCount = useEditorStore(
+    (state) => state.selection.nodeIds.length,
+  );
   const tool = useEffectiveTool();
   const resourcesPanelOpen = useEditorStore(
     (state) => state.resourcesPanelOpen,
@@ -317,6 +321,21 @@ export function EditorPage() {
             type="button"
           >
             Fit
+          </button>
+          <button
+            aria-label="Zoom to selection"
+            disabled={selectedCount === 0}
+            onClick={() => fitSelectionAction()}
+            type="button"
+          >
+            Selection
+          </button>
+          <button
+            aria-label="Zoom to 100 percent"
+            onClick={() => zoomReset()}
+            type="button"
+          >
+            100%
           </button>
           <input
             aria-label="Zoom"

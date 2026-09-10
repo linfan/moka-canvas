@@ -26,6 +26,7 @@ import {
   clampZoom,
   panByPixels,
   screenToWorld,
+  wheelZoomFactor,
   worldToScreen,
   zoomAtPoint,
   type Camera,
@@ -1009,7 +1010,10 @@ export class LeaferEditorController {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top,
     };
-    const factor = Math.pow(1.0015, -event.deltaY);
+    const factor = wheelZoomFactor(
+      event.deltaY,
+      event.ctrlKey || event.metaKey,
+    );
     this.emitCamera(
       zoomAtPoint(this.camera, this.size, screen, factor),
       "move",
