@@ -1,11 +1,13 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
+use base64::Engine;
 use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, AppConfig, RuntimeMode};
 use moka_canvas::domain::{
     derive_ports, AssetProvenance, DocumentCommand, MokaFile, NodeData, NodeKind, Rect,
     WorkflowNode, PACKAGE_MANIFEST_VERSION,
 };
+use moka_canvas::metadata::{crypto, docs};
 use moka_canvas::project::codec::decode_moka_file;
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{CreateProject, PackageScope, ProjectStore, StagedAsset};
@@ -1007,5 +1009,222 @@ async fn a_package_that_says_it_carried_the_runs_keeps_them_through_an_import() 
             .as_deref(),
         Some(MADE_BY_RUN),
         "and the document still points at it"
+    );
+}
+
+/// The credential a channel is configured with.
+const CHANNEL_KEY: &str = "sk-test-1234567890abcd";
+
+/// The address of the channel holding it.
+const CHANNEL_ADDRESS: &str = "https://provider.test/v1";
+
+/// Three runs this machine made, the first of them the one that made the
+/// fixture's placed asset.
+const RUNS: [&str; 3] = [
+    MADE_BY_RUN,
+    "0192b7d4-3333-7000-8000-000000000003",
+    "0192b7d4-4444-7000-8000-000000000004",
+];
+
+/// What no package of any kind carries.
+///
+/// A credential, the address of the channel it belongs to, or the name of the
+/// place this machine keeps them. The manifest is scanned for these too: it
+/// states the rules it applied, which are paths, and naming a rule is not the
+/// same as carrying the thing it kept out.
+const CREDENTIALS: [&str; 5] = ["sk-", "apiKey", "cipher", "metadata.dir", CHANNEL_ADDRESS];
+
+/// What a package of the work does not carry, and a full backup does.
+///
+/// The manifest is excepted, and only the manifest: it says outright which
+/// rules kept what out, so it names `history/runs/**` and `**/secrets.json`
+/// when it found them. That is the declaration a receiver is owed, and it says
+/// nothing about anybody.
+const PERSONAL: [&str; 4] = ["sessions", "runId", "secrets.json", "history/runs"];
+
+/// Every needle that turns up in the bytes of the given entries.
+fn found_in(entries: &[(String, Vec<u8>)], needles: &[&str]) -> Vec<String> {
+    let mut hits = Vec::new();
+    for (name, bytes) in entries {
+        for needle in needles {
+            if bytes
+                .windows(needle.len())
+                .any(|window| window == needle.as_bytes())
+            {
+                hits.push(format!("{name} carries {needle}"));
+            }
+        }
+    }
+    hits
+}
+
+/// The guarantee every rule above exists for, stated once against the bytes a
+/// receiver gets rather than against the fields they were written from.
+#[tokio::test]
+async fn export_never_contains_personal_or_secret_data() {
+    let temp = tempfile::tempdir().unwrap();
+
+    // Server mode refuses to invent a master key, and this test stores a
+    // credential in order to prove it never travels.
+    let metadata = temp.path().join("metadata");
+    std::fs::create_dir_all(&metadata).unwrap();
+    std::fs::write(
+        metadata.join(crypto::MASTER_KEY_FILE),
+        base64::engine::general_purpose::STANDARD.encode([7u8; 32]),
+    )
+    .unwrap();
+
+    let app = test_app(temp.path());
+
+    // A channel configured with a real credential, in the layer where
+    // credentials live. The exporter never walks there, which is the structural
+    // guarantee — but a guarantee nobody checks is only a claim.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "PUT",
+            "/api/v1/providers/channels",
+            json!({
+                "id": "main",
+                "name": "Main",
+                "baseUrl": CHANNEL_ADDRESS,
+                "protocol": "openai",
+                "enabled": true,
+                "apiKey": CHANNEL_KEY,
+                "models": [{ "id": "painter", "capability": "image", "alias": "", "enabled": true }],
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        metadata.join(docs::SECRETS_DOC).is_file(),
+        "the credential is sealed in the metadata layer"
+    );
+
+    let staged = stage_generated_project(temp.path()).await;
+    for run in RUNS {
+        write_run_record(&staged.root, run);
+    }
+
+    // Documents that belong to the application rather than to any project, put
+    // in the project tree anyway: a rule that only holds while nobody makes a
+    // mistake is not a rule.
+    for (name, body) in [
+        (
+            docs::SECRETS_DOC,
+            json!({ "channels": { "main": { "cipher": "sealed", "apiKey": CHANNEL_KEY } } }),
+        ),
+        (
+            docs::PROVIDERS_DOC,
+            json!({ "channels": [{ "id": "main", "baseUrl": CHANNEL_ADDRESS }] }),
+        ),
+        (
+            docs::META_DOC,
+            json!({ "metadata.dir": "/Users/somebody/Library/Application Support/moka" }),
+        ),
+        (docs::RECENT_DOC, json!({ "recent": [] })),
+        (docs::PROMPT_SOURCES_DOC, json!({ "sources": [] })),
+    ] {
+        let path = staged.root.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec_pretty(&body).unwrap()).unwrap();
+    }
+    std::fs::write(
+        staged.root.join(crypto::MASTER_KEY_FILE),
+        b"named like the key that seals credentials",
+    )
+    .unwrap();
+    std::fs::create_dir_all(staged.root.join("history/jobs")).unwrap();
+    std::fs::write(
+        staged
+            .root
+            .join("history/jobs/0192b7d4-5555-7000-8000-000000000005.json"),
+        b"{\"reference\":\"a handle only this machine could ask after\"}",
+    )
+    .unwrap();
+    std::fs::write(staged.root.join("tmp/half-written.moka"), b"scratch").unwrap();
+    std::fs::write(staged.root.join("canvas.corrupt.20260101.json"), b"{}").unwrap();
+    std::fs::write(staged.root.join(".DS_Store"), b"junk").unwrap();
+
+    let held = staged
+        .store
+        .current()
+        .await
+        .unwrap()
+        .expect("a project is open");
+    let mut expected: Vec<String> = held
+        .moka
+        .resources
+        .all()
+        .map(|entry| entry.path.clone())
+        .collect();
+    expected.push("canvas.moka".to_string());
+    expected.push("moka-package.json".to_string());
+    expected.sort();
+
+    let work = temp.path().join("work.mokapkg.zip");
+    staged
+        .store
+        .export_package(Some(&work), false, PackageScope::default())
+        .await
+        .unwrap();
+    let entries = read_zip_entries(&work);
+
+    // Naming every entry is a stronger claim than looking for the ones that
+    // must not be there: a log, a scratch file or a document this application
+    // owns cannot be carried by a package whose contents are listed in full.
+    let mut carried: Vec<String> = entries.iter().map(|(name, _)| name.clone()).collect();
+    carried.sort();
+    assert_eq!(
+        carried, expected,
+        "a package of the work carries the document, the assets and the manifest"
+    );
+
+    let hits = found_in(&entries, &CREDENTIALS);
+    assert!(hits.is_empty(), "no package carries a credential: {hits:?}");
+
+    let (manifest, payload): (Vec<_>, Vec<_>) = entries
+        .into_iter()
+        .partition(|(name, _)| name == "moka-package.json");
+    assert_eq!(manifest.len(), 1, "and it says so in one manifest");
+    let mut needles: Vec<&str> = PERSONAL.to_vec();
+    needles.extend(RUNS);
+    let hits = found_in(&payload, &needles);
+    assert!(
+        hits.is_empty(),
+        "a package of the work carries nothing about this machine: {hits:?}"
+    );
+
+    // A full backup is somebody's own choice to carry the record of what they
+    // did here. It is not a choice to carry a credential, and the two questions
+    // are answered separately.
+    expected.extend(RUNS.iter().map(|run| format!("history/runs/{run}.json")));
+    expected.sort();
+
+    let backup = temp.path().join("backup.mokapkg.zip");
+    staged
+        .store
+        .export_package(
+            Some(&backup),
+            false,
+            PackageScope {
+                personal_history: true,
+                ..PackageScope::default()
+            },
+        )
+        .await
+        .unwrap();
+    let entries = read_zip_entries(&backup);
+    let mut carried: Vec<String> = entries.iter().map(|(name, _)| name.clone()).collect();
+    carried.sort();
+    assert_eq!(
+        carried, expected,
+        "a full backup adds the records of the runs and nothing else"
+    );
+    let hits = found_in(&entries, &CREDENTIALS);
+    assert!(
+        hits.is_empty(),
+        "not even a backup carries a credential: {hits:?}"
     );
 }
