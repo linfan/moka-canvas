@@ -23,6 +23,32 @@ npm run test:e2e  # Playwright: critical path, provider settings, a
 4. Import small and large image/audio/video fixtures; preview each, then
    remove them safely (referencing nodes are flagged, never silently
    deleted).
+   - The resource column is the shelf. Give a file words and a note on its
+     row, mark it a keeper, and confirm the shelf narrows by a word, by
+     shelf, by origin, by keepers, and by every word chosen at once — a
+     second word narrows the list rather than emptying it — and that the
+     search reaches a file by its name, its words, its note, and its
+     summary. The automated equivalents are `npm test` (`SidePanel`,
+     `shelfFilter`).
+   - Save a text node's words as material from the inspector and from
+     the node's menu: a row appears on the shelf under `texts/` holding
+     exactly what the node holds, and filing the unchanged node again
+     says it is already there rather than writing a second file. Save an
+     image node the same way and confirm the entry it already had is
+     marked as one to hand, with the node's ask as its summary where it
+     had none, rather than a second copy appearing. The automated
+     equivalents are `cargo test --test api
+a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
+     (`media`).
+   - Take the shelf the other way with **From assets…** — from the
+     quick-add menu, from a node's reference bar, and from beside the
+     assistant's about line. The dialog says what the choice will come
+     to before anything is taken. Choose two files from the menu and
+     confirm two cards arrive where the menu was opened, all of them
+     selected, with one undo taking both back; choose two from a node's
+     reference bar and confirm they are added to that node — wired in
+     beside it in the wired-in mode, listed by it in the by-hand mode.
+     The automated equivalent is `npm test` (`AssetPickerModal`).
 5. Run a valid workflow and an invalid one (validation errors surface on
    the run card); cancel a running workflow; retry a failed one; reopen
    the project and confirm `history/runs/` records are intact.

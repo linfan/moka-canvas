@@ -110,6 +110,22 @@ export function NodeMenu() {
           })}
         </Fragment>
       ))}
+      <p className="menu-title">From the shelf</p>
+      <button
+        // A menu opened to finish a connection promises the node it makes will
+        // be wired in, and a file off the shelf is not offered as one.
+        disabled={menu.connectFrom !== null}
+        onClick={() => {
+          useEditorStore.getState().closeNodeMenu();
+          useEditorStore
+            .getState()
+            .openAssetPicker({ mode: "nodes", at: menu.world });
+        }}
+        role="menuitem"
+        type="button"
+      >
+        From assets…
+      </button>
     </div>
   );
 }

@@ -565,6 +565,18 @@ export function AssistantPanel() {
               ? "About nothing yet — choose a card, or name one with @."
               : `About ${summary}`}
           </p>
+          <button
+            className="assistant-from-assets"
+            onClick={() =>
+              useEditorStore
+                .getState()
+                .openAssetPicker({ mode: "nodes", at: null })
+            }
+            title="Put files from the shelf on the canvas, ready to ask about"
+            type="button"
+          >
+            From assets…
+          </button>
 
           <div
             aria-label="What to ask for"

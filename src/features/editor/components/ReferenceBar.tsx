@@ -18,6 +18,7 @@ import {
 } from "../canvas/mediaCards";
 import { mentionChoices } from "../canvas/mentions";
 import { ASSET_DRAG_MIME } from "../interactions/actions";
+import { useEditorStore } from "../stores/editorStore";
 
 /**
  * Where an ask takes what it is given from.
@@ -379,6 +380,20 @@ export function ReferenceBar({
           What the prompt points at with @ is what will be sent, in the order it
           is written.
         </p>
+      )}
+
+      {takes && (
+        <button
+          className="reference-add"
+          onClick={() =>
+            useEditorStore
+              .getState()
+              .openAssetPicker({ mode: "reference", nodeId: node.id })
+          }
+          type="button"
+        >
+          From assets…
+        </button>
       )}
 
       {spec.inputMode === "manual" && (

@@ -29,9 +29,8 @@ import { worldToClient } from "../canvas/canvasControl";
 import { buildIssueIndex, buildResourceIndex } from "../canvas/mediaCards";
 import { mentionChoices } from "../canvas/mentions";
 import {
-  addAssetBeside,
+  attachAssetsToNode,
   disconnectEdge,
-  feedInto,
   fitSelectionAction,
   moveInput,
   setNodeGeneration,
@@ -419,18 +418,8 @@ export function PromptPanel() {
    * from the wiring, the new node is wired in; where it takes it from a list
    * kept by hand, it is listed instead.
    */
-  const takeAsset = async (assetId: AssetId) => {
-    const made = await addAssetBeside(node.id, assetId);
-    if (!made) return;
-    if (spec.inputMode === "manual") {
-      commit({ referenceNodeIds: [...spec.referenceNodeIds, made] });
-      return;
-    }
-    if (!feedInto(made, node.id)) {
-      useEditorStore
-        .getState()
-        .announce("It is on the canvas, but this node has no input for it");
-    }
+  const takeAsset = (assetId: AssetId) => {
+    void attachAssetsToNode(node.id, [assetId]);
   };
 
   /**

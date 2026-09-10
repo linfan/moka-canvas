@@ -103,6 +103,18 @@ export interface PictureToolAsk {
   tool: BarEntry;
 }
 
+/**
+ * What the asset picker was opened for.
+ *
+ * A dialog that only picks files would not know what picking them means: the
+ * same shelf file becomes a node of its own, or something one node is given,
+ * and those are different actions. Where it is meant to become a node, the
+ * world point the ask was made at travels with it, so the nodes land where the
+ * reader was looking rather than at the middle of the view.
+ */
+export type AssetPickerState =
+  { mode: "nodes"; at: Point | null } | { mode: "reference"; nodeId: NodeId };
+
 interface EditorState {
   tool: EditorTool;
   /** Space/Ctrl-held temporary tool inversion. */
@@ -152,6 +164,8 @@ interface EditorState {
    * question at a time and two fields for it could both be answered at once.
    */
   pictureTool: PictureToolAsk | null;
+  /** The asset picker dialog, and what it was opened for. */
+  assetPicker: AssetPickerState | null;
   /** Screen-reader announcement fed to the editor's live region. */
   announcement: string;
 
@@ -196,6 +210,8 @@ interface EditorState {
   closePreview: () => void;
   openPictureTool: (ask: PictureToolAsk) => void;
   closePictureTool: () => void;
+  openAssetPicker: (ask: AssetPickerState) => void;
+  closeAssetPicker: () => void;
   announce: (message: string) => void;
 }
 
@@ -223,6 +239,7 @@ export const useEditorStore = create<EditorState>()((set) => ({
   assetDeletePrompt: null,
   previewAssetId: null,
   pictureTool: null,
+  assetPicker: null,
   announcement: "",
 
   setTool: (tool) => set({ tool }),
@@ -274,6 +291,8 @@ export const useEditorStore = create<EditorState>()((set) => ({
   closePreview: () => set({ previewAssetId: null }),
   openPictureTool: (ask) => set({ pictureTool: ask }),
   closePictureTool: () => set({ pictureTool: null }),
+  openAssetPicker: (ask) => set({ assetPicker: ask }),
+  closeAssetPicker: () => set({ assetPicker: null }),
   announce: (message) => set({ announcement: message }),
 }));
 

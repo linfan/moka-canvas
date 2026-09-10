@@ -781,17 +781,26 @@ export async function addAssetNode(assetId: AssetId, at?: Point) {
  * The selection is left where it was, which is the whole of the difference from
  * dropping the same asset on the canvas: this is how a node is given something
  * while its own panel is open, and a panel follows the selection.
+ *
+ * `step` walks a run of nodes down and to the right of the one before it, for
+ * when several are being laid out in one go: without it every one of them would
+ * land on the same spot and only the last would be reachable.
  */
 export async function addAssetBeside(
   targetNodeId: NodeId,
   assetId: AssetId,
+  step = 0,
 ): Promise<NodeId | null> {
   const canvas = activeCanvas();
   const target = canvas ? findNode(canvas, targetNodeId) : null;
   if (!canvas || !target) return null;
   const node = await makeAssetNode(assetId, {
-    x: target.bounds.x - BESIDE_GAP_PX - DEFAULT_NODE_WIDTH,
-    y: target.bounds.y,
+    x:
+      target.bounds.x -
+      BESIDE_GAP_PX -
+      DEFAULT_NODE_WIDTH +
+      step * CASCADE_DROP_OFFSET,
+    y: target.bounds.y + step * CASCADE_DROP_OFFSET,
   });
   if (!node) return null;
   if (
@@ -801,6 +810,74 @@ export async function addAssetBeside(
     return node.id;
   }
   return null;
+}
+
+/**
+ * Lays out a source node for each of the chosen assets in one undo step, and
+ * selects all of them, so what arrived together can be moved together.
+ *
+ * Several at once because that is what the picker asks: one choice of several
+ * files is one action, and undoing it should take all of them back rather than
+ * one per file that happened to be picked.
+ */
+export async function addAssetNodes(
+  assetIds: AssetId[],
+  at?: Point,
+): Promise<NodeId[]> {
+  const canvas = activeCanvas();
+  if (!canvas || assetIds.length === 0) return [];
+  const anchor = at ?? viewCenterWorld() ?? { x: 0, y: 0 };
+  const commands: DocumentCommand[] = [];
+  const made: NodeId[] = [];
+  for (const [index, assetId] of assetIds.entries()) {
+    const node = await makeAssetNode(assetId, {
+      x: anchor.x - NODE_DROP_OFFSET.x + index * CASCADE_DROP_OFFSET,
+      y: anchor.y - NODE_DROP_OFFSET.y + index * CASCADE_DROP_OFFSET,
+    });
+    if (!node) continue;
+    commands.push({ type: "addNode", canvasId: canvas.id, node });
+    made.push(node.id);
+  }
+  if (made.length === 0) return [];
+  if (!execute("Add asset nodes", commands)) return [];
+  useEditorStore.getState().setSelection({ nodeIds: made, edgeIds: [] });
+  announce(`Added ${made.length} ${made.length === 1 ? "node" : "nodes"}`);
+  return made;
+}
+
+/**
+ * Gives a node each of the chosen assets, each as a node of its own beside it.
+ *
+ * Where the node takes what it is given from the wiring, each new node is wired
+ * in; where it takes it from a list kept by hand, the list gains every one of
+ * them in a single step, in the order they were chosen.
+ */
+export async function attachAssetsToNode(
+  targetNodeId: NodeId,
+  assetIds: AssetId[],
+): Promise<void> {
+  const canvas = activeCanvas();
+  const target = canvas ? findNode(canvas, targetNodeId) : null;
+  if (!canvas || !target) return;
+  const made: NodeId[] = [];
+  for (const [index, assetId] of assetIds.entries()) {
+    const nodeId = await addAssetBeside(targetNodeId, assetId, index);
+    if (nodeId) made.push(nodeId);
+  }
+  if (made.length === 0) return;
+  const spec = (target.data as { generation?: GenerationSpec }).generation;
+  if (spec?.inputMode === "manual") {
+    setNodeGeneration(canvas.id, targetNodeId, {
+      ...spec,
+      referenceNodeIds: [...spec.referenceNodeIds, ...made],
+      updatedAt: nowIso(),
+    });
+    return;
+  }
+  const unwired = made.filter((nodeId) => !feedInto(nodeId, targetNodeId));
+  if (unwired.length > 0) {
+    announce("It is on the canvas, but this node has no input for it");
+  }
 }
 
 /**

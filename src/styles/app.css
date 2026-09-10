@@ -1277,6 +1277,78 @@ h2 {
   max-width: 100%;
 }
 
+.asset-pick-dialog {
+  max-width: min(560px, calc(100vw - 48px));
+}
+
+.asset-pick-filter {
+  display: grid;
+  gap: 6px;
+}
+
+.asset-pick-filter input,
+.asset-pick-filter select {
+  width: 100%;
+}
+
+.asset-pick-list {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  padding: 0;
+}
+
+.asset-pick-row {
+  align-items: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.asset-pick-row:hover {
+  background: var(--surface-raised);
+}
+
+.asset-pick-thumb {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  flex: none;
+  height: 26px;
+  object-fit: cover;
+  width: 26px;
+}
+
+.asset-pick-name {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-pick-where {
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+}
+
+.asset-pick-foot {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.asset-pick-foot .prompt-panel-note {
+  flex: 1;
+  margin: 0;
+}
+
 button.danger {
   border-color: var(--danger);
   color: var(--danger);
@@ -1931,6 +2003,13 @@ button.danger:hover:not(:disabled) {
   flex: none;
   font-size: 11px;
   margin: 0;
+}
+
+.assistant-from-assets {
+  align-self: flex-end;
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
 }
 
 /* Offered upward: the field sits at the foot of the column, and a list hanging

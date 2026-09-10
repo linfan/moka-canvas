@@ -33,6 +33,7 @@ import { InspectorPanel } from "./panels/InspectorPanel";
 import { NodeMenu } from "./panels/NodeMenu";
 import { SidePanel } from "./panels/SidePanel";
 import { AssetDeleteDialog } from "./components/AssetDeleteDialog";
+import { AssetPickerModal } from "./components/AssetPickerModal";
 import { AssetPreviewDialog } from "./components/AssetPreviewDialog";
 import {
   UnsavedWorkDialog,
@@ -397,6 +398,7 @@ export function EditorPage() {
       <ContextMenu />
       <NodeMenu />
       <AssetDeleteDialog />
+      <AssetPickerModal />
       <AssetPreviewDialog />
       <PictureToolDialog />
       <RepaintDialog />
