@@ -272,7 +272,16 @@ export const AUDIO_FORMATS = [
   "flac",
   "pcm",
 ] as const;
-export const REASONING_EFFORTS = ["auto", "low", "medium", "high"] as const;
+export const REASONING_EFFORTS = [
+  "auto",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 
 export const HISTORY_LIMIT = 50;
 
