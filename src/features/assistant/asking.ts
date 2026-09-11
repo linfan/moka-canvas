@@ -11,6 +11,14 @@ import type {
 } from "../../shared/domain";
 import { findNode, mentionSpans } from "../../shared/domain";
 import {
+  answerSystemPrompt,
+  askPrompt,
+  contextBlockPrompt,
+  historyLinePrompt,
+  historyPrompt,
+  rewriteSystemPrompt,
+} from "../../shared/prompts";
+import {
   GROUP_LABELS,
   GROUP_ORDER,
   type GroupKey,
@@ -113,6 +121,15 @@ export const HISTORY_CHOICES = [2, 4, 8] as const;
 
 export type HistoryChoice = (typeof HISTORY_CHOICES)[number];
 
+/**
+ * Who a line of a conversation is named for, in the block a question travels
+ * with.
+ *
+ * A role is called by its noun here rather than in the template because the same
+ * three roles are named the same way everywhere else in the panel, and a template
+ * that owned the mapping would be the one place a role was called something of
+ * its own. The sentence around them is the template's.
+ */
 const HISTORY_WORDS: Record<AssistantRole, string> = {
   user: "You",
   assistant: "Assistant",
@@ -137,13 +154,13 @@ export function earlierWords(
     const line = lines[at];
     const words = line.text.trim();
     if (words === "") continue;
-    const entry = `${HISTORY_WORDS[line.role]}: ${words}`;
+    const entry = historyLinePrompt(HISTORY_WORDS[line.role], words);
     if (entry.length > room) break;
     room -= entry.length;
     said.unshift(entry);
   }
   if (said.length === 0) return "";
-  return `Earlier in this conversation:\n${said.join("\n")}`;
+  return historyPrompt(said);
 }
 
 /**
@@ -294,11 +311,26 @@ export type AssistantCardAsk = AskAbout & {
  */
 export type AssistantAsk = AssistantWordsAsk | AssistantCardAsk;
 
-const ANSWER_SYSTEM =
-  "Answer from the cards given to you. Where they do not say, say that rather than filling the gap.";
+/**
+ * What an ask is told about the cards it was given, and what a rewrite is told,
+ * which is narrower on purpose.
+ *
+ * The words live in `shared/prompts/assistant/`, read once here rather than at
+ * every question: a prompt is the same for every ask of a kind, and parsing a
+ * template per turn would be work nobody asked for.
+ */
+const ANSWER_SYSTEM = answerSystemPrompt();
 
-const REWRITE_SYSTEM =
-  "Send the text given to you back written again as the reader asked. Return only that text, with no heading and nothing said about it.";
+const REWRITE_SYSTEM = rewriteSystemPrompt();
+
+/**
+ * What separates one quoted card from the next.
+ *
+ * Blank space rather than words, so it stays beside the code that measures what
+ * fits: the framing a card is quoted in is the template's, and what holds two
+ * quoted cards apart is this.
+ */
+const CARD_SEPARATOR = "\n\n";
 
 export function askOf(
   intent: "answer" | "rewrite",
@@ -342,7 +374,7 @@ export function askOf(
       const content = (held.content ?? "").trim();
       if (content === "") continue;
       if (kind === null) {
-        const block = `[${node.title}]\n${content}`;
+        const block = contextBlockPrompt(node.title, content);
         if (block.length > room) {
           leftOut += 1;
           continue;
@@ -372,7 +404,7 @@ export function askOf(
     });
   }
 
-  const context = blocks.join("\n\n");
+  const context = blocks.join(CARD_SEPARATOR);
   const about = { asked: words, references, leftOut };
   return kind === null
     ? {
@@ -380,9 +412,7 @@ export function askOf(
         request: {
           capability: "text",
           system: intent === "rewrite" ? REWRITE_SYSTEM : ANSWER_SYSTEM,
-          prompt: [context, earlier, words]
-            .filter((part) => part !== "")
-            .join("\n\n---\n\n"),
+          prompt: askPrompt([context, earlier, words]),
           inputs,
         },
         ...about,

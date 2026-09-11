@@ -6,6 +6,7 @@ pub mod generate;
 pub mod imaging;
 pub mod metadata;
 pub mod project;
+pub mod prompts;
 pub mod server;
 pub mod telemetry;
 pub mod workflow;

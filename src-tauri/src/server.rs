@@ -27,6 +27,12 @@ pub struct LocalServer {
 
 impl LocalServer {
     pub async fn start(config: AppConfig, mode: RuntimeMode, metadata_root: &Path) -> Result<Self> {
+        // The prompts are embedded in this binary, so one that does not compile
+        // is a fault in the build rather than in anything a reader can fix later,
+        // and it is refused here rather than at the first request that reaches
+        // it. Both runtimes start through this function, which is why the check
+        // lives here rather than beside either of them.
+        crate::prompts::verify().context("the embedded prompt templates do not compile")?;
         let address: SocketAddr = config
             .server
             .bind

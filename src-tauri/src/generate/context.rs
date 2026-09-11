@@ -329,6 +329,11 @@ fn cut_at(text: &str, limit: usize) -> &str {
 
 /// Numbers the contributions, one run per kind, so a prompt full of images
 /// does not call them all `[Image 1]`.
+///
+/// The brackets and the numbering are markup rather than words, and the noun
+/// inside them comes from [`label_word`], which is the same name the canvas gives
+/// a kind of node everywhere else: a resolver that asked a template for it would
+/// be the one place a node's kind was called something of its own.
 fn label(contributions: &mut [Contribution]) {
     let mut seen: HashMap<&str, usize> = HashMap::new();
     for contribution in contributions.iter_mut() {

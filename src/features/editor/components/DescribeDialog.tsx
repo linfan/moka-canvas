@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { assetUrl, generateApi } from "../../../api";
 import { CAPABILITY_LABELS } from "../../../shared/domain";
 import {
+  describeDefaultPrompt,
+  describeFramingPrompt,
+} from "../../../shared/prompts";
+import {
   splitModelReference,
   useProviderStore,
 } from "../../settings/providerStore";
@@ -15,9 +19,12 @@ import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 import { TOOL_LABELS } from "../stores/toolPrefs";
 
-/** What is asked before anybody has said otherwise. */
-const START_QUESTION =
-  "Describe this picture as the prompt that would make it.";
+/**
+ * What is asked before anybody has said otherwise.
+ *
+ * The words live in `shared/prompts/editor/describe-default.tmpl`.
+ */
+const START_QUESTION = describeDefaultPrompt();
 
 /**
  * How the answer is framed.
@@ -26,10 +33,10 @@ const START_QUESTION =
  * says how to be answered in general: this ask wants one particular thing, words
  * a picture could be made from and nothing around them. A description that
  * arrives wrapped in an announcement of itself has to be unwrapped by hand before
- * it is any use as a prompt.
+ * it is any use as a prompt. The words live in
+ * `shared/prompts/editor/describe-framing.tmpl`.
  */
-const FRAMING =
-  "Answer with a description of the picture alone: what is in it, what is happening, where, in what light, and how it looks. Write it as the words that would be given to make this picture. No preamble, no list, no mention of this request.";
+const FRAMING = describeFramingPrompt();
 
 /**
  * Asks a model to read a picture back as the words that would make it.

@@ -16,6 +16,7 @@
 use crate::assets::new_tmp_path;
 use crate::domain::{now_iso, AssetId, AssetProvenance, ResourceEntry};
 use crate::project::{ProjectError, ProjectStore, StagedAsset};
+use crate::prompts::{render, Prompt, PromptError};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage, Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
@@ -705,7 +706,7 @@ fn tilt(picture: &DynamicImage, ask: TiltAsk) -> Result<Answer, ProjectError> {
             pixels: plate,
             suffix,
         }],
-        prompt: Some(describe_tilt(yaw, pitch)),
+        prompt: Some(describe_tilt(yaw, pitch)?),
         // See-through corners have nowhere to go in a JPEG.
         lossy: false,
     })
@@ -855,20 +856,44 @@ fn sample(source: &RgbaImage, x: f64, y: f64) -> Option<Rgba<u8>> {
 }
 
 /// What the plate says about itself, in the words a model is asked with.
-fn describe_tilt(yaw: f64, pitch: f64) -> String {
-    let mut parts = Vec::new();
+///
+/// The words themselves live under `prompts/imaging/`; what is here is the choice
+/// of which angles were asked for and which way round each one goes. An angle of
+/// zero is left out rather than said as nothing, because a name carrying a zero
+/// reads as though it meant something.
+fn describe_tilt(yaw: f64, pitch: f64) -> Result<String, ProjectError> {
+    let mut angles = Vec::new();
     if yaw != 0.0 {
         let side = if yaw > 0.0 { "right" } else { "left" };
-        parts.push(format!("turned {}° to the {}", rounded(yaw.abs()), side));
+        angles.push(phrase(
+            Prompt::TiltTurn,
+            &serde_json::json!({
+                "degrees": rounded(yaw.abs()),
+                "side": side,
+            }),
+        )?);
     }
     if pitch != 0.0 {
         let way = if pitch > 0.0 { "back" } else { "forward" };
-        parts.push(format!("tipped {}° {}", rounded(pitch.abs()), way));
+        angles.push(phrase(
+            Prompt::TiltTip,
+            &serde_json::json!({
+                "degrees": rounded(pitch.abs()),
+                "way": way,
+            }),
+        )?);
     }
-    format!(
-        "The same subject as the reference, {}, seen from a different angle. Keep what it is and how it is lit; change only where the viewer stands.",
-        parts.join(" and ")
-    )
+    phrase(Prompt::Tilt, &serde_json::json!({ "angles": angles }))
+}
+
+/// One template's words, reported as the fault in the build that it is.
+///
+/// The templates are compiled when the server starts, so a failure here is not
+/// something a reader did to their picture and is not reported as though it
+/// were.
+fn phrase(prompt: Prompt, context: &serde_json::Value) -> Result<String, ProjectError> {
+    render(prompt, context)
+        .map_err(|error: PromptError| ProjectError::domain("INTERNAL", error.to_string()))
 }
 
 fn rounded(degrees: f64) -> i64 {
