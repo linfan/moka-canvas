@@ -6,6 +6,7 @@
 //! status a failure arrives with, the frames a stream is made of, and the body
 //! limit that keeps a prompt from being mistaken for an upload.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -83,6 +84,7 @@ async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capabili
                 })
                 .collect(),
             expected_revision: None,
+            capability_base_urls: HashMap::new(),
         })
         .await
         .expect("the channel is stored");

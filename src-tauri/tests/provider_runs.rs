@@ -21,7 +21,7 @@
 //! puts the answer beside it rather than over it, and that an upstream answer
 //! already on the canvas is read rather than asked for again.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -137,6 +137,7 @@ impl Harness {
                     })
                     .collect(),
                 expected_revision: None,
+                capability_base_urls: HashMap::new(),
             })
             .await
             .expect("the channel is stored");

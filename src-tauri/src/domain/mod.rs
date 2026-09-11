@@ -297,7 +297,7 @@ pub enum DataType {
 
 /// The generation modality a provider model serves. Narrower than
 /// [`DataType`], which also covers port payloads that are never generated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Capability {
     #[default]

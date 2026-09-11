@@ -68,6 +68,9 @@ export function AddProviderWizard({ onClose }: { onClose: () => void }) {
   const [defaults, setDefaults] = useState<Partial<Record<Capability, string>>>(
     {},
   );
+  const [capabilityBaseUrls, setCapabilityBaseUrls] = useState<
+    Record<string, string>
+  >({});
   const [added, setAdded] = useState<string | null>(null);
 
   const chosen = models.filter((model) => model.id.trim() !== "");
@@ -183,6 +186,11 @@ export function AddProviderWizard({ onClose }: { onClose: () => void }) {
         alias: model.alias.trim(),
         enabled: model.enabled,
       })),
+      capabilityBaseUrls: Object.fromEntries(
+        Object.entries(capabilityBaseUrls).filter(
+          ([, url]) => url.trim() !== "",
+        ),
+      ),
       apiKey: apiKey.trim() || null,
     } satisfies ChannelDraft);
     if (!saved) return;
@@ -391,6 +399,45 @@ export function AddProviderWizard({ onClose }: { onClose: () => void }) {
               {refused ??
                 "The provider listed no models, so they have to be typed in."}
             </p>
+          )}
+
+          {chosen.length > 0 && (
+            <section
+              aria-label="Capability-specific addresses"
+              className="settings-section"
+            >
+              <h3 className="settings-heading">Capability addresses</h3>
+              <p className="settings-hint">
+                A different base URL for each capability when the provider
+                serves them at separate addresses. Leave empty to use the
+                channel address.
+              </p>
+              <div className="settings-columns">
+                {MODEL_CAPABILITIES.map((capability) => {
+                  const serving = chosen.filter(
+                    (model) => model.capability === capability,
+                  );
+                  if (serving.length === 0) return null;
+                  return (
+                    <label className="dialog-field" key={capability}>
+                      <span>{CAPABILITY_LABELS[capability]}</span>
+                      <input
+                        aria-label={`${CAPABILITY_LABELS[capability]} base URL override`}
+                        onChange={(event) =>
+                          setCapabilityBaseUrls((state) => ({
+                            ...state,
+                            [capability]: event.target.value,
+                          }))
+                        }
+                        placeholder={inspection?.baseUrl ?? ""}
+                        type="url"
+                        value={capabilityBaseUrls[capability] ?? ""}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
           )}
 
           <div className="dialog-actions">

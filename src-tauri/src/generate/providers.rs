@@ -7,6 +7,7 @@
 //! default that points at a model which exists and may serve the capability
 //! asked of it.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -105,6 +106,8 @@ pub struct ChannelView {
     pub enabled: bool,
     pub models: Vec<ChannelModel>,
     pub api_key: ApiKeyView,
+    #[serde(default)]
+    pub capability_base_urls: HashMap<Capability, String>,
 }
 
 /// The whole configuration, with `revision` for optimistic concurrency: a
@@ -271,6 +274,7 @@ impl ProviderRepo {
                 enabled: channel.enabled,
                 models: channel.models,
                 api_key: ApiKeyView::disclosed(secret),
+                capability_base_urls: channel.capability_base_urls,
             });
         }
         Ok(ProvidersView {
@@ -314,6 +318,9 @@ impl ProviderRepo {
         for model in &draft.models {
             validate_identifier("model", &model.id)?;
         }
+        for url in draft.capability_base_urls.values_mut() {
+            *url = normalize_base_url(url)?;
+        }
         Ok(self.metadata.upsert_channel(&draft).await?)
     }
 
@@ -341,6 +348,7 @@ impl ProviderRepo {
             enabled: true,
             models: Vec::new(),
             expected_revision: import.expected_revision,
+            capability_base_urls: HashMap::new(),
         };
         let record = self.upsert_channel(draft).await?;
         // Stored after the channel exists, so a credential is never left
@@ -613,6 +621,7 @@ impl ProviderRepo {
             enabled: true,
             models: Vec::new(),
             expected_revision: Some(snapshot.revision),
+            capability_base_urls: HashMap::new(),
         };
         self.metadata.upsert_channel(&draft).await?;
         Ok(true)
@@ -936,7 +945,11 @@ fn resolve_in(
         model_id: model.id.clone(),
         capability,
         protocol: channel.protocol,
-        base_url: channel.base_url.clone(),
+        base_url: channel
+            .capability_base_urls
+            .get(&capability)
+            .cloned()
+            .unwrap_or(channel.base_url.clone()),
     })
 }
 
@@ -962,6 +975,7 @@ mod tests {
             protocol: Protocol::Openai,
             enabled: true,
             models,
+            capability_base_urls: HashMap::new(),
         }
     }
 
@@ -1054,6 +1068,21 @@ mod tests {
         snapshot.channels[0].models[1].enabled = false;
         let error = resolve_in(&snapshot, "main::painter", Capability::Image).unwrap_err();
         assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
+    }
+
+    #[test]
+    fn a_capability_specific_base_url_override_is_used_when_set() {
+        let mut snapshot = configured();
+        snapshot.channels[0].capability_base_urls =
+            HashMap::from([(Capability::Image, "https://images.test/v1".to_string())]);
+        let resolved = resolve_in(&snapshot, "main::painter", Capability::Image).unwrap();
+        assert_eq!(
+            resolved.base_url, "https://images.test/v1",
+            "the image capability override replaces the channel base URL"
+        );
+        // Text is unaffected
+        let resolved = resolve_in(&snapshot, "main::writer", Capability::Text).unwrap();
+        assert_eq!(resolved.base_url, "https://provider.test/v1");
     }
 
     #[test]

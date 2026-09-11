@@ -5,6 +5,7 @@
 //! Behaviour that any backend must provide lives in the contract suite, which
 //! this file runs as-is against the file implementation.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -46,6 +47,7 @@ fn draft(id: &str) -> ChannelDraft {
         enabled: true,
         models: Vec::new(),
         expected_revision: None,
+        capability_base_urls: HashMap::new(),
     }
 }
 

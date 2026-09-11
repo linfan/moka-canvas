@@ -3,6 +3,7 @@
 //! These are the shapes callers see. On-disk documents wrap them in envelopes
 //! that carry a revision counter; the envelopes never leave the backend.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -84,6 +85,11 @@ pub struct Channel {
     pub enabled: bool,
     #[serde(default)]
     pub models: Vec<ChannelModel>,
+    /// An override for each capability that needs a different address than the
+    /// channel's own. Text and image from the same provider often land at
+    /// different base URLs; this field lets one channel carry both.
+    #[serde(default)]
+    pub capability_base_urls: HashMap<Capability, String>,
 }
 
 /// Caller-supplied channel contents for an upsert, with the optional revision
@@ -102,6 +108,10 @@ pub struct ChannelDraft {
     pub models: Vec<ChannelModel>,
     #[serde(default)]
     pub expected_revision: Option<u64>,
+    /// Per-capability base URL overrides. Keys match the model capabilities
+    /// declared in `models`; an absent key means "use the channel's base URL".
+    #[serde(default)]
+    pub capability_base_urls: HashMap<Capability, String>,
 }
 
 /// The stored form of a channel, as returned after a write.
@@ -393,6 +403,7 @@ mod tests {
             protocol: Protocol::Openai,
             enabled: true,
             models: Vec::new(),
+            capability_base_urls: HashMap::new(),
         };
         let json = serde_json::to_string(&channel).unwrap();
         assert!(!json.contains("apiKey"), "{json}");

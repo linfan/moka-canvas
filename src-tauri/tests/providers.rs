@@ -5,6 +5,7 @@
 //! URL building — are covered next to the code they belong to, and the wire
 //! protocols are covered against a provider standing on localhost.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -55,6 +56,7 @@ fn draft(id: &str, models: Vec<ChannelModel>) -> ChannelDraft {
         enabled: true,
         models,
         expected_revision: None,
+        capability_base_urls: HashMap::new(),
     }
 }
 

@@ -363,6 +363,7 @@ impl MetadataStore for FileMetadataStore {
             protocol: draft.protocol,
             enabled: draft.enabled,
             models: draft.models.clone(),
+            capability_base_urls: draft.capability_base_urls.clone(),
         };
         let replacement = record.clone();
         let document = self

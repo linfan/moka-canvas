@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ChannelModel, ChannelView } from "../../api";
 import {
+  CAPABILITY_LABELS,
   MAX_CHANNEL_ID_LENGTH,
   MAX_CHANNEL_NAME_LENGTH,
+  MODEL_CAPABILITIES,
   PROVIDER_PROTOCOLS,
   type Capability,
   type ProviderProtocol,
@@ -23,6 +25,7 @@ interface Form {
   enabled: boolean;
   apiKey: string;
   models: ModelRow[];
+  capabilityBaseUrls: Record<string, string>;
 }
 
 function initialForm(channel: ChannelView | null): Form {
@@ -35,6 +38,7 @@ function initialForm(channel: ChannelView | null): Form {
       enabled: true,
       apiKey: "",
       models: [],
+      capabilityBaseUrls: {},
     };
   }
   return {
@@ -47,6 +51,7 @@ function initialForm(channel: ChannelView | null): Form {
     // empty and an edit that leaves it empty keeps whatever is stored.
     apiKey: "",
     models: channel.models.map(toRow),
+    capabilityBaseUrls: channel.capabilityBaseUrls ?? {},
   };
 }
 
@@ -142,6 +147,11 @@ export function ChannelEditor({ channel, onDone }: Props) {
         alias: model.alias.trim(),
         enabled: model.enabled,
       })),
+      capabilityBaseUrls: Object.fromEntries(
+        Object.entries(form.capabilityBaseUrls).filter(
+          ([, url]) => url.trim() !== "",
+        ),
+      ),
       apiKey: form.apiKey.trim() || null,
     });
     if (saved) onDone();
@@ -301,6 +311,44 @@ export function ChannelEditor({ channel, onDone }: Props) {
           />
         )}
       </section>
+
+      {form.models.length > 0 && (
+        <section aria-label="Capability-specific addresses" className="settings-section">
+          <h3 className="settings-heading">Capability addresses</h3>
+          <p className="settings-hint">
+            A different base URL for each capability when the provider serves
+            them at separate addresses. Leave empty to use the channel address.
+          </p>
+          <div className="settings-columns">
+            {MODEL_CAPABILITIES.map((capability) => {
+              const serving = form.models.filter(
+                (model) => model.enabled && model.capability === capability,
+              );
+              if (serving.length === 0) return null;
+              return (
+                <label className="dialog-field" key={capability}>
+                  <span>{CAPABILITY_LABELS[capability]}</span>
+                  <input
+                    aria-label={`${CAPABILITY_LABELS[capability]} base URL override`}
+                    onChange={(event) =>
+                      setForm((state) => ({
+                        ...state,
+                        capabilityBaseUrls: {
+                          ...state.capabilityBaseUrls,
+                          [capability]: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder={form.baseUrl}
+                    type="url"
+                    value={form.capabilityBaseUrls[capability] ?? ""}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <div className="dialog-actions">
         <button disabled={saving} onClick={onDone} type="button">

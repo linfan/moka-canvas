@@ -7,6 +7,7 @@
 //! that a job handle really comes back, and that nothing is sent when the
 //! configuration cannot place the call.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -98,6 +99,20 @@ impl Rig {
         protocol: Protocol,
         models: Vec<ChannelModel>,
     ) {
+        self.channel_serving(id, base_url, protocol, models, HashMap::new())
+            .await;
+    }
+
+    /// Adds a channel whose kinds are served at separate addresses, the way
+    /// Settings would for a provider that publishes more than one base URL.
+    async fn channel_serving(
+        &self,
+        id: &str,
+        base_url: &str,
+        protocol: Protocol,
+        models: Vec<ChannelModel>,
+        capability_base_urls: HashMap<Capability, String>,
+    ) {
         self.providers
             .upsert_channel(ChannelDraft {
                 id: id.into(),
@@ -107,6 +122,7 @@ impl Rig {
                 enabled: true,
                 models,
                 expected_revision: None,
+                capability_base_urls,
             })
             .await
             .expect("the channel is stored");
@@ -380,6 +396,86 @@ async fn a_parameter_the_caller_set_reaches_the_provider_over_the_global_one() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_capability_is_asked_at_the_address_that_serves_it() {
+    let text_watched = Watch::default();
+    let text_answering = text_watched.clone();
+    let text_url = serve(Router::new().route(
+        "/v1/responses",
+        post(move |body: Bytes| {
+            let watched = text_answering.clone();
+            async move {
+                watched.note(Some(body));
+                answer("A lantern, lit.")
+            }
+        }),
+    ))
+    .await;
+
+    let image_watched = Watch::default();
+    let image_answering = image_watched.clone();
+    let image_url = serve(Router::new().route(
+        "/v1/images/generations",
+        post(move |body: Bytes| {
+            let watched = image_answering.clone();
+            async move {
+                watched.note(Some(body));
+                Json(json!({ "data": [{ "b64_json": base64(&encoded(3, 2)) }] }))
+            }
+        }),
+    ))
+    .await;
+
+    let rig = rig().await;
+    rig.channel_serving(
+        "a-channel",
+        &text_url,
+        Protocol::Openai,
+        vec![
+            model("gpt-5.5", Capability::Text),
+            model("gpt-image-2", Capability::Image),
+        ],
+        HashMap::from([(Capability::Image, image_url.clone())]),
+    )
+    .await;
+
+    let mut generation = request(Capability::Image, "a cat", json!({}));
+    generation.model = "a-channel::gpt-image-2".into();
+    let picture = rig
+        .gateway
+        .image(generation, &Cancel::new())
+        .await
+        .expect("the image request is placed where images live");
+
+    assert_eq!(picture.items.len(), 1);
+    assert_eq!(
+        image_watched.times(),
+        1,
+        "the image model was asked at the address its kind declared"
+    );
+    assert_eq!(
+        text_watched.times(),
+        0,
+        "the channel's own address never saw the image call"
+    );
+
+    let mut generation = request(Capability::Text, "describe a lantern", json!({}));
+    generation.model = "a-channel::gpt-5.5".into();
+    let words = rig
+        .gateway
+        .text(generation, &DeltaSink::default(), &Cancel::new())
+        .await
+        .expect("the text request stays on the channel's own address");
+
+    assert_eq!(words.text.as_deref(), Some("A lantern, lit."));
+    assert_eq!(text_watched.times(), 1);
+    assert_eq!(
+        image_watched.times(),
+        1,
+        "and the text model did not reach for the image address"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_reference_is_read_out_of_the_project_and_sent_along() {
     let watched = Watch::default();
     let answering = watched.clone();
@@ -646,6 +742,7 @@ async fn a_channel_with_no_stored_key_is_reported_before_anything_is_sent() {
             enabled: true,
             models: vec![model("gpt-5.5", Capability::Text)],
             expected_revision: None,
+            capability_base_urls: HashMap::new(),
         })
         .await
         .expect("the channel is stored");

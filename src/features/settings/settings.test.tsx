@@ -96,6 +96,7 @@ function upsert(draft: ChannelDraft) {
     protocol: draft.protocol,
     enabled: draft.enabled,
     models: draft.models,
+    capabilityBaseUrls: draft.capabilityBaseUrls ?? {},
     apiKey: key,
   };
   view = {
@@ -351,6 +352,27 @@ describe("provider settings", () => {
     // than quietly dropping the part of it the form does not show.
     expect((write.body as ChannelDraft).models).toHaveLength(storedModels);
     expect(storedKeyLine()).toBeTruthy();
+  });
+
+  it("sends an image call to the address the form gives that capability", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+    fireEvent.change(await screen.findByLabelText("Image base URL override"), {
+      target: { value: "https://images.example.com/v1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+
+    await waitFor(() =>
+      expect(writesTo("/api/v1/providers/channels")).toHaveLength(1),
+    );
+    const [write] = writesTo("/api/v1/providers/channels");
+    // Only the capability that was filled in gets an override; the others
+    // keep falling back to the channel address.
+    expect(write.body).toMatchObject({
+      baseUrl: "https://api.example.com/v1",
+      capabilityBaseUrls: { image: "https://images.example.com/v1" },
+    });
   });
 
   it("creates a channel from the form", async () => {

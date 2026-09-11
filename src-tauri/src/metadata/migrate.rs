@@ -167,6 +167,7 @@ impl LegacyProviders {
                     protocol: channel.protocol.unwrap_or_default(),
                     enabled: channel.enabled.unwrap_or(true),
                     models: channel.models,
+                    capability_base_urls: std::collections::HashMap::new(),
                 })
                 .collect(),
             defaults: self.defaults.unwrap_or_default(),

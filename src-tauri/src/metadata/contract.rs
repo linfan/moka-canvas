@@ -9,6 +9,7 @@
 //! directory lock, quarantine of a damaged document — live in
 //! `tests/metadata_file.rs` instead.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::types::{
@@ -168,6 +169,7 @@ fn draft(id: &str, models: Vec<ChannelModel>) -> ChannelDraft {
         enabled: true,
         models,
         expected_revision: None,
+        capability_base_urls: HashMap::new(),
     }
 }
 

@@ -25,6 +25,8 @@ export interface ChannelView {
   enabled: boolean;
   models: ChannelModel[];
   apiKey: ApiKeyView;
+  /** Empty when the channel serves every kind at its own address. */
+  capabilityBaseUrls?: Record<string, string>;
 }
 
 /** Default model per capability, addressed as `channelId::modelId`. */
@@ -127,6 +129,8 @@ export interface ChannelDraft {
    * separate call, so an unrelated edit cannot cost a working key.
    */
   apiKey?: string | null;
+  /** Per-capability base URL overrides, keyed by capability name. */
+  capabilityBaseUrls?: Record<string, string>;
 }
 
 export interface DefaultsPatch {
