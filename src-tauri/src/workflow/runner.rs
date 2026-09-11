@@ -227,12 +227,35 @@ fn was_empty(node: &WorkflowNode) -> bool {
             .is_empty()
 }
 
+/// Whether a node is asked to make something, as opposed to read for what it
+/// already holds.
+///
+/// A node the run was told to run is asked whatever is on it: asking again is
+/// how a canvas gets a second answer to choose from. A node pulled in because
+/// something below it reads it is asked only while it has nothing to hand
+/// down. An upstream generation that already holds an answer is read instead,
+/// because asking again would pay a provider for a copy of words or a picture
+/// that are already on the node — placed beside it as though somebody had
+/// asked for two.
+fn is_asked(node: &WorkflowNode, requested: bool) -> bool {
+    requested || was_empty(node)
+}
+
 /// What one succeeded step writes back, or `None` for a step that made nothing
 /// to keep.
-fn promotion_for(node: &WorkflowNode, artifacts: &StepArtifacts) -> Option<Promotion> {
+fn promotion_for(
+    node: &WorkflowNode,
+    artifacts: &StepArtifacts,
+    requested: bool,
+) -> Option<Promotion> {
     // Only a node an executor ran made anything. What a written text node or a
-    // bound image already carries is its own, and a run did not add to it.
+    // bound image already carries is its own, and a run did not add to it; and
+    // a node the run read rather than ran has nothing new on it either — the
+    // same question that decided its step decides this.
     executor_key_for(node)?;
+    if !is_asked(node, requested) {
+        return None;
+    }
     // Read off the node as the run saw it rather than as it stands when the
     // answer lands: what somebody put there while it ran is theirs to keep, and
     // a generation waited out is a long time to have changed one's mind.
@@ -829,7 +852,8 @@ impl RunManager {
             match outcome {
                 Ok((value, artifacts)) => {
                     // Decided before the artifacts are moved into the record.
-                    let promotion = promotion_for(&snapshot.nodes[node_id], &artifacts);
+                    let requested = run.requested_node_ids.iter().any(|id| id == node_id);
+                    let promotion = promotion_for(&snapshot.nodes[node_id], &artifacts, requested);
                     let step = &mut run.steps[position];
                     step.status = RunStatus::Succeeded;
                     step.output_text = artifacts.text;
@@ -928,7 +952,9 @@ impl RunManager {
     ///
     /// A node with nothing an executor could do passes the value it already had
     /// downstream, which is how written words or a bound image reach the step
-    /// after them. Everything else is handed to the executor it names.
+    /// after them. An upstream generation the run was not asked for passes its
+    /// own answer down the same way once it has one. Everything else is handed
+    /// to the executor it names.
     fn plan_step(
         &self,
         run: &RunRecord,
@@ -937,7 +963,13 @@ impl RunManager {
         outputs: &HashMap<NodeId, WorkflowValue>,
     ) -> Result<StepPlan, ExecutionError> {
         let node = &snapshot.nodes[node_id];
-        let Some(executor_key) = executor_key_for(node) else {
+        let requested = run.requested_node_ids.iter().any(|id| id == node_id);
+        // Read rather than asked: a node the run was not told to run that
+        // already holds an answer hands it down instead of paying a provider
+        // for a copy of it. The same question decides what is written back,
+        // so the two cannot come apart.
+        let executor_key = executor_key_for(node).filter(|_| is_asked(node, requested));
+        let Some(executor_key) = executor_key else {
             let value = snapshot.source_value(&node.id);
             let artifacts = match &value {
                 Some(WorkflowValue::Text { text, .. }) => StepArtifacts {
@@ -1465,7 +1497,11 @@ mod tests {
             task: None,
         };
         for node in &nodes {
-            assert!(promotion_for(node, &artifacts).is_none(), "{}", node.title);
+            assert!(
+                promotion_for(node, &artifacts, true).is_none(),
+                "{}",
+                node.title
+            );
         }
     }
 
@@ -1477,7 +1513,7 @@ mod tests {
             assets: None,
             task: None,
         };
-        assert!(promotion_for(&poster, &artifacts).is_none());
+        assert!(promotion_for(&poster, &artifacts, true).is_none());
     }
 
     #[test]
@@ -1490,13 +1526,18 @@ mod tests {
         // A node made and never written in holds an empty string rather than
         // nothing, and is still a node with nothing to lose.
         assert_eq!(
-            placement_of(promotion_for(&asking(NodeKind::Text, "script"), &artifacts)),
+            placement_of(promotion_for(
+                &asking(NodeKind::Text, "script"),
+                &artifacts,
+                true
+            )),
             Placement::Own
         );
         assert_eq!(
             placement_of(promotion_for(
                 &asking(NodeKind::Image, "poster"),
-                &artifacts
+                &artifacts,
+                true
             )),
             Placement::Own
         );
@@ -1504,14 +1545,14 @@ mod tests {
         let mut written_in = asking(NodeKind::Text, "script");
         written_in.data.content = Some("Written by hand.".to_string());
         assert_eq!(
-            placement_of(promotion_for(&written_in, &artifacts)),
+            placement_of(promotion_for(&written_in, &artifacts, true)),
             Placement::Beside
         );
 
         let mut showing = asking(NodeKind::Image, "poster");
         showing.data.asset_id = Some("asset-kept".to_string());
         assert_eq!(
-            placement_of(promotion_for(&showing, &artifacts)),
+            placement_of(promotion_for(&showing, &artifacts, true)),
             Placement::Beside
         );
 
@@ -1520,9 +1561,36 @@ mod tests {
         let mut answered = asking(NodeKind::Text, "script");
         answered.data.content = Some("   ".to_string());
         assert_eq!(
-            placement_of(promotion_for(&answered, &artifacts)),
+            placement_of(promotion_for(&answered, &artifacts, true)),
             Placement::Own,
             "a node saying nothing but spaces still says nothing"
+        );
+    }
+
+    #[test]
+    fn an_upstream_node_the_run_was_not_asked_for_keeps_the_answer_it_has() {
+        let artifacts = StepArtifacts {
+            text: Some("A fresh answer.".to_string()),
+            assets: Some(vec!["asset-1".to_string()]),
+            task: None,
+        };
+        // Dragged in because something below reads it, and already holding an
+        // answer: the run passes that answer down, and there is nothing to
+        // write back — a second copy beside the node is the surprise this
+        // rules out.
+        let mut written_in = asking(NodeKind::Text, "script");
+        written_in.data.content = Some("What is already there.".to_string());
+        assert!(promotion_for(&written_in, &artifacts, false).is_none());
+
+        // With nothing yet to hand down it is a step of the run like any other,
+        // and its answer lands on it.
+        assert_eq!(
+            placement_of(promotion_for(
+                &asking(NodeKind::Text, "script"),
+                &artifacts,
+                false
+            )),
+            Placement::Own
         );
     }
 

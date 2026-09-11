@@ -17,8 +17,9 @@
 //! before the run starts rather than failing inside it, that an answer
 //! carrying more than a node can hold is refused whole and filed nowhere,
 //! that a generation a provider refuses leaves the node saying what it said
-//! before, and that an ask answered while the node is already showing something
-//! puts the answer beside it rather than over it.
+//! before, that an ask answered while the node is already showing something
+//! puts the answer beside it rather than over it, and that an upstream answer
+//! already on the canvas is read rather than asked for again.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -1091,6 +1092,109 @@ async fn an_answer_from_earlier_in_the_run_reaches_the_generation_below_it() {
     .expect("the answer is on disk");
     assert_eq!(script["data"]["content"], json!(filed));
     assert_eq!(script["data"]["content"], json!(SENTENCE));
+}
+
+/// A run reads an upstream answer that is already there rather than making a
+/// second one.
+///
+/// The failure this rules out is a run of the node the user picked quietly
+/// running the node above it too: a second copy of words nobody asked for was
+/// paid for, and it landed beside the upstream node as a card whose origin the
+/// user had to work out. An upstream node that already holds an answer is read;
+/// one that has nothing yet is still made first, which the chain above covers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_upstream_answer_that_is_already_there_is_read_rather_than_asked_again() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let base_url = serve(answering(recorded.clone())).await;
+    harness
+        .configure(
+            &base_url,
+            &[(WRITER, Capability::Text), (PAINTER, Capability::Image)],
+        )
+        .await;
+    let (canvas_id, _root) = harness.project("Kept").await;
+    // The script node holds words an ask of its own already made: what the
+    // editor leaves behind after a run, and the state the poster reads from.
+    let mut script = asking(
+        "n-script",
+        NodeKind::Text,
+        "Script",
+        &reference(WRITER),
+        "Write one sentence.",
+        None,
+    );
+    script["data"]["content"] = json!(KEPT);
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": script },
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-poster", NodeKind::Image, "Poster", &reference(PAINTER),
+                "Paint it as a poster.", None) },
+            { "type": "addEdge", "canvasId": canvas_id,
+              "edge": edge("e-1", ("n-script", "out"), ("n-poster", "prompt")) },
+        ]))
+        .await;
+
+    let run_id = harness.start(&canvas_id, json!(["n-poster"])).await;
+    let finished = harness.settled(&run_id).await;
+    assert_eq!(finished["status"], "succeeded");
+    let steps = finished["steps"].as_array().expect("a run has steps");
+    assert_eq!(
+        steps.len(),
+        2,
+        "the upstream node is still carried by the run"
+    );
+    assert_eq!(steps[0]["nodeId"], "n-script");
+    assert_eq!(steps[0]["status"], "succeeded");
+    assert_eq!(
+        steps[0]["outputText"],
+        json!(KEPT),
+        "what it handed down is what it already said, not a fresh answer"
+    );
+    assert!(
+        steps[0]["outputAssetIds"].is_null(),
+        "nothing was generated for it, so nothing was filed for it"
+    );
+
+    // One call, and it is the poster's: the answer already on the canvas cost
+    // nothing, and what it says is what got painted.
+    assert_eq!(
+        recorded.calls(),
+        1,
+        "the node above was read rather than asked again"
+    );
+    let asked = recorded.call(0);
+    assert_eq!(asked["model"], json!(PAINTER));
+    let prompt = asked["prompt"]
+        .as_str()
+        .expect("a picture is asked for in words");
+    assert!(prompt.starts_with("Paint it as a poster."), "{prompt}");
+    assert!(prompt.contains(KEPT), "{prompt}");
+
+    // Nothing was written beside the script, and nothing was made of it: a card
+    // there would be a second copy of what the node already says.
+    let document = harness.document().await;
+    let nodes = document["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    assert_eq!(nodes.len(), 2, "no card was made for the node above");
+    let edges = document["moka"]["canvas"][0]["edges"]
+        .as_array()
+        .expect("a canvas has edges");
+    assert_eq!(edges.len(), 1, "and no edge was added to one");
+    let script = node_by_id(nodes, "n-script");
+    assert_eq!(script["data"]["content"], json!(KEPT));
+    let poster = node_by_id(nodes, "n-poster");
+    let images = document["moka"]["resources"]["images"]
+        .as_array()
+        .expect("a registry");
+    assert_eq!(images.len(), 1, "the poster's own answer was filed");
+    assert_eq!(poster["data"]["assetId"], images[0]["id"]);
+    let texts = document["moka"]["resources"]["texts"]
+        .as_array()
+        .expect("a registry");
+    assert_eq!(texts.len(), 0, "no text was made, so none was filed");
 }
 
 /// What the panel shows is what reaches the provider, read back from the far end.
