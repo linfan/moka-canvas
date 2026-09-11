@@ -18,6 +18,14 @@ export default function App() {
     void useAppStore.getState().boot();
   }, []);
 
+  // The app draws its own context menus, so the browser/webview default one
+  // must never appear on top of them (web and desktop behave the same here).
+  useEffect(() => {
+    const suppress = (event: MouseEvent) => event.preventDefault();
+    document.addEventListener("contextmenu", suppress);
+    return () => document.removeEventListener("contextmenu", suppress);
+  }, []);
+
   // Apart from boot on purpose: provider configuration is something the app
   // shows, not something it needs in order to start.
   useEffect(() => {

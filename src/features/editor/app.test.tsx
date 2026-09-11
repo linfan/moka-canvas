@@ -109,6 +109,18 @@ describe("app boot", () => {
     fireEvent.click(screen.getByRole("button", { name: "Canvas 2" }));
     expect(await within(host).findByText("0 nodes · 0 edges")).toBeTruthy();
   });
+
+  it("never lets the native context menu appear over its own", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "Moka Canvas" });
+
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
 });
 
 describe("what has just happened", () => {
