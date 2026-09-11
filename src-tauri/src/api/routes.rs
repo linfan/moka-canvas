@@ -1338,3 +1338,13 @@ async fn frame(
         .write_all(format!("event: {event}\ndata: {body}\n\n").as_bytes())
         .await
 }
+
+/// Returns the list of available converter protocols from meta.json.
+pub async fn converter_protocols(
+    State(state): State<ApiState>,
+) -> Result<Json<serde_json::Value>, Problem> {
+    use crate::converter::registry::ConverterRegistry;
+    let registry = ConverterRegistry::load(state.converter_root()).await;
+    let protocols = registry.protocols();
+    Ok(Json(serde_json::json!({ "protocols": protocols })))
+}

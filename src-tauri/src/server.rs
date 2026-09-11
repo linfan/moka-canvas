@@ -51,6 +51,11 @@ impl LocalServer {
 
         let state = ApiState::new(config, mode, metadata_root)?;
         seed_starter_model(&state).await;
+        crate::converter::deploy::ensure_deployed(state.converter_root())
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(target: "moka::converter", "deploy error: {error}");
+            });
         let listener = TcpListener::bind(address)
             .await
             .context("failed to bind the local HTTP server")?;
@@ -269,7 +274,7 @@ mod tests {
             .expect("the test configuration always sets a metadata directory");
         let metadata = crate::metadata::open(&dir, &config.metadata, RuntimeMode::Web)
             .expect("the metadata store opens inside a temporary directory");
-        ApiState::with_metadata(config, RuntimeMode::Web, metadata)
+        ApiState::with_metadata(config, RuntimeMode::Web, metadata, root.join("converter"))
     }
 
     async fn body_json(response: Response) -> serde_json::Value {
@@ -333,7 +338,7 @@ mod tests {
             .expect("the test configuration always sets a metadata directory");
         let metadata = crate::metadata::open(&dir, &config.metadata, RuntimeMode::Web)
             .expect("the metadata store opens inside a temporary directory");
-        let state = ApiState::with_metadata(config, RuntimeMode::Web, metadata);
+        let state = ApiState::with_metadata(config, RuntimeMode::Web, metadata, root.path().join("converter"));
 
         let scratch = dir.join("tmp");
         assert!(

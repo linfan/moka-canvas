@@ -124,7 +124,7 @@ impl ProviderAdapter for OpenAiAdapter {
             // change when a model configuration is edited.
             id: new_id(),
             reference,
-            protocol: call.protocol,
+            protocol: call.protocol.clone(),
             capability: Capability::Video,
             model: call.config_id.clone(),
             created_at: now_iso(),
@@ -257,7 +257,7 @@ async fn text(
     // protocol variant is what says which body shape arrives there. There is
     // no second candidate to fall back to: a user who named an address named
     // the shape that answers at it.
-    let endpoint = text_endpoint(call.protocol);
+    let endpoint = text_endpoint(call.protocol.clone());
     let body = (endpoint.body)(call, request, inputs, sink.is_streaming());
     cancel.check()?;
 

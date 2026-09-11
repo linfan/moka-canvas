@@ -122,7 +122,7 @@ impl Gateway {
         let placement = self
             .place(stamped(request, Capability::Video), cancel)
             .await?;
-        let adapter = for_protocol(placement.call.protocol);
+        let adapter = for_protocol(placement.call.protocol.clone());
         let started = Instant::now();
         let task = self
             .retried(
@@ -237,7 +237,7 @@ impl Gateway {
         let snapshot = self.models.snapshot().await?;
         let resolved = resolve_within(&snapshot, &tracked.model, tracked.capability)?;
         let call = self.address(&resolved).await?;
-        let state = for_protocol(tracked.protocol)
+        let state = for_protocol(tracked.protocol.clone())
             .poll_task(&call, &tracked, cancel)
             .await;
         match &state {
@@ -276,7 +276,7 @@ impl Gateway {
         let placement = self.place(request, cancel).await?;
         let (forwarded, watching) = counting(sink);
         let streaming = watching.is_streaming();
-        let adapter = for_protocol(placement.call.protocol);
+        let adapter = for_protocol(placement.call.protocol.clone());
         let started = Instant::now();
         let outcome = self
             .retried(

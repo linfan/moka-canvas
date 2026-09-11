@@ -364,7 +364,7 @@ impl MetadataStore for FileMetadataStore {
         let record = ModelConfig {
             id: draft.id.clone(),
             category: draft.category,
-            protocol: draft.protocol,
+            protocol: draft.protocol.clone(),
             url: draft.url.clone(),
             model: draft.model.clone(),
             display_name: draft.display_name.clone(),

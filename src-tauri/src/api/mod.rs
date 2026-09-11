@@ -7,7 +7,7 @@ use crate::workflow::executor::DeterministicExecutor;
 use crate::workflow::provider::ProviderExecutor;
 use crate::workflow::runner::RunManager;
 use crate::workflow::WorkflowExecutor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub mod dto;
@@ -23,6 +23,8 @@ pub struct ApiState {
     pub models: Arc<ModelRepo>,
     pub gateway: Arc<Gateway>,
     pub runs: Arc<RunManager>,
+    /// Root directory for converter scripts (meta.json is here).
+    converter_root: PathBuf,
 }
 
 impl ApiState {
@@ -36,13 +38,15 @@ impl ApiState {
     /// to open them.
     pub fn new(config: AppConfig, mode: RuntimeMode, root: &Path) -> anyhow::Result<Self> {
         let metadata = metadata::open(root, &config.metadata, mode)?;
-        Ok(Self::with_metadata(config, mode, metadata))
+        let converter_root = root.parent().map(|p| p.join("converter")).unwrap_or_else(|| PathBuf::from("converter"));
+        Ok(Self::with_metadata(config, mode, metadata, converter_root))
     }
 
     pub fn with_metadata(
         config: AppConfig,
         mode: RuntimeMode,
         metadata: Arc<dyn MetadataStore>,
+        converter_root: PathBuf,
     ) -> Self {
         let config = Arc::new(config);
         let store = Arc::new(FsProjectStore::new(Arc::clone(&config)));
@@ -70,7 +74,14 @@ impl ApiState {
             gateway,
             config,
             runs,
+            converter_root,
         }
+    }
+
+    /// The directory where converter scripts live. Used during startup to deploy
+    /// built-in scripts and by the API to list available protocols.
+    pub fn converter_root(&self) -> &Path {
+        &self.converter_root
     }
 }
 
@@ -150,6 +161,7 @@ pub fn router() -> axum::Router<ApiState> {
         )
         .merge(model_router())
         .merge(generate_router())
+        .route("/api/v1/converter/protocols", get(routes::converter_protocols))
 }
 
 /// A generation request carries a prompt and references to assets already in

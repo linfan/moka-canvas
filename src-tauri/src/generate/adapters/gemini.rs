@@ -126,7 +126,7 @@ impl ProviderAdapter for GeminiAdapter {
             // change when a channel is reconfigured.
             id: new_id(),
             reference,
-            protocol: call.protocol,
+            protocol: call.protocol.clone(),
             capability: Capability::Video,
             model: call.config_id.clone(),
             created_at: now_iso(),

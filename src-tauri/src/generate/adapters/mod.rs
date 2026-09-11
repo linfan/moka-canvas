@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use reqwest::header::{HeaderMap, HeaderName};
 
 use crate::config::GenerateConfig;
+use crate::converter;
 use crate::domain::Capability;
 use crate::metadata::Protocol;
 
@@ -95,7 +96,7 @@ impl ModelCall {
             config_id: resolved.config_id.clone(),
             model: resolved.model.clone(),
             display_name: resolved.display_name.clone(),
-            protocol: resolved.protocol,
+            protocol: resolved.protocol.clone(),
             url: resolved.url.clone(),
             api_key,
             budgets,
@@ -238,7 +239,8 @@ pub trait ProviderAdapter: Send + Sync {
 
 /// The adapter that speaks a protocol. One adapter covers a whole family of
 /// endpoint shapes: which shape a call uses is decided by the protocol variant
-/// the configuration named, inside the adapter.
+/// the configuration named, inside the adapter. Lua-backed protocols are
+/// dispatched to the Lua adapter, which loads the appropriate converter script.
 pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
     match protocol {
         Protocol::OpenaiChat
@@ -248,6 +250,7 @@ pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
         | Protocol::OpenaiVideos => &openai::ADAPTER,
         Protocol::Gemini | Protocol::GeminiVideo => &gemini::ADAPTER,
         Protocol::Custom => &custom::ADAPTER,
+        Protocol::LuaScript(_) => converter::LuaAdapter::get(),
     }
 }
 
@@ -259,7 +262,7 @@ pub async fn list_models(
     url: &str,
     api_key: &str,
 ) -> Result<Vec<String>, ProviderError> {
-    let call = ModelCall::listing(protocol, url, api_key)?;
+    let call = ModelCall::listing(protocol.clone(), url, api_key)?;
     let mut ids = if protocol.is_openai() {
         openai::list_models(&call).await?
     } else if protocol.is_gemini() {

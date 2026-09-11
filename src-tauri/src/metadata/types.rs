@@ -51,12 +51,12 @@ pub struct RecentProject {
 /// One variant per endpoint shape rather than one per vendor: the category a
 /// model belongs to decides which of these are on offer, because a text model
 /// and a video model never speak the same endpoint even at the same provider.
-/// `Custom` is reserved; nothing implements it yet.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// `Custom` is reserved; nothing implements it yet. `LuaScript` names a
+/// converter script the user placed in the converter directory (or one of the
+/// built-in scripts that was deployed there).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Protocol {
     /// OpenAI-compatible chat completions (`POST .../chat/completions`).
-    #[default]
     OpenaiChat,
     /// OpenAI-compatible responses endpoint (`POST .../responses`).
     OpenaiResponses,
@@ -71,6 +71,15 @@ pub enum Protocol {
     /// Google Gemini long-running prediction (`POST ...:predictLongRunning`).
     GeminiVideo,
     Custom,
+    /// A protocol backed by a Lua converter script. The string is the protocol
+    /// identifier from the converter meta.json (e.g. `"wan3Video"`).
+    LuaScript(String),
+}
+
+impl Default for Protocol {
+    fn default() -> Self {
+        Self::OpenaiChat
+    }
 }
 
 impl Protocol {
@@ -85,6 +94,30 @@ impl Protocol {
             Self::Gemini => "gemini",
             Self::GeminiVideo => "geminiVideo",
             Self::Custom => "custom",
+            Self::LuaScript(_) => "luaScript",
+        }
+    }
+
+    /// The variant name for display and serde.
+    pub fn wire_name(&self) -> String {
+        match self {
+            Self::LuaScript(name) => name.clone(),
+            other => other.as_str().to_string(),
+        }
+    }
+
+    /// Parse a wire name back into a Protocol.
+    pub fn from_wire_name(name: &str) -> Self {
+        match name {
+            "openaiChat" => Self::OpenaiChat,
+            "openaiResponses" => Self::OpenaiResponses,
+            "openaiImages" => Self::OpenaiImages,
+            "openaiSpeech" => Self::OpenaiSpeech,
+            "openaiVideos" => Self::OpenaiVideos,
+            "gemini" => Self::Gemini,
+            "geminiVideo" => Self::GeminiVideo,
+            "custom" => Self::Custom,
+            other => Self::LuaScript(other.to_string()),
         }
     }
 
@@ -105,6 +138,34 @@ impl Protocol {
     /// travels in the `x-goog-api-key` header.
     pub fn is_gemini(&self) -> bool {
         matches!(self, Self::Gemini | Self::GeminiVideo)
+    }
+
+    /// True when this protocol is a Lua-backed script.
+    pub fn is_lua(&self) -> bool {
+        matches!(self, Self::LuaScript(_))
+    }
+}
+
+/// Custom serialization: built-in variants use their camelCase name, LuaScript
+/// uses its inner string directly.
+impl Serialize for Protocol {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.wire_name())
+    }
+}
+
+/// Custom deserialization: known string → built-in variant, everything else →
+/// LuaScript.
+impl<'de> Deserialize<'de> for Protocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self::from_wire_name(&s))
     }
 }
 

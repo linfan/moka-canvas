@@ -307,7 +307,7 @@ impl ModelRepo {
         let draft = ModelDraft {
             id: new_id.clone(),
             category: source.category,
-            protocol: source.protocol,
+            protocol: source.protocol.clone(),
             url: source.url.clone(),
             model: source.model.clone(),
             display_name,
@@ -410,14 +410,14 @@ impl ModelRepo {
     pub async fn probe(&self, id: &str) -> Result<ProbeReport, ProviderError> {
         let config = self.model(id).await?;
         let started = Instant::now();
-        let outcome = match list_url(config.protocol, &config.url) {
+        let outcome = match list_url(config.protocol.clone(), &config.url) {
             None => Err(ProviderError::invalid(format!(
                 "no model-list address can be derived from {:?}; \
                  check that the URL is the endpoint of a known API shape",
                 config.url
             ))),
             Some(list_url) => match self.credential(id).await {
-                Ok(api_key) => adapters::list_models(config.protocol, &list_url, &api_key)
+                Ok(api_key) => adapters::list_models(config.protocol.clone(), &list_url, &api_key)
                     .await
                     .map(|_| ()),
                 Err(error) => Err(error),
@@ -632,7 +632,7 @@ fn resolve_in(
         model: config.model.clone(),
         display_name: config.display_name.clone(),
         category: capability,
-        protocol: config.protocol,
+        protocol: config.protocol.clone(),
         url: config.url.clone(),
     })
 }

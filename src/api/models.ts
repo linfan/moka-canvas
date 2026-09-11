@@ -121,6 +121,19 @@ function modelPath(id: string, suffix = ""): string {
   return `/api/v1/models/${encodeURIComponent(id)}${suffix}`;
 }
 
+/** One protocol entry from the converter registry. */
+export interface ProtocolEntry {
+  capability: string;
+  script: string;
+  display_name: string;
+  url_example: string;
+}
+
+export interface ProtocolsResponse {
+  protocols: Record<string, ProtocolEntry>;
+}
+
+/** Model / configuration API helpers. */
 export const modelsApi = {
   list(signal?: AbortSignal): Promise<ModelsView> {
     return http.request<ModelsView>("/api/v1/models", { signal });
@@ -178,5 +191,10 @@ export const modelsApi = {
       method: "PATCH",
       body: patch,
     });
+  },
+
+  /** Returns the available converter protocols from the server. */
+  fetchProtocols(): Promise<ProtocolsResponse> {
+    return http.request<ProtocolsResponse>("/api/v1/converter/protocols");
   },
 };
