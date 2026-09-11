@@ -33,6 +33,11 @@ impl LocalServer {
         // it. Both runtimes start through this function, which is why the check
         // lives here rather than beside either of them.
         crate::prompts::verify().context("the embedded prompt templates do not compile")?;
+        // Started here rather than beside either runtime, because both of them
+        // start through this function and a recording that only one of them could
+        // make would be a difference nobody asked for.
+        crate::generate::debug::init(&config.generate.debug, metadata_root)
+            .context("provider call recording could not be started")?;
         let address: SocketAddr = config
             .server
             .bind
@@ -141,8 +146,21 @@ async fn health(State(state): State<ApiState>) -> impl IntoResponse {
     // visible, so the settings page can tell the user what was lost.
     let ok = info.documents.iter().all(|document| !document.corrupt);
     let documents = serde_json::to_value(&info.documents).unwrap_or_default();
+    // Said out loud because a recording is the one diagnostic that changes what
+    // the application keeps, and a reader who does not know it is on cannot weigh
+    // what is on the disk beside the metadata directory. The directory is a path
+    // and not a credential; the credentials inside it are masked by default.
+    let recording = match crate::generate::debug::active() {
+        Some(settings) => json!({
+            "enabled": true,
+            "dir": settings.dir.to_string_lossy(),
+            "redactCredentials": settings.redact,
+        }),
+        None => json!({ "enabled": false }),
+    };
     Json(json!({
         "status": "ok",
+        "llmDebug": recording,
         "metadata": {
             "store": serde_json::to_value(info.store).unwrap_or_default(),
             "root": info.root.to_string_lossy(),

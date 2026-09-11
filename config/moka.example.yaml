@@ -50,6 +50,19 @@ generate:
   # Looks at a job a provider is still running before the step waiting on it
   # gives up: five minutes at the interval the executor polls at.
   videoMaxPolls: 120
+  # Writes down every call that reaches a provider — the address, the headers,
+  # the prompt and the whole answer — as files, for diagnosing an answer that
+  # arrived and was the wrong thing. Off unless switched on, and not a setting to
+  # leave on: what lands on the disk is the prompt somebody typed. Turned on
+  # three ways, in descending order of precedence: the --llm-debug flag, the
+  # environment (MOKA_LLM_DEBUG=1, MOKA_LLM_DEBUG_DIR), or here. With "dir"
+  # omitted, recordings go to <metadata.dir>/llm-debug. "redactCredentials"
+  # masks the key wherever it appears and is on unless set false. See
+  # docs/security.md.
+  # debug:
+  #   enabled: false
+  #   dir: "./llm-debug"
+  #   redactCredentials: true
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

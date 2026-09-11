@@ -30,6 +30,7 @@
 
 pub mod adapters;
 pub mod context;
+pub mod debug;
 pub mod error;
 pub mod gateway;
 pub mod ingest;

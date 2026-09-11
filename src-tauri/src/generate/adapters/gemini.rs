@@ -17,6 +17,7 @@ use super::{
     MODEL_LIST_TIMEOUT,
 };
 use crate::domain::{new_id, now_iso, Capability};
+use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
 use crate::generate::media::{video_images, video_layout, MediaInput, VideoLayout};
 use crate::generate::{
@@ -114,6 +115,7 @@ impl ProviderAdapter for GeminiAdapter {
         }
         cancel.check()?;
         let reply = answer(
+            Kind::TaskCreate,
             call,
             call.post(&endpoint(call, PREDICT))
                 .json(&job_body(request, inputs)),
@@ -154,6 +156,8 @@ impl ProviderAdapter for GeminiAdapter {
         // The handle a job started with is already a path under the version
         // this protocol uses, so it is asked for exactly as it arrived.
         let reply = exchange(
+            Kind::TaskPoll,
+            call,
             call.get(&task.reference),
             call.budgets.poll_timeout(),
             call.budgets.max_response_bytes,
@@ -202,6 +206,8 @@ pub(super) async fn list_models(call: &ChannelCall) -> Result<Vec<String>, Provi
     // this provider also accepts: a URL is logged and quoted back in error
     // messages, and a header is neither.
     let reply = exchange(
+        Kind::Models,
+        call,
         call.get(MODELS).query(&[("pageSize", PAGE_SIZE)]),
         MODEL_LIST_TIMEOUT,
         MAX_MODEL_LIST_BYTES,
@@ -263,10 +269,11 @@ async fn content(
             // as events rather than as one array of pieces.
             .query(&[("alt", "sse")])
             .json(&body);
-        return match open_stream(call, asked).await? {
-            Opened::Streaming(response) => {
+        return match open_stream(Kind::Stream, call, asked).await? {
+            Opened::Streaming(response, recording) => {
                 read_stream(
                     response,
+                    recording.map(|recording| *recording),
                     sink,
                     cancel,
                     call.budgets.timeout_for(request.capability),
@@ -278,6 +285,7 @@ async fn content(
         };
     }
     let reply = answer(
+        Kind::Generate,
         call,
         call.post(&endpoint(call, GENERATE)).json(&body),
         request.capability,
@@ -575,6 +583,8 @@ fn samples(payload: &Value) -> Vec<&str> {
 
 async fn download(call: &ChannelCall, address: &str) -> Result<GeneratedItem, ProviderError> {
     let reply = exchange(
+        Kind::Media,
+        call,
         call.fetch(address),
         call.budgets.timeout_for(Capability::Video),
         call.budgets.max_response_bytes,

@@ -103,6 +103,32 @@ pub struct GenerateConfig {
     /// Looks at an upstream job before it is given up on.
     #[serde(default = "default_video_max_polls")]
     pub video_max_polls: u32,
+    /// Writing down what a provider was asked and what it answered.
+    #[serde(default)]
+    pub debug: DebugConfig,
+}
+
+/// Recording the calls that reach a provider, for the one kind of trouble a log
+/// line cannot describe: an answer that arrived and was the wrong thing.
+///
+/// Off until somebody asks for it, and documented as an exception in
+/// `docs/security.md` rather than as a feature, because what gets written down is
+/// the prompt somebody typed and the credential that carried it. Each field is
+/// optional so that a file which says nothing about recording can be told apart
+/// from one that says it is off, which is what lets the environment and the
+/// command line have a say without repeating the whole section.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugConfig {
+    /// Absent means "whatever the environment says, and off if it says nothing".
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// Absent means `<metadata.dir>/llm-debug`.
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
+    /// Absent means yes: a credential is masked wherever it appears.
+    #[serde(default)]
+    pub redact_credentials: Option<bool>,
 }
 
 impl Default for GenerateConfig {
@@ -123,6 +149,7 @@ impl Default for GenerateConfig {
             max_output_bytes: default_max_output_bytes(),
             max_output_items: default_max_output_items(),
             video_max_polls: default_video_max_polls(),
+            debug: DebugConfig::default(),
         }
     }
 }

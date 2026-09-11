@@ -136,6 +136,59 @@ around that are deliberately narrow:
   form, and what remains is truncated. Some providers repeat parts of a request
   in a failure, and a response must not become a way of reading a key out.
 
+## Recording provider calls
+
+Every rule above says the same thing about prompts and keys: they are not written
+down. Telemetry carries counts, durations and outcomes, and deliberately nothing
+else — `src-tauri/src/telemetry.rs` builds its one log line out of names and
+numbers so that keeping a prompt out of it is not something every caller has to
+remember.
+
+There is one exception, and it is explicit rather than implied:
+`generate.debug.enabled`. Switched on, every call that reaches a provider is
+written to a directory as the request and the answer that came back — address,
+headers, prompt, reference media and body, whole and untruncated. It exists
+because an answer that arrived and was the wrong thing cannot be diagnosed from a
+line saying the call took nine seconds: the only evidence of what was asked and
+what came back was in the two bodies, and both were dropped the moment the call
+returned.
+
+It is off by default and it is not a setting to leave on. What it writes:
+
+- **Prompts.** Everything a reader typed, and everything a card on their canvas
+  said, in full. A recording directory is a copy of the work that went through
+  it.
+- **Credentials, masked.** The default (`redactCredentials: true`) masks the
+  header that carries a key with the same `masked` form every other diagnostic
+  surface uses, masks a key in a query parameter, and replaces any echo of the
+  key inside a body. Set it to `false` and the plaintext key is written to the
+  disk in full — there is no reason to, and it is called out here so that nobody
+  finds it by accident.
+- **Media.** A body that is not text — a picture, a sound, a video — is written
+  beside the record as a `.bin` file of its own and pointed at from it, rather
+  than encoded into a document nobody can read.
+
+The protections that apply:
+
+- The default directory is `<metadata.dir>/llm-debug`, inside the directory the
+  application already owns, created `0700` with every file `0600`.
+- Nothing is uploaded anywhere. Recordings are local files and stay local files,
+  and an exported project package never contains them: they live in the metadata
+  directory, which is structurally outside every project directory (see
+  "Exported packages").
+- Recording cannot fail a generation. Files are written by a task of their own
+  after the answer is already in hand, and a disk that will not take one is
+  complained about in the log rather than handed back to whoever asked.
+
+`/api/health` reports whether recording is on and where it is writing, so that
+somebody who did not switch it on can find out that it is. Turn it off by
+removing the setting, and delete the directory: nothing cleans it up, and a long
+run with large media in the answers can write gigabytes.
+
+Enable it three ways, in descending order of precedence: `moka-server
+--llm-debug [DIR]`, the environment (`MOKA_LLM_DEBUG=1`, `MOKA_LLM_DEBUG_DIR`),
+and the configuration file.
+
 ## Exported packages
 
 A project package (`.moka`, a ZIP) can never contain application metadata:

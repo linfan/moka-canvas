@@ -18,6 +18,7 @@ use crate::config::GenerateConfig;
 use crate::domain::Capability;
 use crate::metadata::Protocol;
 
+use super::debug::{self, Kind};
 use super::error::ProviderError;
 use super::media::MediaInput;
 use super::providers::{join_url, ResolvedModel};
@@ -312,22 +313,52 @@ fn succeeded(status: u16) -> bool {
 /// Places a request under a deadline and reads the answer whole, leaving the
 /// status for the caller: one adapter has to see a 404 before it can decide to
 /// try a second endpoint.
+///
+/// The kind says what the call was for, which is the only thing that tells two
+/// requests to the same address apart in a recording made afterwards.
 async fn exchange(
+    kind: Kind,
+    call: &ChannelCall,
     request: reqwest::RequestBuilder,
     deadline: Duration,
     ceiling: u64,
 ) -> Result<Reply, ProviderError> {
-    drain(open(request.timeout(deadline)).await?, ceiling).await
+    let built = build(request.timeout(deadline))?;
+    let recording = debug::begin(kind, call, &built);
+    let response = match send(call, built).await {
+        Ok(response) => response,
+        Err(error) => {
+            debug::unsent(recording, &error.to_string());
+            return Err(error);
+        }
+    };
+    // Read before the body is, because draining consumes the response that
+    // carries them and a recording wants all three of them together.
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    match drain(response, ceiling).await {
+        Ok(reply) => {
+            debug::answered(recording, status, &headers, &reply.body);
+            Ok(reply)
+        }
+        Err(error) => {
+            debug::broken(recording, &error.to_string(), status, &headers);
+            Err(error)
+        }
+    }
 }
 
 /// [`exchange`] under the deadline for this kind of generation and the ceiling
 /// for an answer, refusing one that is not a success.
 async fn answer(
+    kind: Kind,
     call: &ChannelCall,
     request: reqwest::RequestBuilder,
     capability: Capability,
 ) -> Result<Reply, ProviderError> {
     let reply = exchange(
+        kind,
+        call,
         request,
         call.budgets.timeout_for(capability),
         call.budgets.max_response_bytes,
@@ -340,10 +371,24 @@ async fn answer(
     }
 }
 
-/// Places a request and stops at the headers, which is what lets a failure be
-/// read whole and a success be streamed.
-async fn open(request: reqwest::RequestBuilder) -> Result<reqwest::Response, ProviderError> {
-    request.send().await.map_err(transport)
+/// Builds a request into the shape it goes out in.
+///
+/// Built here rather than sent, because a recording has to read the address, the
+/// headers and the body while all three are still in hand: a request is consumed
+/// by sending it, and the body in particular is not there afterwards.
+fn build(request: reqwest::RequestBuilder) -> Result<reqwest::Request, ProviderError> {
+    request
+        .build()
+        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+}
+
+/// Places a built request and stops at the headers, which is what lets a failure
+/// be read whole and a success be streamed.
+async fn send(
+    call: &ChannelCall,
+    request: reqwest::Request,
+) -> Result<reqwest::Response, ProviderError> {
+    call.client.execute(request).await.map_err(transport)
 }
 
 async fn drain(response: reqwest::Response, ceiling: u64) -> Result<Reply, ProviderError> {
@@ -382,7 +427,12 @@ async fn next_chunk(response: &mut reqwest::Response) -> Result<Option<Vec<u8>>,
 /// single character has reached anybody: once deltas are on screen, a fallback
 /// would repeat them.
 enum Opened {
-    Streaming(reqwest::Response),
+    /// A stream that opened, with the recording waiting for its end. The
+    /// recording travels with the stream rather than staying here, because the
+    /// answer is not finished until the stream is. Boxed because a whole request
+    /// — address, headers, body — is a large thing to size an enum by, and this
+    /// variant is read once and handed back to the recorder.
+    Streaming(reqwest::Response, Option<Box<debug::Pending>>),
     Refused(Reply),
 }
 
@@ -392,15 +442,37 @@ enum Opened {
 /// another endpoint, the other on the same endpoint with a query that changes
 /// the shape of the answer.
 async fn open_stream(
+    kind: Kind,
     call: &ChannelCall,
     request: reqwest::RequestBuilder,
 ) -> Result<Opened, ProviderError> {
-    let response = open(request).await?;
-    if succeeded(response.status().as_u16()) {
-        return Ok(Opened::Streaming(response));
+    let built = build(request)?;
+    let recording = debug::begin(kind, call, &built);
+    let response = match send(call, built).await {
+        Ok(response) => response,
+        Err(error) => {
+            debug::unsent(recording, &error.to_string());
+            return Err(error);
+        }
+    };
+    let status = response.status().as_u16();
+    if succeeded(status) {
+        return Ok(Opened::Streaming(response, recording.map(Box::new)));
     }
-    let reply = drain(response, call.budgets.max_response_bytes).await?;
-    Ok(Opened::Refused(reply))
+    // A refusal arrives whole rather than in pieces, so it is read here and
+    // written down here: a stream nobody is going to read has no end to wait
+    // for.
+    let headers = response.headers().clone();
+    match drain(response, call.budgets.max_response_bytes).await {
+        Ok(reply) => {
+            debug::answered(recording, status, &headers, &reply.body);
+            Ok(Opened::Refused(reply))
+        }
+        Err(error) => {
+            debug::broken(recording, &error.to_string(), status, &headers);
+            Err(error)
+        }
+    }
 }
 
 /// Reads an opened stream to its end, pushing each piece of text to the sink
@@ -408,8 +480,13 @@ async fn open_stream(
 ///
 /// The deadline is checked between chunks instead of being set on the request:
 /// a request timeout would end a stream that is still producing text.
+///
+/// When the stream is being recorded, the raw events are kept beside the reading
+/// of them, because the interesting failure is the one where the two disagree:
+/// what the provider sent is evidence, and what was made of it is an opinion.
 async fn read_stream<F>(
     response: reqwest::Response,
+    recording: Option<debug::Pending>,
     sink: &DeltaSink,
     cancel: &Cancel,
     deadline: Duration,
@@ -419,22 +496,56 @@ where
     F: Fn(&serde_json::Value) -> StreamEvent,
 {
     let mut response = response;
+    let keep = recording.is_some();
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
     let mut reader = SseReader::new(&parse, sink);
+    // Kept only when something is going to be written down: reading a stream
+    // twice is work, and most streams are not being recorded.
+    let mut raw: Vec<u8> = Vec::new();
     let started = Instant::now();
-    while !reader.done {
-        let Some(chunk) = next_chunk(&mut response).await? else {
-            break;
+    let ended = loop {
+        let chunk = match next_chunk(&mut response).await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break Ok(()),
+            Err(error) => break Err(error),
         };
-        cancel.check()?;
+        if keep {
+            raw.extend_from_slice(&chunk);
+        }
+        if let Err(error) = cancel.check() {
+            break Err(error);
+        }
         if started.elapsed() > deadline {
-            return Err(ProviderError::Timeout(format!(
+            break Err(ProviderError::Timeout(format!(
                 "the stream was still open after {} seconds",
                 deadline.as_secs()
             )));
         }
         reader.feed(&chunk);
+        if reader.done {
+            break Ok(());
+        }
+    };
+    match ended {
+        Ok(()) => {
+            let result = reader.finish();
+            debug::streamed(
+                recording,
+                status,
+                &headers,
+                raw,
+                result.text.clone().unwrap_or_default(),
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            // What arrived before the end is still the evidence of what the
+            // provider was doing, so it is kept rather than dropped with the call.
+            debug::stream_broken(recording, &error.to_string(), status, &headers, raw);
+            Err(error)
+        }
     }
-    Ok(reader.finish())
 }
 
 /// What one event in a stream contributed.

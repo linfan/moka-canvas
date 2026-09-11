@@ -21,6 +21,7 @@ use super::{
     MODEL_LIST_TIMEOUT,
 };
 use crate::domain::{new_id, now_iso, Capability};
+use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
 use crate::generate::media::{video_images, video_layout, MediaInput, MultipartBody, VideoLayout};
 use crate::generate::{
@@ -112,6 +113,7 @@ impl ProviderAdapter for OpenAiAdapter {
         }
         cancel.check()?;
         let reply = answer(
+            Kind::TaskCreate,
             call,
             call.post(VIDEOS).json(&video_body(call, request, inputs)),
             Capability::Video,
@@ -149,6 +151,8 @@ impl ProviderAdapter for OpenAiAdapter {
     ) -> Result<TaskState, ProviderError> {
         cancel.check()?;
         let reply = exchange(
+            Kind::TaskPoll,
+            call,
             call.get(&format!("{VIDEOS}/{}", task.reference)),
             call.budgets.poll_timeout(),
             call.budgets.max_response_bytes,
@@ -185,7 +189,14 @@ impl ProviderAdapter for OpenAiAdapter {
 
 /// Asks the channel what it currently offers.
 pub(super) async fn list_models(call: &ChannelCall) -> Result<Vec<String>, ProviderError> {
-    let reply = exchange(call.get(MODELS), MODEL_LIST_TIMEOUT, MAX_MODEL_LIST_BYTES).await?;
+    let reply = exchange(
+        Kind::Models,
+        call,
+        call.get(MODELS),
+        MODEL_LIST_TIMEOUT,
+        MAX_MODEL_LIST_BYTES,
+    )
+    .await?;
     if !succeeded(reply.status) {
         return Err(provider_error(&reply, &call.api_key));
     }
@@ -305,20 +316,27 @@ async fn attempt(
     cancel.check().map_err(Tried::Failed)?;
 
     if sink.is_streaming() {
-        return match open_stream(call, call.post(endpoint.path).json(&body))
+        return match open_stream(Kind::Stream, call, call.post(endpoint.path).json(&body))
             .await
             .map_err(Tried::Failed)?
         {
-            Opened::Streaming(response) => {
-                read_stream(response, sink, cancel, deadline, endpoint.event)
-                    .await
-                    .map_err(Tried::Failed)
-            }
+            Opened::Streaming(response, recording) => read_stream(
+                response,
+                recording.map(|recording| *recording),
+                sink,
+                cancel,
+                deadline,
+                endpoint.event,
+            )
+            .await
+            .map_err(Tried::Failed),
             Opened::Refused(reply) => Err(refusal(reply, &call.api_key)),
         };
     }
 
     let reply = exchange(
+        Kind::Generate,
+        call,
         call.post(endpoint.path).json(&body),
         deadline,
         call.budgets.max_response_bytes,
@@ -572,7 +590,11 @@ async fn image(
             .header(CONTENT_TYPE, content_type)
             .body(body)
     };
-    images(call, answer(call, placed, Capability::Image).await?).await
+    images(
+        call,
+        answer(Kind::Generate, call, placed, Capability::Image).await?,
+    )
+    .await
 }
 
 fn image_body(call: &ChannelCall, request: &GenerateRequest) -> Value {
@@ -702,6 +724,8 @@ fn inline_image(inline: &str) -> Result<GeneratedItem, ProviderError> {
 /// Fetches an image the provider left at an address of its own.
 async fn download(call: &ChannelCall, address: &str) -> Result<GeneratedItem, ProviderError> {
     let reply = exchange(
+        Kind::Media,
+        call,
         call.fetch(address),
         call.budgets.timeout_for(Capability::Image),
         call.budgets.max_response_bytes,
@@ -720,6 +744,7 @@ async fn speech(
 ) -> Result<GenerateResult, ProviderError> {
     cancel.check()?;
     let reply = answer(
+        Kind::Generate,
         call,
         call.post(SPEECH).json(&speech_body(call, request)),
         Capability::Audio,
@@ -798,6 +823,7 @@ fn video_body(call: &ChannelCall, request: &GenerateRequest, inputs: &[MediaInpu
 /// document, so the mime comes from the answer itself.
 async fn collect(call: &ChannelCall, task: &AsyncTask) -> Result<TaskState, ProviderError> {
     let reply = answer(
+        Kind::Media,
         call,
         call.get(&format!("{VIDEOS}/{}/content", task.reference)),
         Capability::Video,
@@ -962,13 +988,23 @@ mod tests {
     #[test]
     fn an_auto_effort_is_left_for_the_provider_to_choose() {
         let call = channel("gpt-5.5");
-        let asked = generation(Capability::Text, "a lighthouse", json!({ "reasoningEffort": "auto" }));
+        let asked = generation(
+            Capability::Text,
+            "a lighthouse",
+            json!({ "reasoningEffort": "auto" }),
+        );
         // Channels that enumerate the efforts they know reject "auto" outright,
         // so it stays out of both bodies: naming no effort is what "auto" means.
-        assert_eq!(answers_body(&call, &asked, &[], false).get("reasoning"), None);
+        assert_eq!(
+            answers_body(&call, &asked, &[], false).get("reasoning"),
+            None
+        );
 
         let older = channel("llama-3.3");
-        assert_eq!(chat_body(&older, &asked, &[], false).get("reasoning_effort"), None);
+        assert_eq!(
+            chat_body(&older, &asked, &[], false).get("reasoning_effort"),
+            None
+        );
     }
 
     #[test]
