@@ -26,14 +26,14 @@ struct Args {
     #[arg(long)]
     generate_key: bool,
     /// Records every call that reaches a provider — the address, the headers, the
-    /// prompt and the whole answer — into a directory, for diagnosing an answer
-    /// that arrived and was the wrong thing. Takes an optional directory; without
-    /// one, recordings go to <metadata.dir>/llm-debug.
+    /// prompt and the whole answer — for diagnosing an answer that arrived and
+    /// was the wrong thing. Recordings always go to the `records` subdirectory
+    /// of the platform application data directory, and credentials in them are
+    /// always masked.
     ///
-    /// This writes prompts and, unless generate.debug.redactCredentials is set
-    /// otherwise, masked credentials to the disk. See docs/security.md.
-    #[arg(long, num_args = 0..=1, value_name = "DIR")]
-    llm_debug: Option<Option<PathBuf>>,
+    /// This writes prompts to the disk. See docs/security.md.
+    #[arg(long)]
+    llm_debug: bool,
 }
 
 #[tokio::main]
@@ -57,8 +57,8 @@ anything able to read that directory can read."
     // Settled before anything reads the configuration, so that the three sources
     // are read in one order: what was typed here beats what the environment says,
     // and what the environment says beats what the file says.
-    if let Some(dir) = args.llm_debug {
-        moka_canvas::generate::debug::from_cli(dir);
+    if args.llm_debug {
+        moka_canvas::generate::debug::from_cli();
     }
     // A file named on the command line has to be there; the one this program
     // picked for itself may be missing, and then every value stays at its

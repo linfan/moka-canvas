@@ -36,7 +36,7 @@ impl LocalServer {
         // Started here rather than beside either runtime, because both of them
         // start through this function and a recording that only one of them could
         // make would be a difference nobody asked for.
-        crate::generate::debug::init(&config.generate.debug, metadata_root)
+        crate::generate::debug::init(&config.generate.debug)
             .context("provider call recording could not be started")?;
         let address: SocketAddr = config
             .server
@@ -148,13 +148,12 @@ async fn health(State(state): State<ApiState>) -> impl IntoResponse {
     let documents = serde_json::to_value(&info.documents).unwrap_or_default();
     // Said out loud because a recording is the one diagnostic that changes what
     // the application keeps, and a reader who does not know it is on cannot weigh
-    // what is on the disk beside the metadata directory. The directory is a path
-    // and not a credential; the credentials inside it are masked by default.
+    // what is on the disk in the application data directory. The directory is a
+    // path and not a credential; the credentials inside it are always masked.
     let recording = match crate::generate::debug::active() {
         Some(settings) => json!({
             "enabled": true,
             "dir": settings.dir.to_string_lossy(),
-            "redactCredentials": settings.redact,
         }),
         None => json!({ "enabled": false }),
     };

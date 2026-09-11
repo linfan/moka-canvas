@@ -137,22 +137,20 @@ pub struct GenerateConfig {
 ///
 /// Off until somebody asks for it, and documented as an exception in
 /// `docs/security.md` rather than as a feature, because what gets written down is
-/// the prompt somebody typed and the credential that carried it. Each field is
-/// optional so that a file which says nothing about recording can be told apart
-/// from one that says it is off, which is what lets the environment and the
-/// command line have a say without repeating the whole section.
+/// the prompt somebody typed. Where the recordings go and how a credential is
+/// treated are not settings: recordings always land in the `records` subdirectory
+/// of the platform application data directory, and a credential is always masked.
+/// The field is optional so that a file which says nothing about recording can be
+/// told apart from one that says it is off, which is what lets the environment
+/// and the command line have a say without repeating the section. Unknown keys
+/// are refused, so that a key which was removed fails at startup instead of
+/// being silently ignored.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DebugConfig {
     /// Absent means "whatever the environment says, and off if it says nothing".
     #[serde(default)]
     pub enabled: Option<bool>,
-    /// Absent means `<metadata.dir>/llm-debug`.
-    #[serde(default)]
-    pub dir: Option<PathBuf>,
-    /// Absent means yes: a credential is masked wherever it appears.
-    #[serde(default)]
-    pub redact_credentials: Option<bool>,
 }
 
 impl Default for GenerateConfig {
@@ -375,7 +373,7 @@ fn default_video_max_polls() -> u32 {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppConfig {
     pub version: u32,
     pub server: ServerConfig,
@@ -707,6 +705,53 @@ public:
         );
         assert_eq!(config.generate.max_output_bytes, 256 * 1024 * 1024);
         assert_eq!(config.generate.video_max_polls, 120);
+    }
+
+    #[test]
+    fn a_section_written_where_it_does_not_belong_is_refused() {
+        // The mistake this answers is a real one: `debug:` at the top level,
+        // where nothing reads it. Ignored silently, the server runs with
+        // recording off and says nothing about why; refused here, the answer
+        // names the key and the file is fixed in a minute.
+        let misplaced = r#"
+version: 1
+server:
+  bind: "127.0.0.1:3000"
+  staticDir: "./dist"
+projects:
+  maxMokaFileBytes: 33554432
+public:
+  productName: "Moka Canvas"
+debug:
+  enabled: true
+"#;
+        let error = parse_config(misplaced).unwrap_err();
+        assert!(matches!(error, ConfigError::InvalidYaml(_)));
+        assert!(error.to_string().contains("debug"), "{error}");
+    }
+
+    #[test]
+    fn the_debug_section_refuses_a_key_that_was_taken_out() {
+        // `dir` and `redactCredentials` were settings once; a file that still
+        // carries one has to be told they are gone rather than quietly doing
+        // something else than what it says.
+        let stale = r#"
+version: 1
+server:
+  bind: "127.0.0.1:3000"
+  staticDir: "./dist"
+projects:
+  maxMokaFileBytes: 33554432
+public:
+  productName: "Moka Canvas"
+generate:
+  debug:
+    enabled: true
+    dir: "./llm-debug"
+"#;
+        let error = parse_config(stale).unwrap_err();
+        assert!(matches!(error, ConfigError::InvalidYaml(_)));
+        assert!(error.to_string().contains("dir"), "{error}");
     }
 
     #[test]

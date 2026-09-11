@@ -142,7 +142,9 @@ Every rule above says the same thing about prompts and keys: they are not writte
 down. Telemetry carries counts, durations and outcomes, and deliberately nothing
 else — `src-tauri/src/telemetry.rs` builds its one log line out of names and
 numbers so that keeping a prompt out of it is not something every caller has to
-remember.
+remember. The log lines go to the console and to a daily file under the `logs`
+subdirectory of the platform application data directory; what protects them is
+the shape of the line, not the place it lands.
 
 There is one exception, and it is explicit rather than implied:
 `generate.debug.enabled`. Switched on, every call that reaches a provider is
@@ -158,24 +160,25 @@ It is off by default and it is not a setting to leave on. What it writes:
 - **Prompts.** Everything a reader typed, and everything a card on their canvas
   said, in full. A recording directory is a copy of the work that went through
   it.
-- **Credentials, masked.** The default (`redactCredentials: true`) masks the
-  header that carries a key with the same `masked` form every other diagnostic
-  surface uses, masks a key in a query parameter, and replaces any echo of the
-  key inside a body. Set it to `false` and the plaintext key is written to the
-  disk in full — there is no reason to, and it is called out here so that nobody
-  finds it by accident.
+- **Credentials, masked.** Masking is not a setting and cannot be turned off:
+  the header that carries a key is masked with the same `masked` form every
+  other diagnostic surface uses, a key in a query parameter is masked, and any
+  echo of the key inside a body is replaced. What remains says which key was
+  used, which is the half of it a diagnosis needs, and never the key itself.
 - **Media.** A body that is not text — a picture, a sound, a video — is written
   beside the record as a `.bin` file of its own and pointed at from it, rather
   than encoded into a document nobody can read.
 
 The protections that apply:
 
-- The default directory is `<metadata.dir>/llm-debug`, inside the directory the
-  application already owns, created `0700` with every file `0600`.
+- The directory is the `records` subdirectory of the platform application data
+  directory — the same root the metadata directory and the logs are resolved
+  from, so the application already owns it — created `0700` with every file
+  `0600`. It is not a setting; nothing can point recordings somewhere else.
 - Nothing is uploaded anywhere. Recordings are local files and stay local files,
-  and an exported project package never contains them: they live in the metadata
-  directory, which is structurally outside every project directory (see
-  "Exported packages").
+  and an exported project package never contains them: they live in the
+  application data directory, which is structurally outside every project
+  directory (see "Exported packages").
 - Recording cannot fail a generation. Files are written by a task of their own
   after the answer is already in hand, and a disk that will not take one is
   complained about in the log rather than handed back to whoever asked.
@@ -186,8 +189,9 @@ removing the setting, and delete the directory: nothing cleans it up, and a long
 run with large media in the answers can write gigabytes.
 
 Enable it three ways, in descending order of precedence: `moka-server
---llm-debug [DIR]`, the environment (`MOKA_LLM_DEBUG=1`, `MOKA_LLM_DEBUG_DIR`),
-and the configuration file.
+--llm-debug`, the environment (`MOKA_LLM_DEBUG=1`), and the configuration file
+(`generate.debug.enabled`). All three say whether to record; none of them says
+where.
 
 ## Exported packages
 

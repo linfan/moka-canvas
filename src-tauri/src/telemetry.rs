@@ -2,21 +2,94 @@
 //! provider says about itself when it is written down.
 //!
 //! Request-level events are emitted by the middleware in [`crate::server`];
-//! this module owns the subscriber and the generation line. `RUST_LOG`
-//! overrides the default `info` filter (for example `RUST_LOG=debug`).
+//! this module owns the subscriber and the generation line. Every line goes to
+//! the console and to a daily file under the `logs` subdirectory of the
+//! platform application data directory — the same root the metadata directory
+//! is resolved from, so the logs of a run sit beside the state it wrote.
+//! `RUST_LOG` overrides the default `info` filter (for example
+//! `RUST_LOG=debug`).
 
 use crate::domain::Capability;
 use crate::generate::adapters::ChannelCall;
 use crate::generate::GenerateRequest;
 use std::fmt;
 use std::time::Duration;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+
+/// Subdirectory of the platform application data directory the log files go
+/// into. One file per day, named `moka.log.<date>`, kept rather than rotated
+/// away: a log that deletes itself is one a reader cannot go back to.
+pub const LOG_DIR_NAME: &str = "logs";
 
 /// Installs the tracing subscriber. Safe to call from more than one runtime
 /// entry point: the first call wins and later calls are no-ops.
 pub fn init() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+    let registry = tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer());
+    match file_writer() {
+        // ANSI escapes are for a terminal; a file wants plain text a reader can
+        // grep.
+        Some((dir, writer)) => {
+            let file = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(writer);
+            let _ = registry.with(file).try_init();
+            tracing::info!("writing logs to {}", dir.display());
+        }
+        // A directory that cannot be had costs the console nothing: logging
+        // continues where it can rather than failing the process over a disk.
+        None => {
+            let _ = registry.try_init();
+        }
+    }
+}
+
+/// The daily log file appender and the directory it writes into, or nothing
+/// (with the reason on stderr) when the platform directory cannot be had.
+fn file_writer() -> Option<(
+    std::path::PathBuf,
+    tracing_appender::rolling::RollingFileAppender,
+)> {
+    let root = match crate::metadata::paths::platform_default() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("logs stay on the console only: {error}");
+            return None;
+        }
+    };
+    let dir = root.join(LOG_DIR_NAME);
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!(
+            "logs stay on the console only: cannot create {}: {error}",
+            dir.display()
+        );
+        return None;
+    }
+    private_directory(&dir);
+    Some((
+        dir.clone(),
+        tracing_appender::rolling::daily(&dir, "moka.log"),
+    ))
+}
+
+/// A directory only its owner can read, held the way the metadata and
+/// recording directories are: the lines inside name the paths one deployment
+/// serves, which is nobody else's business.
+#[cfg(unix)]
+fn private_directory(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)) {
+        eprintln!("cannot protect {}: {error}", path.display());
+    }
+}
+
+#[cfg(not(unix))]
+fn private_directory(path: &std::path::Path) {
+    let _ = path;
 }
 
 /// One call to a provider, as it is worth remembering.

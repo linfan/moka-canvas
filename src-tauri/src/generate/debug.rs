@@ -9,10 +9,13 @@
 //! the call returned.
 //!
 //! It is off until somebody asks for it, and turning it on is a decision rather
-//! than a setting: what lands on the disk is the prompt a reader typed, the
-//! references that travelled with it, and — unless the credential is masked,
-//! which is the default — the key that carried them. `docs/security.md` carries
-//! the warning; this module carries the mechanism.
+//! than a setting: what lands on the disk is the prompt a reader typed and the
+//! references that travelled with it. The credential that carried them is always
+//! masked, and the directory recordings go to is always the `records`
+//! subdirectory of the platform application data directory — neither is a
+//! setting, because a setting somebody can get wrong is either a key on the
+//! disk or a recording nobody can find. `docs/security.md` carries the warning;
+//! this module carries the mechanism.
 //!
 //! Nothing here can fail a generation. A recording is written by a task of its
 //! own after the answer is already in hand, and a disk that will not take it is
@@ -237,14 +240,14 @@ impl Body {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub enabled: bool,
+    /// Where recordings are written: the `records` subdirectory of the platform
+    /// application data directory, which is not a setting anybody can move.
     pub dir: PathBuf,
-    /// Whether a credential is masked wherever it appears.
-    pub redact: bool,
 }
 
 /// What the command line said, which is the outermost word because it is the one
 /// somebody typed at the process being started.
-static FROM_CLI: OnceLock<(bool, Option<PathBuf>)> = OnceLock::new();
+static FROM_CLI: OnceLock<bool> = OnceLock::new();
 
 /// The recorder, when recording is on. Absent when it is off, which is the
 /// default and what every call site asks before it does any work at all.
@@ -274,32 +277,35 @@ struct Job {
 ///
 /// A flag rather than a value written into the configuration, so that the order
 /// the three sources are read in stays in one place: what was typed beats what
-/// the environment says, and what the environment says beats what the file says.
-pub fn from_cli(dir: Option<PathBuf>) {
-    let _ = FROM_CLI.set((true, dir));
+/// the environment says, and what the environment says beats what the file
+/// says. It says whether to record and nothing else: where recordings go is
+/// none of the three sources' business.
+pub fn from_cli() {
+    let _ = FROM_CLI.set(true);
 }
 
 /// The environment's word on recording, which is the one a reader sets without
 /// editing a file.
 const ENABLED_ENV: &str = "MOKA_LLM_DEBUG";
-const DIR_ENV: &str = "MOKA_LLM_DEBUG_DIR";
+
+/// Subdirectory of the platform application data directory recordings go into.
+pub const RECORDS_DIR_NAME: &str = "records";
 
 /// Settles the three sources into one answer.
 ///
-/// The directory defaults to one under the metadata root, which is the directory
-/// the application already owns and already protects, rather than somewhere
-/// beside the program that a reader has to go looking for.
-pub fn resolve(file: &DebugConfig, metadata_root: &Path) -> Settings {
-    settle(
+/// The directory is not settled, because it is not a setting: recordings go to
+/// the `records` subdirectory of the platform application data directory, the
+/// same root the metadata directory is resolved from, which is the directory
+/// the application already owns and already protects.
+pub fn resolve(file: &DebugConfig) -> Result<Settings> {
+    let app_root = crate::metadata::paths::platform_default()
+        .context("cannot determine the platform application data directory")?;
+    Ok(settle(
         file,
-        FROM_CLI.get(),
+        FROM_CLI.get().copied(),
         std::env::var(ENABLED_ENV).ok().as_deref(),
-        std::env::var_os(DIR_ENV)
-            .as_ref()
-            .map(PathBuf::from)
-            .as_deref(),
-        metadata_root,
-    )
+        &app_root,
+    ))
 }
 
 /// Settles the three sources, in the order they are read: what somebody typed at
@@ -312,26 +318,18 @@ pub fn resolve(file: &DebugConfig, metadata_root: &Path) -> Settings {
 /// moment.
 fn settle(
     file: &DebugConfig,
-    cli: Option<&(bool, Option<PathBuf>)>,
+    cli: Option<bool>,
     env_flag: Option<&str>,
-    env_dir: Option<&Path>,
-    metadata_root: &Path,
+    app_root: &Path,
 ) -> Settings {
     let enabled = cli
-        .filter(|(on, _)| *on)
-        .map(|_| true)
+        .filter(|on| *on)
         .or_else(|| env_flag.and_then(truthy))
         .or(file.enabled)
         .unwrap_or(false);
-    let dir = cli
-        .and_then(|(_, dir)| dir.clone())
-        .or_else(|| env_dir.map(Path::to_path_buf))
-        .or_else(|| file.dir.clone())
-        .unwrap_or_else(|| metadata_root.join("llm-debug"));
     Settings {
         enabled,
-        dir,
-        redact: file.redact_credentials.unwrap_or(true),
+        dir: app_root.join(RECORDS_DIR_NAME),
     }
 }
 
@@ -352,11 +350,29 @@ fn truthy(words: &str) -> Option<bool> {
 /// Called from inside the runtime, because the writer is a task of its own: a
 /// recording is written after the answer is already in hand and off the path of
 /// whoever asked, so that a slow disk costs a generation nothing.
-pub fn init(file: &DebugConfig, metadata_root: &Path) -> Result<Option<Settings>> {
-    let settings = resolve(file, metadata_root);
+pub fn init(file: &DebugConfig) -> Result<Option<Settings>> {
+    let settings = resolve(file)?;
     if !settings.enabled {
         return Ok(None);
     }
+    start(settings).map(Some)
+}
+
+/// Starts the recorder into a directory handed in, for a test that needs a
+/// directory of its own rather than the one the platform says. The running
+/// program never takes this path: [`init`] resolves the one directory
+/// recordings go to, and nothing else gets a say.
+#[doc(hidden)]
+pub fn init_in(dir: &Path) -> Result<Option<Settings>> {
+    start(Settings {
+        enabled: true,
+        dir: dir.to_path_buf(),
+    })
+    .map(Some)
+}
+
+/// Opens the directory and starts the task that writes into it.
+fn start(settings: Settings) -> Result<Settings> {
     std::fs::create_dir_all(&settings.dir)
         .with_context(|| format!("cannot create {}", settings.dir.display()))?;
     private_directory(&settings.dir);
@@ -377,14 +393,14 @@ pub fn init(file: &DebugConfig, metadata_root: &Path) -> Result<Option<Settings>
             "provider call recording was already started; calls keep going to {}",
             active.dir.display()
         );
-        return Ok(Some(active.clone()));
+        return Ok(active.clone());
     }
-    tokio::spawn(write_all(settings.dir.clone(), settings.redact, receiver));
+    tokio::spawn(write_all(settings.dir.clone(), receiver));
     tracing::info!(
         "recording every provider call to {}",
         settings.dir.display()
     );
-    Ok(Some(settings))
+    Ok(settings)
 }
 
 /// What is being recorded and where, or nothing when recording is off.
@@ -599,12 +615,12 @@ fn safe_name(words: &str) -> String {
 /// lines. Serialising the writes here also keeps a directory that lists itself in
 /// the order the calls were placed, which is what a reader wants when they are
 /// looking for the one that went wrong.
-async fn write_all(root: PathBuf, redact: bool, mut jobs: mpsc::UnboundedReceiver<Job>) {
+async fn write_all(root: PathBuf, mut jobs: mpsc::UnboundedReceiver<Job>) {
     while let Some(job) = jobs.recv().await {
         // Blocking work in a task of its own, so that a body the size of a picture
         // is not written on a thread the rest of the application is waiting on.
         let root = root.clone();
-        let outcome = tokio::task::spawn_blocking(move || write_one(&root, redact, job)).await;
+        let outcome = tokio::task::spawn_blocking(move || write_one(&root, job)).await;
         match outcome {
             Err(cancelled) => tracing::warn!(%cancelled, "a recording task did not finish"),
             Ok(Err(error)) => tracing::warn!(%error, "a provider call could not be recorded"),
@@ -615,7 +631,7 @@ async fn write_all(root: PathBuf, redact: bool, mut jobs: mpsc::UnboundedReceive
 
 /// Writes one call down: the request, the answer, and one line in the index that
 /// ties them together.
-fn write_one(root: &Path, redact: bool, job: Job) -> Result<()> {
+fn write_one(root: &Path, job: Job) -> Result<()> {
     let Job {
         name,
         kind,
@@ -626,8 +642,8 @@ fn write_one(root: &Path, redact: bool, job: Job) -> Result<()> {
         back,
     } = job;
     let sidecars = std::cell::RefCell::new(Vec::new());
-    let request = record_of_request(&name, &placed, kind, &who, &sent, redact, &sidecars);
-    let response = record_of_response(&name, &who, &back, redact, took, &sidecars);
+    let request = record_of_request(&name, &placed, kind, &who, &sent, &sidecars);
+    let response = record_of_response(&name, &who, &back, took, &sidecars);
     let request_bytes = write_json(root, &format!("{name}.request.json"), &request)?;
     let response_bytes = write_json(root, &format!("{name}.response.json"), &response)?;
     for (suffix, bytes) in sidecars.into_inner() {
@@ -639,7 +655,6 @@ fn write_one(root: &Path, redact: bool, job: Job) -> Result<()> {
             &name,
             kind,
             &who,
-            redact,
             &placed,
             took,
             &sent,
@@ -660,7 +675,6 @@ fn record_of_request(
     kind: Kind,
     who: &Who,
     sent: &Sent,
-    redact: bool,
     sidecars: &Sidecars,
 ) -> Value {
     json!({
@@ -671,9 +685,9 @@ fn record_of_request(
         "model": who.model,
         "protocol": who.protocol,
         "method": sent.method,
-        "url": scrubbed_url(&sent.url, who, redact),
-        "headers": scrubbed_headers(&sent.headers, who, redact),
-        "body": body_value(&sent.body, name, "request", sidecars, who, redact),
+        "url": scrubbed_url(&sent.url, who),
+        "headers": scrubbed_headers(&sent.headers, who),
+        "body": body_value(&sent.body, name, "request", sidecars, who),
     })
 }
 
@@ -681,15 +695,14 @@ fn record_of_response(
     name: &str,
     who: &Who,
     back: &Back,
-    redact: bool,
     took: Duration,
     sidecars: &Sidecars,
 ) -> Value {
     let mut record = json!({
         "name": name,
         "tookMs": took.as_millis() as u64,
-        "headers": scrubbed_headers(&back.headers, who, redact),
-        "body": body_value(&back.body, name, "response", sidecars, who, redact),
+        "headers": scrubbed_headers(&back.headers, who),
+        "body": body_value(&back.body, name, "response", sidecars, who),
     });
     let map = record.as_object_mut().expect("built as an object above");
     // A call that never reached the provider has no status, and the absence says
@@ -699,13 +712,10 @@ fn record_of_response(
         None => map.insert("status".into(), Value::Null),
     };
     if let Some(error) = &back.error {
-        map.insert("error".into(), json!(scrubbed_text(error, who, redact)));
+        map.insert("error".into(), json!(scrubbed_text(error, who)));
     }
     if let Some(aggregate) = &back.aggregate {
-        map.insert(
-            "aggregate".into(),
-            json!(scrubbed_text(aggregate, who, redact)),
-        );
+        map.insert("aggregate".into(), json!(scrubbed_text(aggregate, who)));
     }
     record
 }
@@ -720,14 +730,7 @@ fn record_of_response(
 ///
 /// Nothing is cut short. A recording that left out the middle of an answer would
 /// be worse than no recording, because a reader would trust it.
-fn body_value(
-    body: &Body,
-    name: &str,
-    which: &str,
-    sidecars: &Sidecars,
-    who: &Who,
-    redact: bool,
-) -> Value {
+fn body_value(body: &Body, name: &str, which: &str, sidecars: &Sidecars, who: &Who) -> Value {
     match body {
         Body::Empty => json!({ "kind": "empty", "bytes": 0 }),
         Body::Streamed => json!({
@@ -746,7 +749,7 @@ fn body_value(
             })
         }
         Body::Text(text) => {
-            let text = scrubbed_text(text, who, redact);
+            let text = scrubbed_text(text, who);
             match serde_json::from_str::<Value>(&text) {
                 Ok(parsed) => json!({
                     "kind": "json",
@@ -775,16 +778,16 @@ fn digest(bytes: &[u8]) -> String {
 /// Masked rather than dropped: which key was used is half of diagnosing a
 /// refusal, and a masked one still says that. The mask is the same one every other
 /// diagnostic surface in the application uses, so a key can be recognised in a
-/// recording and in a log line as the same key.
-fn scrubbed_headers(headers: &[Header], who: &Who, redact: bool) -> Value {
+/// recording and in a log line as the same key. Always masked, with no setting
+/// to turn that off: a recording is read by a person and pasted into bug
+/// reports, and there is no diagnosis that needs the whole key.
+fn scrubbed_headers(headers: &[Header], who: &Who) -> Value {
     let mut out = serde_json::Map::new();
     for (name, value) in headers {
-        let value = if redact && is_credential(name) {
+        let value = if is_credential(name) {
             masked_credential(value, who)
-        } else if redact {
-            scrubbed_text(value, who, redact)
         } else {
-            value.clone()
+            scrubbed_text(value, who)
         };
         out.insert(name.clone(), Value::String(value));
     }
@@ -821,12 +824,9 @@ fn masked_credential(value: &str, who: &Who) -> String {
 /// A key belongs in a header, and the protocols here put it in one, but an address
 /// is quoted back in error messages and copied into browsers, and one that carried
 /// a key in its query would keep it wherever it was copied to.
-fn scrubbed_url(url: &str, who: &Who, redact: bool) -> String {
-    if !redact {
-        return url.to_string();
-    }
+fn scrubbed_url(url: &str, who: &Who) -> String {
     let Some((base, query)) = url.split_once('?') else {
-        return scrubbed_text(url, who, redact);
+        return scrubbed_text(url, who);
     };
     let kept: Vec<String> = query
         .split('&')
@@ -836,15 +836,15 @@ fn scrubbed_url(url: &str, who: &Who, redact: bool) -> String {
         })
         .collect();
     let joined = format!("{base}?{}", kept.join("&"));
-    scrubbed_text(&joined, who, redact)
+    scrubbed_text(&joined, who)
 }
 
 /// Any echo of the key this call carried, wherever it turns up.
 ///
 /// A provider explains a refusal by quoting back what it was sent, and what it was
 /// sent sometimes includes the key it was sent with.
-fn scrubbed_text(text: &str, who: &Who, redact: bool) -> String {
-    if !redact || who.api_key.len() < MIN_SCRUBBED_CHARS || !text.contains(&who.api_key) {
+fn scrubbed_text(text: &str, who: &Who) -> String {
+    if who.api_key.len() < MIN_SCRUBBED_CHARS || !text.contains(&who.api_key) {
         return text.to_string();
     }
     text.replace(&who.api_key, &masked(&who.api_key))
@@ -895,7 +895,6 @@ fn index_line(
     name: &str,
     kind: Kind,
     who: &Who,
-    redact: bool,
     placed: &str,
     took: Duration,
     sent: &Sent,
@@ -911,7 +910,7 @@ fn index_line(
         "model": who.model,
         "protocol": who.protocol,
         "method": sent.method,
-        "url": scrubbed_url(&sent.url, who, redact),
+        "url": scrubbed_url(&sent.url, who),
         "status": back.status,
         "tookMs": took.as_millis() as u64,
         "error": back.error,
@@ -960,12 +959,8 @@ fn private_file(path: &Path) {
 mod tests {
     use super::*;
 
-    fn file(enabled: Option<bool>, dir: Option<PathBuf>, redact: Option<bool>) -> DebugConfig {
-        DebugConfig {
-            enabled,
-            dir,
-            redact_credentials: redact,
-        }
+    fn file(enabled: Option<bool>) -> DebugConfig {
+        DebugConfig { enabled }
     }
 
     fn who(key: &str) -> Who {
@@ -1006,84 +1001,51 @@ mod tests {
 
     #[test]
     fn recording_is_off_until_somebody_asks_for_it() {
-        let settled = settle(
-            &file(None, None, None),
-            None,
-            None,
-            None,
-            Path::new("/meta"),
-        );
+        let settled = settle(&file(None), None, None, Path::new("/appdata"));
         assert!(!settled.enabled);
-        assert_eq!(settled.dir, PathBuf::from("/meta/llm-debug"));
-        assert!(
-            settled.redact,
-            "a credential is masked unless asked not to be"
-        );
+        assert_eq!(settled.dir, PathBuf::from("/appdata/records"));
     }
 
     #[test]
-    fn the_file_says_whether_recording_happens_and_where() {
-        let settled = settle(
-            &file(Some(true), Some(PathBuf::from("/elsewhere")), Some(false)),
-            None,
-            None,
-            None,
-            Path::new("/meta"),
-        );
+    fn the_file_says_whether_recording_happens() {
+        let settled = settle(&file(Some(true)), None, None, Path::new("/appdata"));
         assert!(settled.enabled);
-        assert_eq!(settled.dir, PathBuf::from("/elsewhere"));
-        assert!(!settled.redact);
     }
 
     #[test]
     fn the_environment_beats_the_file() {
-        let settled = settle(
-            &file(Some(false), Some(PathBuf::from("/from-file")), None),
-            None,
-            Some("1"),
-            Some(Path::new("/from-env")),
-            Path::new("/meta"),
-        );
+        let settled = settle(&file(Some(false)), None, Some("1"), Path::new("/appdata"));
         assert!(settled.enabled);
-        assert_eq!(settled.dir, PathBuf::from("/from-env"));
     }
 
     #[test]
     fn the_environment_can_switch_off_what_the_file_switched_on() {
-        let settled = settle(
-            &file(Some(true), None, None),
-            None,
-            Some("off"),
-            None,
-            Path::new("/meta"),
-        );
+        let settled = settle(&file(Some(true)), None, Some("off"), Path::new("/appdata"));
         assert!(!settled.enabled);
     }
 
     #[test]
     fn what_somebody_typed_at_the_process_beats_the_environment() {
         let settled = settle(
-            &file(Some(false), Some(PathBuf::from("/from-file")), None),
-            Some(&(true, Some(PathBuf::from("/from-cli")))),
+            &file(Some(false)),
+            Some(true),
             Some("0"),
-            Some(Path::new("/from-env")),
-            Path::new("/meta"),
+            Path::new("/appdata"),
         );
         assert!(settled.enabled);
-        assert_eq!(settled.dir, PathBuf::from("/from-cli"));
     }
 
     #[test]
-    fn a_flag_with_no_directory_leaves_the_file_to_say_where() {
-        let settled = settle(
-            &file(None, Some(PathBuf::from("/from-file")), None),
-            Some(&(true, None)),
-            None,
-            None,
-            Path::new("/meta"),
-        );
-        assert!(settled.enabled);
-        assert_eq!(settled.dir, PathBuf::from("/from-file"));
+    fn the_directory_is_not_a_setting_any_source_can_move() {
+        // All three sources say on or off and nothing about where: recordings
+        // land in the records subdirectory of the application data directory
+        // whatever else anybody configured.
+        for settled in [
+            settle(&file(Some(true)), None, None, Path::new("/appdata")),
+            settle(&file(None), Some(true), Some("1"), Path::new("/appdata")),
+        ] {
+            assert_eq!(settled.dir, PathBuf::from("/appdata/records"));
+        }
     }
 
     #[test]
@@ -1120,7 +1082,6 @@ mod tests {
                 ("content-type".into(), "application/json".into()),
             ],
             &who,
-            true,
         );
         let value = |name: &str| {
             headers
@@ -1143,7 +1104,6 @@ mod tests {
         let url = scrubbed_url(
             "https://api.example.invalid/v1/models?key=sk-secret-value-1234&pageSize=50",
             &who,
-            true,
         );
         assert!(url.contains("pageSize=50"), "the rest of the query stays");
         assert!(!url.contains("secret-value"), "the key does not");
@@ -1156,30 +1116,9 @@ mod tests {
         let echoed = scrubbed_text(
             r#"{"error":{"message":"invalid key sk-secret-value-1234"}}"#,
             &who,
-            true,
         );
         assert!(!echoed.contains("secret-value"));
         assert!(echoed.contains("invalid key"));
-    }
-
-    #[test]
-    fn nothing_is_masked_when_masking_was_switched_off() {
-        let who = who("sk-secret-value-1234");
-        let url = scrubbed_url(
-            "https://api.example.invalid/models?key=sk-secret-value-1234",
-            &who,
-            false,
-        );
-        assert!(url.contains("sk-secret-value-1234"));
-        let headers = scrubbed_headers(
-            &[("authorization".into(), "Bearer sk-secret-value-1234".into())],
-            &who,
-            false,
-        );
-        assert_eq!(
-            headers.get("authorization").and_then(Value::as_str),
-            Some("Bearer sk-secret-value-1234")
-        );
     }
 
     #[test]
@@ -1187,7 +1126,7 @@ mod tests {
         let who = who("short");
         // Masking five characters would show most of them, which is worse than
         // either extreme: it looks protected and is not.
-        assert_eq!(scrubbed_text("short", &who, true), "short");
+        assert_eq!(scrubbed_text("short", &who), "short");
     }
 
     /// A recorder of the test's own: a directory to write into, and a writer
@@ -1206,12 +1145,11 @@ mod tests {
             settings: Settings {
                 enabled: true,
                 dir: dir.path().to_path_buf(),
-                redact: true,
             },
             sequence: AtomicU64::new(1),
             jobs: sender,
         };
-        tokio::spawn(write_all(dir.path().to_path_buf(), true, receiver));
+        tokio::spawn(write_all(dir.path().to_path_buf(), receiver));
         (dir, recorder)
     }
 
@@ -1222,7 +1160,7 @@ mod tests {
     fn written(job: Job) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("a directory to record into");
         let root = dir.path().to_path_buf();
-        write_one(&root, true, job).expect("a recording is written");
+        write_one(&root, job).expect("a recording is written");
         (dir, root)
     }
 
@@ -1317,8 +1255,8 @@ mod tests {
         let mut second = job(Body::Text(r#"{"n":2}"#.into()), Some(200));
         second.name = "2026-01-01T00-00-00Z_0002_chan_painter_generate".into();
         second.kind = Kind::TaskPoll;
-        write_one(root, true, first).expect("the first is written");
-        write_one(root, true, second).expect("the second is written");
+        write_one(root, first).expect("the first is written");
+        write_one(root, second).expect("the second is written");
 
         let lines = std::fs::read_to_string(root.join("index.jsonl")).expect("an index");
         assert_eq!(lines.lines().count(), 2, "one line each, appended");
@@ -1400,7 +1338,6 @@ mod tests {
                 "request",
                 &Sidecars::default(),
                 &who("k"),
-                true
             )["bytes"],
             0
         );
@@ -1412,7 +1349,6 @@ mod tests {
             "request",
             &Sidecars::default(),
             &who("k"),
-            true,
         );
         assert_eq!(streamed["kind"], "streamed");
         assert!(streamed["note"]

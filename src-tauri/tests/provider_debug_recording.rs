@@ -17,7 +17,7 @@ use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use moka_canvas::config::{DebugConfig, GenerateConfig};
+use moka_canvas::config::GenerateConfig;
 use moka_canvas::domain::Capability;
 use moka_canvas::generate::adapters::{for_protocol, list_models, ChannelCall};
 use moka_canvas::generate::providers::ResolvedModel;
@@ -91,12 +91,7 @@ fn watching() -> (DeltaSink, Arc<std::sync::Mutex<String>>) {
 /// One directory per process, because the recorder is one: a second call keeps
 /// the first, which is the behaviour under test rather than an accident of it.
 async fn record_into(dir: &Path) -> PathBuf {
-    let settings = DebugConfig {
-        enabled: Some(true),
-        dir: Some(dir.to_path_buf()),
-        redact_credentials: None,
-    };
-    moka_canvas::generate::debug::init(&settings, dir)
+    moka_canvas::generate::debug::init_in(dir)
         .expect("recording starts")
         .expect("recording is on");
     dir.to_path_buf()
