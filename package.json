@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "favicon": "node scripts/build-favicon.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
