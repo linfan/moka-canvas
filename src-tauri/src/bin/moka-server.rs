@@ -10,9 +10,11 @@ use moka_canvas::server::LocalServer;
 #[command(name = "moka-server", about = "Serve Moka Canvas over localhost")]
 struct Args {
     /// YAML configuration file. Relative paths inside it resolve against the
-    /// current working directory.
-    #[arg(long, default_value = "config/moka.example.yaml")]
-    config: PathBuf,
+    /// current working directory. Without this flag, `config/moka.yaml` is read
+    /// if it is there and every value stays at its default if it is not; a path
+    /// named here has to exist.
+    #[arg(long)]
+    config: Option<PathBuf>,
     /// Overrides server.staticDir from the configuration file.
     #[arg(long)]
     static_dir: Option<PathBuf>,
@@ -58,7 +60,21 @@ anything able to read that directory can read."
     if let Some(dir) = args.llm_debug {
         moka_canvas::generate::debug::from_cli(dir);
     }
-    let mut config = load_config_file(&args.config)?;
+    // A file named on the command line has to be there; the one this program
+    // picked for itself may be missing, and then every value stays at its
+    // default. The difference is said out loud rather than left to be noticed in
+    // an answer that looks like a configuration nobody wrote.
+    let typed_config = args.config.is_some();
+    let config_path = args
+        .config
+        .unwrap_or_else(|| PathBuf::from(moka_canvas::config::DEFAULT_CONFIG_PATH));
+    let mut config = load_config_file(&config_path, typed_config)?;
+    if !typed_config && !config_path.exists() {
+        tracing::info!(
+            "no configuration file at {}; every value is at its default",
+            config_path.display()
+        );
+    }
     if let Some(static_dir) = args.static_dir {
         config.server.static_dir = static_dir;
     }

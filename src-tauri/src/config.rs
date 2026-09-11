@@ -2,7 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Where a web deployment is looked for when nothing was typed for it: a file
+/// beside the project, never inside the program tree, and never tracked — the
+/// tracked one is `config/moka.example.yaml`, which says what the keys mean
+/// rather than what one machine wants.
+pub const DEFAULT_CONFIG_PATH: &str = "config/moka.yaml";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
     pub bind: String,
@@ -11,11 +17,29 @@ pub struct ServerConfig {
     pub max_upload_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            bind: default_bind().to_string(),
+            static_dir: PathBuf::from(default_static_dir()),
+            max_upload_bytes: default_max_upload_bytes(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectsConfig {
     #[serde(default = "default_max_moka_file_bytes")]
     pub max_moka_file_bytes: u64,
+}
+
+impl Default for ProjectsConfig {
+    fn default() -> Self {
+        Self {
+            max_moka_file_bytes: default_max_moka_file_bytes(),
+        }
+    }
 }
 
 /// Application-level metadata: recent projects, provider channels, encrypted
@@ -43,7 +67,7 @@ impl Default for MetadataConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowConfig {
     #[serde(default = "default_enabled_executors")]
@@ -203,7 +227,7 @@ impl GenerateConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicConfig {
     pub product_name: String,
@@ -213,7 +237,17 @@ pub struct PublicConfig {
     pub allowed_media_types: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for PublicConfig {
+    fn default() -> Self {
+        Self {
+            product_name: default_product_name().to_string(),
+            max_upload_bytes: default_max_upload_bytes(),
+            allowed_media_types: default_allowed_media_types(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsConfig {
     #[serde(default = "default_max_nodes_per_canvas")]
@@ -240,6 +274,15 @@ impl Default for LimitsConfig {
     }
 }
 
+fn default_bind() -> &'static str {
+    "127.0.0.1:3000"
+}
+fn default_static_dir() -> &'static str {
+    "./dist"
+}
+fn default_product_name() -> &'static str {
+    "Moka Canvas"
+}
 fn default_max_upload_bytes() -> u64 {
     2_147_483_648
 }
@@ -331,7 +374,7 @@ fn default_video_max_polls() -> u32 {
     120
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub version: u32,
@@ -346,6 +389,25 @@ pub struct AppConfig {
     pub public: PublicConfig,
     #[serde(default)]
     pub limits: LimitsConfig,
+}
+
+impl Default for AppConfig {
+    /// What a deployment gets when no file was read: every ceiling and budget at
+    /// the number the example file documents, loopback on port 3000, and the
+    /// built frontend taken from `./dist` beside the working directory. The
+    /// metadata directory is deliberately absent, so it resolves per platform.
+    fn default() -> Self {
+        Self {
+            version: 1,
+            server: ServerConfig::default(),
+            projects: ProjectsConfig::default(),
+            metadata: MetadataConfig::default(),
+            workflow: WorkflowConfig::default(),
+            generate: GenerateConfig::default(),
+            public: PublicConfig::default(),
+            limits: LimitsConfig::default(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -427,9 +489,25 @@ impl RuntimeMode {
 }
 
 /// Loads the standalone YAML for the CLI/web server.
-pub fn load_config_file(path: &Path) -> Result<AppConfig, ConfigError> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|error| ConfigError::Unreadable(format!("{}: {error}", path.display())))?;
+///
+/// A file that is named at the command line has to be there: a deployment that
+/// means to be read should not be answered by defaults because one character of
+/// a path was mistyped. Only the path the program picked for itself may be
+/// absent, and then it is absent on a fresh checkout, where defaults are what
+/// anybody starting the server locally could mean.
+pub fn load_config_file(path: &Path, typed_by_user: bool) -> Result<AppConfig, ConfigError> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !typed_by_user => {
+            return Ok(AppConfig::default());
+        }
+        Err(error) => {
+            return Err(ConfigError::Unreadable(format!(
+                "{}: {error}",
+                path.display()
+            )));
+        }
+    };
     parse_config(&raw)
 }
 
@@ -527,6 +605,50 @@ mod tests {
             config.workflow.enabled_executors,
             vec!["deterministic".to_string(), "provider".to_string()]
         );
+    }
+
+    #[test]
+    fn the_example_file_says_exactly_what_the_defaults_do() {
+        let config = parse_config(include_str!("../../config/moka.example.yaml"))
+            .expect("example config must parse");
+        assert_eq!(
+            config,
+            AppConfig::default(),
+            "an example that disagreed with the built-in defaults would be the drift \
+             nobody can find from an answer"
+        );
+    }
+
+    #[test]
+    fn a_default_path_that_is_not_there_leaves_every_value_at_its_default() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("config/moka.yaml");
+        let config = load_config_file(&missing, false).expect("an absent default is not a failure");
+        assert_eq!(config, AppConfig::default());
+        assert_eq!(config.server.bind, "127.0.0.1:3000");
+        assert_eq!(config.metadata, MetadataConfig::default());
+    }
+
+    #[test]
+    fn a_config_named_at_the_command_line_has_to_be_there() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("moka.yaml");
+        let error = load_config_file(&missing, true).unwrap_err();
+        assert_eq!(error.code(), "CONFIG_UNREADABLE");
+        assert!(
+            error.to_string().contains("moka.yaml"),
+            "the refusal has to name the file somebody typed: {error}"
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_there_but_unreadable_is_refused_either_way() {
+        let root = tempfile::tempdir().unwrap();
+        // A directory where a file is expected reads as unopenable rather than
+        // absent, so the fallback for a missing default must not swallow it.
+        let not_a_file = root.path().to_path_buf();
+        assert!(load_config_file(&not_a_file, false).is_err());
+        assert!(load_config_file(&not_a_file, true).is_err());
     }
 
     #[test]

@@ -38,6 +38,8 @@ check-boundaries:
 		(printf '%s\n' 'no database dependency while the file backend is the only one' >&2; exit 1)
 	@! grep -rn "json.tmp" src-tauri/src || \
 		(printf '%s\n' 'documents must go through the single atomic-write implementation' >&2; exit 1)
+	@! git ls-files --error-unmatch config/moka.yaml >/dev/null 2>&1 || \
+		(printf '%s\n' 'config/moka.yaml is what one deployment reads and must stay untracked; config/moka.example.yaml is the tracked one' >&2; exit 1)
 
 test:
 	npm test

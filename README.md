@@ -31,6 +31,8 @@ Tauri bundles the built `dist/` directory as a resource, starts the same Axum se
 
 Application-level state — provider channels, encrypted API keys, defaults and preferences, the recent-project list, and the prompt library — lives in one directory under the platform application-data location, never inside the program tree. Startup rejects a directory that resolves next to the executable, inside the served assets, or inside the working directory.
 
+What a server listens on, how long it waits for a provider, and what it refuses to carry is deployment configuration instead, and the server needs none of it to start: with no file it runs on built-in defaults. `config/moka.yaml` is read when it is there and is never committed; `config/moka.example.yaml` is the tracked one, documenting every key and agreeing with those defaults line for line. See [docs/deployment.md](docs/deployment.md).
+
 Three environment variables override the resolved values: `MOKA_METADATA_DIR` (location), `MOKA_METADATA_STORE` (only `file` is accepted), and `MOKA_METADATA_KEY` (the server-mode master key, base64 of 32 bytes). The directory must be on a local disk and must be used by one process at a time; a second process pointing at it fails to start and names the pid holding the lock.
 
 A master key does not have to exist before the first API key is stored: one is generated into the OS keychain on a desktop, or into `<metadata.dir>/master.key` on a server started without `MOKA_METADATA_KEY`. The file tier is the weaker one — the key sits beside the ciphertext it protects — so export a key (`moka-server --generate-key` prints one) for any deployment that is not local and single-user. `/api/health` and the settings page report which tier is in use.

@@ -19,9 +19,24 @@ cd release/moka-canvas-web-<version>-<platform>-<arch>
 
 | Flag           | Default                            | Effect                                                 |
 | -------------- | ---------------------------------- | ------------------------------------------------------ |
-| `--config`     | `config/moka.example.yaml`         | YAML configuration file                                |
+| `--config`     | `config/moka.yaml`, if it exists   | YAML configuration file                                |
 | `--static-dir` | `server.staticDir` from the config | Built frontend to serve                                |
 | `--port`       | `server.bind` from the config      | Overrides the port and pins the address to `127.0.0.1` |
+
+The server starts from built-in defaults and reads nothing else, so a first run
+needs no file at all. To tune it, copy the tracked example, which says what every
+key means and otherwise agrees with those defaults one for one:
+
+```sh
+cp config/moka.example.yaml config/moka.yaml
+```
+
+`config/moka.yaml` is what one machine wants — an address, a set of ceilings —
+and is ignored by git; `config/moka.example.yaml` is documentation and is
+tracked. A path named with `--config` is a different matter: if it is not there,
+startup fails rather than serving defaults nobody asked for, because a
+deployment that meant to be read should not be quietly unread. Relative paths
+inside a configuration file resolve against the working directory.
 
 `--port` always binds loopback. Exposing the server on another interface means
 editing `server.bind` in the configuration file, and means accepting that there
