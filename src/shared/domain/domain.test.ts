@@ -44,7 +44,7 @@ import type {
 } from "./types";
 import {
   mentionNodeIds,
-  modelReferenceShaped,
+  modelIdentifierShaped,
   topologicalOrder,
   unreferencedAssets,
   validateBounds,
@@ -295,7 +295,8 @@ describe("generation validation", () => {
   it("flags a spec that disagrees with its node", () => {
     const canvas = goldenCanvas();
     const broken = spec("image", "Redraw @[node:missing] in ink");
-    broken.model = "painter";
+    // An old "channel::model" reference is not a model configuration id.
+    broken.model = "channel-1::painter";
     patchData(nodeOf(canvas, ids.text), { generation: broken });
 
     expect(flagged(canvas, ids.text, "GENERATION_CAPABILITY_MISMATCH")).toBe(
@@ -395,10 +396,12 @@ describe("generation validation", () => {
     expect(mentionNodeIds("no mentions here")).toEqual([]);
     expect(mentionNodeIds("@[node:] and @[node")).toEqual([]);
 
-    expect(modelReferenceShaped("main::painter")).toBe(true);
-    expect(modelReferenceShaped("::painter")).toBe(false);
-    expect(modelReferenceShaped("main::")).toBe(false);
-    expect(modelReferenceShaped("painter")).toBe(false);
+    expect(modelIdentifierShaped("painter")).toBe(true);
+    // An old "channel::model" reference names nothing now.
+    expect(modelIdentifierShaped("main::painter")).toBe(false);
+    expect(modelIdentifierShaped("::painter")).toBe(false);
+    expect(modelIdentifierShaped("")).toBe(false);
+    expect(modelIdentifierShaped("two words")).toBe(false);
   });
 });
 

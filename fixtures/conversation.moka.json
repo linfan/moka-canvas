@@ -32,7 +32,7 @@
           "operationNodeId": "00000000-0000-7000-8000-00000000000b",
           "assistantSessionId": "00000000-0000-7000-8000-000000000028",
           "parameterSnapshot": {
-            "model": "demo::painter"
+            "model": "painter"
           },
           "createdAt": "2026-01-01T00:00:01.000Z"
         }

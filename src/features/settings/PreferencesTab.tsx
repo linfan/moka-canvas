@@ -12,7 +12,7 @@ import {
   MAX_VIDEO_SECONDS,
   MIN_AUDIO_SPEED,
 } from "../../shared/domain";
-import { useProviderStore } from "./providerStore";
+import { useModelStore } from "./modelStore";
 import {
   ASKING_A_MODEL,
   BAR_ENTRIES,
@@ -50,8 +50,8 @@ function clone(preferences: GenerationPreferences): GenerationPreferences {
  * that saving here cannot undo a change made somewhere else.
  */
 function GenerationDefaults() {
-  const view = useProviderStore((state) => state.view);
-  const saving = useProviderStore((state) => state.saving);
+  const view = useModelStore((state) => state.view);
+  const saving = useModelStore((state) => state.saving);
   const [draft, setDraft] = useState<GenerationPreferences | null>(() =>
     view ? clone(view.preferences) : null,
   );
@@ -262,9 +262,7 @@ function GenerationDefaults() {
         <button
           className="primary"
           disabled={saving || !changed}
-          onClick={() =>
-            void useProviderStore.getState().savePreferences(patch)
-          }
+          onClick={() => void useModelStore.getState().savePreferences(patch)}
           type="button"
         >
           {saving ? "Saving…" : "Save preferences"}

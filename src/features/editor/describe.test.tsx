@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import App from "../../App";
-import type { ProvidersView } from "../../api/providers";
+import type { ModelsView } from "../../api";
 import {
   CASCADE_DROP_OFFSET,
   DEFAULT_NODE_WIDTH,
@@ -19,7 +19,7 @@ import {
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
-import { useProviderStore } from "../settings/providerStore";
+import { useModelStore } from "../settings/modelStore";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
@@ -28,7 +28,7 @@ import { BAR_ENTRIES, useToolPrefs } from "./stores/toolPrefs";
 
 /** Whether this deployment can reach a provider at all. */
 let executors: string[] = ["provider"];
-/** What the channel offers, so a test can take the text model away. */
+/** What is configured, so a test can take the text model away. */
 let offersText = true;
 
 function config() {
@@ -47,37 +47,40 @@ function config() {
   };
 }
 
-function providers(): ProvidersView {
-  const models = [
+function providers(): ModelsView {
+  const models: ModelsView["models"] = [
     ...(offersText
       ? [
           {
             id: "reader",
-            capability: "text" as const,
-            alias: "",
+            category: "text" as const,
+            protocol: "openaiChat" as const,
+            url: "https://api.example.com/v1/chat/completions",
+            model: "reader-1",
+            displayName: "Example Reader",
             enabled: true,
+            apiKey: { set: true, masked: "sk-…abcd" },
           },
         ]
       : []),
-    { id: "painter", capability: "image" as const, alias: "", enabled: true },
+    {
+      id: "painter",
+      category: "image" as const,
+      protocol: "openaiImages" as const,
+      url: "https://api.example.com/v1/images/generations",
+      model: "painter-1",
+      displayName: "Example Painter",
+      enabled: true,
+      apiKey: { set: true, masked: "sk-…abcd" },
+    },
   ];
   return {
     version: 1,
     revision: 7,
-    channels: [
-      {
-        id: "example",
-        name: "Example Inc",
-        baseUrl: "https://api.example.com/v1",
-        protocol: "openai",
-        enabled: true,
-        models,
-        apiKey: { set: true, masked: "sk-…abcd" },
-      },
-    ],
+    models,
     defaults: {
-      text: offersText ? "example::reader" : null,
-      image: "example::painter",
+      text: offersText ? "reader" : null,
+      image: "painter",
       audio: null,
       video: null,
     },
@@ -175,7 +178,7 @@ function route(url: string, init?: RequestInit): Response {
       },
     ]);
   }
-  if (url === "/api/v1/providers") return json(providers());
+  if (url === "/api/v1/models") return json(providers());
   if (url === "/api/v1/projects/open") {
     return json({
       root: "/tmp/golden",
@@ -215,7 +218,7 @@ beforeEach(() => {
   useProjectStore.getState().close();
   useHistoryStore.getState().clear();
   useAppStore.setState({ toasts: [], config: null });
-  useProviderStore.setState({ view: null, error: null });
+  useModelStore.setState({ view: null, error: null });
   useEditorStore.setState({
     selection: { nodeIds: [], edgeIds: [] },
     pictureTool: null,
@@ -299,7 +302,9 @@ describe("reading a picture back as words", () => {
       "Describe this picture as the prompt that would make it.",
     );
     expect(dialog.textContent).toContain("it costs what an ask costs");
-    expect(dialog.textContent).toContain("Asked through Example Inc as reader");
+    expect(dialog.textContent).toContain(
+      "Asked through Example Reader as reader-1",
+    );
     expect(askButton(dialog)).toHaveProperty("disabled", false);
     // Nothing has been spent by opening it, and it is not the dialog that asks
     // for numbers: what this one asks for is a question.
@@ -324,7 +329,7 @@ describe("reading a picture back as words", () => {
     expect(asks).toHaveLength(1);
     expect(asks[0]).toMatchObject({
       capability: "text",
-      model: "example::reader",
+      model: "reader",
       prompt: "What would have made this picture?",
       // The picture travels as a reference rather than as the thing to be
       // edited: nothing here is asking for a new one.

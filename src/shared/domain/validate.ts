@@ -338,9 +338,14 @@ export function mentionNodeIds(prompt: string): string[] {
     .filter((nodeId) => nodeId !== "");
 }
 
-export function modelReferenceShaped(model: string): boolean {
-  const separator = model.indexOf("::");
-  return separator > 0 && separator + 2 < model.length;
+/**
+ * True when `model` is shaped like a model configuration identifier: one
+ * piece, no whitespace, and no legacy "channelId::modelId" separator — the
+ * halves of an old reference name nothing now, so a document carrying one is
+ * from before model configurations replaced channels.
+ */
+export function modelIdentifierShaped(model: string): boolean {
+  return model !== "" && !model.includes("::") && !/\s/.test(model);
 }
 
 function generationIssues(
@@ -373,10 +378,10 @@ function generationIssues(
       `Generation capability "${spec.capability}" does not match node kind "${node.kind}"`,
     );
   }
-  if (spec.model !== "" && !modelReferenceShaped(spec.model)) {
+  if (spec.model !== "" && !modelIdentifierShaped(spec.model)) {
     at(
       "GENERATION_MODEL_MISSING",
-      `Generation model "${spec.model}" is not a channelId::modelId reference`,
+      `Generation model "${spec.model}" is not a model configuration identifier`,
     );
   }
   if (spec.prompt.length > MAX_PROMPT_LENGTH) {

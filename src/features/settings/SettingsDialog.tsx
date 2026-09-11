@@ -1,38 +1,42 @@
 import { useEffect } from "react";
-import { ChannelsTab } from "./ChannelsTab";
-import { DefaultsTab } from "./DefaultsTab";
-import { PreferencesTab } from "./PreferencesTab";
 import {
-  guidanceFor,
-  useProviderStore,
-  type SettingsTab,
-} from "./providerStore";
+  CAPABILITY_LABELS,
+  MODEL_CAPABILITIES,
+  type Capability,
+} from "../../shared/domain";
+import { ModelsTab } from "./ModelsTab";
+import { guidanceFor, useModelStore, type SettingsTab } from "./modelStore";
+import { PreferencesTab } from "./PreferencesTab";
 
 const TABS: { id: SettingsTab; label: string }[] = [
-  { id: "channels", label: "Channels" },
-  { id: "defaults", label: "Defaults" },
+  ...MODEL_CAPABILITIES.map((capability: Capability) => ({
+    id: capability as SettingsTab,
+    label: CAPABILITY_LABELS[capability],
+  })),
   { id: "preferences", label: "Preferences" },
 ];
 
 /**
- * Provider configuration.
+ * Model configuration.
  *
- * Reachable from the launcher as well as the editor, because a channel has to
- * be set up before any project exists for it to be used from.
+ * Reachable from the launcher as well as the editor, because a model has to
+ * be set up before any project exists for it to be used from. Each category
+ * gets its own tab: the models that serve one kind of node are listed, added,
+ * copied, tested, and defaulted together, and nothing else is mixed in.
  */
 export function SettingsDialog() {
-  const open = useProviderStore((state) => state.open);
-  const tab = useProviderStore((state) => state.tab);
-  const error = useProviderStore((state) => state.error);
-  const errorCode = useProviderStore((state) => state.errorCode);
-  const loading = useProviderStore((state) => state.loading);
-  const loaded = useProviderStore((state) => state.view !== null);
+  const open = useModelStore((state) => state.open);
+  const tab = useModelStore((state) => state.tab);
+  const error = useModelStore((state) => state.error);
+  const errorCode = useModelStore((state) => state.errorCode);
+  const loading = useModelStore((state) => state.loading);
+  const loaded = useModelStore((state) => state.view !== null);
   const guidance = guidanceFor(errorCode);
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") useProviderStore.getState().closeSettings();
+      if (event.key === "Escape") useModelStore.getState().closeSettings();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -40,7 +44,7 @@ export function SettingsDialog() {
 
   if (!open) return null;
 
-  const close = () => useProviderStore.getState().closeSettings();
+  const close = () => useModelStore.getState().closeSettings();
 
   return (
     <div className="dialog-backdrop" onClick={close} role="presentation">
@@ -75,7 +79,7 @@ export function SettingsDialog() {
               className={tab === entry.id ? "is-active" : ""}
               id={`settings-tab-${entry.id}`}
               key={entry.id}
-              onClick={() => useProviderStore.getState().setTab(entry.id)}
+              onClick={() => useModelStore.getState().setTab(entry.id)}
               role="tab"
               type="button"
             >
@@ -92,12 +96,10 @@ export function SettingsDialog() {
         >
           {loading && !loaded ? (
             <p className="settings-hint">Loading configuration…</p>
-          ) : tab === "channels" ? (
-            <ChannelsTab />
-          ) : tab === "defaults" ? (
-            <DefaultsTab />
-          ) : (
+          ) : tab === "preferences" ? (
             <PreferencesTab />
+          ) : (
+            <ModelsTab category={tab} />
           )}
         </div>
 

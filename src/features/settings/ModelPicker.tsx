@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { CAPABILITY_LABELS, type Capability } from "../../shared/domain";
-import { modelOptionsFor, useProviderStore } from "./providerStore";
+import { modelOptionsFor, useModelStore } from "./modelStore";
 
 interface Props {
   capability: Capability;
@@ -15,8 +15,8 @@ interface Props {
  * The model for one capability: the stored default in settings, or one node's
  * own choice.
  *
- * A stored reference whose channel has since been switched off or deleted is
- * still offered, rather than quietly collapsing to "no default": the setting is
+ * A stored id whose model has since been switched off or deleted is still
+ * offered, rather than quietly collapsing to "no default": the setting is
  * still in force, and hiding it would leave no way to clear it.
  */
 export function ModelPicker({
@@ -26,7 +26,7 @@ export function ModelPicker({
   disabled = false,
   noneLabel = "No default",
 }: Props) {
-  const view = useProviderStore((state) => state.view);
+  const view = useModelStore((state) => state.view);
   const options = useMemo(
     () => modelOptionsFor(view, capability),
     [view, capability],

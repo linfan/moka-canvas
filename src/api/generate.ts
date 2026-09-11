@@ -24,7 +24,7 @@ export interface GenerateInput {
  */
 export interface GenerateRequest {
   capability: Capability;
-  /** "channelId::modelId"; empty means the default for the capability. */
+  /** A model configuration id; empty means the default for the capability. */
   model?: string;
   prompt?: string;
   /** An instruction that frames the prompt rather than forming part of it. */

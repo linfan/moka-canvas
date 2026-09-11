@@ -5,10 +5,7 @@ import {
   describeDefaultPrompt,
   describeFramingPrompt,
 } from "../../../shared/prompts";
-import {
-  splitModelReference,
-  useProviderStore,
-} from "../../settings/providerStore";
+import { useModelStore } from "../../settings/modelStore";
 import { buildResourceIndex } from "../canvas/mediaCards";
 import { fileDescription } from "../interactions/actions";
 import {
@@ -44,7 +41,7 @@ const FRAMING = describeFramingPrompt();
  * The other half of a generation: a picture arrived from somewhere and what made
  * it is not written down, so the words are read out of it instead. They are asked
  * for here rather than filed silently, because an ask costs what an ask costs and
- * the question, the picture and the channel that will answer are all things a
+ * the question, the picture and the model that will answer are all things a
  * reader should see before spending.
  *
  * What comes back is filed as a text node wired into the picture's prompt, which
@@ -56,7 +53,7 @@ const FRAMING = describeFramingPrompt();
 export function DescribeDialog() {
   const asked = useEditorStore((state) => state.pictureTool);
   const moka = useProjectStore((state) => state.moka);
-  const providers = useProviderStore((state) => state.view);
+  const view = useModelStore((state) => state.view);
   const reachable = useGenerationAvailable();
   const [question, setQuestion] = useState(START_QUESTION);
   const [said, setSaid] = useState("");
@@ -113,11 +110,11 @@ export function DescribeDialog() {
   if (!entry) return null;
 
   const close = () => useEditorStore.getState().closePictureTool();
-  const reference = providers?.defaults.text ?? null;
-  const split = reference ? splitModelReference(reference) : null;
-  const channel = split
-    ? (providers?.channels.find((one) => one.id === split.channelId) ?? null)
-    : null;
+  const reference = view?.defaults.text ?? null;
+  const chosen =
+    (reference !== null
+      ? view?.models.find((one) => one.id === reference)
+      : null) ?? null;
   const refusal = !reachable
     ? GENERATION_UNAVAILABLE
     : reference === null
@@ -232,16 +229,16 @@ export function DescribeDialog() {
 
         <p
           className={
-            channel === null || reference === null
+            chosen === null || reference === null
               ? "dialog-error"
               : "dialog-note"
           }
         >
           {reference === null
             ? "No model is chosen for written answers, so there is nothing to ask."
-            : channel === null
-              ? "The channel this would be asked through is gone, so there is nothing to ask."
-              : `Asked through ${channel.name} as ${split?.modelId ?? reference}. A model that cannot see a picture will answer about the question alone, which reads as a description of nothing — Escape lets go of an answer still arriving.`}
+            : chosen === null
+              ? "The model this would be asked through is gone, so there is nothing to ask."
+              : `Asked through ${chosen.displayName} as ${chosen.model}. A model that cannot see a picture will answer about the question alone, which reads as a description of nothing — Escape lets go of an answer still arriving.`}
         </p>
 
         {unread && (

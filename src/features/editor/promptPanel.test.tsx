@@ -20,13 +20,13 @@ import {
 } from "../../shared/domain";
 import type { GenerationSpec, MokaFile, RunRecord } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
-import type { GenerationPreview, ProvidersView } from "../../api";
+import type { GenerationPreview, ModelsView } from "../../api";
 import { GENERATION_UNAVAILABLE, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
 import { useRunStore } from "./stores/runStore";
-import { useProviderStore } from "../settings/providerStore";
+import { useModelStore } from "../settings/modelStore";
 import { undo } from "./commands/execute";
 import { enterIntent } from "./interactions/keyboard";
 
@@ -46,12 +46,12 @@ const CONFIG = {
   capabilities: { mode: "web", assetCategories: [] },
 };
 
-/** One channel offering one model per capability, as the server would send it. */
-function providers(channels: ProvidersView["channels"]): ProvidersView {
+/** One model per capability, as the server would send them. */
+function models(models: ModelsView["models"]): ModelsView {
   return {
     version: 1,
     revision: 7,
-    channels,
+    models,
     defaults: { text: null, image: null, audio: null, video: null },
     preferences: {
       systemPrompt: "",
@@ -70,23 +70,33 @@ function providers(channels: ProvidersView["channels"]): ProvidersView {
   };
 }
 
-const PAINTER = {
-  id: "chan-1",
-  name: "Demo",
-  baseUrl: "https://demo.test/v1",
-  protocol: "openai" as const,
-  enabled: true,
-  apiKey: { set: true, masked: "sk-…abcd" },
-  models: [
-    { id: "painter", capability: "image" as const, alias: "", enabled: true },
-    { id: "writer", capability: "text" as const, alias: "", enabled: true },
-  ],
-};
+const DEMO_MODELS: ModelsView["models"] = [
+  {
+    id: "painter",
+    category: "image",
+    protocol: "openaiImages",
+    url: "https://demo.test/v1/images/generations",
+    model: "painter-1",
+    displayName: "Painter",
+    enabled: true,
+    apiKey: { set: true, masked: "sk-…abcd" },
+  },
+  {
+    id: "writer",
+    category: "text",
+    protocol: "openaiChat",
+    url: "https://demo.test/v1/chat/completions",
+    model: "writer-1",
+    displayName: "Writer",
+    enabled: true,
+    apiKey: { set: true, masked: "sk-…abcd" },
+  },
+];
 
 interface MockApi {
   calls: { url: string; method: string; body?: unknown }[];
   executors: string[];
-  providers: ProvidersView;
+  models: ModelsView;
   /** The runs the server is holding, which the editor reads when it opens. */
   runs: RunRecord[];
   /** What a node will send, or null for a node the server has no ask for yet. */
@@ -97,7 +107,7 @@ interface MockApi {
 const api: MockApi = {
   calls: [],
   executors: [PROVIDER_EXECUTOR_KEY],
-  providers: providers([PAINTER]),
+  models: models(DEMO_MODELS),
   runs: [],
   preview: null,
   moka: () => buildGoldenMokaFile(),
@@ -171,7 +181,7 @@ function route(url: string, method: string, body: unknown): Response {
     });
   }
   if (url === "/api/health") return json({ status: "ok" });
-  if (url === "/api/v1/providers") return json(api.providers);
+  if (url === "/api/v1/models") return json(api.models);
   if (url === "/api/v1/recent-projects") return json([]);
   if (
     url === "/api/v1/projects/open" ||
@@ -260,7 +270,7 @@ function specOf(nodeId: string): GenerationSpec | undefined {
 beforeEach(() => {
   api.calls = [];
   api.executors = [PROVIDER_EXECUTOR_KEY];
-  api.providers = providers([PAINTER]);
+  api.models = models(DEMO_MODELS);
   api.runs = [];
   api.preview = makePreview();
   api.moka = () => buildGoldenMokaFile();
@@ -280,7 +290,7 @@ beforeEach(() => {
   useRunStore.getState().reset();
   useProjectStore.getState().close();
   useHistoryStore.getState().clear();
-  useProviderStore.getState().reset();
+  useModelStore.getState().reset();
   useAppStore.setState({
     phase: "booting",
     config: null,
@@ -468,13 +478,13 @@ describe("the generation panel", () => {
     const picker = within(panel()).getByRole("combobox", { name: "Image" });
     expect(picker).toHaveProperty("value", "");
 
-    fireEvent.change(picker, { target: { value: "chan-1::painter" } });
+    fireEvent.change(picker, { target: { value: "painter" } });
     await settle();
-    expect(specOf(ids.image)?.model).toBe("chan-1::painter");
+    expect(specOf(ids.image)?.model).toBe("painter");
   });
 
   it("offers the way to configure models when there are none", async () => {
-    api.providers = providers([]);
+    api.models = models([]);
     await openEditor();
     selectNode(ids.image);
     await settle();
@@ -487,20 +497,19 @@ describe("the generation panel", () => {
     );
     await settle();
     expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
-    // With no channel at all the answer is "add one", which is the editor
-    // rather than a list to search.
-    expect(screen.getByRole("heading", { name: "New channel" })).toBeTruthy();
+    // With no model at all the answer is "add one", on the category's own tab
+    // rather than in a list to search.
+    expect(
+      screen.getByRole("button", { name: "New image model" }),
+    ).toBeTruthy();
   });
 
-  it("goes to the channel that would serve the node, not to a list of them", async () => {
-    // A channel that serves images only: an image node is fine, a text node has
-    // nothing to be pointed at, and the way out leads to this channel.
-    api.providers = providers([
-      {
-        ...PAINTER,
-        models: PAINTER.models.filter((model) => model.capability === "image"),
-      },
-    ]);
+  it("goes to the category that would serve the node, not to a list of them", async () => {
+    // Only an image model exists: an image node is fine, a text node has
+    // nothing to be pointed at, and the way out leads to the text tab.
+    api.models = models(
+      DEMO_MODELS.filter((model) => model.category === "image"),
+    );
     await openEditor();
     selectNode(ids.text);
     await settle();
@@ -509,8 +518,10 @@ describe("the generation panel", () => {
       within(panel()).getByRole("button", { name: "Configure models" }),
     );
     await settle();
-    expect(screen.getByRole("heading", { name: "Edit Demo" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Models" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Text" }).getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(screen.getByTestId("text-empty")).toBeTruthy();
   });
 
   it("saves what was typed before asking for the run", async () => {
@@ -894,7 +905,7 @@ describe("driving one node's run", () => {
   });
 
   it("says on the button when this kind of node has no model", async () => {
-    api.providers = providers([]);
+    api.models = models([]);
     await openEditor();
     selectNode(ids.image);
     await settle();

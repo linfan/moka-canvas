@@ -1141,7 +1141,7 @@ describe("generation UI", () => {
     await screen.findByRole("button", { name: "▶ Run this node" });
     expect(inspected("Capability")).toBe("Image");
     expect(inspected("Mode")).toBe("generate");
-    expect(inspected("Model")).toBe("demo::painter");
+    expect(inspected("Model")).toBe("painter");
     expect(inspected("Inputs from")).toBe("mentions");
     // The panel under the node carries the same words, so the excerpt is read
     // from the inspector's own row rather than from anywhere on screen.
@@ -1216,7 +1216,7 @@ describe("generation UI", () => {
     expect(patch?.patch.data.generation.prompt).toBe(
       "Paint the lake at night as a poster.",
     );
-    expect(patch?.patch.data.generation.model).toBe("demo::painter");
+    expect(patch?.patch.data.generation.model).toBe("painter");
     expect(api.calls[startedAt]?.body).toEqual({
       canvasId: generated.canvas,
       nodeIds: [generated.image],

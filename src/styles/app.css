@@ -418,7 +418,7 @@ h2 {
   width: auto;
 }
 
-.channel-list,
+.model-card-list,
 .model-list {
   display: grid;
   gap: 10px;
@@ -427,7 +427,7 @@ h2 {
   padding: 0;
 }
 
-.channel {
+.model-card {
   background: var(--surface-raised);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
@@ -436,18 +436,18 @@ h2 {
   padding: 12px 14px;
 }
 
-.channel.is-off {
+.model-card.is-off {
   opacity: 0.6;
 }
 
-.channel-head {
+.model-card-head {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.channel-tag {
+.model-card-tag {
   background: var(--canvas);
   border: 1px solid var(--stroke);
   border-radius: 999px;
@@ -456,7 +456,7 @@ h2 {
   padding: 1px 8px;
 }
 
-.channel-detail {
+.model-card-detail {
   color: var(--muted);
   font-size: 12px;
   margin-bottom: 0;
@@ -465,130 +465,14 @@ h2 {
   white-space: nowrap;
 }
 
-.channel-probe {
+.model-card-probe {
   color: var(--success);
   font-size: 12px;
   margin-bottom: 0;
 }
 
-.channel-probe.is-failed {
+.model-card-probe.is-failed {
   color: var(--coral);
-}
-
-.model-row {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns:
-    minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr)
-    auto auto;
-}
-
-.candidate-id {
-  font-size: 12px;
-  grid-column: span 3;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* What a set of models covers. The gaps are the point: a capability with
-   nothing behind it is what a node of that kind will refuse for. */
-.coverage-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-}
-
-.coverage-chip {
-  align-items: center;
-  background: var(--canvas);
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
-  color: var(--ink);
-  display: inline-flex;
-  font-size: 11px;
-  gap: 5px;
-  padding: 1px 8px;
-}
-
-.coverage-chip.is-gap {
-  border-style: dashed;
-  color: var(--muted);
-}
-
-.coverage-count {
-  background: var(--primary);
-  border-radius: 999px;
-  color: var(--on-primary);
-  font-size: 10px;
-  min-width: 15px;
-  padding: 0 4px;
-  text-align: center;
-}
-
-/* A channel that cannot serve anything says so where it is listed, with the
-   way out beside it. */
-.channel-gap {
-  align-items: center;
-  color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 12px;
-  gap: 8px;
-  margin: 0;
-}
-
-.candidate-picker {
-  display: grid;
-  gap: 12px;
-}
-
-/* The three steps of adding a provider, named so the path is visible. */
-.wizard-steps {
-  color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 11px;
-  gap: 10px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.wizard-step.is-current {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-/* One capability's default, with the gap it leaves named underneath. */
-.default-row {
-  display: grid;
-  gap: 6px;
-}
-
-.default-row .settings-hint {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-/* A heading with its own count and a bulk action on the same line. */
-.candidate-picker .settings-heading {
-  align-items: baseline;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.candidate-picker .settings-heading .settings-hint {
-  font-size: 11px;
-  letter-spacing: 0;
-  margin-left: 6px;
-  text-transform: none;
 }
 
 .missing-asset-list {

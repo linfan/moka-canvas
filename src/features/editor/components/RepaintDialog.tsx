@@ -19,10 +19,7 @@ import {
   type MarkTool,
   type Size,
 } from "../canvas/repaint";
-import {
-  splitModelReference,
-  useProviderStore,
-} from "../../settings/providerStore";
+import { useModelStore } from "../../settings/modelStore";
 import { fileRepaint } from "../interactions/actions";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -62,7 +59,7 @@ function askOf(moka: MokaFile | null, nodeId: string): GenerationSpec | null {
 export function RepaintDialog() {
   const asked = useEditorStore((state) => state.pictureTool);
   const moka = useProjectStore((state) => state.moka);
-  const providers = useProviderStore((state) => state.view);
+  const view = useModelStore((state) => state.view);
   const surface = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [marks, setMarks] = useState<Mark[]>([]);
@@ -278,7 +275,7 @@ export function RepaintDialog() {
   };
 
   /**
-   * Whether the channel this will be asked through can take a mask at all.
+   * Whether the model this will be asked through can take a mask at all.
    *
    * Said before the painting rather than after the run: a protocol with no field
    * of its own for a mask still sends one, as a second picture beside the words,
@@ -286,13 +283,12 @@ export function RepaintDialog() {
    * the program ignoring them.
    */
   const reference =
-    askOf(moka, painting.nodeId)?.model || providers?.defaults.image;
-  const split = reference ? splitModelReference(reference) : null;
-  const protocol = split
-    ? (providers?.channels.find((channel) => channel.id === split.channelId)
-        ?.protocol ?? null)
-    : null;
-  const takesMask = protocol === "openai";
+    askOf(moka, painting.nodeId)?.model || view?.defaults.image || null;
+  const protocol =
+    (reference !== null
+      ? view?.models.find((model) => model.id === reference)?.protocol
+      : null) ?? null;
+  const takesMask = protocol === "openaiImages";
 
   return (
     <div className="dialog-backdrop" onClick={close} role="presentation">
@@ -439,10 +435,10 @@ export function RepaintDialog() {
           }
         >
           {protocol === null
-            ? "No channel is chosen yet, so which one this is asked through will decide whether the region can be held to."
+            ? "No model is chosen yet, so which one this is asked through will decide whether the region can be held to."
             : takesMask
-              ? "This channel has a field of its own for a mask, so what changes stays inside the marking."
-              : "This channel has no field of its own for a mask. It travels as a second picture beside the words, so what changes may not stay inside the marking — say which part of the picture is meant in the words as well."}
+              ? "This model has a field of its own for a mask, so what changes stays inside the marking."
+              : "This model has no field of its own for a mask. It travels as a second picture beside the words, so what changes may not stay inside the marking — say which part of the picture is meant in the words as well."}
         </p>
 
         {failed && <p className="dialog-error">{failed}</p>}

@@ -1,0 +1,327 @@
+import { create } from "zustand";
+import {
+  isApiError,
+  modelsApi,
+  type DefaultsPatch,
+  type ModelDraft,
+  type ModelsView,
+  type PreferencesPatch,
+  type ProbeReport,
+} from "../../api";
+import { PROTOCOLS_BY_CATEGORY, type Capability } from "../../shared/domain";
+
+/** The settings tabs: one per model category, plus the global preferences. */
+export type SettingsTab = Capability | "preferences";
+
+export interface ModelOption {
+  /** The model configuration's own id, which is what a node stores. */
+  reference: string;
+  label: string;
+}
+
+/**
+ * The models a category can be pointed at: the enabled configurations of
+ * that category, labelled by the display name somebody chose.
+ */
+export function modelOptionsFor(
+  view: ModelsView | null,
+  capability: Capability,
+): ModelOption[] {
+  if (!view) return [];
+  return view.models
+    .filter((model) => model.enabled && model.category === capability)
+    .map((model) => ({ reference: model.id, label: model.displayName }));
+}
+
+/** A sensible starting protocol when a category is picked in the form. */
+export function firstProtocol(capability: Capability) {
+  return PROTOCOLS_BY_CATEGORY[capability][0];
+}
+
+/** What a per-model test is doing, and what it last produced. */
+export interface ModelActivity {
+  probing: boolean;
+  probe: ProbeReport | null;
+}
+
+const IDLE: ModelActivity = { probing: false, probe: null };
+
+/**
+ * Codes whose fix is not in this dialog. The server's message says what is
+ * wrong; this says what to do about it, because the remedy is a shell command
+ * and a restart that no control here can perform.
+ */
+const GUIDANCE: Record<string, string> = {
+  CONFIG_METADATA_KEY_MISSING:
+    "The master key protecting stored credentials is missing. Start the server " +
+    "with MOKA_METADATA_KEY set — `moka-server --generate-key` prints a " +
+    "value — or put back the <metadata.dir>/master.key that belongs to this " +
+    "directory. A key created from now on cannot open credentials sealed with " +
+    "the missing one.",
+};
+
+/** How to act on a failure whose code is known, if there is anything to add. */
+export function guidanceFor(code: string | null): string | null {
+  return code === null ? null : (GUIDANCE[code] ?? null);
+}
+
+/** The two fields every failure sets on the store. */
+interface Failure {
+  error: string;
+  errorCode: string | null;
+}
+
+function describe(error: unknown, fallback: string): Failure {
+  return {
+    error: error instanceof Error ? error.message : fallback,
+    errorCode: isApiError(error) ? error.code : null,
+  };
+}
+
+/**
+ * Model settings: the stored configuration, and the dialog that edits it.
+ *
+ * Every write answers with the whole view, so state never has to be patched
+ * field by field — and the revision it carries is what the next write is
+ * checked against.
+ */
+interface ModelState {
+  open: boolean;
+  tab: SettingsTab;
+  /** Which model the editor is open on: an id, "new", or null for the list. */
+  editing: string | "new" | null;
+  /** The category a "new" editor starts on. */
+  newCategory: Capability;
+  view: ModelsView | null;
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  /** The problem code behind `error`, so the dialog can explain the fix. */
+  errorCode: string | null;
+  activity: Record<string, ModelActivity>;
+  openSettings: (tab?: SettingsTab) => void;
+  closeSettings: () => void;
+  setTab: (tab: SettingsTab) => void;
+  editModel: (id: string) => void;
+  newModel: (category: Capability) => void;
+  closeEditor: () => void;
+  /**
+   * Opens settings on the category that matters for a node: the tab of the
+   * model it named if that still exists, otherwise the category's own tab,
+   * ready to add one.
+   */
+  openModelForCapability: (
+    capability: Capability,
+    reference?: string | null,
+  ) => void;
+  load: () => Promise<void>;
+  saveModel: (draft: ModelDraft) => Promise<boolean>;
+  removeModel: (id: string) => Promise<boolean>;
+  /** Copies a configuration, credential included, and opens the copy. */
+  duplicateModel: (id: string) => Promise<boolean>;
+  setKey: (id: string, apiKey: string | null) => Promise<boolean>;
+  /** Makes one model its category's default, or clears the default. */
+  setDefault: (capability: Capability, id: string | null) => Promise<boolean>;
+  savePreferences: (patch: PreferencesPatch) => Promise<boolean>;
+  probe: (id: string) => Promise<void>;
+  reset: () => void;
+}
+
+export const useModelStore = create<ModelState>()((set, get) => {
+  const withActivity = (
+    id: string,
+    patch: Partial<ModelActivity>,
+    extra: Partial<ModelState> = {},
+  ) => {
+    set((state) => ({
+      ...extra,
+      activity: {
+        ...state.activity,
+        [id]: { ...(state.activity[id] ?? IDLE), ...patch },
+      },
+    }));
+  };
+
+  /**
+   * Runs a write, adopting the view it returns.
+   *
+   * The revision is filled in here rather than at the call sites: it is a
+   * property of the state this store holds, and a form that had to remember to
+   * send it would eventually forget. A refused write refreshes the view first
+   * and reports second, so the message describes state the user can now see.
+   */
+  const write = async (
+    fallback: string,
+    send: (revision: number | null) => Promise<ModelsView>,
+  ): Promise<boolean> => {
+    set({ saving: true, error: null, errorCode: null });
+    try {
+      set({ view: await send(get().view?.revision ?? null), saving: false });
+      return true;
+    } catch (error) {
+      set({ saving: false });
+      if (isApiError(error, "METADATA_CONFLICT")) await get().load();
+      set(describe(error, fallback));
+      return false;
+    }
+  };
+
+  return {
+    open: false,
+    tab: "text",
+    editing: null,
+    newCategory: "text",
+    view: null,
+    loading: false,
+    saving: false,
+    error: null,
+    errorCode: null,
+    activity: {},
+
+    openSettings(tab = "text") {
+      set({ open: true, tab });
+    },
+
+    closeSettings() {
+      // Back to the list on the next open: an editor left open on a model is
+      // a surprise to whoever opens settings for something else.
+      set({ open: false, editing: null });
+    },
+
+    setTab(tab) {
+      set({ tab, editing: null });
+    },
+
+    editModel(id) {
+      const view = get().view;
+      const category =
+        view?.models.find((model) => model.id === id)?.category ?? get().tab;
+      set({
+        open: true,
+        tab: category === "preferences" ? "text" : category,
+        editing: id,
+      });
+    },
+
+    newModel(category) {
+      set({ open: true, tab: category, newCategory: category, editing: "new" });
+    },
+
+    closeEditor() {
+      set({ editing: null });
+    },
+
+    openModelForCapability(capability, reference = null) {
+      const view = get().view;
+      const models = view?.models ?? [];
+      const known =
+        reference !== null && models.some((model) => model.id === reference);
+      // Straight to the model a node named when it still exists, so the thing
+      // that would serve the node is the thing the editor opens on.
+      set({ open: true, tab: capability, editing: known ? reference : null });
+    },
+
+    async load() {
+      if (get().loading) return;
+      set({ loading: true });
+      try {
+        set({
+          view: await modelsApi.list(),
+          loading: false,
+          error: null,
+          errorCode: null,
+        });
+      } catch (error) {
+        set({ loading: false, ...describe(error, "Failed to load settings") });
+      }
+    },
+
+    saveModel(draft) {
+      return write("Failed to save the model", (revision) =>
+        modelsApi.upsert({ ...draft, expectedRevision: revision }),
+      );
+    },
+
+    removeModel(id) {
+      return write("Failed to remove the model", (revision) =>
+        modelsApi.remove(id, revision ?? undefined),
+      ).then((saved) => {
+        if (saved) {
+          set((state) => {
+            const activity = { ...state.activity };
+            delete activity[id];
+            return { activity };
+          });
+        }
+        return saved;
+      });
+    },
+
+    async duplicateModel(id) {
+      const before = new Set((get().view?.models ?? []).map((m) => m.id));
+      const saved = await write("Failed to copy the model", (revision) =>
+        modelsApi.duplicate(id, revision ?? undefined),
+      );
+      if (!saved) return false;
+      const added = (get().view?.models ?? []).find(
+        (model) => !before.has(model.id),
+      );
+      if (added) {
+        // Straight to the copy: the point of duplicating is to change
+        // something about it, and the id is the first thing that has to move
+        // if the original stays.
+        set({ tab: added.category, editing: added.id });
+      }
+      return true;
+    },
+
+    setKey(id, apiKey) {
+      return write("Failed to update the credential", () =>
+        modelsApi.setKey(id, apiKey),
+      );
+    },
+
+    setDefault(capability, id) {
+      const patch: DefaultsPatch = { [capability]: id };
+      return write("Failed to save the default", (revision) =>
+        modelsApi.setDefaults({ ...patch, expectedRevision: revision }),
+      );
+    },
+
+    savePreferences(patch) {
+      return write("Failed to save the preferences", (revision) =>
+        modelsApi.setPreferences({ ...patch, expectedRevision: revision }),
+      );
+    },
+
+    async probe(id) {
+      withActivity(id, { probing: true });
+      try {
+        const probe = await modelsApi.probe(id);
+        withActivity(
+          id,
+          { probing: false, probe },
+          { error: null, errorCode: null },
+        );
+      } catch (error) {
+        withActivity(id, { probing: false });
+        set(describe(error, "Failed to test the model"));
+      }
+    },
+
+    reset() {
+      set({
+        open: false,
+        tab: "text",
+        editing: null,
+        newCategory: "text",
+        view: null,
+        loading: false,
+        saving: false,
+        error: null,
+        errorCode: null,
+        activity: {},
+      });
+    },
+  };
+});

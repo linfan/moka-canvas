@@ -9,7 +9,7 @@ import { EditorPage } from "./features/editor/EditorPage";
 import { LauncherPage } from "./features/editor/launcher/LauncherPage";
 import { useAppStore } from "./features/editor/stores/appStore";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
-import { useProviderStore } from "./features/settings/providerStore";
+import { useModelStore } from "./features/settings/modelStore";
 
 export default function App() {
   const phase = useAppStore((state) => state.phase);
@@ -26,10 +26,10 @@ export default function App() {
     return () => document.removeEventListener("contextmenu", suppress);
   }, []);
 
-  // Apart from boot on purpose: provider configuration is something the app
+  // Apart from boot on purpose: model configuration is something the app
   // shows, not something it needs in order to start.
   useEffect(() => {
-    void useProviderStore.getState().load();
+    void useModelStore.getState().load();
   }, []);
 
   return (

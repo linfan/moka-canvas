@@ -8,7 +8,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import type { ProvidersView } from "../../api";
+import type { ModelsView } from "../../api";
 import type {
   AssistantMessage,
   AssistantRole,
@@ -27,7 +27,7 @@ import { undo } from "../editor/commands/execute";
 import { useEditorStore } from "../editor/stores/editorStore";
 import { useHistoryStore } from "../editor/stores/historyStore";
 import { useProjectStore } from "../editor/stores/projectStore";
-import { useProviderStore } from "../settings/providerStore";
+import { useModelStore } from "../settings/modelStore";
 import { AssistantPanel } from "./AssistantPanel";
 import { earlierWords } from "./asking";
 import { useAssistantStore } from "./assistantStore";
@@ -108,11 +108,11 @@ function talking(...messages: AssistantMessage[]): MokaFile {
 }
 
 /** A configuration with nothing in it, as a board straight off an install reads. */
-function bare(): ProvidersView {
+function bare(): ModelsView {
   return {
     version: 1,
     revision: 1,
-    channels: [],
+    models: [],
     defaults: { text: null, image: null, audio: null, video: null },
     preferences: {
       systemPrompt: "",
@@ -177,7 +177,7 @@ beforeEach(() => {
   });
   useHistoryStore.getState().clear();
   useEditorStore.getState().clearSelection();
-  useProviderStore.setState({ view: null, open: false, tab: "channels" });
+  useModelStore.setState({ view: null, open: false, tab: "text" });
 });
 
 afterEach(() => {
@@ -432,7 +432,7 @@ describe("sending what was said before", () => {
 describe("before anything can be asked", () => {
   it("refuses a capability the board has no model for", () => {
     hydrate(buildGoldenMokaFile());
-    useProviderStore.setState({ view: bare() });
+    useModelStore.setState({ view: bare() });
     render(<AssistantPanel />);
 
     expect(screen.getByRole("alert").textContent).toBe(
@@ -441,13 +441,14 @@ describe("before anything can be asked", () => {
     expect(screen.queryByLabelText("Ask about this canvas")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Configure models" }));
-    expect(useProviderStore.getState().open).toBe(true);
-    expect(useProviderStore.getState().tab).toBe("channels");
+    expect(useModelStore.getState().open).toBe(true);
+    // Straight to the category that has nothing configured.
+    expect(useModelStore.getState().tab).toBe("text");
   });
 
   it("names the picture it cannot make rather than promising one", () => {
     hydrate(buildGoldenMokaFile());
-    useProviderStore.setState({ view: bare() });
+    useModelStore.setState({ view: bare() });
     render(<AssistantPanel />);
 
     fireEvent.click(screen.getByRole("button", { name: "Image" }));

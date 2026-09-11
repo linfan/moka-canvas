@@ -230,7 +230,7 @@ export type GenerationInputMode = "upstream" | "manual" | "mentions";
 export interface GenerationSpec {
   capability: Capability;
   mode: GenerationMode;
-  /** "channelId::modelId"; empty means fall back to the provider defaults. */
+  /** A model configuration id; empty means fall back to the category default. */
   model: string;
   prompt: string;
   inputMode: GenerationInputMode;

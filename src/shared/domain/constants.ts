@@ -131,14 +131,74 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   video: "Video",
 };
 
-export const PROVIDER_PROTOCOLS = ["openai", "gemini", "custom"] as const;
-export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
+/**
+ * The wire protocols a model configuration can speak. One name per endpoint
+ * shape rather than per vendor: a category's list is a slice of this, because
+ * a text model and a video model never speak the same endpoint even at the
+ * same provider.
+ */
+export const MODEL_PROTOCOLS = [
+  "openaiChat",
+  "openaiResponses",
+  "openaiImages",
+  "openaiSpeech",
+  "openaiVideos",
+  "gemini",
+  "geminiVideo",
+  "custom",
+] as const;
+export type ModelProtocol = (typeof MODEL_PROTOCOLS)[number];
+
+/**
+ * The protocols on offer per category, mirroring `protocols_for` on the
+ * server: the form offers one list and a write is refused against the same
+ * one, so what may be chosen and what may be stored cannot disagree.
+ */
+export const PROTOCOLS_BY_CATEGORY: Record<
+  Capability,
+  readonly ModelProtocol[]
+> = {
+  text: ["openaiChat", "openaiResponses", "gemini"],
+  image: ["openaiImages", "gemini"],
+  audio: ["openaiSpeech", "gemini"],
+  video: ["openaiVideos", "geminiVideo"],
+};
+
+/** What each protocol is called where a reader picks one. */
+export const PROTOCOL_LABELS: Record<ModelProtocol, string> = {
+  openaiChat: "OpenAI-compatible · Chat Completions",
+  openaiResponses: "OpenAI-compatible · Responses",
+  openaiImages: "OpenAI-compatible · Images API",
+  openaiSpeech: "OpenAI-compatible · Speech API",
+  openaiVideos: "OpenAI-compatible · Videos API",
+  gemini: "Google Gemini · generateContent",
+  geminiVideo: "Google Gemini · long-running (Veo)",
+  custom: "Custom (reserved)",
+};
+
+/**
+ * The complete endpoint address each protocol speaks at, as the example a URL
+ * field starts from. A configuration carries the whole address — there is no
+ * base URL to extend.
+ */
+export const PROTOCOL_URL_EXAMPLES: Record<ModelProtocol, string> = {
+  openaiChat: "https://api.openai.com/v1/chat/completions",
+  openaiResponses: "https://api.openai.com/v1/responses",
+  openaiImages: "https://api.openai.com/v1/images/generations",
+  openaiSpeech: "https://api.openai.com/v1/audio/speech",
+  openaiVideos: "https://api.openai.com/v1/videos",
+  gemini:
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+  geminiVideo:
+    "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
+  custom: "",
+};
 
 /** The executor a generation node's step is handed to. */
 export const PROVIDER_EXECUTOR_KEY = "provider";
 
-export const MAX_CHANNEL_ID_LENGTH = 96;
-export const MAX_CHANNEL_NAME_LENGTH = 120;
+export const MAX_MODEL_ID_LENGTH = 96;
+export const MAX_MODEL_NAME_LENGTH = 120;
 export const MAX_IMAGES_PER_RUN = 10;
 export const MAX_VIDEO_SECONDS = 600;
 export const MIN_AUDIO_SPEED = 0.25;

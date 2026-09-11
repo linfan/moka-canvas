@@ -6,15 +6,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import App from "../../App";
-import type {
-  ChannelDraft,
-  ChannelView,
-  ModelCandidate,
-  ProvidersView,
-} from "../../api";
-import { useProviderStore } from "./providerStore";
+import type { ModelDraft, ModelsView, ModelView } from "../../api";
+import { useModelStore } from "./modelStore";
 
 const CONFIG = {
   productName: "Moka Canvas",
@@ -39,32 +35,46 @@ interface Call {
   body?: unknown;
 }
 
-let view: ProvidersView;
+let view: ModelsView;
 let calls: Call[];
-/** What the stand-in provider offers when it is asked, and how it refuses. */
-let offered: ModelCandidate[];
-let inspectRefusal: string | null;
 /** Lets a test make the next write fail the way the server would. */
 let refuseNextWrite: { status: number; code: string; message: string } | null;
+/** Lets a test make the next probe fail the way a provider would. */
+let probeRefusal: string | null;
 
-function fixture(): ProvidersView {
+function model(
+  id: string,
+  category: ModelView["category"],
+  protocol: ModelView["protocol"],
+  displayName: string,
+  keyed: boolean,
+): ModelView {
+  const urls: Record<string, string> = {
+    openaiChat: "https://api.example.com/v1/chat/completions",
+    openaiImages: "https://api.example.com/v1/images/generations",
+  };
+  return {
+    id,
+    category,
+    protocol,
+    url: urls[protocol] ?? "https://api.example.com/v1",
+    model: `${id}-1`,
+    displayName,
+    enabled: true,
+    apiKey: keyed
+      ? { set: true, masked: MASKED }
+      : { set: false, masked: null },
+  };
+}
+
+function fixture(): ModelsView {
   return {
     version: 1,
     revision: 1,
-    channels: [
-      {
-        id: "main",
-        name: "Example Inc",
-        baseUrl: "https://api.example.com/v1",
-        protocol: "openai",
-        enabled: true,
-        models: [
-          { id: "writer", capability: "text", alias: "", enabled: true },
-          { id: "scribe", capability: "text", alias: "", enabled: true },
-          { id: "painter", capability: "image", alias: "", enabled: true },
-        ],
-        apiKey: { set: true, masked: MASKED },
-      },
+    models: [
+      model("writer", "text", "openaiChat", "Writer", true),
+      model("scribe", "text", "openaiChat", "Scribe", false),
+      model("painter", "image", "openaiImages", "Painter", true),
     ],
     defaults: { text: null, image: null, audio: null, video: null },
     preferences: {
@@ -84,46 +94,52 @@ function fixture(): ProvidersView {
   };
 }
 
-function upsert(draft: ChannelDraft) {
-  const stored = view.channels.find((entry) => entry.id === draft.id);
+function upsert(draft: ModelDraft) {
+  const stored = view.models.find((entry) => entry.id === draft.id);
   const key = draft.apiKey?.trim()
     ? { set: true, masked: MASKED }
     : (stored?.apiKey ?? { set: false, masked: null });
-  const record: ChannelView = {
+  const record: ModelView = {
     id: draft.id,
-    name: draft.name,
-    baseUrl: draft.baseUrl,
+    category: draft.category,
     protocol: draft.protocol,
+    url: draft.url,
+    model: draft.model,
+    displayName: draft.displayName,
     enabled: draft.enabled,
-    models: draft.models,
-    capabilityBaseUrls: draft.capabilityBaseUrls ?? {},
     apiKey: key,
   };
   view = {
     ...view,
     revision: view.revision + 1,
-    channels: stored
-      ? view.channels.map((entry) => (entry.id === draft.id ? record : entry))
-      : [...view.channels, record],
+    models: stored
+      ? view.models.map((entry) => (entry.id === draft.id ? record : entry))
+      : [...view.models, record],
   };
 }
 
-/** The identifier and protocol come from the address, as they do server-side. */
-function imported(baseUrl: string, apiKey: string | null | undefined) {
-  const host = baseUrl.replace(/^https?:\/\//, "").split("/")[0];
-  const id = host
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-  upsert({
-    id,
-    name: host,
-    baseUrl,
-    protocol: host.includes("googleapis") ? "gemini" : "openai",
-    enabled: true,
-    models: [],
-    apiKey: apiKey ?? null,
-  });
+/** The server-side copy: a new identifier and the credential along with it. */
+function duplicate(id: string) {
+  const source = view.models.find((entry) => entry.id === id);
+  if (!source) return;
+  let candidate = `${id}-copy`;
+  let counter = 2;
+  while (view.models.some((entry) => entry.id === candidate)) {
+    candidate = `${id}-copy-${counter}`;
+    counter += 1;
+  }
+  view = {
+    ...view,
+    revision: view.revision + 1,
+    models: [
+      ...view.models,
+      {
+        ...source,
+        id: candidate,
+        displayName: `${source.displayName} (copy)`.slice(0, 120),
+      },
+    ],
+  };
 }
 
 function route(url: string, method: string, body: unknown): Response {
@@ -142,60 +158,36 @@ function route(url: string, method: string, body: unknown): Response {
   if (url === "/api/health") return json({ status: "ok" });
   if (url === "/api/v1/recent-projects") return json([]);
 
-  if (path === "/api/v1/providers" && method === "GET") return json(view);
+  if (path === "/api/v1/models" && method === "GET") return json(view);
 
-  // Derives the channel identity from the address the way the server does, so
-  // the wizard can be driven through the whole path without one.
-  if (path === "/api/v1/providers/inspect" && method === "POST") {
-    const request = body as {
-      baseUrl: string;
-      apiKey?: string | null;
-      protocol?: string | null;
-    };
-    const host = request.baseUrl.replace(/^https?:\/\//, "").split("/")[0];
-    const id = host
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-    return json({
-      channelId: id,
-      channelName: host,
-      baseUrl: request.baseUrl,
-      protocol:
-        request.protocol ?? (host.includes("googleapis") ? "gemini" : "openai"),
-      ok: inspectRefusal === null,
-      latencyMs: 12,
-      ...(inspectRefusal === null
-        ? {}
-        : {
-            error: { code: "PROVIDER_AUTH", message: inspectRefusal },
-          }),
-      models: inspectRefusal === null ? offered : [],
-    });
-  }
-
-  if (path === "/api/v1/providers/channels" && method === "PUT") {
+  if (path === "/api/v1/models" && method === "PUT") {
     if (refuseNextWrite) {
       const refusal = refuseNextWrite;
       refuseNextWrite = null;
       return problem(refusal.status, refusal.code, refusal.message);
     }
-    upsert(body as ChannelDraft);
+    upsert(body as ModelDraft);
     return json(view);
   }
 
-  if (path === "/api/v1/providers/defaults" && method === "PATCH") {
-    const patch = body as Partial<ProvidersView["defaults"]>;
+  if (path === "/api/v1/models/defaults" && method === "PATCH") {
+    const patch: Record<string, unknown> = {
+      ...(body as Partial<ModelsView["defaults"]>),
+    };
+    delete patch.expectedRevision;
     view = {
       ...view,
       revision: view.revision + 1,
-      defaults: { ...view.defaults, ...patch },
+      defaults: {
+        ...view.defaults,
+        ...(patch as Partial<ModelsView["defaults"]>),
+      },
     };
     return json(view);
   }
 
-  if (path === "/api/v1/providers/preferences" && method === "PATCH") {
-    const patch = body as Partial<ProvidersView["preferences"]>;
+  if (path === "/api/v1/models/preferences" && method === "PATCH") {
+    const patch = body as Partial<ModelsView["preferences"]>;
     view = {
       ...view,
       revision: view.revision + 1,
@@ -204,26 +196,18 @@ function route(url: string, method: string, body: unknown): Response {
     return json(view);
   }
 
-  if (path === "/api/v1/providers/import" && method === "POST") {
-    const request = body as { baseUrl: string; apiKey?: string | null };
-    imported(request.baseUrl, request.apiKey);
-    return json(view);
-  }
-
-  const channel = path.match(
-    /^\/api\/v1\/providers\/channels\/([^/]+)(\/.*)?$/,
-  );
-  if (channel) {
-    const id = decodeURIComponent(channel[1]);
-    const suffix = channel[2] ?? "";
-    const index = view.channels.findIndex((entry) => entry.id === id);
-    if (index === -1) return problem(404, "NOT_FOUND", `no channel ${id}`);
+  const named = path.match(/^\/api\/v1\/models\/([^/]+)(\/.*)?$/);
+  if (named) {
+    const id = decodeURIComponent(named[1]);
+    const suffix = named[2] ?? "";
+    const index = view.models.findIndex((entry) => entry.id === id);
+    if (index === -1) return problem(404, "NOT_FOUND", `no model ${id}`);
 
     if (suffix === "" && method === "DELETE") {
       view = {
         ...view,
         revision: view.revision + 1,
-        channels: view.channels.filter((entry) => entry.id !== id),
+        models: view.models.filter((entry) => entry.id !== id),
       };
       return json(view);
     }
@@ -232,7 +216,7 @@ function route(url: string, method: string, body: unknown): Response {
       view = {
         ...view,
         revision: view.revision + 1,
-        channels: view.channels.map((entry, at) =>
+        models: view.models.map((entry, at) =>
           at === index
             ? {
                 ...entry,
@@ -245,17 +229,18 @@ function route(url: string, method: string, body: unknown): Response {
       };
       return json(view);
     }
-    if (suffix === "/models" && method === "GET") {
-      return json({
-        models: [
-          { id: "scribe-2", capability: null },
-          { id: "illustrator-2", capability: "image" },
-          { id: "choir-1", capability: "audio" },
-        ],
-      });
+    if (suffix === "/duplicate" && method === "POST") {
+      duplicate(id);
+      return json(view);
     }
     if (suffix === "/probe" && method === "POST") {
-      return json({ ok: true, latencyMs: 42 });
+      return probeRefusal === null
+        ? json({ ok: true, latencyMs: 42 })
+        : json({
+            ok: false,
+            latencyMs: 8,
+            error: { code: "PROVIDER_AUTH", message: probeRefusal },
+          });
     }
   }
 
@@ -273,26 +258,27 @@ function readsOf(path: string): number {
     .length;
 }
 
-/** A row puts the credential and the model count in one paragraph. */
-function storedKeyLine() {
-  return screen.getByText(new RegExp(`Key ${MASKED}`));
+/** The card one model is listed in. */
+function cardOf(displayName: string): HTMLElement {
+  const card = screen.getByText(displayName).closest("li");
+  if (!card) throw new Error(`no card for ${displayName}`);
+  return card;
 }
 
-async function openSettings() {
+async function openSettings(tab?: string) {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-  return screen.findByRole("dialog", { name: "Settings" });
+  const dialog = await screen.findByRole("dialog", { name: "Settings" });
+  await screen.findByText("Writer");
+  if (tab) fireEvent.click(screen.getByRole("tab", { name: tab }));
+  return dialog;
 }
 
 beforeEach(() => {
   view = fixture();
   calls = [];
   refuseNextWrite = null;
-  offered = [
-    { id: "painter", capability: "image" },
-    { id: "scribe", capability: null },
-  ];
-  inspectRefusal = null;
+  probeRefusal = null;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
@@ -305,338 +291,212 @@ beforeEach(() => {
       ),
     ),
   );
-  useProviderStore.getState().reset();
+  useModelStore.getState().reset();
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-describe("provider settings", () => {
+describe("model settings", () => {
+  it("lists each category's models on its own tab", async () => {
+    await openSettings();
+
+    // The text tab carries the text models and nothing else.
+    expect(screen.getByText("Writer")).toBeTruthy();
+    expect(screen.getByText("Scribe")).toBeTruthy();
+    expect(screen.queryByText("Painter")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    expect(await screen.findByText("Painter")).toBeTruthy();
+    expect(screen.queryByText("Writer")).toBeNull();
+  });
+
   it("shows what may be disclosed about a credential and nothing more", async () => {
     await openSettings();
-    await screen.findByText("Example Inc");
+    await screen.findByText("Writer");
 
-    expect(storedKeyLine()).toBeTruthy();
+    expect(screen.getByText(`Key ${MASKED}`)).toBeTruthy();
     expect(document.body.textContent).not.toContain(KEY);
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const field = await screen.findByLabelText("API key");
-    // The form offers a placeholder, never the value it would overwrite.
-    expect((field as HTMLInputElement).value).toBe("");
-    expect(field.getAttribute("placeholder")).toContain(MASKED);
+  it("creates a model from the form", async () => {
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "Composer" },
+    });
+    fireEvent.change(screen.getByLabelText("Model identifier"), {
+      target: { value: "composer" },
+    });
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "composer-1" },
+    });
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: KEY },
+    });
+    // The URL starts from the protocol's own example, which is a complete
+    // endpoint rather than a base to extend.
+    const url = screen.getByLabelText("Endpoint URL") as HTMLInputElement;
+    expect(url.value).toBe("https://api.openai.com/v1/chat/completions");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await screen.findByText("Composer");
+
+    const [write] = writesTo("/api/v1/models");
+    expect(write.body).toEqual({
+      id: "composer",
+      category: "text",
+      protocol: "openaiChat",
+      url: "https://api.openai.com/v1/chat/completions",
+      model: "composer-1",
+      displayName: "Composer",
+      enabled: true,
+      apiKey: KEY,
+      expectedRevision: 1,
+    });
+  });
+
+  it("offers each category only the protocols that serve it", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Video" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New video model" }),
+    );
+
+    const protocol = (await screen.findByLabelText(
+      "Protocol",
+    )) as HTMLSelectElement;
+    expect([...protocol.options].map((option) => option.value)).toEqual([
+      "openaiVideos",
+      "geminiVideo",
+    ]);
+
+    // Picking the other shape offers its own complete address.
+    fireEvent.change(protocol, { target: { value: "geminiVideo" } });
+    const url = screen.getByLabelText("Endpoint URL") as HTMLInputElement;
+    expect(url.value).toContain(":predictLongRunning");
   });
 
   it("keeps a stored credential when an edit does not mention it", async () => {
-    // Read before the write: the mock adopts the request body, so counting
-    // afterwards would only compare the write with itself.
-    const storedModels = view.channels[0].models.length;
     await openSettings();
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      within(cardOf("Writer")).getByRole("button", { name: "Edit" }),
+    );
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    fireEvent.change(await screen.findByLabelText("Display name"), {
       target: { value: "Renamed" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+    // The stored key is announced, and the field stays blank.
+    const key = screen.getByLabelText("API key") as HTMLInputElement;
+    expect(key.placeholder).toContain(MASKED);
+    expect(key.value).toBe("");
 
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
     await screen.findByText("Renamed");
-    const [write] = writesTo("/api/v1/providers/channels");
-    expect(write.body).toMatchObject({
-      id: "main",
-      name: "Renamed",
+
+    const [write] = writesTo("/api/v1/models");
+    const body = write.body as Record<string, unknown>;
+    expect(body.displayName).toBe("Renamed");
+    expect("apiKey" in body).toBe(false);
+    expect(screen.getByText(`Key ${MASKED}`)).toBeTruthy();
+  });
+
+  it("clears a stored key only when asked to", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await openSettings();
+    fireEvent.click(
+      within(cardOf("Writer")).getByRole("button", { name: "Edit" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the stored key" }),
+    );
+
+    await waitFor(() =>
+      expect(writesTo("/api/v1/models/writer/key")).toHaveLength(1),
+    );
+    expect(writesTo("/api/v1/models/writer/key")[0].body).toEqual({
       apiKey: null,
-      expectedRevision: 1,
     });
-    // Every stored model went out, so the edit replaced the channel rather
-    // than quietly dropping the part of it the form does not show.
-    expect((write.body as ChannelDraft).models).toHaveLength(storedModels);
-    expect(storedKeyLine()).toBeTruthy();
+    // Scoped to the cleared model: another text model also stores no key.
+    expect(within(cardOf("Writer")).getByText("No key stored")).toBeTruthy();
+    confirm.mockRestore();
   });
 
-  it("sends an image call to the address the form gives that capability", async () => {
+  it("copies a model, key included, and opens the copy", async () => {
     await openSettings();
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-
-    fireEvent.change(await screen.findByLabelText("Image base URL override"), {
-      target: { value: "https://images.example.com/v1" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+    fireEvent.click(
+      within(cardOf("Writer")).getByRole("button", { name: "Copy Writer" }),
+    );
 
     await waitFor(() =>
-      expect(writesTo("/api/v1/providers/channels")).toHaveLength(1),
+      expect(writesTo("/api/v1/models/writer/duplicate")).toHaveLength(1),
     );
-    const [write] = writesTo("/api/v1/providers/channels");
-    // Only the capability that was filled in gets an override; the others
-    // keep falling back to the channel address.
-    expect(write.body).toMatchObject({
-      baseUrl: "https://api.example.com/v1",
-      capabilityBaseUrls: { image: "https://images.example.com/v1" },
-    });
+    // The editor opens on the copy, which is what "quick create" means: the
+    // fields worth repeating are filled in and the key came along.
+    const display = (await screen.findByLabelText(
+      "Display name",
+    )) as HTMLInputElement;
+    expect(display.value).toBe("Writer (copy)");
+    // The credential came along: the field offers to keep it rather than
+    // asking for it again.
+    const key = screen.getByLabelText("API key") as HTMLInputElement;
+    expect(key.placeholder).toContain(MASKED);
+    expect(key.value).toBe("");
+
+    const id = screen.getByLabelText("Model identifier") as HTMLInputElement;
+    expect(id.value).toBe("writer-copy");
   });
 
-  it("creates a channel from the form", async () => {
-    view.channels = [];
+  it("sets a category's default from its own tab", async () => {
     await openSettings();
-    await screen.findByText(/No channels yet/);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Write one out in full" }),
-    );
-    fireEvent.change(await screen.findByLabelText("Identifier"), {
-      target: { value: "example" },
-    });
-    fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "Example" },
-    });
-    fireEvent.change(screen.getByLabelText("Base URL"), {
-      target: { value: "https://api.example.com/v1" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add model" }));
-    fireEvent.change(screen.getByLabelText("Model 1 identifier"), {
-      target: { value: "chat" },
-    });
-    fireEvent.change(screen.getByLabelText("API key"), {
-      target: { value: KEY },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
-
-    await screen.findByText("Example");
-    const [write] = writesTo("/api/v1/providers/channels");
-    expect(write.body).toMatchObject({
-      id: "example",
-      name: "Example",
-      baseUrl: "https://api.example.com/v1",
-      protocol: "openai",
-      enabled: true,
-      apiKey: KEY,
-      models: [{ id: "chat", capability: "text", alias: "", enabled: true }],
-    });
-    expect(storedKeyLine()).toBeTruthy();
-    expect(document.body.textContent).not.toContain(KEY);
-  });
-
-  it("adds a provider by asking its address what it offers", async () => {
-    await openSettings();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Add a provider" }),
+    // The gap the default closes is named before one is chosen.
+    expect(screen.getByTestId("text-gap").textContent).toContain(
+      "No default text model",
     );
 
-    fireEvent.change(await screen.findByLabelText("Provider address"), {
-      target: { value: "https://api.example.com/v1" },
-    });
-    fireEvent.change(screen.getByLabelText("API key"), {
-      target: { value: KEY },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Ask what it offers" }));
-
-    // Asking stores nothing, so a wrong answer costs a message and not a
-    // channel to find and delete.
-    expect((await screen.findByTestId("wizard-reached")).textContent).toContain(
-      "2 models offered",
-    );
-    expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "Choose models" }));
-    // The offer is grouped by what each model can make, and a kind is taken
-    // whole rather than one row at a time.
     fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Add all image models offered",
+      await screen.findByRole("radio", {
+        name: "Use Writer as the default text model",
       }),
     );
-    expect(
-      (screen.getByLabelText("Model 1 identifier") as HTMLInputElement).value,
-    ).toBe("painter");
-    expect(
-      (screen.getByLabelText("Model 1 capability") as HTMLSelectElement).value,
-    ).toBe("image");
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-
-    // One image model and no image default is an unambiguous answer, so it is
-    // offered rather than asked for.
-    expect(
-      (screen.getByLabelText("Default Image model") as HTMLSelectElement).value,
-    ).toBe("api-example-com::painter");
-    fireEvent.click(screen.getByRole("button", { name: "Add the channel" }));
-
-    await screen.findByText("api.example.com added");
-    const [channel] = writesTo("/api/v1/providers/channels");
-    expect(channel.body).toMatchObject({
-      id: "api-example-com",
-      name: "api.example.com",
-      baseUrl: "https://api.example.com/v1",
-      protocol: "openai",
-      apiKey: KEY,
-      models: [
-        { id: "painter", capability: "image", alias: "", enabled: true },
-      ],
-    } as Partial<ChannelDraft>);
-    // The channel and the default it was offered for are both written.
-    expect(writesTo("/api/v1/providers/defaults")[0].body).toEqual({
-      image: "api-example-com::painter",
-      expectedRevision: 2,
-    });
-    expect(document.body.textContent).not.toContain(KEY);
-  });
-
-  it("keeps going when a provider will not list its models", async () => {
-    inspectRefusal = "Incorrect API key provided";
-    await openSettings();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Add a provider" }),
-    );
-
-    fireEvent.change(await screen.findByLabelText("Provider address"), {
-      target: { value: "https://api.example.com/v1" },
-    });
-    fireEvent.change(screen.getByLabelText("API key"), {
-      target: { value: "sk-wrong" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Ask what it offers" }));
-
-    // The refusal is reported beside the fields that caused it, and the path
-    // continues rather than ending: a provider that will not list its models
-    // can still be configured by hand.
-    const refused = await screen.findByTestId("wizard-refused");
-    expect(refused.textContent).toContain("Incorrect API key provided");
-    const onward = screen.getByRole("button", { name: "Continue anyway" });
-    expect((onward as HTMLButtonElement).disabled).toBe(false);
-
-    fireEvent.click(onward);
-    expect(screen.getByTestId("wizard-models-gap").textContent).toContain(
-      "will serve nothing",
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add a model by hand" }),
-    );
-    fireEvent.change(screen.getByLabelText("Model 1 identifier"), {
-      target: { value: "director" },
-    });
-    fireEvent.change(screen.getByLabelText("Model 1 capability"), {
-      target: { value: "video" },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByLabelText("Default Video model")).toHaveProperty(
-      "value",
-      "api-example-com::director",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Add the channel" }));
-
-    await screen.findByText("api.example.com added");
-    const [channel] = writesTo("/api/v1/providers/channels");
-    expect(channel.body).toMatchObject({
-      models: [
-        { id: "director", capability: "video", alias: "", enabled: true },
-      ],
-    });
-  });
-
-  it("leaves a default somebody else chose alone", async () => {
-    // The fixture's own image model is already the default, so adding a second
-    // image model must not quietly take that over.
-    view.defaults = { ...view.defaults, image: "main::painter" };
-    await openSettings();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Add a provider" }),
-    );
-
-    fireEvent.change(await screen.findByLabelText("Provider address"), {
-      target: { value: "https://api.example.com/v1" },
-    });
-    fireEvent.change(screen.getByLabelText("API key"), {
-      target: { value: KEY },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Ask what it offers" }));
-    await screen.findByTestId("wizard-reached");
-    fireEvent.click(screen.getByRole("button", { name: "Choose models" }));
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Add all image models offered",
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-
-    const picker = screen.getByLabelText(
-      "Default Image model",
-    ) as HTMLSelectElement;
-    expect(picker.value).toBe("main::painter");
-    expect(picker.disabled).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: "Add the channel" }));
-    await screen.findByText("api.example.com added");
-    expect(writesTo("/api/v1/providers/channels")).toHaveLength(1);
-    // Nothing to set, so nothing is written over it.
-    expect(writesTo("/api/v1/providers/defaults")).toHaveLength(0);
-  });
-
-  it("offers each capability only the models that can serve it", async () => {
-    await openSettings();
-    fireEvent.click(await screen.findByRole("tab", { name: "Defaults" }));
-
-    const image = await screen.findByLabelText("Image");
-    fireEvent.change(image, { target: { value: "main::painter" } });
-    expect(screen.getByLabelText("Text")).toBeTruthy();
-    expect(
-      [...image.querySelectorAll("option")].map((option) => option.value),
-    ).toEqual(["", "main::painter"]);
-
-    const save = screen.getByRole("button", { name: "Save defaults" });
-    fireEvent.click(save);
-    // Disabled again only once the answered view has been adopted, so the form
-    // and the configuration agree.
     await waitFor(() =>
-      expect((save as HTMLButtonElement).disabled).toBe(true),
+      expect(writesTo("/api/v1/models/defaults")).toHaveLength(1),
     );
-
-    const [write] = writesTo("/api/v1/providers/defaults");
-    // Only the capability that moved, so a text default set elsewhere survives.
-    expect(write.body).toEqual({ image: "main::painter", expectedRevision: 1 });
-  });
-
-  it("names a default nobody set and offers the only model that could fill it", async () => {
-    await openSettings();
-    fireEvent.click(await screen.findByRole("tab", { name: "Defaults" }));
-
-    // One image model, so the gap has a single answer and the tab offers it
-    // instead of only describing the hole.
-    const image = await screen.findByTestId("image-gap");
-    expect(image.textContent).toContain("1 image model available");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Use Example Inc · painter" }),
-    );
-    expect((screen.getByLabelText("Image") as HTMLSelectElement).value).toBe(
-      "main::painter",
-    );
-    // Offered as a choice to make, not a write already performed.
-    expect(writesTo("/api/v1/providers/defaults")).toHaveLength(0);
-
-    // Two text models is a choice the tab must not make for the user: it says
-    // the gap and leaves the picker as the way to close it.
-    const text = screen.getByTestId("text-gap");
-    expect(text.textContent).toContain(
-      "2 text models available and none of them is the default",
-    );
-    expect(
-      screen.queryByRole("button", { name: /^Use Example Inc · writer$/ }),
-    ).toBeNull();
-
-    // A capability nothing serves says so, and leads to where it would change.
-    expect(screen.getByTestId("video-gap").textContent).toContain(
-      "No video model in any enabled channel",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
-    await waitFor(() =>
-      expect(writesTo("/api/v1/providers/defaults")).toHaveLength(1),
-    );
-    // Only the capability that moved.
-    expect(writesTo("/api/v1/providers/defaults")[0].body).toEqual({
-      image: "main::painter",
+    expect(writesTo("/api/v1/models/defaults")[0].body).toEqual({
+      text: "writer",
       expectedRevision: 1,
     });
+    // The gap is gone and the choice is shown as made.
+    await waitFor(() => expect(screen.queryByTestId("text-gap")).toBeNull());
+    expect(
+      (
+        screen.getByRole("radio", {
+          name: "Use Writer as the default text model",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+  });
+
+  it("deletes a model and its key when asked", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await openSettings();
+    fireEvent.click(
+      within(cardOf("Scribe")).getByRole("button", { name: "Delete" }),
+    );
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "DELETE")).toBe(true),
+    );
+    expect(screen.queryByText("Scribe")).toBeNull();
+    expect(screen.getByText("Writer")).toBeTruthy();
+    confirm.mockRestore();
   });
 
   it("sends only the preference group that moved", async () => {
@@ -652,92 +512,11 @@ describe("provider settings", () => {
       expect((save as HTMLButtonElement).disabled).toBe(true),
     );
 
-    const [write] = writesTo("/api/v1/providers/preferences");
+    const [write] = writesTo("/api/v1/models/preferences");
     expect(write.body).toEqual({
       image: { size: "1:1", quality: "auto", background: "", count: 3 },
       expectedRevision: 1,
     });
-  });
-
-  it("offers what a provider lists grouped by what each model can make", async () => {
-    await openSettings();
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Ask Example Inc which models it offers",
-      }),
-    );
-
-    // The decision is "which of these can make a picture", so the offer arrives
-    // grouped that way rather than as one long list of names.
-    const image = await screen.findByRole("region", {
-      name: "Image models offered",
-    });
-    expect(image.textContent).toContain("illustrator-2");
-    expect(
-      screen.getByRole("region", { name: "Audio models offered" }).textContent,
-    ).toContain("choir-1");
-    // A name the guess could not place is text, and the group says it guessed.
-    const text = screen.getByRole("region", { name: "Text models offered" });
-    expect(text.textContent).toContain("scribe-2");
-    expect(text.textContent).toContain("guessing");
-    // A listing reads, so nothing has been stored by it.
-    expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Add illustrator-2 to the image models",
-      }),
-    );
-    expect(
-      (screen.getByLabelText("Model 4 identifier") as HTMLInputElement).value,
-    ).toBe("illustrator-2");
-    // The capability came from the grouping, and is still the user's to change.
-    expect(
-      (screen.getByLabelText("Model 4 capability") as HTMLSelectElement).value,
-    ).toBe("image");
-    // Adopted into the form, not into the configuration.
-    expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
-    // And it is now visibly taken, so it cannot be added twice.
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Add all image models offered",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
-  });
-
-  it("takes a whole capability at once and narrows the offer by name", async () => {
-    await openSettings();
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Ask Example Inc which models it offers",
-      }),
-    );
-    await screen.findByRole("region", { name: "Audio models offered" });
-
-    fireEvent.change(
-      screen.getByLabelText("Filter the models the provider offers"),
-      { target: { value: "choir" } },
-    );
-    // Only the matching group is left, so "Add all" cannot sweep in models
-    // nobody filtered for.
-    expect(
-      screen.queryByRole("region", { name: "Image models offered" }),
-    ).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add all audio models offered" }),
-    );
-
-    expect(
-      (screen.getByLabelText("Model 4 identifier") as HTMLInputElement).value,
-    ).toBe("choir-1");
-    expect(
-      (screen.getByLabelText("Model 4 capability") as HTMLSelectElement).value,
-    ).toBe("audio");
-    expect(writesTo("/api/v1/providers/channels")).toHaveLength(0);
   });
 
   it("reports a refused write and shows the state that refused it", async () => {
@@ -747,36 +526,32 @@ describe("provider settings", () => {
       message: "the configuration changed underneath this edit",
     };
     await openSettings();
-    const readsBefore = readsOf("/api/v1/providers");
+    const readsBefore = readsOf("/api/v1/models");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    fireEvent.click(
+      within(cardOf("Writer")).getByRole("button", { name: "Edit" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Display name"), {
       target: { value: "Renamed" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
 
     expect(
       await screen.findByText("the configuration changed underneath this edit"),
     ).toBeTruthy();
     // The view was re-read, so the form is not left holding a stale revision.
-    expect(readsOf("/api/v1/providers")).toBeGreaterThan(readsBefore);
+    expect(readsOf("/api/v1/models")).toBeGreaterThan(readsBefore);
   });
 
   it("says how strongly the stored keys are protected", async () => {
     await openSettings();
-    await screen.findByText("Example Inc");
+    await screen.findByText("Writer");
 
     // The file tier is the weaker one, so the warning belongs where a key is
     // typed, not only in the deployment docs.
     const note = screen.getByTestId("secret-storage-note");
     expect(note.textContent).toContain("master.key");
     expect(note.textContent).toContain("MOKA_METADATA_KEY");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await screen.findByLabelText("API key");
-    expect(screen.getByTestId("secret-storage-note").textContent).toContain(
-      "master.key",
-    );
   });
 
   it("explains a missing master key instead of only reporting it", async () => {
@@ -786,11 +561,13 @@ describe("provider settings", () => {
       message: "no master key protects stored credentials",
     };
     await openSettings();
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      within(cardOf("Scribe")).getByRole("button", { name: "Edit" }),
+    );
     fireEvent.change(await screen.findByLabelText("API key"), {
       target: { value: KEY },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
 
     expect(
       await screen.findByText("no master key protects stored credentials"),
@@ -800,19 +577,33 @@ describe("provider settings", () => {
     expect(guidance.textContent).toContain("MOKA_METADATA_KEY");
   });
 
-  it("reports a channel that refuses the probe inside the dialog", async () => {
+  it("reports a model that refuses the probe inside the dialog", async () => {
     await openSettings();
     fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Test the connection to Example Inc",
+      within(cardOf("Writer")).getByRole("button", {
+        name: "Test the connection to Writer",
       }),
     );
     expect(await screen.findByText("Reached in 42 ms")).toBeTruthy();
   });
 
+  it("reports a probe a provider refused beside the model it is about", async () => {
+    probeRefusal = "the provider rejected the stored credential";
+    await openSettings();
+    fireEvent.click(
+      within(cardOf("Writer")).getByRole("button", {
+        name: "Test the connection to Writer",
+      }),
+    );
+    const report = await screen.findByRole("status");
+    expect(report.textContent).toContain("PROVIDER_AUTH");
+    expect(report.textContent).toContain("the provider rejected");
+  });
+
   it("closes on escape", async () => {
     await openSettings();
-    await screen.findByText("Example Inc");
+    await screen.findByText("Writer");
+
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
   });

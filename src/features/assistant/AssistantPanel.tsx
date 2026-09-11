@@ -13,7 +13,7 @@ import {
   type RunId,
   type SessionId,
 } from "../../shared/domain";
-import { modelOptionsFor, useProviderStore } from "../settings/providerStore";
+import { modelOptionsFor, useModelStore } from "../settings/modelStore";
 import {
   buildIssueIndex,
   buildResourceIndex,
@@ -357,7 +357,7 @@ export function AssistantPanel() {
   const selfCheck = useProjectStore((state) => state.selfCheck);
   const chosen = useEditorStore((state) => state.selection.nodeIds);
   const generationOn = useGenerationAvailable();
-  const providers = useProviderStore((state) => state.view);
+  const view = useModelStore((state) => state.view);
   const intent = useAssistantStore((state) => state.intent);
   const draft = useAssistantStore((state) => state.draft);
   const asking = useAssistantStore((state) => state.asking);
@@ -467,7 +467,7 @@ export function AssistantPanel() {
   const summary = referenceSummary(planned?.references ?? []);
   const capability = capabilityFor(intent);
   const noModel =
-    providers !== null && modelOptionsFor(providers, capability).length === 0;
+    view !== null && modelOptionsFor(view, capability).length === 0;
   // A configuration still being read is not one with nothing in it.
   const refusal = !generationOn
     ? GENERATION_UNAVAILABLE
@@ -643,7 +643,7 @@ export function AssistantPanel() {
               {noModel && generationOn && (
                 <button
                   onClick={() =>
-                    useProviderStore.getState().openSettings("channels")
+                    useModelStore.getState().openSettings(capability)
                   }
                   type="button"
                 >

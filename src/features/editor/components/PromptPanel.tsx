@@ -21,10 +21,7 @@ import {
   type WorkflowNode,
 } from "../../../shared/domain";
 import { ModelPicker } from "../../settings/ModelPicker";
-import {
-  modelOptionsFor,
-  useProviderStore,
-} from "../../settings/providerStore";
+import { modelOptionsFor, useModelStore } from "../../settings/modelStore";
 import { worldToClient } from "../canvas/canvasControl";
 import { buildIssueIndex, buildResourceIndex } from "../canvas/mediaCards";
 import { mentionChoices } from "../canvas/mentions";
@@ -171,7 +168,7 @@ export function PromptPanel() {
   const selfCheck = useProjectStore((state) => state.selfCheck);
   const activeCanvasId = useProjectStore((state) => state.activeCanvasId);
   const generationOn = useGenerationAvailable();
-  const providers = useProviderStore((state) => state.view);
+  const view = useModelStore((state) => state.view);
   const run = useLatestRunForNode(open?.nodeId ?? null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const shownFor = useRef<NodeId | null>(null);
@@ -317,7 +314,7 @@ export function PromptPanel() {
   const opening: GenerationMode =
     capability === "image" && holdsSomething(node) ? "edit" : "generate";
   const mode = stored && offered.includes(stored.mode) ? stored.mode : opening;
-  const models = modelOptionsFor(providers, capability);
+  const models = modelOptionsFor(view, capability);
   const going = run !== null && isGoing(run.status);
   const stopping = run !== null && going && run.cancelRequested;
   /**
@@ -334,7 +331,7 @@ export function PromptPanel() {
     run.requestedNodeIds.length === 1 &&
     run.requestedNodeIds[0] === node.id;
   // A configuration still being read is not one with nothing in it.
-  const noModel = providers !== null && models.length === 0;
+  const noModel = view !== null && models.length === 0;
   // What a node with no words of its own may still be asked for: something
   // arriving on its prompt port, or a reference it points at by hand.
   const fedFromUpstream =
@@ -589,12 +586,12 @@ export function PromptPanel() {
           </p>
           <button
             onClick={() =>
-              // Straight to the channel that would serve this node, rather than
-              // to a list to be searched: the node named a model, or the default
-              // did, and that is the one with nothing to offer.
-              useProviderStore
+              // Straight to the category that would serve this node, on the
+              // model it named when that still exists, rather than to a list
+              // to be searched.
+              useModelStore
                 .getState()
-                .openChannelForCapability(capability, spec.model || null)
+                .openModelForCapability(capability, spec.model || null)
             }
             type="button"
           >
@@ -664,7 +661,7 @@ export function PromptPanel() {
       {paramsOpen && (
         <GenerationParams
           capability={capability}
-          defaults={providers?.preferences ?? null}
+          defaults={view?.preferences ?? null}
           key={node.id}
           onChange={setParam}
           params={spec.params}

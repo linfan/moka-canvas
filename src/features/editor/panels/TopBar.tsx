@@ -4,7 +4,7 @@ import {
   PROVIDER_EXECUTOR_KEY,
   executorKeyForNode,
 } from "../../../shared/domain";
-import { useProviderStore } from "../../settings/providerStore";
+import { useModelStore } from "../../settings/modelStore";
 import { viewCenterWorld } from "../canvas/canvasControl";
 import { redo, undo } from "../commands/execute";
 import {
@@ -232,7 +232,7 @@ export function TopBar({ onBack, onExport }: TopBarProps) {
         type="file"
       />
       <button
-        onClick={() => useProviderStore.getState().openSettings()}
+        onClick={() => useModelStore.getState().openSettings()}
         type="button"
       >
         Settings

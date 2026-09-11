@@ -391,7 +391,7 @@ export function buildGenerationMokaFile(): MokaFile {
       generation: {
         capability: "image",
         mode: "generate",
-        model: "demo::painter",
+        model: "painter",
         prompt: `Paint @[node:${textId}] as a poster.`,
         inputMode: "mentions",
         params: { size: "1:1", count: 2 },
@@ -466,7 +466,7 @@ export function buildConversationMokaFile(): MokaFile {
     canvasId: ids.canvasMain,
     operationNodeId: ids.image,
     assistantSessionId: said.session,
-    parameterSnapshot: { model: "demo::painter" },
+    parameterSnapshot: { model: "painter" },
     createdAt: T1,
   };
 

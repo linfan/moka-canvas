@@ -9,14 +9,14 @@ import {
   within,
 } from "@testing-library/react";
 import App from "../../App";
-import type { ProvidersView } from "../../api/providers";
-import type { ProviderProtocol, SelfCheckReport } from "../../shared/domain";
+import type { ModelsView } from "../../api";
+import type { ModelProtocol, SelfCheckReport } from "../../shared/domain";
 import { CASCADE_DROP_OFFSET, DEFAULT_NODE_WIDTH } from "../../shared/domain";
 import {
   buildGoldenMokaFile,
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
-import { useProviderStore } from "../settings/providerStore";
+import { useModelStore } from "../settings/modelStore";
 import {
   closesOutline,
   drawMarks,
@@ -62,37 +62,31 @@ const filed: { name: string; type: string; bytes: number }[] = [];
 
 const fetchMock = vi.fn<typeof fetch>();
 
-/** Which protocol the one channel answers with, so a test can pick the degrade. */
-let protocol: ProviderProtocol | null = "openai";
+/** Which protocol the image model answers with, so a test can pick the degrade. */
+let protocol: ModelProtocol | null = "openaiImages";
 
-function providers(): ProvidersView {
+function providers(): ModelsView {
   return {
     version: 1,
     revision: 7,
-    channels:
+    models:
       protocol === null
         ? []
         : [
             {
-              id: "example",
-              name: "Example Inc",
-              baseUrl: "https://api.example.com/v1",
+              id: "painter",
+              category: "image",
               protocol,
+              url: "https://api.example.com/v1/images/generations",
+              model: "painter-1",
+              displayName: "Example Painter",
               enabled: true,
-              models: [
-                {
-                  id: "painter",
-                  capability: "image",
-                  alias: "",
-                  enabled: true,
-                },
-              ],
               apiKey: { set: true, masked: "sk-…abcd" },
             },
           ],
     defaults: {
       text: null,
-      image: protocol === null ? null : "example::painter",
+      image: protocol === null ? null : "painter",
       audio: null,
       video: null,
     },
@@ -123,7 +117,7 @@ function route(selfCheck: SelfCheckReport) {
     if (url === "/api/v1/config") return json(CONFIG);
     if (url === "/api/health") return json({ status: "ok" });
     if (url === "/api/v1/recent-projects") return json(RECENTS);
-    if (url === "/api/v1/providers") return json(providers());
+    if (url === "/api/v1/models") return json(providers());
     if (url === "/api/v1/projects/open") {
       return json({
         root: "/tmp/golden",
@@ -227,7 +221,7 @@ const shared = makeSheet(() => exported);
 beforeEach(() => {
   filed.length = 0;
   written.length = 0;
-  protocol = "openai";
+  protocol = "openaiImages";
   exported = new Uint8ClampedArray([255, 255, 255, 255]);
   shared.calls.length = 0;
   fetchMock.mockReset();
@@ -261,7 +255,7 @@ beforeEach(() => {
   useProjectStore.getState().close();
   useHistoryStore.getState().clear();
   useAppStore.setState({ toasts: [] });
-  useProviderStore.setState({ view: null, error: null });
+  useModelStore.setState({ view: null, error: null });
   useEditorStore.setState({
     selection: { nodeIds: [], edgeIds: [] },
     pictureTool: null,
@@ -901,31 +895,28 @@ async function openRepaintAgain() {
 }
 
 describe("saying whether the region can be held to", () => {
-  it.each<[ProviderProtocol | null, string, string]>([
-    ["openai", "dialog-note", "This channel has a field of its own for a mask"],
+  it.each<[ModelProtocol | null, string, string]>([
     [
-      "gemini",
-      "dialog-error",
-      "This channel has no field of its own for a mask",
+      "openaiImages",
+      "dialog-note",
+      "This model has a field of its own for a mask",
     ],
+    ["gemini", "dialog-error", "This model has no field of its own for a mask"],
     [
       "custom",
       "dialog-error",
       "It travels as a second picture beside the words",
     ],
-  ])(
-    "says it for the channel that will be asked",
-    async (which, kind, said) => {
-      protocol = which;
-      const dialog = await openRepaint();
-      expect(saidIn(dialog, kind)).toContain(said);
-    },
-  );
+  ])("says it for the model that will be asked", async (which, kind, said) => {
+    protocol = which;
+    const dialog = await openRepaint();
+    expect(saidIn(dialog, kind)).toContain(said);
+  });
 
-  it("says so when no channel has been chosen at all", async () => {
+  it("says so when no model has been chosen at all", async () => {
     protocol = null;
     const dialog = await openRepaint();
-    expect(saidIn(dialog, "dialog-note")).toContain("No channel is chosen yet");
+    expect(saidIn(dialog, "dialog-note")).toContain("No model is chosen yet");
     expect(saidIn(dialog, "dialog-error")).not.toContain("second picture");
   });
 });
