@@ -385,7 +385,7 @@ fn answers_body(
     if let Some(tokens) = request.int_param("maxTokens") {
         body.insert("max_output_tokens".into(), json!(tokens));
     }
-    if let Some(effort) = request.text_param("reasoningEffort") {
+    if let Some(effort) = reasoning_effort(request) {
         body.insert("reasoning".into(), json!({ "effort": effort }));
     }
     Value::Object(body)
@@ -492,10 +492,18 @@ fn chat_body(
     if let Some(tokens) = request.int_param("maxTokens") {
         body.insert("max_tokens".into(), json!(tokens));
     }
-    if let Some(effort) = request.text_param("reasoningEffort") {
+    if let Some(effort) = reasoning_effort(request) {
         body.insert("reasoning_effort".into(), json!(effort));
     }
     Value::Object(body)
+}
+
+/// "Auto" means the provider picks the effort itself, and some channels reject
+/// it as an unknown value, so it never travels in the body.
+fn reasoning_effort(request: &GenerateRequest) -> Option<&str> {
+    request
+        .text_param("reasoningEffort")
+        .filter(|effort| !effort.eq_ignore_ascii_case("auto"))
 }
 
 fn chat_event(payload: &Value) -> StreamEvent {
@@ -949,6 +957,18 @@ mod tests {
                 "max_tokens": 64,
             })
         );
+    }
+
+    #[test]
+    fn an_auto_effort_is_left_for_the_provider_to_choose() {
+        let call = channel("gpt-5.5");
+        let asked = generation(Capability::Text, "a lighthouse", json!({ "reasoningEffort": "auto" }));
+        // Channels that enumerate the efforts they know reject "auto" outright,
+        // so it stays out of both bodies: naming no effort is what "auto" means.
+        assert_eq!(answers_body(&call, &asked, &[], false).get("reasoning"), None);
+
+        let older = channel("llama-3.3");
+        assert_eq!(chat_body(&older, &asked, &[], false).get("reasoning_effort"), None);
     }
 
     #[test]
