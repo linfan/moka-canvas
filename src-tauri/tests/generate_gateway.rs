@@ -7,7 +7,6 @@
 //! that a job handle really comes back, and that nothing is sent when the
 //! configuration cannot place the call.
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,14 +22,13 @@ use axum::{Json, Router};
 use base64::Engine;
 use moka_canvas::config::{parse_test_config, GenerateConfig, RuntimeMode};
 use moka_canvas::domain::Capability;
-use moka_canvas::generate::providers::ProviderRepo;
+use moka_canvas::generate::models::ModelRepo;
 use moka_canvas::generate::{
     Cancel, DeltaSink, Gateway, GenerateInput, GenerateRequest, InputRole, TaskState,
 };
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
 use moka_canvas::metadata::{
-    self, ChannelDraft, ChannelModel, Defaults, ImagePreferences, MetadataStore, Preferences,
-    Protocol,
+    self, Defaults, ImagePreferences, MetadataStore, ModelDraft, Preferences, Protocol,
 };
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{CreateProject, ProjectStore, StagedAsset};
@@ -83,7 +81,7 @@ async fn serve(routes: Router) -> String {
 /// A gateway over a real project and a real metadata store.
 struct Rig {
     gateway: Arc<Gateway>,
-    providers: Arc<ProviderRepo>,
+    models: Arc<ModelRepo>,
     assets: Arc<FsProjectStore>,
     project: PathBuf,
     /// Keeps the tree both stores were opened in alive for the whole test.
@@ -91,45 +89,33 @@ struct Rig {
 }
 
 impl Rig {
-    /// Adds a channel with a stored credential, the way Settings would.
-    async fn channel(
-        &self,
-        id: &str,
-        base_url: &str,
-        protocol: Protocol,
-        models: Vec<ChannelModel>,
-    ) {
-        self.channel_serving(id, base_url, protocol, models, HashMap::new())
-            .await;
-    }
-
-    /// Adds a channel whose kinds are served at separate addresses, the way
-    /// Settings would for a provider that publishes more than one base URL.
-    async fn channel_serving(
-        &self,
-        id: &str,
-        base_url: &str,
-        protocol: Protocol,
-        models: Vec<ChannelModel>,
-        capability_base_urls: HashMap<Capability, String>,
-    ) {
-        self.providers
-            .upsert_channel(ChannelDraft {
-                id: id.into(),
-                name: format!("Channel {id}"),
-                base_url: base_url.into(),
-                protocol,
-                enabled: true,
-                models,
-                expected_revision: None,
-                capability_base_urls,
-            })
-            .await
-            .expect("the channel is stored");
-        self.providers
-            .set_key(id, Some(API_KEY))
-            .await
-            .expect("the credential is stored");
+    /// Adds model configurations with stored credentials, the way Settings
+    /// would. Each model carries its own full endpoint address, built from the
+    /// throwaway provider's base and the endpoint shape its protocol speaks.
+    async fn serving(&self, base_url: &str, models: Vec<TestModel>) {
+        for entry in models {
+            let protocol = entry
+                .protocol
+                .unwrap_or_else(|| default_protocol(entry.capability));
+            let id = entry.id.clone();
+            self.models
+                .upsert(ModelDraft {
+                    id: id.clone(),
+                    category: entry.capability,
+                    protocol,
+                    url: endpoint_of(base_url, protocol, &id),
+                    model: id.clone(),
+                    display_name: id.clone(),
+                    enabled: true,
+                    expected_revision: None,
+                })
+                .await
+                .expect("the model is stored");
+            self.models
+                .set_key(&id, Some(API_KEY))
+                .await
+                .expect("the credential is stored");
+        }
     }
 
     /// Makes one model the answer for a capability, the way Settings would.
@@ -141,14 +127,14 @@ impl Rig {
             Capability::Audio => defaults.audio = Some(reference.into()),
             Capability::Video => defaults.video = Some(reference.into()),
         }
-        self.providers
+        self.models
             .set_defaults(&defaults, None)
             .await
             .expect("the default resolves");
     }
 
     async fn prefer(&self, preferences: Preferences) {
-        self.providers
+        self.models
             .set_preferences(&preferences, None)
             .await
             .expect("the preferences are stored");
@@ -199,7 +185,7 @@ async fn rig() -> Rig {
         .map(|store| store as Arc<dyn MetadataStore>)
         .expect("the store opens");
 
-    let providers = Arc::new(ProviderRepo::new(metadata));
+    let models = Arc::new(ModelRepo::new(metadata));
     let assets = Arc::new(FsProjectStore::new(Arc::clone(&config)));
     let project = tmp.path().join("demo-project");
     assets
@@ -213,25 +199,66 @@ async fn rig() -> Rig {
         .expect("the project scaffolds");
 
     let gateway = Arc::new(Gateway::new(
-        Arc::clone(&providers),
+        Arc::clone(&models),
         Arc::clone(&assets) as Arc<dyn ProjectStore>,
         budgets,
     ));
     Rig {
         gateway,
-        providers,
+        models,
         assets,
         project,
         _tmp: tmp,
     }
 }
 
-fn model(id: &str, capability: Capability) -> ChannelModel {
-    ChannelModel {
+/// One model a test configures. The protocol is optional: a category has a
+/// default shape, and a test that serves a different endpoint names it.
+struct TestModel {
+    id: String,
+    capability: Capability,
+    protocol: Option<Protocol>,
+}
+
+fn model(id: &str, capability: Capability) -> TestModel {
+    TestModel {
         id: id.into(),
         capability,
-        alias: String::new(),
-        enabled: true,
+        protocol: None,
+    }
+}
+
+fn model_via(id: &str, capability: Capability, protocol: Protocol) -> TestModel {
+    TestModel {
+        id: id.into(),
+        capability,
+        protocol: Some(protocol),
+    }
+}
+
+fn default_protocol(capability: Capability) -> Protocol {
+    match capability {
+        Capability::Text => Protocol::OpenaiChat,
+        Capability::Image => Protocol::OpenaiImages,
+        Capability::Audio => Protocol::OpenaiSpeech,
+        Capability::Video => Protocol::OpenaiVideos,
+    }
+}
+
+/// The complete endpoint address a protocol speaks at, on a throwaway
+/// provider's base address.
+fn endpoint_of(base_url: &str, protocol: Protocol, model_id: &str) -> String {
+    match protocol {
+        Protocol::OpenaiChat => format!("{base_url}/v1/chat/completions"),
+        Protocol::OpenaiResponses => format!("{base_url}/v1/responses"),
+        Protocol::OpenaiImages => format!("{base_url}/v1/images/generations"),
+        Protocol::OpenaiSpeech => format!("{base_url}/v1/audio/speech"),
+        Protocol::OpenaiVideos => format!("{base_url}/v1/videos"),
+        Protocol::Gemini => format!("{base_url}/v1beta/models/{model_id}:generateContent"),
+        Protocol::GeminiVideo => {
+            format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
+        }
+        Protocol::Custom => format!("{base_url}/v1/chat/completions"),
     }
 }
 
@@ -302,14 +329,16 @@ async fn a_generation_goes_to_the_default_model_when_the_request_names_none() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
+    rig.serving(
         &base_url,
-        Protocol::Openai,
-        vec![model("gpt-5.5", Capability::Text)],
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
     )
     .await;
-    rig.default(Capability::Text, "a-channel::gpt-5.5").await;
+    rig.default(Capability::Text, "gpt-5.5").await;
 
     let result = rig
         .gateway
@@ -345,15 +374,9 @@ async fn a_parameter_the_caller_set_reaches_the_provider_over_the_global_one() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
-        &base_url,
-        Protocol::Openai,
-        vec![model("gpt-image-2", Capability::Image)],
-    )
-    .await;
-    rig.default(Capability::Image, "a-channel::gpt-image-2")
+    rig.serving(&base_url, vec![model("gpt-image-2", Capability::Image)])
         .await;
+    rig.default(Capability::Image, "gpt-image-2").await;
     rig.prefer(Preferences {
         image: ImagePreferences {
             size: "1024x1024".into(),
@@ -425,21 +448,23 @@ async fn each_capability_is_asked_at_the_address_that_serves_it() {
     ))
     .await;
 
+    // One configuration per model, each addressed at the endpoint that
+    // serves its own category: there is no shared channel address any more.
     let rig = rig().await;
-    rig.channel_serving(
-        "a-channel",
+    rig.serving(
         &text_url,
-        Protocol::Openai,
-        vec![
-            model("gpt-5.5", Capability::Text),
-            model("gpt-image-2", Capability::Image),
-        ],
-        HashMap::from([(Capability::Image, image_url.clone())]),
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
     )
     .await;
+    rig.serving(&image_url, vec![model("gpt-image-2", Capability::Image)])
+        .await;
 
     let mut generation = request(Capability::Image, "a cat", json!({}));
-    generation.model = "a-channel::gpt-image-2".into();
+    generation.model = "gpt-image-2".into();
     let picture = rig
         .gateway
         .image(generation, &Cancel::new())
@@ -450,21 +475,21 @@ async fn each_capability_is_asked_at_the_address_that_serves_it() {
     assert_eq!(
         image_watched.times(),
         1,
-        "the image model was asked at the address its kind declared"
+        "the image model was asked at the address it was configured with"
     );
     assert_eq!(
         text_watched.times(),
         0,
-        "the channel's own address never saw the image call"
+        "the text model's address never saw the image call"
     );
 
     let mut generation = request(Capability::Text, "describe a lantern", json!({}));
-    generation.model = "a-channel::gpt-5.5".into();
+    generation.model = "gpt-5.5".into();
     let words = rig
         .gateway
         .text(generation, &DeltaSink::default(), &Cancel::new())
         .await
-        .expect("the text request stays on the channel's own address");
+        .expect("the text request stays on its own address");
 
     assert_eq!(words.text.as_deref(), Some("A lantern, lit."));
     assert_eq!(text_watched.times(), 1);
@@ -501,15 +526,9 @@ async fn a_reference_is_read_out_of_the_project_and_sent_along() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
-        &base_url,
-        Protocol::Openai,
-        vec![model("gpt-image-2", Capability::Image)],
-    )
-    .await;
-    rig.default(Capability::Image, "a-channel::gpt-image-2")
+    rig.serving(&base_url, vec![model("gpt-image-2", Capability::Image)])
         .await;
+    rig.default(Capability::Image, "gpt-image-2").await;
     let asset = rig.upload("cat.png", "image/png", &encoded(4, 3)).await;
 
     let mut generation = request(Capability::Image, "a cat, older", json!({}));
@@ -573,14 +592,16 @@ async fn a_channel_that_asked_to_be_waited_for_is_asked_again_after_that_wait() 
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
+    rig.serving(
         &base_url,
-        Protocol::Openai,
-        vec![model("gpt-5.5", Capability::Text)],
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
     )
     .await;
-    rig.default(Capability::Text, "a-channel::gpt-5.5").await;
+    rig.default(Capability::Text, "gpt-5.5").await;
 
     let started = Instant::now();
     let result = rig
@@ -621,14 +642,16 @@ async fn a_credential_the_provider_rejected_is_reported_once() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
+    rig.serving(
         &base_url,
-        Protocol::Openai,
-        vec![model("gpt-5.5", Capability::Text)],
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
     )
     .await;
-    rig.default(Capability::Text, "a-channel::gpt-5.5").await;
+    rig.default(Capability::Text, "gpt-5.5").await;
 
     let error = rig
         .gateway
@@ -655,15 +678,9 @@ async fn an_answer_that_carried_nothing_is_reported_rather_than_stored() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
-        &base_url,
-        Protocol::Openai,
-        vec![model("gpt-image-2", Capability::Image)],
-    )
-    .await;
-    rig.default(Capability::Image, "a-channel::gpt-image-2")
+    rig.serving(&base_url, vec![model("gpt-image-2", Capability::Image)])
         .await;
+    rig.default(Capability::Image, "gpt-image-2").await;
 
     let error = rig
         .gateway
@@ -694,18 +711,13 @@ async fn a_model_that_generates_something_else_is_refused_before_anything_is_sen
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
-        &base_url,
-        Protocol::Openai,
-        vec![model("gpt-image-2", Capability::Image)],
-    )
-    .await;
+    rig.serving(&base_url, vec![model("gpt-image-2", Capability::Image)])
+        .await;
 
     // The endpoint says text, and the only model named is one that makes
     // pictures: answering would produce an asset no text node can hold.
     let mut generation = request(Capability::Text, "describe a lantern", json!({}));
-    generation.model = "a-channel::gpt-image-2".into();
+    generation.model = "gpt-image-2".into();
     let error = rig
         .gateway
         .text(generation, &DeltaSink::default(), &Cancel::new())
@@ -717,7 +729,7 @@ async fn a_model_that_generates_something_else_is_refused_before_anything_is_sen
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_channel_with_no_stored_key_is_reported_before_anything_is_sent() {
+async fn a_model_with_no_stored_key_is_reported_before_anything_is_sent() {
     let watched = Watch::default();
     let answering = watched.clone();
     let base_url = serve(Router::new().route(
@@ -733,20 +745,20 @@ async fn a_channel_with_no_stored_key_is_reported_before_anything_is_sent() {
     .await;
 
     let rig = rig().await;
-    rig.providers
-        .upsert_channel(ChannelDraft {
-            id: "a-channel".into(),
-            name: "Channel".into(),
-            base_url: base_url.clone(),
-            protocol: Protocol::Openai,
+    rig.models
+        .upsert(ModelDraft {
+            id: "gpt-5.5".into(),
+            category: Capability::Text,
+            protocol: Protocol::OpenaiResponses,
+            url: format!("{base_url}/v1/responses"),
+            model: "gpt-5.5".into(),
+            display_name: "GPT-5.5".into(),
             enabled: true,
-            models: vec![model("gpt-5.5", Capability::Text)],
             expected_revision: None,
-            capability_base_urls: HashMap::new(),
         })
         .await
-        .expect("the channel is stored");
-    rig.default(Capability::Text, "a-channel::gpt-5.5").await;
+        .expect("the model is stored");
+    rig.default(Capability::Text, "gpt-5.5").await;
 
     let error = rig
         .gateway
@@ -779,14 +791,16 @@ async fn a_cancelled_generation_never_reaches_the_provider() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
+    rig.serving(
         &base_url,
-        Protocol::Openai,
-        vec![model("gpt-5.5", Capability::Text)],
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
     )
     .await;
-    rig.default(Capability::Text, "a-channel::gpt-5.5").await;
+    rig.default(Capability::Text, "gpt-5.5").await;
 
     let cancel = Cancel::new();
     cancel.cancel();
@@ -815,14 +829,16 @@ async fn a_streamed_answer_reaches_the_caller_as_it_arrives_and_comes_back_whole
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
+    rig.serving(
         &base_url,
-        Protocol::Openai,
-        vec![model("gpt-5.5", Capability::Text)],
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
     )
     .await;
-    rig.default(Capability::Text, "a-channel::gpt-5.5").await;
+    rig.default(Capability::Text, "gpt-5.5").await;
 
     let seen = Arc::new(Mutex::new(String::new()));
     let collected = Arc::clone(&seen);
@@ -930,14 +946,16 @@ async fn a_failure_after_something_was_streamed_is_not_asked_again() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
+    rig.serving(
         &base_url,
-        Protocol::Openai,
-        vec![model("gpt-5.5", Capability::Text)],
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
     )
     .await;
-    rig.default(Capability::Text, "a-channel::gpt-5.5").await;
+    rig.default(Capability::Text, "gpt-5.5").await;
 
     let seen = Arc::new(Mutex::new(String::new()));
     let collected = Arc::clone(&seen);
@@ -1029,15 +1047,9 @@ async fn a_shot_is_started_polled_and_then_the_handle_is_done_with() {
     let base_url = video_provider(watched.clone()).await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
-        &base_url,
-        Protocol::Openai,
-        vec![model("a-video-model", Capability::Video)],
-    )
-    .await;
-    rig.default(Capability::Video, "a-channel::a-video-model")
+    rig.serving(&base_url, vec![model("a-video-model", Capability::Video)])
         .await;
+    rig.default(Capability::Video, "a-video-model").await;
 
     let task = rig
         .gateway
@@ -1111,15 +1123,9 @@ async fn a_job_the_provider_has_forgotten_ends_the_tracking() {
     .await;
 
     let rig = rig().await;
-    rig.channel(
-        "a-channel",
-        &base_url,
-        Protocol::Openai,
-        vec![model("a-video-model", Capability::Video)],
-    )
-    .await;
-    rig.default(Capability::Video, "a-channel::a-video-model")
+    rig.serving(&base_url, vec![model("a-video-model", Capability::Video)])
         .await;
+    rig.default(Capability::Video, "a-video-model").await;
 
     let task = rig
         .gateway

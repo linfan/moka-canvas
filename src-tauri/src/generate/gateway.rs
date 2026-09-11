@@ -25,11 +25,11 @@ use crate::metadata::Preferences;
 use crate::project::ProjectStore;
 use crate::telemetry::GenerationNote;
 
-use super::adapters::{for_protocol, ChannelCall};
+use super::adapters::{for_protocol, ModelCall};
 use super::error::ProviderError;
 use super::jobs::TaskRegistry;
 use super::media::{load_inputs, MediaInput};
-use super::providers::{resolve_within, ProviderRepo, ResolvedModel};
+use super::models::{resolve_within, ModelRepo, ResolvedModel};
 use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskState};
 
 /// One generation, resolved and ready to send.
@@ -38,14 +38,14 @@ use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskS
 /// is built at the last moment before a request and dropped when the attempts
 /// are over.
 struct Placement {
-    call: ChannelCall,
+    call: ModelCall,
     request: GenerateRequest,
     inputs: Vec<MediaInput>,
 }
 
-/// Places generations with the channels the user configured.
+/// Places generations with the models the user configured.
 pub struct Gateway {
-    providers: Arc<ProviderRepo>,
+    models: Arc<ModelRepo>,
     assets: Arc<dyn ProjectStore>,
     budgets: GenerateConfig,
     tasks: TaskRegistry,
@@ -53,12 +53,12 @@ pub struct Gateway {
 
 impl Gateway {
     pub fn new(
-        providers: Arc<ProviderRepo>,
+        models: Arc<ModelRepo>,
         assets: Arc<dyn ProjectStore>,
         budgets: GenerateConfig,
     ) -> Self {
         Self {
-            providers,
+            models,
             assets,
             budgets,
             tasks: TaskRegistry::new(),
@@ -231,10 +231,10 @@ impl Gateway {
             Err(error) => return Err(error),
         };
         cancel.check()?;
-        // The job stays with the channel that started it. Polling through
-        // whatever the default is now would ask one provider about a handle
-        // another issued.
-        let snapshot = self.providers.snapshot().await?;
+        // The job stays with the model configuration that started it. Polling
+        // through whatever the default is now would ask one provider about a
+        // handle another issued.
+        let snapshot = self.models.snapshot().await?;
         let resolved = resolve_within(&snapshot, &tracked.model, tracked.capability)?;
         let call = self.address(&resolved).await?;
         let state = for_protocol(tracked.protocol)
@@ -318,7 +318,7 @@ impl Gateway {
         result
     }
 
-    /// Resolves a request into one channel, one set of parameters, and the
+    /// Resolves a request into one model, one set of parameters, and the
     /// references it carries.
     ///
     /// The configuration comes from a single in-memory snapshot and the
@@ -330,7 +330,7 @@ impl Gateway {
         cancel: &Cancel,
     ) -> Result<Placement, ProviderError> {
         cancel.check()?;
-        let snapshot = self.providers.snapshot().await?;
+        let snapshot = self.models.snapshot().await?;
         let capability = request.capability;
         let request = merged(request, &snapshot.preferences);
         let resolved = resolve_within(&snapshot, &request.model, capability)?;
@@ -343,11 +343,11 @@ impl Gateway {
         })
     }
 
-    /// Addresses one channel, fetching the credential at the moment the
-    /// request goes out and not before.
-    async fn address(&self, resolved: &ResolvedModel) -> Result<ChannelCall, ProviderError> {
-        let api_key = self.providers.credential(&resolved.channel_id).await?;
-        ChannelCall::new(resolved, api_key, self.budgets.clone())
+    /// Addresses one model, fetching the credential at the moment the request
+    /// goes out and not before.
+    async fn address(&self, resolved: &ResolvedModel) -> Result<ModelCall, ProviderError> {
+        let api_key = self.models.credential(&resolved.config_id).await?;
+        ModelCall::new(resolved, api_key, self.budgets.clone())
     }
 
     /// Asks again after a failure waiting can fix, until the budget for
@@ -523,7 +523,7 @@ fn waitable(error: &ProviderError) -> bool {
 /// How long to wait before asking again.
 ///
 /// A provider that said when to come back is obeyed: a backoff that ignores it
-/// either hammers a channel that asked for a minute, or waits a minute out
+/// either hammers a provider that asked for a minute, or waits a minute out
 /// when it asked for a second.
 fn backoff(error: &ProviderError, attempt: u32, budgets: &GenerateConfig) -> Duration {
     let asked = match error {
@@ -696,7 +696,7 @@ mod tests {
         assert_eq!(error.code(), "PROVIDER_NO_OUTPUT");
         assert!(
             !error.retryable(),
-            "asking the same channel again changes nothing"
+            "asking the same model again changes nothing"
         );
 
         let answered = settled(GenerateResult {
@@ -816,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_busy_or_unreachable_channel_is_worth_waiting_for() {
+    fn only_a_busy_or_unreachable_provider_is_worth_waiting_for() {
         assert!(waitable(&ProviderError::Unreachable(
             "nothing answered".into()
         )));
@@ -849,7 +849,7 @@ mod tests {
         assert_eq!(backoff(&unreachable, 2, &budgets), Duration::from_secs(2));
         assert_eq!(backoff(&unreachable, 3, &budgets), Duration::from_secs(4));
 
-        // A backoff that ignored this would hammer a channel that asked for a
+        // A backoff that ignored this would hammer a provider that asked for a
         // minute, or wait a minute out when it asked for a second.
         let asked = ProviderError::RateLimited {
             detail: "slow down".into(),

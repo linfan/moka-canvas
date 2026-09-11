@@ -15,9 +15,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use moka_canvas::config::GenerateConfig;
 use moka_canvas::domain::Capability;
-use moka_canvas::generate::adapters::{for_protocol, list_models, ChannelCall, ProviderAdapter};
+use moka_canvas::generate::adapters::{for_protocol, list_models, ModelCall, ProviderAdapter};
 use moka_canvas::generate::media::MediaInput;
-use moka_canvas::generate::providers::ResolvedModel;
+use moka_canvas::generate::models::ResolvedModel;
 use moka_canvas::generate::{Cancel, DeltaSink, GenerateRequest, InputRole, TaskState};
 use moka_canvas::metadata::Protocol;
 use serde_json::{json, Value};
@@ -99,8 +99,8 @@ struct Headers {
     query: Option<String>,
 }
 
-/// Starts a throwaway provider and returns the address a channel would be
-/// configured with.
+/// Starts a throwaway provider and returns the base address a model's full
+/// endpoint URL is built on.
 async fn serve(routes: Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -112,35 +112,64 @@ async fn serve(routes: Router) -> String {
     format!("http://{address}")
 }
 
-/// A channel resolved to one model on a throwaway provider.
-fn channel(base_url: &str, model_id: &str, capability: Capability) -> ChannelCall {
-    speaking(Protocol::Openai, base_url, model_id, capability)
+/// A model configuration resolved to one call on a throwaway provider. The
+/// category picks the default protocol its endpoint shape speaks.
+fn channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
+    let protocol = match capability {
+        Capability::Text => Protocol::OpenaiChat,
+        Capability::Image => Protocol::OpenaiImages,
+        Capability::Audio => Protocol::OpenaiSpeech,
+        Capability::Video => Protocol::OpenaiVideos,
+    };
+    speaking(protocol, base_url, model_id, capability)
 }
 
-fn gemini_channel(base_url: &str, model_id: &str, capability: Capability) -> ChannelCall {
-    speaking(Protocol::Gemini, base_url, model_id, capability)
+fn gemini_channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
+    let protocol = match capability {
+        Capability::Video => Protocol::GeminiVideo,
+        _ => Protocol::Gemini,
+    };
+    speaking(protocol, base_url, model_id, capability)
 }
 
+/// A model configuration resolved to one call speaking a named protocol.
 fn speaking(
     protocol: Protocol,
     base_url: &str,
     model_id: &str,
     capability: Capability,
-) -> ChannelCall {
+) -> ModelCall {
     let resolved = ResolvedModel {
-        reference: format!("channel-1::{model_id}"),
-        channel_id: "channel-1".into(),
-        model_id: model_id.into(),
-        capability,
+        config_id: model_id.into(),
+        model: model_id.to_string(),
+        display_name: format!("Model {model_id}"),
+        category: capability,
         protocol,
-        base_url: base_url.to_string(),
+        url: endpoint_of(protocol, base_url, model_id),
     };
-    ChannelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
+    ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
         .expect("a client builds")
 }
 
+/// The complete endpoint address a protocol speaks at, on a throwaway
+/// provider's base address.
+fn endpoint_of(protocol: Protocol, base_url: &str, model_id: &str) -> String {
+    match protocol {
+        Protocol::OpenaiChat => format!("{base_url}/v1/chat/completions"),
+        Protocol::OpenaiResponses => format!("{base_url}/v1/responses"),
+        Protocol::OpenaiImages => format!("{base_url}/v1/images/generations"),
+        Protocol::OpenaiSpeech => format!("{base_url}/v1/audio/speech"),
+        Protocol::OpenaiVideos => format!("{base_url}/v1/videos"),
+        Protocol::Gemini => format!("{base_url}/v1beta/models/{model_id}:generateContent"),
+        Protocol::GeminiVideo => {
+            format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
+        }
+        Protocol::Custom => format!("{base_url}/v1/chat/completions"),
+    }
+}
+
 fn openai_adapter() -> &'static dyn ProviderAdapter {
-    for_protocol(Protocol::Openai)
+    for_protocol(Protocol::OpenaiChat)
 }
 
 fn gemini_adapter() -> &'static dyn ProviderAdapter {
@@ -267,7 +296,7 @@ async fn gemini_models(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_openai_compatible_channel_lists_its_models() {
+async fn an_openai_compatible_provider_lists_its_models() {
     let recorded = Recorded::default();
     let listing = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -279,9 +308,13 @@ async fn an_openai_compatible_channel_lists_its_models() {
     ))
     .await;
 
-    let models = list_models(Protocol::Openai, &base_url, API_KEY)
-        .await
-        .expect("the list arrives");
+    let models = list_models(
+        Protocol::OpenaiChat,
+        &format!("{base_url}/v1/models"),
+        API_KEY,
+    )
+    .await
+    .expect("the list arrives");
 
     assert_eq!(models, ["gpt-5.5", "gpt-image-2"], "sorted, without blanks");
     let headers = recorded.headers();
@@ -293,33 +326,7 @@ async fn an_openai_compatible_channel_lists_its_models() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_base_url_that_already_carries_the_version_is_not_extended() {
-    let recorded = Recorded::default();
-    let listing = recorded.clone();
-    let address = serve(Router::new().route(
-        "/v1/models",
-        get(move |query: RawQuery, headers: HeaderMap| {
-            let recorded = listing.clone();
-            async move { openai_models(recorded, query, headers).await }
-        }),
-    ))
-    .await;
-
-    // Only /v1/models is routed, so appending a second version would answer
-    // 404 and the assertion below would fail.
-    let models = list_models(Protocol::Openai, &format!("{address}/v1"), API_KEY)
-        .await
-        .expect("the version segment is not added twice");
-    assert!(!models.is_empty());
-
-    let models = list_models(Protocol::Openai, &format!("{address}/v1/"), API_KEY)
-        .await
-        .expect("a trailing slash is not a second version either");
-    assert!(!models.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_gemini_channel_sends_its_key_in_a_header() {
+async fn a_gemini_provider_sends_its_key_in_a_header() {
     let recorded = Recorded::default();
     let listing = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -331,9 +338,13 @@ async fn a_gemini_channel_sends_its_key_in_a_header() {
     ))
     .await;
 
-    let models = list_models(Protocol::Gemini, &base_url, API_KEY)
-        .await
-        .expect("the list arrives");
+    let models = list_models(
+        Protocol::Gemini,
+        &format!("{base_url}/v1beta/models"),
+        API_KEY,
+    )
+    .await
+    .expect("the list arrives");
 
     assert_eq!(
         models,
@@ -367,9 +378,13 @@ async fn a_rejected_credential_is_an_auth_failure_worth_fixing_not_retrying() {
     ))
     .await;
 
-    let error = list_models(Protocol::Openai, &base_url, API_KEY)
-        .await
-        .expect_err("the provider refused the key");
+    let error = list_models(
+        Protocol::OpenaiChat,
+        &format!("{base_url}/v1/models"),
+        API_KEY,
+    )
+    .await
+    .expect_err("the provider refused the key");
 
     assert_eq!(error.code(), "PROVIDER_AUTH");
     assert!(!error.retryable(), "the same key will be refused again");
@@ -393,9 +408,13 @@ async fn a_busy_provider_is_worth_waiting_for() {
     ))
     .await;
 
-    let error = list_models(Protocol::Openai, &base_url, API_KEY)
-        .await
-        .expect_err("the provider is busy");
+    let error = list_models(
+        Protocol::OpenaiChat,
+        &format!("{base_url}/v1/models"),
+        API_KEY,
+    )
+    .await
+    .expect_err("the provider is busy");
 
     assert_eq!(error.code(), "PROVIDER_RATE_LIMIT");
     assert!(error.retryable());
@@ -415,9 +434,13 @@ async fn a_provider_that_echoes_the_key_back_does_not_leak_it() {
     ))
     .await;
 
-    let error = list_models(Protocol::Openai, &base_url, API_KEY)
-        .await
-        .expect_err("the provider refused the request");
+    let error = list_models(
+        Protocol::OpenaiChat,
+        &format!("{base_url}/v1/models"),
+        API_KEY,
+    )
+    .await
+    .expect_err("the provider refused the request");
 
     assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
     assert!(!error.to_string().contains(API_KEY), "{error}");
@@ -432,9 +455,13 @@ async fn an_answer_that_is_not_a_model_list_says_so() {
     ))
     .await;
 
-    let error = list_models(Protocol::Openai, &base_url, API_KEY)
-        .await
-        .expect_err("a proxy answered instead of the provider");
+    let error = list_models(
+        Protocol::OpenaiChat,
+        &format!("{base_url}/v1/models"),
+        API_KEY,
+    )
+    .await
+    .expect_err("a proxy answered instead of the provider");
 
     assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
     assert!(!error.retryable());
@@ -450,9 +477,13 @@ async fn an_address_nothing_answers_at_is_unreachable() {
     };
 
     // The listener is gone, so the port refuses the connection.
-    let error = list_models(Protocol::Openai, &format!("http://{address}"), API_KEY)
-        .await
-        .expect_err("nothing is listening");
+    let error = list_models(
+        Protocol::OpenaiChat,
+        &format!("http://{address}/v1/models"),
+        API_KEY,
+    )
+    .await
+    .expect_err("nothing is listening");
 
     assert_eq!(error.code(), "PROVIDER_UNAVAILABLE");
     assert!(error.retryable());
@@ -508,7 +539,12 @@ async fn a_streamed_text_generation_is_aggregated_before_it_is_stored() {
     ))
     .await;
 
-    let call = channel(&base_url, "gpt-5.5", Capability::Text);
+    let call = speaking(
+        Protocol::OpenaiResponses,
+        &base_url,
+        "gpt-5.5",
+        Capability::Text,
+    );
     let request = generation(
         Capability::Text,
         "describe a lantern",
@@ -531,64 +567,6 @@ async fn a_streamed_text_generation_is_aggregated_before_it_is_stored() {
     assert_eq!(sent["model"], "gpt-5.5");
     assert_eq!(sent["input"], "describe a lantern");
     assert_eq!(sent["stream"], true, "the endpoint was asked for pieces");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_gateway_without_the_newer_text_endpoint_is_asked_on_the_older_one() {
-    let recorded = Recorded::default();
-    let refusing = recorded.clone();
-    let answering = recorded.clone();
-    let base_url = serve(
-        Router::new()
-            .route(
-                "/v1/responses",
-                post(move |headers: HeaderMap| {
-                    let recorded = refusing.clone();
-                    async move {
-                        recorded.note("responses", &headers, None);
-                        refuse(
-                            StatusCode::NOT_FOUND,
-                            json!({"error": {"message": "no such route"}}),
-                        )
-                        .await
-                    }
-                }),
-            )
-            .route(
-                "/v1/chat/completions",
-                post(move |headers: HeaderMap, body: Bytes| {
-                    let recorded = answering.clone();
-                    async move {
-                        recorded.note("chat", &headers, None);
-                        recorded.note_body(&body);
-                        Json(json!({
-                            "choices": [{ "message": { "content": "A lantern." } }],
-                            "usage": { "prompt_tokens": 4, "completion_tokens": 2 },
-                        }))
-                    }
-                }),
-            ),
-    )
-    .await;
-
-    let call = channel(&base_url, "gpt-5.5", Capability::Text);
-    let request = generation(Capability::Text, "describe a lantern", json!({}));
-    let result = openai_adapter()
-        .generate(&call, &request, &[], &Cancel::new())
-        .await
-        .expect("a listing gateway is not obliged to have every endpoint");
-
-    assert_eq!(result.text.as_deref(), Some("A lantern."));
-    assert_eq!(recorded.asked(), ["responses", "chat"], "asked in order");
-    // The endpoint that refused recorded no body, so the one that remains was
-    // sent to the fallback — and it speaks in messages, not in the newer
-    // endpoint's fields. Without a system prompt of its own, the request has
-    // exactly one of them.
-    let sent = recorded.body(0);
-    assert_eq!(sent["messages"].as_array().map(Vec::len), Some(1), "{sent}");
-    assert_eq!(sent["messages"][0]["role"], "user");
-    assert_eq!(sent["messages"][0]["content"], "describe a lantern");
-    assert!(sent.get("input").is_none(), "{sent}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -625,7 +603,12 @@ async fn a_request_a_provider_refused_is_not_repeated_on_another_endpoint() {
     )
     .await;
 
-    let call = channel(&base_url, "gpt-5.5", Capability::Text);
+    let call = speaking(
+        Protocol::OpenaiResponses,
+        &base_url,
+        "gpt-5.5",
+        Capability::Text,
+    );
     let request = generation(Capability::Text, "describe a lantern", json!({}));
     let error = openai_adapter()
         .generate(&call, &request, &[], &Cancel::new())
@@ -645,7 +628,7 @@ async fn a_request_a_provider_refused_is_not_repeated_on_another_endpoint() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_model_nobody_recognises_goes_straight_to_the_endpoint_everyone_has() {
+async fn a_chat_protocol_configuration_is_asked_at_the_chat_endpoint() {
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -660,8 +643,8 @@ async fn a_model_nobody_recognises_goes_straight_to_the_endpoint_everyone_has() 
     ))
     .await;
 
-    // Only the older endpoint is routed, so trying the newer one first would
-    // have to fall back to reach this answer at all.
+    // The address a configuration carries is the whole endpoint: the chat
+    // protocol posts to it and nowhere else.
     let call = channel(&base_url, "llama-3.3", Capability::Text);
     let result = openai_adapter()
         .generate(
@@ -1080,9 +1063,9 @@ async fn a_video_generation_is_started_polled_and_collected() {
     assert!(!task.id.is_empty());
     assert_ne!(task.id, task.reference);
     assert_eq!(task.reference, "job-1");
-    assert_eq!(task.protocol, Protocol::Openai);
+    assert_eq!(task.protocol, Protocol::OpenaiVideos);
     assert_eq!(task.capability, Capability::Video);
-    assert_eq!(task.model, "channel-1::a-video-model");
+    assert_eq!(task.model, "a-video-model");
     assert!(!task.created_at.is_empty());
 
     let sent = recorded.body(0);
@@ -1134,9 +1117,9 @@ async fn a_job_the_provider_has_forgotten_ends_the_polling() {
     let task = moka_canvas::generate::AsyncTask {
         id: "task-1".into(),
         reference: "job-gone".into(),
-        protocol: Protocol::Openai,
+        protocol: Protocol::OpenaiVideos,
         capability: Capability::Video,
-        model: "channel-1::a-video-model".into(),
+        model: "a-video-model".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
     };
 
@@ -1169,9 +1152,9 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
     let task = moka_canvas::generate::AsyncTask {
         id: "task-2".into(),
         reference: "job-2".into(),
-        protocol: Protocol::Openai,
+        protocol: Protocol::OpenaiVideos,
         capability: Capability::Video,
-        model: "channel-1::a-video-model".into(),
+        model: "a-video-model".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
     };
 
@@ -1571,9 +1554,9 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
         "the handle a client polls with is ours"
     );
     assert_eq!(task.reference, "models/a-video-model/operations/job-1");
-    assert_eq!(task.protocol, Protocol::Gemini);
+    assert_eq!(task.protocol, Protocol::GeminiVideo);
     assert_eq!(task.capability, Capability::Video);
-    assert_eq!(task.model, "channel-1::a-video-model");
+    assert_eq!(task.model, "a-video-model");
 
     let sent = recorded.body(0);
     assert_eq!(sent["instances"][0]["prompt"], "a slow pan");

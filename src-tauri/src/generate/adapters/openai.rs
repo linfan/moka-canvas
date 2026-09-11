@@ -1,12 +1,14 @@
 //! The OpenAI-compatible protocol, which most gateways and aggregators also
 //! speak.
 //!
-//! Four capabilities over five endpoints. Text prefers the newer answer
-//! endpoint and falls back to chat completions, which every compatible gateway
-//! has, and carries the pictures a question is asked about in whichever of the
-//! two shapes the endpoint reads one as; an image with references travels as a
-//! multipart body rather than as JSON; audio arrives as the bytes themselves; and
-//! video is a job started here and collected later.
+//! Four capabilities over four endpoint shapes, chosen by the protocol variant
+//! a model configuration named: chat completions or the responses endpoint for
+//! text, the images endpoint for pictures, the speech endpoint for audio, and
+//! the videos job for shots. Every request goes to the complete address the
+//! configuration carries; the only addresses derived from it are the sibling
+//! an image edit travels to and the job handles a video is polled by. An image
+//! with references travels as a multipart body rather than as JSON, and audio
+//! arrives as the bytes themselves.
 
 use std::time::Duration;
 
@@ -17,29 +19,19 @@ use serde_json::{json, Map, Value};
 
 use super::{
     answer, exchange, image_item, media_item, open_stream, provider_error, read_stream, succeeded,
-    usage_of, ChannelCall, Opened, ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES,
+    usage_of, ModelCall, Opened, ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES,
     MODEL_LIST_TIMEOUT,
 };
 use crate::domain::{new_id, now_iso, Capability};
 use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
 use crate::generate::media::{video_images, video_layout, MediaInput, MultipartBody, VideoLayout};
+use crate::generate::models::image_edit_url;
 use crate::generate::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, InputRole,
     TaskState, Usage,
 };
 use crate::metadata::Protocol;
-
-const MODELS: &str = "/models";
-const SPEECH: &str = "/audio/speech";
-const IMAGE_CREATE: &str = "/images/generations";
-const IMAGE_EDIT: &str = "/images/edits";
-const VIDEOS: &str = "/videos";
-
-/// Identifiers expected to speak the newer answer endpoint. Anything else goes
-/// straight to chat completions, which is the one route every compatible
-/// gateway implements.
-const ANSWER_FAMILIES: [&str; 5] = ["gpt-", "o1", "o3", "o4", "chatgpt-"];
 
 /// How long a caller should wait before looking at a job again. The provider
 /// does not say, and asking more often than this only adds refusals.
@@ -55,13 +47,9 @@ pub struct OpenAiAdapter;
 
 #[async_trait::async_trait]
 impl ProviderAdapter for OpenAiAdapter {
-    fn protocol(&self) -> Protocol {
-        Protocol::Openai
-    }
-
     async fn generate(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         cancel: &Cancel,
@@ -81,7 +69,7 @@ impl ProviderAdapter for OpenAiAdapter {
 
     async fn generate_stream(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         sink: &DeltaSink,
@@ -100,7 +88,7 @@ impl ProviderAdapter for OpenAiAdapter {
 
     async fn create_task(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         cancel: &Cancel,
@@ -115,7 +103,7 @@ impl ProviderAdapter for OpenAiAdapter {
         let reply = answer(
             Kind::TaskCreate,
             call,
-            call.post(VIDEOS).json(&video_body(call, request, inputs)),
+            call.post().json(&video_body(call, request, inputs)),
             Capability::Video,
         )
         .await?;
@@ -133,19 +121,19 @@ impl ProviderAdapter for OpenAiAdapter {
             .to_string();
         Ok(AsyncTask {
             // Ours, not the provider's: the handle a client polls with must not
-            // change when a channel is reconfigured.
+            // change when a model configuration is edited.
             id: new_id(),
             reference,
-            protocol: Protocol::Openai,
+            protocol: call.protocol,
             capability: Capability::Video,
-            model: call.reference.clone(),
+            model: call.config_id.clone(),
             created_at: now_iso(),
         })
     }
 
     async fn poll_task(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         task: &AsyncTask,
         cancel: &Cancel,
     ) -> Result<TaskState, ProviderError> {
@@ -153,7 +141,7 @@ impl ProviderAdapter for OpenAiAdapter {
         let reply = exchange(
             Kind::TaskPoll,
             call,
-            call.get(&format!("{VIDEOS}/{}", task.reference)),
+            call.get(&format!("{}/{}", call.endpoint(), task.reference)),
             call.budgets.poll_timeout(),
             call.budgets.max_response_bytes,
         )
@@ -188,11 +176,11 @@ impl ProviderAdapter for OpenAiAdapter {
 }
 
 /// Asks the channel what it currently offers.
-pub(super) async fn list_models(call: &ChannelCall) -> Result<Vec<String>, ProviderError> {
+pub(super) async fn list_models(call: &ModelCall) -> Result<Vec<String>, ProviderError> {
     let reply = exchange(
         Kind::Models,
         call,
-        call.get(MODELS),
+        call.get(call.endpoint()),
         MODEL_LIST_TIMEOUT,
         MAX_MODEL_LIST_BYTES,
     )
@@ -227,142 +215,84 @@ fn identifiers(reply: &Reply) -> Result<Vec<String>, ProviderError> {
         .collect())
 }
 
-fn speaks_answers(model_id: &str) -> bool {
-    let lowered = model_id.to_lowercase();
-    ANSWER_FAMILIES
-        .iter()
-        .any(|family| lowered.starts_with(family))
-}
-
-/// True when a gateway said it has no such route, which is a reason to try
-/// another endpoint rather than a reason to stop.
-fn missing_endpoint(status: u16) -> bool {
-    matches!(status, 404 | 405 | 501)
-}
-
-/// One text endpoint: where it lives, what to send it, and how to read it back.
+/// One text endpoint shape: what to send it, and how to read it back.
 ///
-/// A table rather than a branch, because the two endpoints differ in all four
-/// of those and a `match` on the path would repeat the pairing at every use.
+/// A table rather than a branch, because the two shapes differ in all three
+/// of those and a `match` at every use would repeat the pairing.
 struct TextEndpoint {
-    path: &'static str,
-    body: fn(&ChannelCall, &GenerateRequest, &[MediaInput], bool) -> Value,
+    body: fn(&ModelCall, &GenerateRequest, &[MediaInput], bool) -> Value,
     event: fn(&Value) -> StreamEvent,
     result: fn(Value) -> GenerateResult,
 }
 
 const ANSWERS: TextEndpoint = TextEndpoint {
-    path: "/responses",
     body: answers_body,
     event: answers_event,
     result: answers_result,
 };
 
 const CHAT: TextEndpoint = TextEndpoint {
-    path: "/chat/completions",
     body: chat_body,
     event: chat_event,
     result: chat_result,
 };
 
-/// Why one text endpoint did not answer.
-enum Tried {
-    /// It has no such route, so asking the next one is worth a request.
-    Missing(ProviderError),
-    /// Anything else: the request was understood and refused, or never placed.
-    Failed(ProviderError),
+/// The endpoint shape the configured protocol named.
+fn text_endpoint(protocol: Protocol) -> &'static TextEndpoint {
+    match protocol {
+        Protocol::OpenaiResponses => &ANSWERS,
+        _ => &CHAT,
+    }
 }
 
 async fn text(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: &GenerateRequest,
     inputs: &[MediaInput],
     sink: &DeltaSink,
     cancel: &Cancel,
 ) -> Result<GenerateResult, ProviderError> {
     let deadline = call.budgets.timeout_for(Capability::Text);
-    let endpoints: &[TextEndpoint] = if speaks_answers(&call.model_id) {
-        &[ANSWERS, CHAT]
-    } else {
-        &[CHAT]
-    };
-
-    // A gateway that lists a model is not obliged to implement every endpoint
-    // behind it. The fallback happens before anything is streamed, because one
-    // after the first delta would show the answer twice.
-    let mut missing: Option<ProviderError> = None;
-    for endpoint in endpoints {
-        match attempt(call, endpoint, request, inputs, sink, cancel, deadline).await {
-            Ok(result) => return Ok(result),
-            Err(Tried::Missing(error)) => missing = Some(error),
-            Err(Tried::Failed(error)) => return Err(error),
-        }
-    }
-    Err(missing.unwrap_or_else(|| {
-        ProviderError::invalid("no text endpoint on this channel answered".to_string())
-    }))
-}
-
-async fn attempt(
-    call: &ChannelCall,
-    endpoint: &TextEndpoint,
-    request: &GenerateRequest,
-    inputs: &[MediaInput],
-    sink: &DeltaSink,
-    cancel: &Cancel,
-    deadline: Duration,
-) -> Result<GenerateResult, Tried> {
+    // The address a configuration carries is the whole endpoint, so the
+    // protocol variant is what says which body shape arrives there. There is
+    // no second candidate to fall back to: a user who named an address named
+    // the shape that answers at it.
+    let endpoint = text_endpoint(call.protocol);
     let body = (endpoint.body)(call, request, inputs, sink.is_streaming());
-    cancel.check().map_err(Tried::Failed)?;
+    cancel.check()?;
 
     if sink.is_streaming() {
-        return match open_stream(Kind::Stream, call, call.post(endpoint.path).json(&body))
-            .await
-            .map_err(Tried::Failed)?
-        {
-            Opened::Streaming(response, recording) => read_stream(
-                response,
-                recording.map(|recording| *recording),
-                sink,
-                cancel,
-                deadline,
-                endpoint.event,
-            )
-            .await
-            .map_err(Tried::Failed),
-            Opened::Refused(reply) => Err(refusal(reply, &call.api_key)),
+        return match open_stream(Kind::Stream, call, call.post().json(&body)).await? {
+            Opened::Streaming(response, recording) => {
+                read_stream(
+                    response,
+                    recording.map(|recording| *recording),
+                    sink,
+                    cancel,
+                    deadline,
+                    endpoint.event,
+                )
+                .await
+            }
+            Opened::Refused(reply) => Err(provider_error(&reply, &call.api_key)),
         };
     }
 
     let reply = exchange(
         Kind::Generate,
         call,
-        call.post(endpoint.path).json(&body),
+        call.post().json(&body),
         deadline,
         call.budgets.max_response_bytes,
     )
-    .await
-    .map_err(Tried::Failed)?;
+    .await?;
     if succeeded(reply.status) {
-        let payload = reply.value().map_err(Tried::Failed)?;
+        let payload = reply.value()?;
         return Ok((endpoint.result)(payload));
     }
-    Err(refusal(reply, &call.api_key))
+    Err(provider_error(&reply, &call.api_key))
 }
 
-/// Maps a refusal onto an error, marking the one case where another endpoint is
-/// worth asking.
-fn refusal(reply: Reply, api_key: &str) -> Tried {
-    let error = provider_error(&reply, api_key);
-    if missing_endpoint(reply.status) {
-        Tried::Missing(error)
-    } else {
-        Tried::Failed(error)
-    }
-}
-
-/// The pictures a written question is asked about, in the order they arrived.
-///
 /// Only pictures: neither text endpoint here has a field for anything else, and
 /// an audio reference left out is better than one sent as a picture no model can
 /// hear.
@@ -371,7 +301,7 @@ fn pictures(inputs: &[MediaInput]) -> Vec<&MediaInput> {
 }
 
 fn answers_body(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: &GenerateRequest,
     inputs: &[MediaInput],
     streaming: bool,
@@ -470,7 +400,7 @@ fn answer_parts(payload: &Value) -> Option<String> {
 }
 
 fn chat_body(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: &GenerateRequest,
     inputs: &[MediaInput],
     streaming: bool,
@@ -498,7 +428,7 @@ fn chat_body(
     messages.push(json!({ "role": "user", "content": asked }));
 
     let mut body = Map::from_iter([
-        ("model".to_string(), json!(call.model_id)),
+        ("model".to_string(), json!(call.model)),
         ("messages".to_string(), json!(messages)),
     ]);
     if streaming {
@@ -558,9 +488,9 @@ fn tokens(payload: &Value, input: &str, output: &str) -> Option<Usage> {
 
 /// The two fields every body here starts with: the model this channel resolved,
 /// and the prompt under the name this endpoint gives it.
-fn opening(call: &ChannelCall, key: &str, request: &GenerateRequest) -> Map<String, Value> {
+fn opening(call: &ModelCall, key: &str, request: &GenerateRequest) -> Map<String, Value> {
     Map::from_iter([
-        ("model".to_string(), json!(call.model_id)),
+        ("model".to_string(), json!(call.model)),
         (key.to_string(), json!(request.prompt)),
     ])
 }
@@ -569,7 +499,7 @@ fn opening(call: &ChannelCall, key: &str, request: &GenerateRequest) -> Map<Stri
 /// endpoint and a different body shape: the settings travel as form fields
 /// beside the bytes rather than as a JSON document.
 async fn image(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: &GenerateRequest,
     inputs: &[MediaInput],
     cancel: &Cancel,
@@ -583,10 +513,10 @@ async fn image(
         .partition(|input| input.role == InputRole::Mask);
 
     let placed = if references.is_empty() {
-        call.post(IMAGE_CREATE).json(&image_body(call, request))
+        call.post().json(&image_body(call, request))
     } else {
         let (body, content_type) = edit_body(call, request, &references, masks.first().copied());
-        call.post(IMAGE_EDIT)
+        call.post_at(&image_edit_url(call.endpoint()))
             .header(CONTENT_TYPE, content_type)
             .body(body)
     };
@@ -597,7 +527,7 @@ async fn image(
     .await
 }
 
-fn image_body(call: &ChannelCall, request: &GenerateRequest) -> Value {
+fn image_body(call: &ModelCall, request: &GenerateRequest) -> Value {
     let mut body = opening(call, "prompt", request);
     if let Some(size) = image_size(request) {
         body.insert("size".into(), json!(size));
@@ -642,7 +572,7 @@ fn proportion(size: &str) -> Option<f64> {
 }
 
 fn edit_body(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: &GenerateRequest,
     references: &[&MediaInput],
     mask: Option<&MediaInput>,
@@ -655,7 +585,7 @@ fn edit_body(
         "image[]"
     };
     let mut body = MultipartBody::new()
-        .field("model", &call.model_id)
+        .field("model", &call.model)
         .field("prompt", &request.prompt);
     if let Some(size) = image_size(request) {
         body = body.field("size", &size);
@@ -684,7 +614,7 @@ fn edit_body(
 
 /// The images in an answer, which arrive either inline or as an address to
 /// fetch them from.
-async fn images(call: &ChannelCall, reply: Reply) -> Result<GenerateResult, ProviderError> {
+async fn images(call: &ModelCall, reply: Reply) -> Result<GenerateResult, ProviderError> {
     let payload = reply.value()?;
     let mut items = Vec::new();
     let mut rewritten = Vec::new();
@@ -722,7 +652,7 @@ fn inline_image(inline: &str) -> Result<GeneratedItem, ProviderError> {
 }
 
 /// Fetches an image the provider left at an address of its own.
-async fn download(call: &ChannelCall, address: &str) -> Result<GeneratedItem, ProviderError> {
+async fn download(call: &ModelCall, address: &str) -> Result<GeneratedItem, ProviderError> {
     let reply = exchange(
         Kind::Media,
         call,
@@ -738,7 +668,7 @@ async fn download(call: &ChannelCall, address: &str) -> Result<GeneratedItem, Pr
 }
 
 async fn speech(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: &GenerateRequest,
     cancel: &Cancel,
 ) -> Result<GenerateResult, ProviderError> {
@@ -746,7 +676,7 @@ async fn speech(
     let reply = answer(
         Kind::Generate,
         call,
-        call.post(SPEECH).json(&speech_body(call, request)),
+        call.post().json(&speech_body(call, request)),
         Capability::Audio,
     )
     .await?;
@@ -764,7 +694,7 @@ async fn speech(
     })
 }
 
-fn speech_body(call: &ChannelCall, request: &GenerateRequest) -> Value {
+fn speech_body(call: &ModelCall, request: &GenerateRequest) -> Value {
     let mut body = opening(call, "input", request);
     for (key, parameter) in [("voice", "voice"), ("response_format", "format")] {
         if let Some(value) = request.text_param(parameter) {
@@ -780,7 +710,7 @@ fn speech_body(call: &ChannelCall, request: &GenerateRequest) -> Value {
     Value::Object(body)
 }
 
-fn video_body(call: &ChannelCall, request: &GenerateRequest, inputs: &[MediaInput]) -> Value {
+fn video_body(call: &ModelCall, request: &GenerateRequest, inputs: &[MediaInput]) -> Value {
     let mut body = opening(call, "prompt", request);
     for (key, parameter) in [("resolution", "resolution"), ("ratio", "ratio")] {
         if let Some(value) = request.text_param(parameter) {
@@ -821,11 +751,11 @@ fn video_body(call: &ChannelCall, request: &GenerateRequest, inputs: &[MediaInpu
 
 /// Downloads a finished job. The endpoint answers with the bytes rather than a
 /// document, so the mime comes from the answer itself.
-async fn collect(call: &ChannelCall, task: &AsyncTask) -> Result<TaskState, ProviderError> {
+async fn collect(call: &ModelCall, task: &AsyncTask) -> Result<TaskState, ProviderError> {
     let reply = answer(
         Kind::Media,
         call,
-        call.get(&format!("{VIDEOS}/{}/content", task.reference)),
+        call.get(&format!("{}/{}/content", call.endpoint(), task.reference)),
         Capability::Video,
     )
     .await?;
@@ -864,20 +794,20 @@ fn outcome(payload: &Value, status: &str) -> TaskState {
 mod tests {
     use super::*;
     use crate::config::GenerateConfig;
-    use crate::generate::providers::ResolvedModel;
+    use crate::generate::models::ResolvedModel;
 
-    /// A channel resolved to one model, pointed at an address nothing answers
-    /// so that a body built for it cannot be sent by accident.
-    fn channel(model_id: &str) -> ChannelCall {
+    /// A model configuration resolved to one call, pointed at an address
+    /// nothing answers so that a body built for it cannot be sent by accident.
+    fn channel(model_id: &str) -> ModelCall {
         let resolved = ResolvedModel {
-            reference: format!("channel-1::{model_id}"),
-            channel_id: "channel-1".into(),
-            model_id: model_id.into(),
-            capability: Capability::Text,
-            protocol: Protocol::Openai,
-            base_url: "https://example.invalid".into(),
+            config_id: model_id.to_string(),
+            model: model_id.to_string(),
+            display_name: format!("Model {model_id}"),
+            category: Capability::Text,
+            protocol: Protocol::OpenaiChat,
+            url: "https://example.invalid/v1/chat/completions".into(),
         };
-        ChannelCall::new(&resolved, "a-key".into(), GenerateConfig::default())
+        ModelCall::new(&resolved, "a-key".into(), GenerateConfig::default())
             .expect("a client builds")
     }
 
@@ -897,42 +827,6 @@ mod tests {
             name: format!("{name}.png"),
             bytes: b"png".to_vec(),
             mime: "image/png".into(),
-        }
-    }
-
-    #[test]
-    fn a_model_is_sent_to_the_endpoint_it_is_expected_to_speak() {
-        for model in [
-            "gpt-5.5",
-            "gpt-image-2",
-            "o3-mini",
-            "o4",
-            "chatgpt-4o-latest",
-            "GPT-4o",
-        ] {
-            assert!(speaks_answers(model), "{model} should be tried first");
-        }
-        for model in [
-            "llama-3.3",
-            "mistral-large",
-            "deepseek-v3",
-            "qwen-vl",
-            "gpt4",
-        ] {
-            assert!(!speaks_answers(model), "{model} should not be tried first");
-        }
-    }
-
-    #[test]
-    fn only_a_missing_route_makes_a_second_endpoint_worth_asking() {
-        // A gateway that lists a model is not obliged to implement every
-        // endpoint behind it; one that understood a request and refused it will
-        // refuse the same request elsewhere.
-        for status in [404, 405, 501] {
-            assert!(missing_endpoint(status), "status {status}");
-        }
-        for status in [400, 401, 403, 422, 429, 500] {
-            assert!(!missing_endpoint(status), "status {status}");
         }
     }
 

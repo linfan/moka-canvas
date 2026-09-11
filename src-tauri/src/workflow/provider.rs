@@ -57,7 +57,7 @@ impl CancelRegistry {
     }
 }
 
-/// Hands every generation step to the channels the user configured.
+/// Hands every generation step to the models the user configured.
 pub struct ProviderExecutor {
     gateway: Arc<Gateway>,
     in_flight: CancelRegistry,
@@ -422,7 +422,7 @@ mod tests {
             retry_after: None,
         });
         assert_eq!(busy.code, "PROVIDER_RATE_LIMIT");
-        assert!(busy.retryable, "waiting is the fix for a busy channel");
+        assert!(busy.retryable, "waiting is the fix for a busy provider");
         assert!(!busy.cancelled);
 
         let refused = step_error(ProviderError::Rejected("the prompt was refused".into()));
@@ -438,7 +438,7 @@ mod tests {
         // what reaches the run record and nothing further does.
         assert_eq!(
             refused.message,
-            "the channel rejected the request: the prompt was refused"
+            "the provider rejected the request: the prompt was refused"
         );
     }
 

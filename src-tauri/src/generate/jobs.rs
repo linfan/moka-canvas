@@ -116,9 +116,9 @@ mod tests {
         AsyncTask {
             id: id.into(),
             reference: format!("job-{id}"),
-            protocol: Protocol::Openai,
+            protocol: Protocol::OpenaiVideos,
             capability: Capability::Video,
-            model: "channel-1::a-video-model".into(),
+            model: "a-video-model".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
         }
     }

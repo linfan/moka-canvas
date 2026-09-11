@@ -98,16 +98,15 @@ pub fn mention_node_ids(prompt: &str) -> Vec<String> {
         .collect()
 }
 
-/// True when `model` carries both sides of a `channelId::modelId` reference.
-pub fn model_reference_shaped(model: &str) -> bool {
-    match model.find("::") {
-        Some(separator) => {
-            let channel = model[..separator].chars().count();
-            let model_id = model[separator + 2..].chars().count();
-            channel > 0 && model_id > 0
-        }
-        None => false,
-    }
+/// True when `model` is shaped like a model configuration identifier: one
+/// piece, no whitespace, and no legacy `channelId::modelId` separator — the
+/// halves of an old reference name nothing now, so one that arrives is a node
+/// saved before model configurations replaced channels, and saying so at
+/// validation is clearer than an opaque refusal at run time.
+pub fn model_identifier_shaped(model: &str) -> bool {
+    !model.is_empty()
+        && !model.contains("::")
+        && !model.chars().any(|character| character.is_whitespace())
 }
 
 /// Parameters each capability accepts; mirrors `GENERATION_PARAM_KEYS` in
@@ -357,11 +356,11 @@ fn generation_issues(
             ),
         ));
     }
-    if !spec.model.is_empty() && !model_reference_shaped(&spec.model) {
+    if !spec.model.is_empty() && !model_identifier_shaped(&spec.model) {
         issues.push(issue(
             "GENERATION_MODEL_MISSING",
             format!(
-                "Generation model \"{}\" is not a channelId::modelId reference",
+                "Generation model \"{}\" is not a model configuration identifier",
                 spec.model
             ),
         ));

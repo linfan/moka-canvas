@@ -1,6 +1,6 @@
 //! Talking to generation providers.
 //!
-//! [`providers`] is the configuration domain — channels, model references,
+//! [`models`] is the configuration domain — standalone model configurations
 //! and what may be disclosed about a stored credential. [`adapters`] turns
 //! that configuration into an HTTP call, one module per wire protocol.
 //! [`error`] names what can go wrong on the provider side, which is a
@@ -11,7 +11,7 @@
 //! them.
 //!
 //! [`gateway`] sits above all four and is what the rest of the program calls:
-//! it picks the channel, merges the parameters, decides between answering at
+//! it picks the model, merges the parameters, decides between answering at
 //! once and starting a job, and asks again when waiting would help. [`jobs`]
 //! keeps the handles a started job is polled by, for as long as polling one
 //! could still mean anything.
@@ -36,7 +36,7 @@ pub mod gateway;
 pub mod ingest;
 pub mod jobs;
 pub mod media;
-pub mod providers;
+pub mod models;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -52,7 +52,7 @@ pub use error::ProviderError;
 pub use gateway::Gateway;
 pub use ingest::ingest_generated;
 pub use jobs::TaskRegistry;
-pub use providers::{ProbeReport, ProviderRepo, ResolvedModel};
+pub use models::{ModelRepo, ProbeReport, ResolvedModel};
 
 /// One generation, in the project's words.
 ///
@@ -63,7 +63,7 @@ pub use providers::{ProbeReport, ProviderRepo, ResolvedModel};
 #[serde(rename_all = "camelCase")]
 pub struct GenerateRequest {
     pub capability: Capability,
-    /// `channelId::modelId`; empty means the default for the capability.
+    /// A model configuration id; empty means the default for the capability.
     #[serde(default)]
     pub model: String,
     #[serde(default)]
@@ -235,8 +235,8 @@ pub struct AsyncTask {
     pub reference: String,
     pub protocol: Protocol,
     pub capability: Capability,
-    /// The resolved `channelId::modelId`, kept so a poll cannot be pointed at
-    /// a different channel than the one that created the job.
+    /// The resolved model configuration id, kept so a poll cannot be pointed
+    /// at a different model than the one that created the job.
     pub model: String,
     pub created_at: IsoTimestamp,
 }

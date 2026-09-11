@@ -19,8 +19,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use moka_canvas::config::GenerateConfig;
 use moka_canvas::domain::Capability;
-use moka_canvas::generate::adapters::{for_protocol, list_models, ChannelCall};
-use moka_canvas::generate::providers::ResolvedModel;
+use moka_canvas::generate::adapters::{for_protocol, list_models, ModelCall};
+use moka_canvas::generate::models::ResolvedModel;
 use moka_canvas::generate::{Cancel, DeltaSink, GenerateRequest};
 use moka_canvas::metadata::Protocol;
 use serde_json::{json, Value};
@@ -28,8 +28,8 @@ use serde_json::{json, Value};
 /// Long enough that masking keeps a recognisable head and tail.
 const API_KEY: &str = "sk-test-1234567890abcd";
 
-/// Starts a throwaway provider and returns the address a channel would be
-/// configured with.
+/// Starts a throwaway provider and returns the base address a model's full
+/// endpoint URL is built on.
 async fn serve(routes: Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -41,16 +41,16 @@ async fn serve(routes: Router) -> String {
     format!("http://{address}")
 }
 
-fn channel(base_url: &str) -> ChannelCall {
+fn channel(base_url: &str) -> ModelCall {
     let resolved = ResolvedModel {
-        reference: "channel-1::gpt-5.5".into(),
-        channel_id: "channel-1".into(),
-        model_id: "gpt-5.5".into(),
-        capability: Capability::Text,
-        protocol: Protocol::Openai,
-        base_url: base_url.to_string(),
+        config_id: "gpt-5.5".into(),
+        model: "gpt-5.5".into(),
+        display_name: "GPT-5.5".into(),
+        category: Capability::Text,
+        protocol: Protocol::OpenaiResponses,
+        url: format!("{base_url}/v1/responses"),
     };
-    ChannelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
+    ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
         .expect("a client builds")
 }
 
@@ -187,11 +187,15 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
     .await;
 
     let call = channel(&base_url);
-    let adapter = for_protocol(Protocol::Openai);
+    let adapter = for_protocol(Protocol::OpenaiResponses);
 
-    let models = list_models(Protocol::Openai, &base_url, API_KEY)
-        .await
-        .expect("a listing");
+    let models = list_models(
+        Protocol::OpenaiResponses,
+        &format!("{base_url}/v1/models"),
+        API_KEY,
+    )
+    .await
+    .expect("a listing");
     assert_eq!(models, ["gpt-5.5".to_string()]);
 
     let asked = generation("describe a lantern", json!({}));
@@ -215,14 +219,14 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
     assert_eq!(streamed.text.as_deref(), Some("A lantern."));
     assert_eq!(*seen.lock().expect("not poisoned"), "A lantern.");
 
-    let speech = ChannelCall::new(
+    let speech = ModelCall::new(
         &ResolvedModel {
-            reference: "channel-1::gpt-5.5".into(),
-            channel_id: "channel-1".into(),
-            model_id: "gpt-5.5".into(),
-            capability: Capability::Audio,
-            protocol: Protocol::Openai,
-            base_url: base_url.clone(),
+            config_id: "a-voice".into(),
+            model: "gpt-5.5".into(),
+            display_name: "A voice".into(),
+            category: Capability::Audio,
+            protocol: Protocol::OpenaiSpeech,
+            url: format!("{base_url}/v1/audio/speech"),
         },
         API_KEY.to_string(),
         GenerateConfig::default(),
@@ -243,9 +247,8 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
     // Whatever the answer is worth, the call it came from is on the disk.
     let _ = spoken;
 
-    // Three kinds of call, one recording each: a listing, a generation, a stream,
-    // and the sound that
-    // sound the channel answered with, each of them accounted for.
+    // Four kinds of call, one recording each: a listing, a generation, a
+    // stream, and the sound the provider answered with, each accounted for.
     let lines = recordings(&root, 4).await;
     assert_eq!(
         lines.len(),

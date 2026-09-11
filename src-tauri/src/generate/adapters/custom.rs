@@ -1,15 +1,14 @@
 //! The reserved protocol.
 //!
-//! A channel can be configured with it and nothing more: there is no defined
+//! A model can be configured with it and nothing more: there is no defined
 //! request shape to send, so every call says so rather than reaching an
 //! endpoint whose body would have to be invented. A template-driven adapter
 //! belongs here when there is one.
 
-use super::{ChannelCall, ProviderAdapter, CUSTOM_RESERVED};
+use super::{ModelCall, ProviderAdapter, CUSTOM_RESERVED};
 use crate::generate::error::ProviderError;
 use crate::generate::media::MediaInput;
 use crate::generate::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskState};
-use crate::metadata::Protocol;
 
 pub(super) static ADAPTER: CustomAdapter = CustomAdapter;
 
@@ -17,13 +16,9 @@ pub struct CustomAdapter;
 
 #[async_trait::async_trait]
 impl ProviderAdapter for CustomAdapter {
-    fn protocol(&self) -> Protocol {
-        Protocol::Custom
-    }
-
     async fn generate(
         &self,
-        _call: &ChannelCall,
+        _call: &ModelCall,
         _request: &GenerateRequest,
         _inputs: &[MediaInput],
         _cancel: &Cancel,
@@ -33,7 +28,7 @@ impl ProviderAdapter for CustomAdapter {
 
     async fn generate_stream(
         &self,
-        _call: &ChannelCall,
+        _call: &ModelCall,
         _request: &GenerateRequest,
         _inputs: &[MediaInput],
         _sink: &DeltaSink,
@@ -44,7 +39,7 @@ impl ProviderAdapter for CustomAdapter {
 
     async fn create_task(
         &self,
-        _call: &ChannelCall,
+        _call: &ModelCall,
         _request: &GenerateRequest,
         _inputs: &[MediaInput],
         _cancel: &Cancel,
@@ -54,7 +49,7 @@ impl ProviderAdapter for CustomAdapter {
 
     async fn poll_task(
         &self,
-        _call: &ChannelCall,
+        _call: &ModelCall,
         _task: &AsyncTask,
         _cancel: &Cancel,
     ) -> Result<TaskState, ProviderError> {
@@ -73,18 +68,19 @@ mod tests {
     use super::*;
     use crate::config::GenerateConfig;
     use crate::domain::Capability;
-    use crate::generate::providers::ResolvedModel;
+    use crate::generate::models::ResolvedModel;
+    use crate::metadata::Protocol;
 
-    fn call() -> ChannelCall {
+    fn call() -> ModelCall {
         let resolved = ResolvedModel {
-            reference: "channel-1::anything".into(),
-            channel_id: "channel-1".into(),
-            model_id: "anything".into(),
-            capability: Capability::Text,
+            config_id: "anything".into(),
+            model: "anything".into(),
+            display_name: "Anything".into(),
+            category: Capability::Text,
             protocol: Protocol::Custom,
-            base_url: "https://example.invalid/v1".into(),
+            url: "https://example.invalid/v1/chat/completions".into(),
         };
-        ChannelCall::new(&resolved, "a-key".into(), GenerateConfig::default())
+        ModelCall::new(&resolved, "a-key".into(), GenerateConfig::default())
             .expect("a client builds")
     }
 
@@ -98,7 +94,7 @@ mod tests {
             reference: "job-1".into(),
             protocol: Protocol::Custom,
             capability: Capability::Video,
-            model: call.reference.clone(),
+            model: call.config_id.clone(),
             created_at: "2026-01-01T00:00:00Z".into(),
         };
 

@@ -81,10 +81,11 @@ const RUN_RECORDS: &str = "history/runs/";
 /// Application-level metadata documents that sit at the project root only.
 /// Matching the whole relative path keeps an asset that happens to share a
 /// name — a project may well contain its own `meta.json` — in the package.
-const METADATA_DOCUMENTS: [&str; 4] = [
+const METADATA_DOCUMENTS: [&str; 5] = [
     docs::META_DOC,
     docs::RECENT_DOC,
-    docs::PROVIDERS_DOC,
+    docs::MODELS_DOC,
+    docs::LEGACY_PROVIDERS_DOC,
     docs::PROMPT_SOURCES_DOC,
 ];
 

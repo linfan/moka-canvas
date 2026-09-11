@@ -9,12 +9,15 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::types::{Channel, Defaults, Preferences, PromptItem, PromptSource, RecentProject};
+use super::types::{Defaults, ModelConfig, Preferences, PromptItem, PromptSource, RecentProject};
 use crate::domain::{now_iso, IsoTimestamp};
 
 pub const META_DOC: &str = "meta.json";
 pub const RECENT_DOC: &str = "recent-projects.json";
-pub const PROVIDERS_DOC: &str = "providers.json";
+pub const MODELS_DOC: &str = "models.json";
+/// What the model document was called while it still grouped models into
+/// provider channels. Read once by the schema-2 upgrade and then removed.
+pub const LEGACY_PROVIDERS_DOC: &str = "providers.json";
 pub const SECRETS_DOC: &str = "secrets.json";
 pub const PROMPT_SOURCES_DOC: &str = "prompts/sources.json";
 pub const PROMPT_ITEMS_DIR: &str = "prompts/items";
@@ -24,7 +27,7 @@ pub const PROMPT_ITEMS_DIR: &str = "prompts/items";
 pub const MANAGED_DOCUMENTS: [&str; 5] = [
     META_DOC,
     RECENT_DOC,
-    PROVIDERS_DOC,
+    MODELS_DOC,
     SECRETS_DOC,
     PROMPT_SOURCES_DOC,
 ];
@@ -62,23 +65,23 @@ pub struct RecentDoc {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProvidersDoc {
+pub struct ModelsDoc {
     pub revision: u64,
     pub version: u32,
     #[serde(default)]
-    pub channels: Vec<Channel>,
+    pub models: Vec<ModelConfig>,
     #[serde(default)]
     pub defaults: Defaults,
     #[serde(default)]
     pub preferences: Preferences,
 }
 
-impl Default for ProvidersDoc {
+impl Default for ModelsDoc {
     fn default() -> Self {
         Self {
             revision: 0,
             version: 1,
-            channels: Vec::new(),
+            models: Vec::new(),
             defaults: Defaults::default(),
             preferences: Preferences::default(),
         }
@@ -178,8 +181,8 @@ mod tests {
                 serde_json::to_vec(&RecentDoc::default()).unwrap(),
             ),
             (
-                PROVIDERS_DOC,
-                serde_json::to_vec(&ProvidersDoc::default()).unwrap(),
+                MODELS_DOC,
+                serde_json::to_vec(&ModelsDoc::default()).unwrap(),
             ),
             (
                 SECRETS_DOC,
@@ -198,10 +201,10 @@ mod tests {
 
     #[test]
     fn a_missing_field_falls_back_instead_of_failing() {
-        let parsed: ProvidersDoc =
+        let parsed: ModelsDoc =
             serde_json::from_str(r#"{"revision":3,"version":1}"#).expect("sparse doc");
         assert_eq!(parsed.revision, 3);
-        assert!(parsed.channels.is_empty());
+        assert!(parsed.models.is_empty());
         assert_eq!(parsed.preferences.reasoning_effort, "auto");
     }
 

@@ -50,7 +50,7 @@ impl LocalServer {
         );
 
         let state = ApiState::new(config, mode, metadata_root)?;
-        seed_starter_channel(&state).await;
+        seed_starter_model(&state).await;
         let listener = TcpListener::bind(address)
             .await
             .context("failed to bind the local HTTP server")?;
@@ -97,22 +97,22 @@ impl Drop for LocalServer {
 /// Gives a first launch a channel to fill in instead of an empty list.
 ///
 /// A failure is logged rather than fatal. The editor is usable without it —
-/// Settings creates the same channel by hand — so refusing to start over a
+/// Settings creates the same model by hand — so refusing to start over a
 /// missing starter row would trade a cosmetic gap for an app that does not
 /// open at all.
-async fn seed_starter_channel(state: &ApiState) {
-    match state.providers.seed().await {
+async fn seed_starter_model(state: &ApiState) {
+    match state.models.seed().await {
         Ok(true) => tracing::info!(
-            target: "moka::providers",
-            channel = crate::generate::providers::SEED_CHANNEL_ID,
-            "created the starter provider channel"
+            target: "moka::models",
+            model = crate::generate::models::SEED_MODEL_ID,
+            "created the starter model configuration"
         ),
         Ok(false) => {}
         Err(error) => tracing::warn!(
-            target: "moka::providers",
+            target: "moka::models",
             code = error.code(),
             error = %error,
-            "could not create the starter provider channel"
+            "could not create the starter model configuration"
         ),
     }
 }
@@ -287,7 +287,7 @@ mod tests {
         let body = body_json(response).await;
         assert_eq!(body["status"], "ok");
         assert_eq!(body["metadata"]["store"], "file");
-        assert_eq!(body["metadata"]["schemaVersion"], 1);
+        assert_eq!(body["metadata"]["schemaVersion"], 2);
         assert_eq!(body["metadata"]["ok"], true);
         let names: Vec<&str> = body["metadata"]["documents"]
             .as_array()

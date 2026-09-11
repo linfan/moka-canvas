@@ -33,11 +33,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
-use super::adapters::ChannelCall;
+use super::adapters::ModelCall;
 use crate::config::DebugConfig;
 use crate::domain::now_iso;
 use crate::metadata::redact::masked;
-use crate::metadata::Protocol;
 
 /// What one call was for.
 ///
@@ -55,7 +54,7 @@ pub enum Kind {
     TaskCreate,
     /// One look at a job started earlier.
     TaskPoll,
-    /// Asking a channel what it currently offers.
+    /// Asking a provider what it currently offers.
     Models,
     /// Fetching bytes a provider left at an address of its own.
     Media,
@@ -74,14 +73,16 @@ impl Kind {
     }
 }
 
-/// The channel a call was placed with, copied rather than borrowed.
+/// The model configuration a call was placed with, copied rather than
+/// borrowed.
 ///
 /// Copied because a recording outlives the call it describes: the task that
-/// writes it runs after the answer is in hand, by which time the channel that
+/// writes it runs after the answer is in hand, by which time the call that
 /// made it may have been dropped.
 #[derive(Debug, Clone)]
 struct Who {
-    channel: String,
+    /// The model configuration's identifier.
+    config: String,
     model: String,
     protocol: String,
     /// The credential this call carried, kept so that it can be taken back out
@@ -89,22 +90,14 @@ struct Who {
     api_key: String,
 }
 
-impl From<&ChannelCall> for Who {
-    fn from(call: &ChannelCall) -> Self {
+impl From<&ModelCall> for Who {
+    fn from(call: &ModelCall) -> Self {
         Self {
-            channel: call.channel_id.clone(),
-            model: call.model_id.clone(),
-            protocol: protocol_name(call.protocol).to_string(),
+            config: call.config_id.clone(),
+            model: call.model.clone(),
+            protocol: call.protocol.as_str().to_string(),
             api_key: call.api_key.clone(),
         }
-    }
-}
-
-fn protocol_name(protocol: Protocol) -> &'static str {
-    match protocol {
-        Protocol::Openai => "openai",
-        Protocol::Gemini => "gemini",
-        Protocol::Custom => "custom",
     }
 }
 
@@ -415,7 +408,7 @@ pub fn active() -> Option<&'static Settings> {
 ///
 /// Read here rather than after the answer, because a request is consumed by
 /// sending it and there is nothing left to read afterwards.
-pub fn begin(kind: Kind, call: &ChannelCall, request: &reqwest::Request) -> Option<Pending> {
+pub fn begin(kind: Kind, call: &ModelCall, request: &reqwest::Request) -> Option<Pending> {
     Some(RECORDER.get()?.begin(kind, call, request))
 }
 
@@ -425,7 +418,7 @@ impl Recorder {
     /// A method rather than a free function so that a test can record into a
     /// directory of its own instead of into the one the process has, which it can
     /// only have once.
-    fn begin(&self, kind: Kind, call: &ChannelCall, request: &reqwest::Request) -> Pending {
+    fn begin(&self, kind: Kind, call: &ModelCall, request: &reqwest::Request) -> Pending {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let placed = now_iso();
         Pending {
@@ -571,23 +564,23 @@ fn job_of(pending: Pending, outcome: Outcome) -> Job {
 ///
 /// The moment first, so that a directory lists itself in order; then which call
 /// it was, so that two calls placed in the same moment still pair up; then the
-/// channel and the model, which are the two things a reader filters by; then what
-/// the call was for.
-fn name_of(placed: &str, sequence: u64, call: &ChannelCall, kind: Kind) -> String {
+/// configuration and the model, which are the two things a reader filters by;
+/// then what the call was for.
+fn name_of(placed: &str, sequence: u64, call: &ModelCall, kind: Kind) -> String {
     format!(
         "{}_{sequence:04}_{}_{}_{}",
         // A moment is written the same way everywhere else in the application and
         // only the colons in it are a path separator's business.
         placed.replace(':', "-"),
-        safe_name(&call.channel_id),
-        safe_name(&call.model_id),
+        safe_name(&call.config_id),
+        safe_name(&call.model),
         kind.as_str()
     )
 }
 
 /// One name a reader typed, made safe to put in a path.
 ///
-/// A channel is named by whoever configured it and a model by whoever serves it,
+/// A configuration is named by whoever configured it and a model by whoever serves it,
 /// and neither has any reason to be a file name: one that carried a slash would
 /// write somewhere else, and one that carried nothing would say nothing.
 fn safe_name(words: &str) -> String {
@@ -681,7 +674,7 @@ fn record_of_request(
         "name": name,
         "placed": placed,
         "kind": kind.as_str(),
-        "channel": who.channel,
+        "config": who.config,
         "model": who.model,
         "protocol": who.protocol,
         "method": sent.method,
@@ -906,7 +899,7 @@ fn index_line(
         "name": name,
         "placed": placed,
         "kind": kind.as_str(),
-        "channel": who.channel,
+        "config": who.config,
         "model": who.model,
         "protocol": who.protocol,
         "method": sent.method,
@@ -958,6 +951,7 @@ fn private_file(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::Protocol;
 
     fn file(enabled: Option<bool>) -> DebugConfig {
         DebugConfig { enabled }
@@ -965,9 +959,9 @@ mod tests {
 
     fn who(key: &str) -> Who {
         Who {
-            channel: "chan".into(),
+            config: "chan".into(),
             model: "painter".into(),
-            protocol: "openai".into(),
+            protocol: "openaiChat".into(),
             api_key: key.into(),
         }
     }
@@ -1180,7 +1174,7 @@ mod tests {
         let response = read_json(&root, &format!("{name}.response.json"));
 
         assert_eq!(request["kind"], "generate");
-        assert_eq!(request["channel"], "chan");
+        assert_eq!(request["config"], "chan");
         assert_eq!(request["model"], "painter");
         assert_eq!(request["method"], "POST");
         assert_eq!(request["placed"], "2026-01-01T00:00:00Z");
@@ -1370,21 +1364,22 @@ mod tests {
         unsent(None, "the channel did not answer in time");
     }
 
-    /// A channel to record against, addressed to a host that cannot answer.
-    fn channel() -> ChannelCall {
-        ChannelCall::new(
-            &crate::generate::providers::ResolvedModel {
-                channel_id: "chan".into(),
-                model_id: "painter".into(),
-                reference: "chan:painter".into(),
-                protocol: Protocol::Openai,
-                base_url: "https://api.example.invalid/v1".into(),
-                capability: crate::domain::Capability::Text,
+    /// A model configuration to record against, addressed to a host that
+    /// cannot answer.
+    fn channel() -> ModelCall {
+        ModelCall::new(
+            &crate::generate::models::ResolvedModel {
+                config_id: "chan".into(),
+                model: "painter".into(),
+                display_name: "Painter".into(),
+                protocol: Protocol::OpenaiChat,
+                url: "https://api.example.invalid/v1/chat/completions".into(),
+                category: crate::domain::Capability::Text,
             },
             "sk-secret-value-1234".into(),
             crate::config::GenerateConfig::default(),
         )
-        .expect("a channel")
+        .expect("a call")
     }
 
     fn request() -> reqwest::Request {
@@ -1434,7 +1429,7 @@ mod tests {
         assert_eq!(line["name"], name);
         assert_eq!(line["kind"], "generate");
         assert_eq!(line["status"], 200);
-        assert_eq!(line["channel"], "chan");
+        assert_eq!(line["config"], "chan");
         assert_eq!(line["model"], "painter");
 
         let sent = read_json(&root, &format!("{name}.request.json"));

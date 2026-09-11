@@ -1,34 +1,25 @@
-//! Document format versioning, plus the one import that must happen.
+//! Document format versioning and the schema-2 upgrade.
 //!
-//! Recent projects are deliberately *not* imported from the location the
-//! previous build used: reading two sources creates a permanent "which one is
-//! real" ambiguity, especially across a rollback. The list simply starts
-//! empty and refills as projects are opened.
-//!
-//! Plaintext credentials are the exception. If a provider document written
-//! before encryption ever existed is still on disk, it is imported into the
-//! encrypted document and the original is renamed aside, because leaving a
-//! plaintext API key on disk is not a compatibility preference.
+//! Schema 2 replaced provider channels with standalone model configurations.
+//! The upgrade is a deliberate clean break: channels, their model lists, the
+//! per-capability defaults that pointed into them, and the credentials stored
+//! against channel identifiers are all dropped, because a channel address is
+//! not a model endpoint and a channel key is not a model key. The one thing
+//! carried across is the generation preferences, which describe how the user
+//! likes answers shaped rather than who serves them.
+
+use std::path::Path;
 
 use serde::Deserialize;
-use serde_json::Value;
 
-use super::docs::{ProvidersDoc, PROVIDERS_DOC};
-use super::{MetadataError, SCHEMA_VERSION};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LegacyKeys {
-    /// The provider document with every credential field removed.
-    pub providers: ProvidersDoc,
-    /// Channel id and plaintext credential, in document order.
-    pub credentials: Vec<(String, String)>,
-}
+use super::docs::{LEGACY_PROVIDERS_DOC, MODELS_DOC};
+use super::{MetadataError, Preferences, SCHEMA_VERSION};
 
 /// Rejects a directory written by a different format version.
 ///
-/// A lower version migrates forward through the registry below; a higher one
-/// means the user rolled the app back, and overwriting it would destroy data
-/// the newer build understands.
+/// A lower version migrates forward through [`upgrade_to_models`]; a higher
+/// one means the user rolled the app back, and overwriting it would destroy
+/// data the newer build understands.
 pub fn check_schema(found: u32) -> Result<(), MetadataError> {
     if found > SCHEMA_VERSION {
         return Err(MetadataError::migration_failed(format!(
@@ -37,153 +28,93 @@ pub fn check_schema(found: u32) -> Result<(), MetadataError> {
              or restore an older copy of the directory"
         )));
     }
-    for migration in MIGRATIONS {
-        if migration.from >= found && migration.to <= SCHEMA_VERSION {
-            (migration.note)();
-        }
-    }
     Ok(())
 }
 
-struct Migration {
-    from: u32,
-    to: u32,
-    note: fn(),
+/// True when a directory written before the model-configuration schema still
+/// carries the document the upgrade reads.
+pub fn needs_models_upgrade(root: &Path) -> bool {
+    root.join(LEGACY_PROVIDERS_DOC).exists() && !root.join(MODELS_DOC).exists()
 }
 
-/// Format migrations, applied in order while the directory lock is held.
-/// Version 1 is the first version, so there is nothing to migrate yet; the
-/// registry exists so the next bump has an obvious home.
-const MIGRATIONS: &[Migration] = &[];
-
-/// Finds plaintext credentials in a provider document.
+/// The schema-2 upgrade: reads what is worth keeping out of the legacy
+/// provider document, moves the document aside, and hands back the
+/// preferences it carried.
 ///
-/// Returns `None` for a document that is already in the current shape, which
-/// is the normal case: the stored [`super::Channel`] type has no credential
-/// field, so serde would otherwise skip past it silently.
-pub fn detect_plaintext_keys(raw: &[u8]) -> Result<Option<LegacyKeys>, MetadataError> {
-    // An unparseable document is corrupt rather than legacy. The caller
-    // quarantines it and starts from an empty document; reporting that as a
-    // failed migration would block startup on a damaged file.
-    let Ok(value) = super::docs::parse::<Value>(PROVIDERS_DOC, raw) else {
-        return Ok(None);
-    };
-    let Some(channels) = value.get("channels").and_then(Value::as_array) else {
-        return Ok(None);
-    };
-
-    let mut credentials = Vec::new();
-    for channel in channels {
-        let Some(id) = channel.get("id").and_then(Value::as_str) else {
-            continue;
-        };
-        // Both spellings have been seen in hand-edited files.
-        for field in ["apiKey", "api_key"] {
-            if let Some(key) = channel.get(field).and_then(Value::as_str) {
-                if !key.is_empty() {
-                    credentials.push((id.to_string(), key.to_string()));
-                }
+/// Channels and defaults are not read at all. Stored credentials were sealed
+/// against channel identifiers that no longer name anything, so the orphan
+/// collector at startup drops them; there is no way to re-key a secret to a
+/// model configuration that does not exist yet.
+///
+/// The legacy document is renamed rather than deleted so that a user who
+/// upgrades by accident can still read back what was configured.
+pub fn upgrade_to_models(root: &Path) -> Result<Preferences, MetadataError> {
+    let path = root.join(LEGACY_PROVIDERS_DOC);
+    let preferences = match std::fs::read(&path) {
+        Ok(bytes) => match serde_json::from_slice::<LegacyProviders>(&bytes) {
+            Ok(legacy) => legacy.preferences.unwrap_or_default(),
+            // A document that cannot be parsed has nothing worth keeping, and
+            // refusing startup over a file this build no longer needs would be
+            // the worse trade.
+            Err(error) => {
+                tracing::warn!(
+                    target: "moka::metadata",
+                    error = %error,
+                    "the legacy provider document could not be read; its preferences are lost"
+                );
+                Preferences::default()
             }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Preferences::default());
         }
-    }
-    if credentials.is_empty() {
-        return Ok(None);
-    }
-
-    let providers = sanitize(&value)?;
-    Ok(Some(LegacyKeys {
-        providers,
-        credentials,
-    }))
+        Err(error) => {
+            return Err(MetadataError::migration_failed(format!(
+                "{}: {error}",
+                path.display()
+            )))
+        }
+    };
+    let stamp = crate::domain::now_iso().replace(':', "-");
+    let aside = root.join(format!("providers.legacy.{stamp}.json"));
+    std::fs::rename(&path, &aside).map_err(|error| {
+        MetadataError::migration_failed(format!(
+            "the legacy provider document could not be moved aside: {error}"
+        ))
+    })?;
+    tracing::info!(
+        target: "moka::metadata",
+        "provider channels were replaced by per-model configurations; \
+         models and keys must be set up again"
+    );
+    Ok(preferences)
 }
 
-/// Strips credential fields and re-parses into the current document shape.
-fn sanitize(value: &Value) -> Result<ProvidersDoc, MetadataError> {
-    let mut cleaned = value.clone();
-    if let Some(channels) = cleaned.get_mut("channels").and_then(Value::as_array_mut) {
-        for channel in channels {
-            if let Some(object) = channel.as_object_mut() {
-                object.remove("apiKey");
-                object.remove("api_key");
-            }
-        }
-    }
-    if let Some(object) = cleaned.as_object_mut() {
-        // The current document separates these into their own fields; a legacy
-        // file may have nested them under a settings object.
-        object.remove("settings");
-    }
-    serde_json::from_value::<LegacyProviders>(cleaned)
-        .map(|legacy| legacy.into_current())
-        .map_err(|error| MetadataError::migration_failed(error.to_string()))
-}
-
-/// Tolerant shape for a legacy document: unknown fields are dropped rather
-/// than rejected, because the point of the import is to rescue credentials.
+/// Tolerant shape for the legacy document: everything but the preferences is
+/// dropped rather than rejected, because the point of the read is to rescue
+/// what is still meaningful.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LegacyProviders {
     #[serde(default)]
-    revision: u64,
-    #[serde(default)]
-    version: Option<u32>,
-    #[serde(default)]
-    channels: Vec<LegacyChannel>,
-    #[serde(default)]
-    defaults: Option<super::Defaults>,
-    #[serde(default)]
-    preferences: Option<super::Preferences>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyChannel {
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    base_url: String,
-    #[serde(default)]
-    protocol: Option<super::Protocol>,
-    #[serde(default)]
-    enabled: Option<bool>,
-    #[serde(default)]
-    models: Vec<super::ChannelModel>,
-}
-
-impl LegacyProviders {
-    fn into_current(self) -> ProvidersDoc {
-        ProvidersDoc {
-            revision: self.revision,
-            version: self.version.unwrap_or(1),
-            channels: self
-                .channels
-                .into_iter()
-                .map(|channel| super::Channel {
-                    id: channel.id,
-                    name: channel.name,
-                    base_url: channel.base_url,
-                    protocol: channel.protocol.unwrap_or_default(),
-                    enabled: channel.enabled.unwrap_or(true),
-                    models: channel.models,
-                    capability_base_urls: std::collections::HashMap::new(),
-                })
-                .collect(),
-            defaults: self.defaults.unwrap_or_default(),
-            preferences: self.preferences.unwrap_or_default(),
-        }
-    }
+    preferences: Option<Preferences>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::now_iso;
+    use std::fs;
+
+    fn write_legacy(root: &Path, body: &str) {
+        fs::write(root.join(LEGACY_PROVIDERS_DOC), body).unwrap();
+    }
 
     #[test]
     fn accepts_the_current_schema_version() {
         assert!(check_schema(SCHEMA_VERSION).is_ok());
         assert!(check_schema(0).is_ok());
+        assert!(check_schema(1).is_ok());
     }
 
     #[test]
@@ -194,73 +125,56 @@ mod tests {
     }
 
     #[test]
-    fn a_current_shaped_document_needs_no_import() {
-        let raw = serde_json::to_vec(&ProvidersDoc::default()).unwrap();
-        assert!(detect_plaintext_keys(&raw).unwrap().is_none());
+    fn a_directory_without_the_legacy_document_needs_no_upgrade() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!needs_models_upgrade(root.path()));
+        let preferences = upgrade_to_models(root.path()).unwrap();
+        assert_eq!(preferences, Preferences::default());
     }
 
     #[test]
-    fn finds_and_strips_a_plaintext_credential() {
-        let raw = br#"{
-            "revision": 4,
-            "version": 1,
-            "channels": [{
-                "id": "openai",
-                "name": "OpenAI",
-                "baseUrl": "https://api.openai.com/v1",
-                "protocol": "openai",
-                "enabled": true,
-                "apiKey": "sk-plaintext-value",
-                "models": []
-            }],
-            "defaults": {},
-            "preferences": {"systemPrompt":"","reasoningEffort":"auto",
-                            "image":{"size":"1:1","quality":"auto","background":"","count":1},
-                            "video":{"seconds":6,"resolution":"720","generateAudio":true,
-                                     "watermark":false,"mode":"auto"},
-                            "audio":{"voice":"alloy","format":"mp3","speed":1,"instructions":""}}
-        }"#;
-        let legacy = detect_plaintext_keys(raw)
+    fn the_upgrade_keeps_preferences_and_moves_the_document_aside() {
+        let root = tempfile::tempdir().unwrap();
+        write_legacy(
+            root.path(),
+            r#"{"revision":4,"version":1,
+               "channels":[{"id":"openai","name":"OpenAI","baseUrl":"https://api.openai.com/v1",
+                             "models":[{"id":"gpt-4o","capability":"text","alias":"","enabled":true}]}],
+               "defaults":{"text":"openai::gpt-4o"},
+               "preferences":{"systemPrompt":"be brief","reasoningEffort":"auto",
+                 "image":{"size":"1:1","quality":"auto","background":"","count":1},
+                 "video":{"seconds":6,"resolution":"720","generateAudio":true,"watermark":false,"mode":"auto"},
+                 "audio":{"voice":"alloy","format":"mp3","speed":1,"instructions":""}}}"#,
+        );
+        assert!(needs_models_upgrade(root.path()));
+        let preferences = upgrade_to_models(root.path()).unwrap();
+        assert_eq!(preferences.system_prompt, "be brief");
+        assert!(!root.path().join(LEGACY_PROVIDERS_DOC).exists());
+        let kept: Vec<_> = fs::read_dir(root.path())
             .unwrap()
-            .expect("legacy document");
-        assert_eq!(
-            legacy.credentials,
-            vec![("openai".to_string(), "sk-plaintext-value".to_string())]
-        );
-        assert_eq!(legacy.providers.revision, 4);
-        assert_eq!(legacy.providers.channels.len(), 1);
-        assert_eq!(legacy.providers.channels[0].id, "openai");
-
-        let sanitized = serde_json::to_vec(&legacy.providers).unwrap();
-        assert!(
-            !sanitized.windows(11).any(|w| w == b"sk-plaintext"),
-            "credential must be gone"
-        );
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("providers.legacy."))
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(!needs_models_upgrade(root.path()));
     }
 
     #[test]
-    fn also_accepts_the_snake_case_spelling() {
-        let raw = br#"{"revision":0,"channels":[{"id":"a","api_key":"sk-x"}]}"#;
-        let legacy = detect_plaintext_keys(raw)
-            .unwrap()
-            .expect("legacy document");
-        assert_eq!(
-            legacy.credentials,
-            vec![("a".to_string(), "sk-x".to_string())]
-        );
+    fn an_unparseable_legacy_document_upgrades_with_default_preferences() {
+        let root = tempfile::tempdir().unwrap();
+        write_legacy(root.path(), "{");
+        let preferences = upgrade_to_models(root.path()).unwrap();
+        assert_eq!(preferences, Preferences::default());
+        assert!(!root.path().join(LEGACY_PROVIDERS_DOC).exists());
     }
 
     #[test]
-    fn an_empty_credential_is_not_imported() {
-        let raw = br#"{"revision":0,"channels":[{"id":"a","apiKey":""}]}"#;
-        assert!(detect_plaintext_keys(raw).unwrap().is_none());
-    }
-
-    /// A document that cannot be parsed is corrupt rather than legacy, so
-    /// detection steps aside and lets the loader quarantine and reset it
-    /// instead of failing startup.
-    #[test]
-    fn an_unparseable_document_is_left_to_the_corruption_path() {
-        assert!(detect_plaintext_keys(b"{").unwrap().is_none());
+    fn a_legacy_document_without_preferences_upgrades_to_the_defaults() {
+        let root = tempfile::tempdir().unwrap();
+        write_legacy(root.path(), r#"{"revision":2,"channels":[]}"#);
+        let preferences = upgrade_to_models(root.path()).unwrap();
+        assert_eq!(preferences.reasoning_effort, "auto");
+        let _ = now_iso();
     }
 }

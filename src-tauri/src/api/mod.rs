@@ -1,5 +1,5 @@
 use crate::config::{AppConfig, RuntimeMode};
-use crate::generate::{Gateway, ProviderRepo};
+use crate::generate::{Gateway, ModelRepo};
 use crate::metadata::{self, MetadataStore};
 use crate::project::store::FsProjectStore;
 use crate::project::ProjectStore;
@@ -20,7 +20,7 @@ pub struct ApiState {
     pub config: Arc<AppConfig>,
     pub store: Arc<FsProjectStore>,
     pub metadata: Arc<dyn MetadataStore>,
-    pub providers: Arc<ProviderRepo>,
+    pub models: Arc<ModelRepo>,
     pub gateway: Arc<Gateway>,
     pub runs: Arc<RunManager>,
 }
@@ -46,9 +46,9 @@ impl ApiState {
     ) -> Self {
         let config = Arc::new(config);
         let store = Arc::new(FsProjectStore::new(Arc::clone(&config)));
-        let providers = Arc::new(ProviderRepo::new(Arc::clone(&metadata)));
+        let models = Arc::new(ModelRepo::new(Arc::clone(&metadata)));
         let gateway = Arc::new(Gateway::new(
-            Arc::clone(&providers),
+            Arc::clone(&models),
             Arc::clone(&store) as Arc<dyn ProjectStore>,
             config.generate.clone(),
         ));
@@ -66,7 +66,7 @@ impl ApiState {
             mode,
             store,
             metadata,
-            providers,
+            models,
             gateway,
             config,
             runs,
@@ -148,13 +148,13 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/generate/preview",
             post(routes::preview_generation),
         )
-        .merge(provider_router())
+        .merge(model_router())
         .merge(generate_router())
 }
 
 /// A generation request carries a prompt and references to assets already in
 /// the project, never the assets themselves, so it gets the same tight ceiling
-/// as a channel write rather than the one an upload needs.
+/// as a model write rather than the one an upload needs.
 fn generate_router() -> axum::Router<ApiState> {
     use axum::extract::DefaultBodyLimit;
     use axum::routing::{get, post};
@@ -174,45 +174,32 @@ fn generate_router() -> axum::Router<ApiState> {
         .route_layer(DefaultBodyLimit::max(MAX_GENERATE_BODY_BYTES))
 }
 
-/// Provider configuration carries a credential in the request body, and a
-/// channel document is small by nature, so these routes get a far tighter
-/// ceiling than asset uploads. The limit is applied last for a request, so it
-/// replaces the one the server router sets rather than adding to it.
-fn provider_router() -> axum::Router<ApiState> {
+/// Model configuration carries a credential in the request body, and a model
+/// document is small by nature, so these routes get a far tighter ceiling than
+/// asset uploads. The limit is applied last for a request, so it replaces the
+/// one the server router sets rather than adding to it.
+fn model_router() -> axum::Router<ApiState> {
     use axum::extract::DefaultBodyLimit;
-    use axum::routing::{delete, get, patch, post, put};
+    use axum::routing::{delete, get, patch, post};
 
     const MAX_PROVIDER_BODY_BYTES: usize = 1024 * 1024;
 
     axum::Router::new()
-        .route("/api/v1/providers", get(routes::list_providers))
-        .route("/api/v1/providers/channels", put(routes::upsert_channel))
         .route(
-            "/api/v1/providers/channels/{id}",
-            delete(routes::delete_channel),
+            "/api/v1/models",
+            get(routes::list_models).put(routes::upsert_model),
         )
+        .route("/api/v1/models/{id}", delete(routes::delete_model))
+        .route("/api/v1/models/{id}/key", post(routes::set_model_key))
         .route(
-            "/api/v1/providers/channels/{id}/key",
-            post(routes::set_channel_key),
+            "/api/v1/models/{id}/duplicate",
+            post(routes::duplicate_model),
         )
+        .route("/api/v1/models/{id}/probe", post(routes::probe_model))
+        .route("/api/v1/models/defaults", patch(routes::patch_defaults))
         .route(
-            "/api/v1/providers/channels/{id}/models",
-            get(routes::fetch_channel_models),
-        )
-        .route(
-            "/api/v1/providers/channels/{id}/models/refresh",
-            post(routes::refresh_channel_models),
-        )
-        .route(
-            "/api/v1/providers/channels/{id}/probe",
-            post(routes::probe_channel),
-        )
-        .route("/api/v1/providers/defaults", patch(routes::patch_defaults))
-        .route(
-            "/api/v1/providers/preferences",
+            "/api/v1/models/preferences",
             patch(routes::patch_preferences),
         )
-        .route("/api/v1/providers/import", post(routes::import_channel))
-        .route("/api/v1/providers/inspect", post(routes::inspect_channel))
         .route_layer(DefaultBodyLimit::max(MAX_PROVIDER_BODY_BYTES))
 }

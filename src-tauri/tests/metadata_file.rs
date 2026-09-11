@@ -1,11 +1,10 @@
 //! Tests for the file backend specifically: the on-disk layout, permission
-//! bits, the directory lock, quarantine of a damaged document, and the import
-//! of credentials an earlier build left in plaintext.
+//! bits, the directory lock, quarantine of a damaged document, and the
+//! schema-2 upgrade that replaced provider channels with model configs.
 //!
 //! Behaviour that any backend must provide lives in the contract suite, which
 //! this file runs as-is against the file implementation.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -13,10 +12,10 @@ use base64::Engine;
 use moka_canvas::config::{MetadataConfig, RuntimeMode};
 use moka_canvas::metadata::contract::{run_metadata_suite, StoreFactory};
 use moka_canvas::metadata::crypto::{KEY_ENV, MASTER_KEY_FILE};
-use moka_canvas::metadata::docs::{PROVIDERS_DOC, RECENT_DOC, SECRETS_DOC};
+use moka_canvas::metadata::docs::{LEGACY_PROVIDERS_DOC, MODELS_DOC, RECENT_DOC, SECRETS_DOC};
 use moka_canvas::metadata::fs::{LOCK_FILE, SECRET_MODE, TMP_DIR};
 use moka_canvas::metadata::{
-    self, ChannelDraft, MetadataError, MetadataStore, RecentProject, SecretStorage,
+    self, MetadataError, MetadataStore, ModelDraft, RecentProject, SecretStorage,
 };
 
 const PLAINTEXT_KEY: &str = "sk-plaintext-value";
@@ -38,16 +37,16 @@ fn seed_master_key(root: &Path) {
     std::fs::write(root.join(MASTER_KEY_FILE), encoded).expect("the master key is written");
 }
 
-fn draft(id: &str) -> ChannelDraft {
-    ChannelDraft {
+fn draft(id: &str) -> ModelDraft {
+    ModelDraft {
         id: id.to_string(),
-        name: format!("Channel {id}"),
-        base_url: "https://provider.test/v1".to_string(),
+        category: moka_canvas::domain::Capability::Text,
         protocol: Default::default(),
+        url: "https://provider.test/v1/chat/completions".to_string(),
+        model: format!("model-{id}"),
+        display_name: format!("Model {id}"),
         enabled: true,
-        models: Vec::new(),
         expected_revision: None,
-        capability_base_urls: HashMap::new(),
     }
 }
 
@@ -105,10 +104,10 @@ async fn credentials_reach_the_disk_only_as_ciphertext() {
     let root = tempfile::tempdir().unwrap();
     seed_master_key(root.path());
     let store = open(root.path()).expect("the store opens");
-    store.upsert_channel(&draft("sealed")).await.unwrap();
+    store.upsert_model(&draft("sealed")).await.unwrap();
     store.put_secret("sealed", PLAINTEXT_KEY).await.unwrap();
 
-    for document in [SECRETS_DOC, PROVIDERS_DOC] {
+    for document in [SECRETS_DOC, MODELS_DOC] {
         let raw = std::fs::read(root.path().join(document)).unwrap();
         let text = String::from_utf8_lossy(&raw);
         assert!(
@@ -148,7 +147,7 @@ async fn the_credential_document_is_private() {
     let root = tempfile::tempdir().unwrap();
     seed_master_key(root.path());
     let store = open(root.path()).expect("the store opens");
-    store.upsert_channel(&draft("sealed")).await.unwrap();
+    store.upsert_model(&draft("sealed")).await.unwrap();
     store.put_secret("sealed", PLAINTEXT_KEY).await.unwrap();
 
     let mode = std::fs::metadata(root.path().join(SECRETS_DOC))
@@ -168,7 +167,7 @@ async fn a_first_credential_in_server_mode_creates_a_file_held_master_key() {
     }
     let root = tempfile::tempdir().unwrap();
     let store = open(root.path()).expect("the store opens with no credentials stored");
-    store.upsert_channel(&draft("unkeyed")).await.unwrap();
+    store.upsert_model(&draft("unkeyed")).await.unwrap();
 
     // Storing must not be refused just because nobody exported a key: the
     // alternative is a server where the API key field can never be filled in.
@@ -213,12 +212,12 @@ async fn stored_credentials_without_any_master_key_refuse_startup() {
     let root = tempfile::tempdir().unwrap();
     seed_master_key(root.path());
     let store = open(root.path()).expect("the store opens");
-    store.upsert_channel(&draft("keyed")).await.unwrap();
+    store.upsert_model(&draft("keyed")).await.unwrap();
     store.put_secret("keyed", PLAINTEXT_KEY).await.unwrap();
     drop(store);
 
     // Losing the key is not a state to start up in: every generation request
-    // would fail with an authentication error while the channel looked
+    // would fail with an authentication error while the model looked
     // configured. The message has to name both places the key could come from.
     std::fs::remove_file(root.path().join(MASTER_KEY_FILE)).unwrap();
     let error = open(root.path())
@@ -235,7 +234,7 @@ async fn a_damaged_document_is_quarantined_without_taking_the_others_down() {
     let root = tempfile::tempdir().unwrap();
     seed_master_key(root.path());
     let seeded = open(root.path()).expect("the store opens");
-    seeded.upsert_channel(&draft("kept")).await.unwrap();
+    seeded.upsert_model(&draft("kept")).await.unwrap();
     drop(seeded);
 
     std::fs::write(
@@ -252,9 +251,9 @@ async fn a_damaged_document_is_quarantined_without_taking_the_others_down() {
             .any(|document| document.name == RECENT_DOC && document.corrupt),
         "the reset must be reported: {info:?}"
     );
-    let snapshot = store.provider_snapshot().await.unwrap();
+    let snapshot = store.models_snapshot().await.unwrap();
     assert!(
-        snapshot.channels.iter().any(|channel| channel.id == "kept"),
+        snapshot.models.iter().any(|model| model.id == "kept"),
         "an unrelated document must survive"
     );
     let quarantined: Vec<String> = names_in(root.path())
@@ -266,50 +265,62 @@ async fn a_damaged_document_is_quarantined_without_taking_the_others_down() {
 }
 
 #[tokio::test]
-async fn plaintext_credentials_left_by_an_earlier_build_are_sealed_on_startup() {
+async fn a_legacy_provider_document_upgrades_to_an_empty_model_list() {
     let root = tempfile::tempdir().unwrap();
     seed_master_key(root.path());
-    std::fs::create_dir_all(root.path()).unwrap();
+    // What schema 1 left behind: a channel with models and defaults pointing
+    // into it, plus preferences that describe answers rather than providers.
     std::fs::write(
-        root.path().join(PROVIDERS_DOC),
-        format!(
-            r#"{{"revision":4,"version":1,"channels":[{{"id":"legacy","name":"Legacy",
-               "baseUrl":"https://provider.test/v1","protocol":"openai","enabled":true,
-               "models":[],"apiKey":"{PLAINTEXT_KEY}"}}]}}"#
-        ),
+        root.path().join(LEGACY_PROVIDERS_DOC),
+        r#"{"revision":4,"version":1,
+           "channels":[{"id":"legacy","name":"Legacy","baseUrl":"https://provider.test/v1",
+                        "protocol":"openai","enabled":true,
+                        "models":[{"id":"gpt","capability":"text","alias":"","enabled":true}]}],
+           "defaults":{"text":"legacy::gpt"},
+           "preferences":{"systemPrompt":"be brief","reasoningEffort":"auto",
+             "image":{"size":"1:1","quality":"auto","background":"","count":1},
+             "video":{"seconds":6,"resolution":"720","generateAudio":true,
+                      "watermark":false,"mode":"auto"},
+             "audio":{"voice":"alloy","format":"mp3","speed":1,"instructions":""}}}"#,
     )
     .unwrap();
 
-    let store = open(root.path()).expect("the import runs at startup");
-    assert_eq!(
-        store.get_secret("legacy").await.unwrap().as_deref(),
-        Some(PLAINTEXT_KEY)
-    );
-    let snapshot = store.provider_snapshot().await.unwrap();
+    let store = open(root.path()).expect("the upgrade runs at startup");
+    let snapshot = store.models_snapshot().await.unwrap();
     assert!(
-        snapshot
-            .channels
-            .iter()
-            .any(|channel| channel.id == "legacy"),
-        "the channel itself must survive the import"
+        snapshot.models.is_empty(),
+        "channels are gone; models are configured anew"
+    );
+    assert_eq!(
+        snapshot.defaults.text, None,
+        "old references point at nothing"
+    );
+    assert_eq!(
+        snapshot.preferences.system_prompt, "be brief",
+        "preferences describe answers, not providers, so they survive"
     );
 
-    // No copy of the plaintext may remain anywhere in the directory.
-    for entry in names_in(root.path()) {
-        if let Ok(raw) = std::fs::read(root.path().join(&entry)) {
-            assert!(
-                !String::from_utf8_lossy(&raw).contains(PLAINTEXT_KEY),
-                "{entry} still holds the plaintext credential"
-            );
-        }
-    }
+    // The legacy document was moved aside rather than deleted, and nothing
+    // reads it any more.
+    assert!(!root.path().join(LEGACY_PROVIDERS_DOC).exists());
+    let kept: Vec<String> = names_in(root.path())
+        .into_iter()
+        .filter(|name| name.starts_with("providers.legacy."))
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+
+    // The upgrade is not repeated on the next startup.
+    drop(store);
+    let reopened = open(root.path()).expect("the store reopens");
+    let snapshot = reopened.models_snapshot().await.unwrap();
+    assert_eq!(snapshot.preferences.system_prompt, "be brief");
 }
 
 #[tokio::test]
 async fn startup_clears_crash_leftovers() {
     let root = tempfile::tempdir().unwrap();
     seed_master_key(root.path());
-    let leftover = root.path().join(TMP_DIR).join("providers.json.99.123");
+    let leftover = root.path().join(TMP_DIR).join("models.json.99.123");
     std::fs::create_dir_all(leftover.parent().unwrap()).unwrap();
     std::fs::write(&leftover, b"half written").unwrap();
 

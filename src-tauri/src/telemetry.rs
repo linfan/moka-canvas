@@ -10,7 +10,7 @@
 //! `RUST_LOG=debug`).
 
 use crate::domain::Capability;
-use crate::generate::adapters::ChannelCall;
+use crate::generate::adapters::ModelCall;
 use crate::generate::GenerateRequest;
 use std::fmt;
 use std::time::Duration;
@@ -101,7 +101,8 @@ fn private_directory(path: &std::path::Path) {
 /// that outlived the call it was fetched for. The shape keeps both out, so
 /// keeping them out is not something every caller has to remember.
 pub struct GenerationNote {
-    pub channel: String,
+    /// The model configuration the call was placed with.
+    pub config: String,
     pub model: String,
     pub capability: Capability,
     pub took: Duration,
@@ -113,15 +114,15 @@ impl GenerationNote {
     /// What one call is worth saying, built out of everything the call has to
     /// hand — including the two things that must not be said.
     pub fn of(
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         took: Duration,
         bytes: u64,
         status: &str,
     ) -> Self {
         Self {
-            channel: call.channel_id.clone(),
-            model: call.model_id.clone(),
+            config: call.config_id.clone(),
+            model: call.model.clone(),
             capability: request.capability,
             took,
             bytes,
@@ -134,8 +135,8 @@ impl fmt::Display for GenerationNote {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "generation channel={} model={} capability={} tookMs={} bytes={} status={}",
-            self.channel,
+            "generation config={} model={} capability={} tookMs={} bytes={} status={}",
+            self.config,
             self.model,
             self.capability.as_str(),
             self.took.as_millis(),
@@ -156,17 +157,17 @@ mod tests {
     /// which is exactly as long as a log line must not.
     const KEY: &str = "sk-secret-1234567890abcd";
 
-    fn addressed(capability: Capability) -> ChannelCall {
+    fn addressed(capability: Capability) -> ModelCall {
         let resolved = ResolvedModel {
-            reference: "a-channel::painter-1".into(),
-            channel_id: "a-channel".into(),
-            model_id: "painter-1".into(),
-            capability,
-            protocol: Protocol::Openai,
-            base_url: "https://provider.example".into(),
+            config_id: "painter-config".into(),
+            model: "painter-1".into(),
+            display_name: "Painter".into(),
+            category: capability,
+            protocol: Protocol::OpenaiImages,
+            url: "https://provider.example/v1/images/generations".into(),
         };
-        ChannelCall::new(&resolved, KEY.to_string(), GenerateConfig::default())
-            .expect("a channel is addressed")
+        ModelCall::new(&resolved, KEY.to_string(), GenerateConfig::default())
+            .expect("a model is addressed")
     }
 
     #[test]
@@ -181,18 +182,19 @@ mod tests {
         let note = GenerationNote::of(&call, &request, Duration::from_millis(1204), 184_320, "ok");
         let line = note.to_string();
 
-        for named in ["a-channel", "painter-1", "image", "1204", "184320", "ok"] {
+        for named in [
+            "painter-config",
+            "painter-1",
+            "image",
+            "1204",
+            "184320",
+            "ok",
+        ] {
             assert!(line.contains(named), "{line} does not name {named}");
         }
         // What was asked for, what framed it, where it was asked, and what it
         // was asked with: all of it in hand, none of it written down.
-        for withheld in [
-            KEY,
-            "paper lantern",
-            "one sentence",
-            "provider.example",
-            "a-channel::painter-1",
-        ] {
+        for withheld in [KEY, "paper lantern", "one sentence", "provider.example"] {
             assert!(!line.contains(withheld), "{line} carries {withheld}");
         }
     }

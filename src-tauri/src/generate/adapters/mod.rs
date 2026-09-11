@@ -1,10 +1,10 @@
-//! The wire protocols a channel can speak.
+//! The wire protocols a model configuration can speak.
 //!
-//! One module per protocol, all behind the same trait, so nothing above this
-//! branches on the protocol itself. An adapter is given an address, a
-//! credential, and a request phrased in the project's own words, and answers
-//! with bytes and a mime type: no provider field name crosses this boundary in
-//! either direction.
+//! One module per protocol family, all behind the same trait, so nothing above
+//! this branches on the protocol itself. An adapter is given the full endpoint
+//! address, a credential, and a request phrased in the project's own words,
+//! and answers with bytes and a mime type: no provider field name crosses this
+//! boundary in either direction.
 
 mod custom;
 mod gemini;
@@ -21,7 +21,7 @@ use crate::metadata::Protocol;
 use super::debug::{self, Kind};
 use super::error::ProviderError;
 use super::media::MediaInput;
-use super::providers::{join_url, ResolvedModel};
+use super::models::ResolvedModel;
 use super::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
 };
@@ -31,7 +31,7 @@ use super::{
 const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A channel address is supplied by the user, so whatever answers at it is
+/// A model's address is supplied by the user, so whatever answers at it is
 /// untrusted input rather than a provider's well-formed document. A model list
 /// gets its own, tighter ceiling than a generation answer, which can carry an
 /// image.
@@ -63,87 +63,94 @@ const UNSPECIFIED_MIME: &str = "application/octet-stream";
 /// same way.
 const CUSTOM_RESERVED: &str = "the custom protocol is reserved and has no implementation";
 
-/// One channel, addressed for a single call.
+/// One model configuration, addressed for a single call.
 ///
 /// It carries the plaintext credential, which is why it is built when a request
 /// goes out and dropped when the call returns. No `Debug` on purpose: a stray
 /// `{call:?}` in a log line should fail to build rather than print a key.
 #[derive(Clone)]
-pub struct ChannelCall {
-    /// The provider's own model name, split out of the reference already.
-    pub model_id: String,
-    /// Which of the user's channels this is, split out as well: a name is worth
-    /// writing down, and taking it back out of the reference is a thing a caller
-    /// should not have to do.
-    pub channel_id: String,
-    /// The resolved `channelId::modelId`, kept so a job started here can be
-    /// pointed back at the same channel.
-    pub reference: String,
+pub struct ModelCall {
+    /// The model configuration's own identifier: a name worth writing down,
+    /// and what a job started here is pointed back at.
+    pub config_id: String,
+    /// The provider's own model name.
+    pub model: String,
+    /// What the user calls this model in the settings.
+    pub display_name: String,
     pub protocol: Protocol,
-    pub base_url: String,
+    /// The complete endpoint address the configured calls are sent to.
+    pub url: String,
     pub api_key: String,
     pub budgets: GenerateConfig,
     client: reqwest::Client,
 }
 
-impl ChannelCall {
+impl ModelCall {
     pub fn new(
         resolved: &ResolvedModel,
         api_key: String,
         budgets: GenerateConfig,
     ) -> Result<Self, ProviderError> {
         Ok(Self {
-            model_id: resolved.model_id.clone(),
-            channel_id: resolved.channel_id.clone(),
-            reference: resolved.reference.clone(),
+            config_id: resolved.config_id.clone(),
+            model: resolved.model.clone(),
+            display_name: resolved.display_name.clone(),
             protocol: resolved.protocol,
-            base_url: resolved.base_url.clone(),
+            url: resolved.url.clone(),
             api_key,
             budgets,
             client: build_client()?,
         })
     }
 
-    /// A channel addressed to ask what it offers. No model has been chosen
-    /// yet, so there is nothing to carry; the budgets are the defaults because
-    /// a listing applies its own tighter deadline and ceiling.
-    fn listing(protocol: Protocol, base_url: &str, api_key: &str) -> Result<Self, ProviderError> {
+    /// A call addressed to a derived model-list endpoint rather than to a
+    /// configured one. The budgets are the defaults because a listing applies
+    /// its own tighter deadline and ceiling.
+    fn listing(protocol: Protocol, url: &str, api_key: &str) -> Result<Self, ProviderError> {
         Ok(Self {
-            model_id: String::new(),
-            channel_id: String::new(),
-            reference: String::new(),
+            config_id: String::new(),
+            model: String::new(),
+            display_name: String::new(),
             protocol,
-            base_url: base_url.to_string(),
+            url: url.to_string(),
             api_key: api_key.to_string(),
             budgets: GenerateConfig::default(),
             client: build_client()?,
         })
     }
 
-    /// An address for one endpoint, with the version segment this protocol
-    /// wants added once.
-    pub fn url(&self, path: &str) -> String {
-        join_url(self.protocol, &self.base_url, path)
+    /// The address a generation is placed at: the configured endpoint itself.
+    /// Derived addresses — an edit endpoint, a job poll — are built by the
+    /// helpers in [`super::models`] and fetched through [`get`].
+    pub fn endpoint(&self) -> &str {
+        &self.url
     }
 
-    /// The address this channel was configured with, so a caller can tell
-    /// whether another URL belongs to the same provider.
+    /// The origin of the configured address, so a caller can tell whether
+    /// another URL belongs to the same provider.
     pub fn origin(&self) -> Option<String> {
-        origin_of(&self.base_url)
+        origin_of(&self.url)
     }
 
-    fn post(&self, path: &str) -> reqwest::RequestBuilder {
-        self.credentialed(self.client.post(self.url(path)))
+    fn post(&self) -> reqwest::RequestBuilder {
+        self.credentialed(self.client.post(self.url.clone()))
     }
 
-    fn get(&self, path: &str) -> reqwest::RequestBuilder {
-        self.credentialed(self.client.get(self.url(path)))
+    /// A post to an address derived from the configured one — an edit
+    /// endpoint beside a generation endpoint, say. The credential follows it
+    /// because the derivation cannot leave the origin.
+    fn post_at(&self, url: &str) -> reqwest::RequestBuilder {
+        self.credentialed(self.client.post(url.to_string()))
     }
 
-    /// A request for an address the provider handed back, rather than for one
-    /// of this channel's own endpoints. The credential follows it only where
-    /// the address is on the channel's own host: an image left on a third-party
-    /// CDN is public by nature, and a key sent after it would not be.
+    fn get(&self, url: &str) -> reqwest::RequestBuilder {
+        self.credentialed(self.client.get(url.to_string()))
+    }
+
+    /// A request for an address the provider handed back, rather than for the
+    /// configured endpoint. The credential follows it only where the address
+    /// is on the same origin: an image left on a third-party CDN is public by
+    /// nature, and a key sent after it would not be.
     fn fetch(&self, address: &str) -> reqwest::RequestBuilder {
         let request = self.client.get(address);
         if origin_of(address).is_some() && origin_of(address) == self.origin() {
@@ -154,9 +161,10 @@ impl ChannelCall {
     }
 
     fn credentialed(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        match self.protocol {
-            Protocol::Gemini => request.header(API_KEY_HEADER, &self.api_key),
-            Protocol::Openai | Protocol::Custom => request.bearer_auth(&self.api_key),
+        if self.protocol.is_gemini() {
+            request.header(API_KEY_HEADER, &self.api_key)
+        } else {
+            request.bearer_auth(&self.api_key)
         }
     }
 }
@@ -180,12 +188,10 @@ fn build_client() -> Result<reqwest::Client, ProviderError> {
 /// only where an adapter says it can.
 #[async_trait::async_trait]
 pub trait ProviderAdapter: Send + Sync {
-    fn protocol(&self) -> Protocol;
-
     /// One generation, waited out.
     async fn generate(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         cancel: &Cancel,
@@ -196,7 +202,7 @@ pub trait ProviderAdapter: Send + Sync {
     /// stored: the stream only makes the wait visible.
     async fn generate_stream(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         sink: &DeltaSink,
@@ -209,7 +215,7 @@ pub trait ProviderAdapter: Send + Sync {
     /// Starts a job that outlives this request and returns the handle to poll.
     async fn create_task(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         cancel: &Cancel,
@@ -221,7 +227,7 @@ pub trait ProviderAdapter: Send + Sync {
     /// One look at a job started earlier.
     async fn poll_task(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         task: &AsyncTask,
         cancel: &Cancel,
     ) -> Result<TaskState, ProviderError> {
@@ -230,26 +236,36 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
-/// The adapter that speaks a protocol.
+/// The adapter that speaks a protocol. One adapter covers a whole family of
+/// endpoint shapes: which shape a call uses is decided by the protocol variant
+/// the configuration named, inside the adapter.
 pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
     match protocol {
-        Protocol::Openai => &openai::ADAPTER,
-        Protocol::Gemini => &gemini::ADAPTER,
+        Protocol::OpenaiChat
+        | Protocol::OpenaiResponses
+        | Protocol::OpenaiImages
+        | Protocol::OpenaiSpeech
+        | Protocol::OpenaiVideos => &openai::ADAPTER,
+        Protocol::Gemini | Protocol::GeminiVideo => &gemini::ADAPTER,
         Protocol::Custom => &custom::ADAPTER,
     }
 }
 
-/// Asks a provider what it currently offers, sorted and without duplicates.
+/// Asks a derived model-list address what the provider offers, sorted and
+/// without duplicates. The address is derived by [`super::models::list_url`]
+/// from a configuration's own endpoint before this is called.
 pub async fn list_models(
     protocol: Protocol,
-    base_url: &str,
+    url: &str,
     api_key: &str,
 ) -> Result<Vec<String>, ProviderError> {
-    let call = ChannelCall::listing(protocol, base_url, api_key)?;
-    let mut ids = match protocol {
-        Protocol::Openai => openai::list_models(&call).await?,
-        Protocol::Gemini => gemini::list_models(&call).await?,
-        Protocol::Custom => return Err(ProviderError::invalid(CUSTOM_RESERVED)),
+    let call = ModelCall::listing(protocol, url, api_key)?;
+    let mut ids = if protocol.is_openai() {
+        openai::list_models(&call).await?
+    } else if protocol.is_gemini() {
+        gemini::list_models(&call).await?
+    } else {
+        return Err(ProviderError::invalid(CUSTOM_RESERVED));
     };
     ids.sort();
     ids.dedup();
@@ -318,7 +334,7 @@ fn succeeded(status: u16) -> bool {
 /// requests to the same address apart in a recording made afterwards.
 async fn exchange(
     kind: Kind,
-    call: &ChannelCall,
+    call: &ModelCall,
     request: reqwest::RequestBuilder,
     deadline: Duration,
     ceiling: u64,
@@ -352,7 +368,7 @@ async fn exchange(
 /// for an answer, refusing one that is not a success.
 async fn answer(
     kind: Kind,
-    call: &ChannelCall,
+    call: &ModelCall,
     request: reqwest::RequestBuilder,
     capability: Capability,
 ) -> Result<Reply, ProviderError> {
@@ -385,7 +401,7 @@ fn build(request: reqwest::RequestBuilder) -> Result<reqwest::Request, ProviderE
 /// Places a built request and stops at the headers, which is what lets a failure
 /// be read whole and a success be streamed.
 async fn send(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: reqwest::Request,
 ) -> Result<reqwest::Response, ProviderError> {
     call.client.execute(request).await.map_err(transport)
@@ -443,7 +459,7 @@ enum Opened {
 /// the shape of the answer.
 async fn open_stream(
     kind: Kind,
-    call: &ChannelCall,
+    call: &ModelCall,
     request: reqwest::RequestBuilder,
 ) -> Result<Opened, ProviderError> {
     let built = build(request)?;
@@ -1064,7 +1080,7 @@ mod tests {
     }
 
     #[test]
-    fn an_origin_says_whether_an_address_belongs_to_the_channel() {
+    fn an_origin_says_whether_an_address_belongs_to_the_model() {
         assert_eq!(
             origin_of("https://api.example.com/v1/images").as_deref(),
             Some("https://api.example.com")
@@ -1083,10 +1099,20 @@ mod tests {
     }
 
     #[test]
-    fn a_protocol_answers_with_the_adapter_that_speaks_it() {
-        for protocol in [Protocol::Openai, Protocol::Gemini, Protocol::Custom] {
-            assert_eq!(for_protocol(protocol).protocol(), protocol);
+    fn every_protocol_routes_to_the_adapter_of_its_family() {
+        let openai = for_protocol(Protocol::OpenaiChat);
+        for protocol in [
+            Protocol::OpenaiResponses,
+            Protocol::OpenaiImages,
+            Protocol::OpenaiSpeech,
+            Protocol::OpenaiVideos,
+        ] {
+            assert!(std::ptr::eq(openai, for_protocol(protocol)), "{protocol:?}");
         }
+        let gemini = for_protocol(Protocol::Gemini);
+        assert!(std::ptr::eq(gemini, for_protocol(Protocol::GeminiVideo)));
+        assert!(!std::ptr::eq(openai, gemini));
+        assert!(!std::ptr::eq(openai, for_protocol(Protocol::Custom)));
     }
 
     /// A real encoded image, so a test can assert on what sniffing and the

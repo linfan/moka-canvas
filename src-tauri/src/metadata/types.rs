@@ -3,7 +3,6 @@
 //! These are the shapes callers see. On-disk documents wrap them in envelopes
 //! that carry a revision counter; the envelopes never leave the backend.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -47,77 +46,139 @@ pub struct RecentProject {
     pub last_opened: IsoTimestamp,
 }
 
-/// The wire protocol a channel speaks. `Custom` is reserved; nothing
-/// implements it yet.
+/// The wire protocol a model configuration speaks.
+///
+/// One variant per endpoint shape rather than one per vendor: the category a
+/// model belongs to decides which of these are on offer, because a text model
+/// and a video model never speak the same endpoint even at the same provider.
+/// `Custom` is reserved; nothing implements it yet.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Protocol {
+    /// OpenAI-compatible chat completions (`POST .../chat/completions`).
     #[default]
-    Openai,
+    OpenaiChat,
+    /// OpenAI-compatible responses endpoint (`POST .../responses`).
+    OpenaiResponses,
+    /// OpenAI-compatible images API (`POST .../images/generations`).
+    OpenaiImages,
+    /// OpenAI-compatible speech API (`POST .../audio/speech`).
+    OpenaiSpeech,
+    /// OpenAI-compatible videos API (`POST .../videos`, polled).
+    OpenaiVideos,
+    /// Google Gemini content generation (`POST ...:generateContent`).
     Gemini,
+    /// Google Gemini long-running prediction (`POST ...:predictLongRunning`).
+    GeminiVideo,
     Custom,
 }
 
-/// One model offered by a channel, tagged with what it can generate.
+impl Protocol {
+    /// The wire name, as it appears on the wire and in a settings form.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenaiChat => "openaiChat",
+            Self::OpenaiResponses => "openaiResponses",
+            Self::OpenaiImages => "openaiImages",
+            Self::OpenaiSpeech => "openaiSpeech",
+            Self::OpenaiVideos => "openaiVideos",
+            Self::Gemini => "gemini",
+            Self::GeminiVideo => "geminiVideo",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// True when the protocol speaks the OpenAI wire format: the credential
+    /// travels as a bearer token and bodies use OpenAI field names.
+    pub fn is_openai(&self) -> bool {
+        matches!(
+            self,
+            Self::OpenaiChat
+                | Self::OpenaiResponses
+                | Self::OpenaiImages
+                | Self::OpenaiSpeech
+                | Self::OpenaiVideos
+        )
+    }
+
+    /// True when the protocol speaks the Gemini wire format: the credential
+    /// travels in the `x-goog-api-key` header.
+    pub fn is_gemini(&self) -> bool {
+        matches!(self, Self::Gemini | Self::GeminiVideo)
+    }
+}
+
+/// The protocol choices on offer for one category of model.
+///
+/// The list differs per category because each category speaks a different
+/// endpoint shape: a text model posts messages, an image model posts a
+/// prompt to an images endpoint, and a video model starts a job. The
+/// settings form and the server-side validation both read this one list, so
+/// what may be chosen and what may be stored cannot disagree.
+pub fn protocols_for(capability: Capability) -> &'static [Protocol] {
+    match capability {
+        Capability::Text => &[
+            Protocol::OpenaiChat,
+            Protocol::OpenaiResponses,
+            Protocol::Gemini,
+        ],
+        Capability::Image => &[Protocol::OpenaiImages, Protocol::Gemini],
+        Capability::Audio => &[Protocol::OpenaiSpeech, Protocol::Gemini],
+        Capability::Video => &[Protocol::OpenaiVideos, Protocol::GeminiVideo],
+    }
+}
+
+/// One configured model, standing on its own.
+///
+/// There is no provider grouping: every model carries its own address,
+/// protocol, and credential, so two models from the same vendor are two
+/// configurations that cannot interfere with each other. Deliberately has no
+/// credential field: the API key lives in a separate encrypted document,
+/// keyed by this configuration's `id`, and never appears in a snapshot handed
+/// to the generation hot path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChannelModel {
+pub struct ModelConfig {
     pub id: String,
-    pub capability: Capability,
-    #[serde(default)]
-    pub alias: String,
+    /// What the model generates; also the settings tab it appears under.
+    pub category: Capability,
+    /// The wire format the endpoint speaks; must be one of
+    /// [`protocols_for(category)`].
+    pub protocol: Protocol,
+    /// The complete endpoint address requests are sent to — not a base URL.
+    /// For example `https://api.openai.com/v1/chat/completions` or
+    /// `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`.
+    pub url: String,
+    /// The model name the provider knows, sent in the request body where the
+    /// protocol has one.
+    pub model: String,
+    /// What the settings list and model pickers show.
+    pub display_name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
 
-/// A configured provider channel. Deliberately has no credential field: the
-/// API key lives in a separate encrypted document and never appears in a
-/// snapshot handed to the generation hot path.
+/// Caller-supplied model configuration contents for an upsert, with the
+/// optional revision the caller last read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Channel {
+pub struct ModelDraft {
     pub id: String,
-    pub name: String,
-    pub base_url: String,
-    #[serde(default)]
+    pub category: Capability,
     pub protocol: Protocol,
+    pub url: String,
+    pub model: String,
+    pub display_name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default)]
-    pub models: Vec<ChannelModel>,
-    /// An override for each capability that needs a different address than the
-    /// channel's own. Text and image from the same provider often land at
-    /// different base URLs; this field lets one channel carry both.
-    #[serde(default)]
-    pub capability_base_urls: HashMap<Capability, String>,
-}
-
-/// Caller-supplied channel contents for an upsert, with the optional revision
-/// the caller last read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChannelDraft {
-    pub id: String,
-    pub name: String,
-    pub base_url: String,
-    #[serde(default)]
-    pub protocol: Protocol,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default)]
-    pub models: Vec<ChannelModel>,
     #[serde(default)]
     pub expected_revision: Option<u64>,
-    /// Per-capability base URL overrides. Keys match the model capabilities
-    /// declared in `models`; an absent key means "use the channel's base URL".
-    #[serde(default)]
-    pub capability_base_urls: HashMap<Capability, String>,
 }
 
-/// The stored form of a channel, as returned after a write.
-pub type ChannelRecord = Channel;
+/// The stored form of a model configuration, as returned after a write.
+pub type ModelRecord = ModelConfig;
 
-/// Default model per capability, addressed as `channelId::modelId`.
+/// Default model per capability, addressed by model configuration id.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Defaults {
@@ -212,23 +273,24 @@ impl Default for Preferences {
     }
 }
 
-/// Everything the generation path needs about providers, minus credentials.
+/// Everything the generation path needs about model configurations, minus
+/// credentials.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProviderSnapshot {
+pub struct ModelsSnapshot {
     pub version: u32,
     pub revision: u64,
-    pub channels: Vec<Channel>,
+    pub models: Vec<ModelConfig>,
     pub defaults: Defaults,
     pub preferences: Preferences,
 }
 
-impl Default for ProviderSnapshot {
+impl Default for ModelsSnapshot {
     fn default() -> Self {
         Self {
             version: 1,
             revision: 0,
-            channels: Vec::new(),
+            models: Vec::new(),
             defaults: Defaults::default(),
             preferences: Preferences::default(),
         }
@@ -370,15 +432,52 @@ mod tests {
     }
 
     #[test]
-    fn protocols_serialize_as_lowercase_names() {
+    fn protocols_serialize_as_camel_case_names() {
         assert_eq!(
-            serde_json::to_string(&Protocol::Openai).unwrap(),
-            "\"openai\""
+            serde_json::to_string(&Protocol::OpenaiChat).unwrap(),
+            "\"openaiChat\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Protocol::OpenaiResponses).unwrap(),
+            "\"openaiResponses\""
         );
         assert_eq!(
             serde_json::to_string(&Protocol::Gemini).unwrap(),
             "\"gemini\""
         );
+        assert_eq!(
+            serde_json::to_string(&Protocol::GeminiVideo).unwrap(),
+            "\"geminiVideo\""
+        );
+    }
+
+    #[test]
+    fn each_category_offers_its_own_protocol_list() {
+        // A video model never speaks a chat endpoint, so the lists cannot be
+        // one shared constant.
+        assert_eq!(
+            protocols_for(Capability::Text),
+            &[
+                Protocol::OpenaiChat,
+                Protocol::OpenaiResponses,
+                Protocol::Gemini
+            ]
+        );
+        assert_eq!(
+            protocols_for(Capability::Video),
+            &[Protocol::OpenaiVideos, Protocol::GeminiVideo]
+        );
+        assert!(!protocols_for(Capability::Image).contains(&Protocol::OpenaiChat));
+    }
+
+    #[test]
+    fn protocol_families_split_by_wire_format() {
+        assert!(Protocol::OpenaiChat.is_openai());
+        assert!(Protocol::OpenaiVideos.is_openai());
+        assert!(!Protocol::OpenaiChat.is_gemini());
+        assert!(Protocol::Gemini.is_gemini());
+        assert!(Protocol::GeminiVideo.is_gemini());
+        assert!(!Protocol::Gemini.is_openai());
     }
 
     #[test]
@@ -395,19 +494,21 @@ mod tests {
     }
 
     #[test]
-    fn a_channel_has_no_credential_field() {
-        let channel = Channel {
-            id: "openai".to_string(),
-            name: "OpenAI".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            protocol: Protocol::Openai,
+    fn a_model_config_has_no_credential_field() {
+        let config = ModelConfig {
+            id: "gpt-4o".to_string(),
+            category: Capability::Text,
+            protocol: Protocol::OpenaiChat,
+            url: "https://api.openai.com/v1/chat/completions".to_string(),
+            model: "gpt-4o".to_string(),
+            display_name: "GPT-4o".to_string(),
             enabled: true,
-            models: Vec::new(),
-            capability_base_urls: HashMap::new(),
         };
-        let json = serde_json::to_string(&channel).unwrap();
+        let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("apiKey"), "{json}");
         assert!(!json.contains("api_key"), "{json}");
+        assert!(json.contains("\"displayName\""), "{json}");
+        assert!(json.contains("\"category\":\"text\""), "{json}");
     }
 
     #[test]

@@ -6,7 +6,6 @@
 //! status a failure arrives with, the frames a stream is made of, and the body
 //! limit that keeps a prompt from being mistaken for an upload.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -20,16 +19,13 @@ use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, RuntimeMode};
 use moka_canvas::domain::Capability;
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
-use moka_canvas::metadata::{ChannelDraft, ChannelModel, Defaults, Protocol};
+use moka_canvas::metadata::{Defaults, ModelDraft, Protocol};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
 /// Long enough that masking keeps a recognisable head and tail.
 const API_KEY: &str = "sk-test-1234567890abcd";
-
-/// The one channel every test here configures, so a reference is predictable.
-const CHANNEL: &str = "a-channel";
 
 struct Harness {
     app: Router,
@@ -62,58 +58,56 @@ fn harness() -> Harness {
     }
 }
 
-/// Points the app at a throwaway provider and makes its models the defaults,
-/// which is what Settings does before a generation can be placed at all.
+/// Points the app at throwaway models and makes them the defaults, which is
+/// what Settings does before a generation can be placed at all. One model
+/// configuration per entry, addressed at the endpoint its category speaks on
+/// the throwaway provider.
 async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capability)]) {
-    harness
-        .state
-        .providers
-        .upsert_channel(ChannelDraft {
-            id: CHANNEL.into(),
-            name: "A channel".into(),
-            base_url: base_url.into(),
-            protocol: Protocol::Openai,
-            enabled: true,
-            models: models
-                .iter()
-                .map(|(id, capability)| ChannelModel {
-                    id: (*id).into(),
-                    capability: *capability,
-                    alias: String::new(),
-                    enabled: true,
-                })
-                .collect(),
-            expected_revision: None,
-            capability_base_urls: HashMap::new(),
-        })
-        .await
-        .expect("the channel is stored");
-    harness
-        .state
-        .providers
-        .set_key(CHANNEL, Some(API_KEY))
-        .await
-        .expect("the credential is stored");
-
     let mut defaults = Defaults::default();
     for (id, capability) in models {
-        let reference = format!("{CHANNEL}::{id}");
+        let (protocol, suffix) = match capability {
+            Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
+            Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
+            Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
+            Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
+        };
+        harness
+            .state
+            .models
+            .upsert(ModelDraft {
+                id: (*id).into(),
+                category: *capability,
+                protocol,
+                url: format!("{base_url}{suffix}"),
+                model: (*id).into(),
+                display_name: (*id).into(),
+                enabled: true,
+                expected_revision: None,
+            })
+            .await
+            .expect("the model is stored");
+        harness
+            .state
+            .models
+            .set_key(id, Some(API_KEY))
+            .await
+            .expect("the credential is stored");
         match capability {
-            Capability::Text => defaults.text = Some(reference),
-            Capability::Image => defaults.image = Some(reference),
-            Capability::Audio => defaults.audio = Some(reference),
-            Capability::Video => defaults.video = Some(reference),
+            Capability::Text => defaults.text = Some((*id).to_string()),
+            Capability::Image => defaults.image = Some((*id).to_string()),
+            Capability::Audio => defaults.audio = Some((*id).to_string()),
+            Capability::Video => defaults.video = Some((*id).to_string()),
         }
     }
     harness
         .state
-        .providers
+        .models
         .set_defaults(&defaults, None)
         .await
         .expect("the defaults are stored");
 }
 
-/// Starts a throwaway provider and returns the address a channel would carry.
+/// Starts a throwaway provider and returns the address a model URL is built on.
 async fn serve(routes: Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -568,7 +562,7 @@ async fn a_shot_comes_back_as_a_handle_and_is_polled_until_it_ends() {
         .to_string();
     assert!(!id.is_empty());
     assert_eq!(task["capability"], "video");
-    assert_eq!(task["model"], format!("{CHANNEL}::a-video-model"));
+    assert_eq!(task["model"], "a-video-model");
     assert!(task["createdAt"].as_str().is_some());
     assert!(
         task.get("retryAfterMs").is_none(),

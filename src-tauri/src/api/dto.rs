@@ -1,10 +1,7 @@
 use crate::config::LimitsConfig;
 use crate::domain::{Capability, DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
-use crate::generate::providers::ModelCandidate;
 use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, InputRole, Usage};
-use crate::metadata::{
-    AudioPreferences, ChannelDraft, ImagePreferences, Protocol, VideoPreferences,
-};
+use crate::metadata::{AudioPreferences, ImagePreferences, ModelDraft, VideoPreferences};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
@@ -202,23 +199,23 @@ pub struct CapabilitiesResponse {
     pub asset_categories: Vec<String>,
 }
 
-/// A channel write. The credential rides along but is a separate concern:
-/// leaving it out — or leaving it blank — keeps whatever is stored, so editing
-/// a name or a model list cannot quietly destroy a working key. Removing one
-/// is an explicit call to the key endpoint.
+/// A model configuration write. The credential rides along but is a separate
+/// concern: leaving it out — or leaving it blank — keeps whatever is stored, so
+/// renaming a model cannot quietly destroy a working key. Removing one is an
+/// explicit call to the key endpoint.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpsertChannelRequest {
+pub struct UpsertModelRequest {
     #[serde(flatten)]
-    pub channel: ChannelDraft,
+    pub model: ModelDraft,
     #[serde(default)]
     pub api_key: Option<String>,
 }
 
-/// Sets or clears one channel's credential on its own.
+/// Sets or clears one model configuration's credential on its own.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChannelKeyRequest {
+pub struct ModelKeyRequest {
     /// Absent, null, or blank all mean "clear it".
     #[serde(default)]
     pub api_key: Option<String>,
@@ -267,49 +264,6 @@ pub struct PreferencesPatch {
     pub expected_revision: Option<u64>,
 }
 
-/// Creates or updates a channel from an address and a credential, deriving the
-/// rest.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportChannelRequest {
-    pub base_url: String,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub protocol: Option<Protocol>,
-    #[serde(default)]
-    pub expected_revision: Option<u64>,
-}
-
-/// Asks an address what it offers, storing nothing.
-///
-/// Carries no revision because it writes nothing, which is the distinction that
-/// keeps a wrong address from leaving a channel behind.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InspectChannelRequest {
-    pub base_url: String,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    #[serde(default)]
-    pub protocol: Option<Protocol>,
-}
-
-/// Hand-written: a derived `Debug` would print the credential into a panic
-/// message, a log line, or an error that formats its request.
-impl std::fmt::Debug for InspectChannelRequest {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("InspectChannelRequest")
-            .field("base_url", &self.base_url)
-            .field("protocol", &self.protocol)
-            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
-            .finish()
-    }
-}
-
 /// An optional revision carried in a query string, for the requests that have
 /// no body to put it in.
 #[derive(Debug, Deserialize)]
@@ -324,12 +278,6 @@ pub struct RevisionQuery {
 #[serde(rename_all = "camelCase")]
 pub struct RunStreamQuery {
     pub run_id: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelListResponse {
-    pub models: Vec<ModelCandidate>,
 }
 
 /// One answer to a generation request.

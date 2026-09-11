@@ -13,31 +13,23 @@ use serde_json::{json, Map, Value};
 
 use super::{
     answer, exchange, image_item, media_item, open_stream, provider_error, read_stream, succeeded,
-    usage_of, ChannelCall, Opened, ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES,
+    usage_of, ModelCall, Opened, ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES,
     MODEL_LIST_TIMEOUT,
 };
 use crate::domain::{new_id, now_iso, Capability};
 use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
 use crate::generate::media::{video_images, video_layout, MediaInput, VideoLayout};
+use crate::generate::models::{gemini_root, gemini_stream_url};
 use crate::generate::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
 };
-use crate::metadata::Protocol;
-
-const MODELS: &str = "/models";
 
 /// Enough for everything a provider lists today to arrive in one page.
 const PAGE_SIZE: &str = "1000";
 
 /// Identifiers arrive qualified, as in `models/gemini-2.5-flash`.
 const NAME_PREFIX: &str = "models/";
-
-/// The actions one model answers on, appended to its address rather than
-/// forming a path of their own.
-const GENERATE: &str = ":generateContent";
-const STREAM: &str = ":streamGenerateContent";
-const PREDICT: &str = ":predictLongRunning";
 
 /// How long a caller should wait before looking at a job again. The provider
 /// does not say, and asking more often than this only adds refusals.
@@ -59,13 +51,9 @@ pub struct GeminiAdapter;
 
 #[async_trait::async_trait]
 impl ProviderAdapter for GeminiAdapter {
-    fn protocol(&self) -> Protocol {
-        Protocol::Gemini
-    }
-
     async fn generate(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         cancel: &Cancel,
@@ -83,7 +71,7 @@ impl ProviderAdapter for GeminiAdapter {
 
     async fn generate_stream(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         sink: &DeltaSink,
@@ -102,7 +90,7 @@ impl ProviderAdapter for GeminiAdapter {
 
     async fn create_task(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         request: &GenerateRequest,
         inputs: &[MediaInput],
         cancel: &Cancel,
@@ -117,8 +105,7 @@ impl ProviderAdapter for GeminiAdapter {
         let reply = answer(
             Kind::TaskCreate,
             call,
-            call.post(&endpoint(call, PREDICT))
-                .json(&job_body(request, inputs)),
+            call.post().json(&job_body(request, inputs)),
             Capability::Video,
         )
         .await?;
@@ -139,26 +126,30 @@ impl ProviderAdapter for GeminiAdapter {
             // change when a channel is reconfigured.
             id: new_id(),
             reference,
-            protocol: Protocol::Gemini,
+            protocol: call.protocol,
             capability: Capability::Video,
-            model: call.reference.clone(),
+            model: call.config_id.clone(),
             created_at: now_iso(),
         })
     }
 
     async fn poll_task(
         &self,
-        call: &ChannelCall,
+        call: &ModelCall,
         task: &AsyncTask,
         cancel: &Cancel,
     ) -> Result<TaskState, ProviderError> {
         cancel.check()?;
-        // The handle a job started with is already a path under the version
-        // this protocol uses, so it is asked for exactly as it arrived.
+        // The handle a job started with is a path under the root of the
+        // configured address, so it is asked for exactly as it arrived,
+        // resolved against that root.
+        let root = gemini_root(call.endpoint())
+            .or_else(|| call.origin())
+            .unwrap_or_default();
         let reply = exchange(
             Kind::TaskPoll,
             call,
-            call.get(&task.reference),
+            call.get(&format!("{root}/{}", task.reference)),
             call.budgets.poll_timeout(),
             call.budgets.max_response_bytes,
         )
@@ -201,14 +192,14 @@ impl ProviderAdapter for GeminiAdapter {
 }
 
 /// Asks a provider what it currently offers.
-pub(super) async fn list_models(call: &ChannelCall) -> Result<Vec<String>, ProviderError> {
+pub(super) async fn list_models(call: &ModelCall) -> Result<Vec<String>, ProviderError> {
     // The credential is already in a header rather than in the query parameter
     // this provider also accepts: a URL is logged and quoted back in error
     // messages, and a header is neither.
     let reply = exchange(
         Kind::Models,
         call,
-        call.get(MODELS).query(&[("pageSize", PAGE_SIZE)]),
+        call.get(call.endpoint()).query(&[("pageSize", PAGE_SIZE)]),
         MODEL_LIST_TIMEOUT,
         MAX_MODEL_LIST_BYTES,
     )
@@ -246,15 +237,9 @@ fn identifiers(reply: &Reply) -> Result<Vec<String>, ProviderError> {
         .collect())
 }
 
-/// The address of one action on the model this channel resolved. The model is
-/// named here rather than in a body, which is why no body carries it.
-fn endpoint(call: &ChannelCall, action: &str) -> String {
-    format!("{MODELS}/{}{action}", call.model_id)
-}
-
 /// One generation, waited out or read as it arrives.
 async fn content(
-    call: &ChannelCall,
+    call: &ModelCall,
     request: &GenerateRequest,
     inputs: &[MediaInput],
     sink: &DeltaSink,
@@ -264,7 +249,7 @@ async fn content(
     let body = content_body(request, inputs);
     if sink.is_streaming() {
         let asked = call
-            .post(&endpoint(call, STREAM))
+            .post_at(&gemini_stream_url(call.endpoint()))
             // A stream is asked for in the query rather than in the body, and
             // as events rather than as one array of pieces.
             .query(&[("alt", "sse")])
@@ -287,7 +272,7 @@ async fn content(
     let reply = answer(
         Kind::Generate,
         call,
-        call.post(&endpoint(call, GENERATE)).json(&body),
+        call.post().json(&body),
         request.capability,
     )
     .await?;
@@ -556,7 +541,7 @@ fn job_body(request: &GenerateRequest, inputs: &[MediaInput]) -> Value {
 }
 
 /// Downloads what a finished job left behind, from the addresses it named.
-async fn collect(call: &ChannelCall, payload: &Value) -> Result<TaskState, ProviderError> {
+async fn collect(call: &ModelCall, payload: &Value) -> Result<TaskState, ProviderError> {
     let mut items = Vec::new();
     for address in samples(payload) {
         items.push(download(call, address).await?);
@@ -581,7 +566,7 @@ fn samples(payload: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-async fn download(call: &ChannelCall, address: &str) -> Result<GeneratedItem, ProviderError> {
+async fn download(call: &ModelCall, address: &str) -> Result<GeneratedItem, ProviderError> {
     let reply = exchange(
         Kind::Media,
         call,
@@ -606,21 +591,26 @@ async fn download(call: &ChannelCall, address: &str) -> Result<GeneratedItem, Pr
 mod tests {
     use super::*;
     use crate::config::GenerateConfig;
-    use crate::generate::providers::ResolvedModel;
+    use crate::generate::models::ResolvedModel;
     use crate::generate::InputRole;
+    use crate::metadata::Protocol;
 
-    /// A channel resolved to one model, pointed at an address nothing answers
-    /// so that a body built for it cannot be sent by accident.
-    fn channel(model_id: &str, capability: Capability) -> ChannelCall {
-        let resolved = ResolvedModel {
-            reference: format!("channel-1::{model_id}"),
-            channel_id: "channel-1".into(),
-            model_id: model_id.into(),
-            capability,
-            protocol: Protocol::Gemini,
-            base_url: "https://example.invalid".into(),
+    /// A model configuration resolved to one call, pointed at an address
+    /// nothing answers so that a body built for it cannot be sent by accident.
+    fn channel(model_id: &str, capability: Capability) -> ModelCall {
+        let (protocol, action) = match capability {
+            Capability::Video => (Protocol::GeminiVideo, ":predictLongRunning"),
+            _ => (Protocol::Gemini, ":generateContent"),
         };
-        ChannelCall::new(&resolved, "a-key".into(), GenerateConfig::default())
+        let resolved = ResolvedModel {
+            config_id: model_id.to_string(),
+            model: model_id.to_string(),
+            display_name: format!("Model {model_id}"),
+            category: capability,
+            protocol,
+            url: format!("https://example.invalid/v1beta/models/{model_id}{action}"),
+        };
+        ModelCall::new(&resolved, "a-key".into(), GenerateConfig::default())
             .expect("a client builds")
     }
 
@@ -671,17 +661,13 @@ mod tests {
     fn the_model_is_named_in_the_address_rather_than_in_a_body() {
         let call = channel("gemini-2.5-flash", Capability::Text);
         assert_eq!(
-            endpoint(&call, GENERATE),
-            "/models/gemini-2.5-flash:generateContent"
-        );
-        assert_eq!(
-            call.url(&endpoint(&call, GENERATE)),
+            call.endpoint(),
             "https://example.invalid/v1beta/models/gemini-2.5-flash:generateContent"
         );
 
         let shots = channel("veo-3", Capability::Video);
         assert_eq!(
-            shots.url(&endpoint(&shots, PREDICT)),
+            shots.endpoint(),
             "https://example.invalid/v1beta/models/veo-3:predictLongRunning"
         );
 

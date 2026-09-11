@@ -30,8 +30,8 @@ pub enum ProviderError {
     #[error("no {capability} model is configured: {reason}")]
     NotConfigured { capability: String, reason: String },
 
-    #[error("channel {channel} has no stored API key")]
-    KeyMissing { channel: String },
+    #[error("model {model} has no stored API key")]
+    KeyMissing { model: String },
 
     #[error("{reference} generates {found}, not {capability}")]
     CapabilityMismatch {
@@ -40,38 +40,38 @@ pub enum ProviderError {
         found: String,
     },
 
-    /// The channel is still the default for at least one capability.
-    #[error("channel {channel} is still the default for {capabilities:?}")]
+    /// The model is still the default for at least one category.
+    #[error("model {model} is still the default for {capabilities:?}")]
     InUse {
-        channel: String,
+        model: String,
         capabilities: Vec<String>,
     },
 
-    #[error("the channel rejected the stored credential: {0}")]
+    #[error("the provider rejected the stored credential: {0}")]
     Auth(String),
 
-    /// The channel is busy. Carries its own advice about when to come back,
+    /// The provider is busy. Carries its own advice about when to come back,
     /// because a backoff that ignores `Retry-After` either hammers a provider
     /// that asked for a minute or waits one out when it asked for a second.
-    #[error("the channel is rate limiting requests: {detail}")]
+    #[error("the provider is rate limiting requests: {detail}")]
     RateLimited {
         detail: String,
         retry_after: Option<Duration>,
     },
 
-    #[error("the channel did not answer in time: {0}")]
+    #[error("the provider did not answer in time: {0}")]
     Timeout(String),
 
-    #[error("the channel could not serve the request: {0}")]
+    #[error("the provider could not serve the request: {0}")]
     Unreachable(String),
 
-    #[error("the channel rejected the request: {0}")]
+    #[error("the provider rejected the request: {0}")]
     Rejected(String),
 
     /// A successful answer with nothing in it. Reported instead of handing
     /// back an empty result, because "no output" is a provider failure the
     /// caller can retry elsewhere rather than a legitimate blank page.
-    #[error("the channel returned no usable output: {0}")]
+    #[error("the provider returned no usable output: {0}")]
     NoOutput(String),
 
     /// A successful answer too big to keep. The ceiling is one the deployment
@@ -156,10 +156,10 @@ impl ProviderError {
     pub fn details(&self) -> Option<serde_json::Value> {
         match self {
             Self::InUse {
-                channel,
+                model,
                 capabilities,
             } => Some(serde_json::json!({
-                "channelId": channel,
+                "modelId": model,
                 "defaultFor": capabilities,
             })),
             Self::CapabilityMismatch {
@@ -213,7 +213,7 @@ mod tests {
     fn a_run_outcome_is_never_something_waiting_fixes() {
         // An empty answer, one too big to keep, a caller that left, and a
         // handle that is gone all fail again verbatim; only a busy or
-        // unreachable channel is worth a backoff.
+        // unreachable provider is worth a backoff.
         for error in run_outcomes() {
             assert!(!error.retryable(), "{error} must not be retried");
             assert!(error.details().is_none());

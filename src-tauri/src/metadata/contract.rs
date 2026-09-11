@@ -9,11 +9,10 @@
 //! directory lock, quarantine of a damaged document — live in
 //! `tests/metadata_file.rs` instead.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::types::{
-    ChannelDraft, ChannelModel, Defaults, Preferences, PromptItem, PromptQuery, PromptSource,
+    Defaults, ModelDraft, Preferences, PromptItem, PromptQuery, PromptSource, Protocol,
     RecentProject, VideoPreferences, MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
 };
 use super::{MetadataError, MetadataStore, MetadataStoreKind};
@@ -62,13 +61,13 @@ pub async fn run_metadata_suite(open: &StoreFactory) -> Vec<ContractFailure> {
     record(&mut failures, "recent_removal", recent_removal(store).await);
     record(
         &mut failures,
-        "channel_is_written_whole",
-        channel_is_written_whole(store).await,
+        "model_is_written_whole",
+        model_is_written_whole(store).await,
     );
     record(
         &mut failures,
-        "channel_models_are_replaced",
-        channel_models_are_replaced(store).await,
+        "upsert_replaces_the_whole_model",
+        upsert_replaces_the_whole_model(store).await,
     );
     record(
         &mut failures,
@@ -92,13 +91,13 @@ pub async fn run_metadata_suite(open: &StoreFactory) -> Vec<ContractFailure> {
     );
     record(
         &mut failures,
-        "delete_secret_keeps_channel",
-        delete_secret_keeps_channel(store).await,
+        "delete_secret_keeps_model",
+        delete_secret_keeps_model(store).await,
     );
     record(
         &mut failures,
-        "delete_channel_clears_secret",
-        delete_channel_clears_secret(store).await,
+        "delete_model_clears_secret",
+        delete_model_clears_secret(store).await,
     );
     record(
         &mut failures,
@@ -160,25 +159,16 @@ fn recent(id: &str, path: &str) -> RecentProject {
     }
 }
 
-fn draft(id: &str, models: Vec<ChannelModel>) -> ChannelDraft {
-    ChannelDraft {
+fn draft(id: &str, category: Capability) -> ModelDraft {
+    ModelDraft {
         id: id.to_string(),
-        name: format!("Channel {id}"),
-        base_url: "https://provider.example/v1".to_string(),
-        protocol: super::types::Protocol::Openai,
+        category,
+        protocol: Protocol::OpenaiChat,
+        url: "https://provider.example/v1/chat/completions".to_string(),
+        model: format!("model-{id}"),
+        display_name: format!("Model {id}"),
         enabled: true,
-        models,
         expected_revision: None,
-        capability_base_urls: HashMap::new(),
-    }
-}
-
-fn model(id: &str, capability: Capability) -> ChannelModel {
-    ChannelModel {
-        id: id.to_string(),
-        capability,
-        alias: format!("Alias {id}"),
-        enabled: true,
     }
 }
 
@@ -243,77 +233,76 @@ async fn recent_removal(store: &dyn MetadataStore) -> Result<(), String> {
     Ok(())
 }
 
-async fn channel_is_written_whole(store: &dyn MetadataStore) -> Result<(), String> {
-    let models = vec![
-        model("text-1", Capability::Text),
-        model("image-1", Capability::Image),
-    ];
+async fn model_is_written_whole(store: &dyn MetadataStore) -> Result<(), String> {
     describe(
         "upsert",
-        store.upsert_channel(&draft("whole", models.clone())),
+        store.upsert_model(&draft("whole", Capability::Text)),
     )
     .await?;
-    let snapshot = describe("snapshot", store.provider_snapshot()).await?;
-    let channel = snapshot
-        .channels
+    let snapshot = describe("snapshot", store.models_snapshot()).await?;
+    let model = snapshot
+        .models
         .iter()
-        .find(|channel| channel.id == "whole")
-        .ok_or("channel missing from the snapshot")?;
-    if channel.models != models {
-        return Err(format!(
-            "models were partially written: {:?}",
-            channel.models
-        ));
+        .find(|model| model.id == "whole")
+        .ok_or("model missing from the snapshot")?;
+    if model.url.is_empty() || model.model.is_empty() || model.display_name.is_empty() {
+        return Err("model fields were partially written".to_string());
     }
-    if channel.base_url.is_empty() || !channel.enabled {
-        return Err("channel fields were partially written".to_string());
+    if !model.enabled || model.category != Capability::Text {
+        return Err(format!("model fields were written wrong: {model:?}"));
     }
     Ok(())
 }
 
-async fn channel_models_are_replaced(store: &dyn MetadataStore) -> Result<(), String> {
+async fn upsert_replaces_the_whole_model(store: &dyn MetadataStore) -> Result<(), String> {
     describe(
         "upsert",
-        store.upsert_channel(&draft("models", vec![model("old", Capability::Text)])),
+        store.upsert_model(&draft("replaced", Capability::Text)),
     )
     .await?;
-    describe(
-        "replace",
-        store.replace_channel_models("models", &[model("new", Capability::Video)], None),
-    )
-    .await?;
-    let snapshot = describe("snapshot", store.provider_snapshot()).await?;
-    let channel = snapshot
-        .channels
+    let mut changed = draft("replaced", Capability::Image);
+    changed.url = "https://provider.example/v1/images/generations".to_string();
+    changed.protocol = Protocol::OpenaiImages;
+    changed.display_name = "Renamed".to_string();
+    describe("upsert again", store.upsert_model(&changed)).await?;
+    let snapshot = describe("snapshot", store.models_snapshot()).await?;
+    let models: Vec<_> = snapshot
+        .models
         .iter()
-        .find(|channel| channel.id == "models")
-        .ok_or("channel missing")?;
-    if channel.models.len() != 1 || channel.models[0].id != "new" {
+        .filter(|model| model.id == "replaced")
+        .collect();
+    if models.len() != 1 {
         return Err(format!(
-            "models were merged instead of replaced: {:?}",
-            channel.models
+            "upsert duplicated the model: {} entries",
+            models.len()
         ));
     }
-    let error = store
-        .replace_channel_models("nope", &[], None)
-        .await
-        .expect_err("an unknown channel cannot be modified");
-    if error.code() != "NOT_FOUND" {
-        return Err(format!("expected NOT_FOUND, got {}", error.code()));
+    if models[0].category != Capability::Image
+        || models[0].protocol != Protocol::OpenaiImages
+        || models[0].display_name != "Renamed"
+    {
+        return Err(format!(
+            "upsert merged instead of replacing: {:?}",
+            models[0]
+        ));
     }
     Ok(())
 }
 
 async fn revision_conflict(store: &dyn MetadataStore) -> Result<(), String> {
-    describe("upsert", store.upsert_channel(&draft("locked", vec![]))).await?;
-    let snapshot = describe("snapshot", store.provider_snapshot()).await?;
+    describe(
+        "upsert",
+        store.upsert_model(&draft("locked", Capability::Text)),
+    )
+    .await?;
+    let snapshot = describe("snapshot", store.models_snapshot()).await?;
     let stale = snapshot.revision.saturating_sub(1);
     if stale == snapshot.revision {
         return Err("revision did not advance after a write".to_string());
     }
-    let mut conflicting = draft("locked", vec![]);
+    let mut conflicting = draft("locked", Capability::Text);
     conflicting.expected_revision = Some(stale);
-    let error = match store.upsert_channel(&conflicting).await {
+    let error = match store.upsert_model(&conflicting).await {
         Ok(_) => return Err("a stale revision was accepted".to_string()),
         Err(error) => error,
     };
@@ -321,12 +310,12 @@ async fn revision_conflict(store: &dyn MetadataStore) -> Result<(), String> {
         return Err(format!("expected METADATA_CONFLICT, got {}", error.code()));
     }
     // The current revision is accepted.
-    let mut current = draft("locked", vec![model("ok", Capability::Text)]);
+    let mut current = draft("locked", Capability::Text);
     current.expected_revision = Some(snapshot.revision);
-    describe("upsert at current revision", store.upsert_channel(&current)).await?;
+    describe("upsert at current revision", store.upsert_model(&current)).await?;
 
     let stale_defaults = Defaults {
-        text: Some("locked::ok".to_string()),
+        text: Some("locked".to_string()),
         ..Default::default()
     };
     let error = store
@@ -344,8 +333,8 @@ async fn revision_conflict(store: &dyn MetadataStore) -> Result<(), String> {
 
 async fn defaults_and_preferences(store: &dyn MetadataStore) -> Result<(), String> {
     let defaults = Defaults {
-        text: Some("locked::ok".to_string()),
-        image: Some("other::image".to_string()),
+        text: Some("locked".to_string()),
+        image: Some("other-image".to_string()),
         audio: None,
         video: None,
     };
@@ -360,7 +349,7 @@ async fn defaults_and_preferences(store: &dyn MetadataStore) -> Result<(), Strin
     };
     describe("set preferences", store.set_preferences(&preferences, None)).await?;
 
-    let snapshot = describe("snapshot", store.provider_snapshot()).await?;
+    let snapshot = describe("snapshot", store.models_snapshot()).await?;
     if snapshot.defaults != defaults {
         return Err(format!("defaults did not persist: {:?}", snapshot.defaults));
     }
@@ -371,7 +360,11 @@ async fn defaults_and_preferences(store: &dyn MetadataStore) -> Result<(), Strin
 }
 
 async fn secret_round_trip(store: &dyn MetadataStore) -> Result<(), String> {
-    describe("upsert", store.upsert_channel(&draft("secreted", vec![]))).await?;
+    describe(
+        "upsert",
+        store.upsert_model(&draft("secreted", Capability::Text)),
+    )
+    .await?;
     describe("put", store.put_secret("secreted", "sk-round-trip-value")).await?;
     let recovered = describe("get", store.get_secret("secreted")).await?;
     if recovered.as_deref() != Some("sk-round-trip-value") {
@@ -385,13 +378,17 @@ async fn secret_round_trip(store: &dyn MetadataStore) -> Result<(), String> {
     }
     let absent = describe("get unknown", store.get_secret("never-stored")).await?;
     if absent.is_some() {
-        return Err("an unknown channel reported a credential".to_string());
+        return Err("an unknown model reported a credential".to_string());
     }
     Ok(())
 }
 
 async fn secret_state_hides_the_value(store: &dyn MetadataStore) -> Result<(), String> {
-    describe("upsert", store.upsert_channel(&draft("masked", vec![]))).await?;
+    describe(
+        "upsert",
+        store.upsert_model(&draft("masked", Capability::Text)),
+    )
+    .await?;
     describe("put", store.put_secret("masked", "sk-abcdefgh123456")).await?;
     let state = describe("state", store.secret_state("masked"))
         .await?
@@ -416,40 +413,40 @@ async fn secret_state_hides_the_value(store: &dyn MetadataStore) -> Result<(), S
     Ok(())
 }
 
-async fn delete_secret_keeps_channel(store: &dyn MetadataStore) -> Result<(), String> {
-    describe("upsert", store.upsert_channel(&draft("keyless", vec![]))).await?;
+async fn delete_secret_keeps_model(store: &dyn MetadataStore) -> Result<(), String> {
+    describe(
+        "upsert",
+        store.upsert_model(&draft("keyless", Capability::Text)),
+    )
+    .await?;
     describe("put", store.put_secret("keyless", "sk-temporary")).await?;
     describe("delete secret", store.delete_secret("keyless")).await?;
     let state = describe("state", store.secret_state("keyless")).await?;
     if state.is_some() {
         return Err("credential survived deletion".to_string());
     }
-    let snapshot = describe("snapshot", store.provider_snapshot()).await?;
-    if !snapshot
-        .channels
-        .iter()
-        .any(|channel| channel.id == "keyless")
-    {
-        return Err("deleting the credential also deleted the channel".to_string());
+    let snapshot = describe("snapshot", store.models_snapshot()).await?;
+    if !snapshot.models.iter().any(|model| model.id == "keyless") {
+        return Err("deleting the credential also deleted the model".to_string());
     }
     Ok(())
 }
 
-async fn delete_channel_clears_secret(store: &dyn MetadataStore) -> Result<(), String> {
-    describe("upsert", store.upsert_channel(&draft("doomed", vec![]))).await?;
+async fn delete_model_clears_secret(store: &dyn MetadataStore) -> Result<(), String> {
+    describe(
+        "upsert",
+        store.upsert_model(&draft("doomed", Capability::Text)),
+    )
+    .await?;
     describe("put", store.put_secret("doomed", "sk-doomed")).await?;
-    describe("delete", store.delete_channel("doomed", None)).await?;
-    let snapshot = describe("snapshot", store.provider_snapshot()).await?;
-    if snapshot
-        .channels
-        .iter()
-        .any(|channel| channel.id == "doomed")
-    {
-        return Err("channel survived deletion".to_string());
+    describe("delete", store.delete_model("doomed", None)).await?;
+    let snapshot = describe("snapshot", store.models_snapshot()).await?;
+    if snapshot.models.iter().any(|model| model.id == "doomed") {
+        return Err("model survived deletion".to_string());
     }
     let state = describe("state", store.secret_state("doomed")).await?;
     if state.is_some() {
-        return Err("credential outlived its channel".to_string());
+        return Err("credential outlived its model".to_string());
     }
     Ok(())
 }
@@ -700,7 +697,7 @@ async fn reopen_preserves_content(open: &StoreFactory) -> Result<(), String> {
     let first = open().map_err(|error| format!("first open: {error}"))?;
     describe(
         "write before reopen",
-        first.upsert_channel(&draft("persisted", vec![model("m", Capability::Image)])),
+        first.upsert_model(&draft("persisted", Capability::Image)),
     )
     .await?;
     describe(
@@ -716,14 +713,14 @@ async fn reopen_preserves_content(open: &StoreFactory) -> Result<(), String> {
     drop(first);
 
     let second = open().map_err(|error| format!("reopen: {error}"))?;
-    let snapshot = describe("snapshot after reopen", second.provider_snapshot()).await?;
-    let channel = snapshot
-        .channels
+    let snapshot = describe("snapshot after reopen", second.models_snapshot()).await?;
+    let model = snapshot
+        .models
         .iter()
-        .find(|channel| channel.id == "persisted")
-        .ok_or("channel was not written durably")?;
-    if channel.models.len() != 1 {
-        return Err("channel models were not written durably".to_string());
+        .find(|model| model.id == "persisted")
+        .ok_or("model was not written durably")?;
+    if model.category != Capability::Image {
+        return Err("model fields were not written durably".to_string());
     }
     let secret = describe("secret after reopen", second.get_secret("persisted")).await?;
     if secret.as_deref() != Some("sk-persisted") {
@@ -738,17 +735,21 @@ async fn reopen_preserves_content(open: &StoreFactory) -> Result<(), String> {
 
 async fn reopen_is_idempotent(open: &StoreFactory) -> Result<(), String> {
     let first = open().map_err(|error| format!("first open: {error}"))?;
-    describe("seed", first.upsert_channel(&draft("stable", vec![]))).await?;
-    let seeded = describe("seeded snapshot", first.provider_snapshot()).await?;
+    describe(
+        "seed",
+        first.upsert_model(&draft("stable", Capability::Text)),
+    )
+    .await?;
+    let seeded = describe("seeded snapshot", first.models_snapshot()).await?;
     drop(first);
 
     // Two further boots: a migration that ran again on each one would keep
     // advancing the revision or reshaping the document.
     for attempt in 0..2 {
         let reopened = open().map_err(|error| format!("reopen {attempt}: {error}"))?;
-        let snapshot = describe("snapshot after reopen", reopened.provider_snapshot()).await?;
-        if snapshot.channels != seeded.channels {
-            return Err(format!("reopen {attempt} changed the channels"));
+        let snapshot = describe("snapshot after reopen", reopened.models_snapshot()).await?;
+        if snapshot.models != seeded.models {
+            return Err(format!("reopen {attempt} changed the models"));
         }
         if snapshot.revision != seeded.revision {
             return Err(format!(

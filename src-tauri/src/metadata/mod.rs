@@ -26,11 +26,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use thiserror::Error;
 
+pub use types::protocols_for;
 pub use types::{
-    AudioPreferences, Channel, ChannelDraft, ChannelModel, ChannelRecord, Defaults, DocumentInfo,
-    ImagePreferences, MetadataInfo, MetadataStoreKind, Preferences, PromptItem, PromptPage,
-    PromptQuery, PromptSource, Protocol, ProviderSnapshot, RecentProject, SecretInfo,
-    SecretStorage, VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
+    AudioPreferences, Defaults, DocumentInfo, ImagePreferences, MetadataInfo, MetadataStoreKind,
+    ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot, Preferences, PromptItem, PromptPage,
+    PromptQuery, PromptSource, Protocol, RecentProject, SecretInfo, SecretStorage,
+    VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
 };
 
 use crate::config::{MetadataConfig, RuntimeMode};
@@ -39,7 +40,10 @@ use crate::config::{MetadataConfig, RuntimeMode};
 pub const FILE_STORE: &str = "file";
 
 /// Current document format version, recorded in `meta.json`.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// Version 2 replaced provider channels with standalone model configurations;
+/// see [`migrate`] for what the upgrade keeps and what it drops.
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum MetadataError {
@@ -153,24 +157,18 @@ pub trait MetadataStore: Send + Sync {
 
     async fn remove_recent(&self, id: &str) -> Result<(), MetadataError>;
 
-    /// Provider configuration without any credential.
-    async fn provider_snapshot(&self) -> Result<ProviderSnapshot, MetadataError>;
+    /// Model configuration without any credential.
+    async fn models_snapshot(&self) -> Result<ModelsSnapshot, MetadataError>;
 
-    /// Replaces a whole channel — fields and models together — so a partially
-    /// updated channel cannot exist.
-    async fn upsert_channel(&self, draft: &ChannelDraft) -> Result<ChannelRecord, MetadataError>;
+    /// Replaces one whole model configuration, so a partially updated model
+    /// cannot exist.
+    async fn upsert_model(&self, draft: &ModelDraft) -> Result<ModelRecord, MetadataError>;
 
-    /// Removes a channel and its stored credential in one operation.
-    async fn delete_channel(
+    /// Removes a model configuration and its stored credential in one
+    /// operation.
+    async fn delete_model(
         &self,
         id: &str,
-        expected_revision: Option<u64>,
-    ) -> Result<(), MetadataError>;
-
-    async fn replace_channel_models(
-        &self,
-        channel_id: &str,
-        models: &[ChannelModel],
         expected_revision: Option<u64>,
     ) -> Result<(), MetadataError>;
 
@@ -186,18 +184,18 @@ pub trait MetadataStore: Send + Sync {
         expected_revision: Option<u64>,
     ) -> Result<(), MetadataError>;
 
-    /// Stores a credential, replacing any previous one for the channel.
-    async fn put_secret(&self, channel_id: &str, key: &str) -> Result<SecretInfo, MetadataError>;
+    /// Stores a credential, replacing any previous one for the model.
+    async fn put_secret(&self, model_id: &str, key: &str) -> Result<SecretInfo, MetadataError>;
 
     /// The plaintext credential, fetched at the last moment before a request.
-    async fn get_secret(&self, channel_id: &str) -> Result<Option<String>, MetadataError>;
+    async fn get_secret(&self, model_id: &str) -> Result<Option<String>, MetadataError>;
 
-    /// Clears a credential but keeps the channel.
-    async fn delete_secret(&self, channel_id: &str) -> Result<(), MetadataError>;
+    /// Clears a credential but keeps the model configuration.
+    async fn delete_secret(&self, model_id: &str) -> Result<(), MetadataError>;
 
     /// Disclosable state of a credential: masked value, fingerprint, and when
     /// it was last rotated.
-    async fn secret_state(&self, channel_id: &str) -> Result<Option<SecretInfo>, MetadataError>;
+    async fn secret_state(&self, model_id: &str) -> Result<Option<SecretInfo>, MetadataError>;
 
     async fn list_prompt_sources(&self) -> Result<Vec<PromptSource>, MetadataError>;
 

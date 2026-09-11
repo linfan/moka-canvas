@@ -1,8 +1,8 @@
-//! Credentials at rest: AES-256-GCM sealed with the channel id as additional
+//! Credentials at rest: AES-256-GCM sealed with the owning id (a model configuration) as additional
 //! authenticated data, plus resolution of the master key that protects them.
 //!
-//! Binding the channel id into the AAD means ciphertext copied from one
-//! channel's entry into another's will not open. That is a mistake-resistance
+//! Binding the owning id (a model configuration) into the AAD means ciphertext copied from one
+//! owner's entry into another's will not open. That is a mistake-resistance
 //! measure, not a defence against a process that can already read this
 //! directory: such a process can read `master.key` too when the OS keychain is
 //! unavailable. What encryption buys here is that no plaintext key appears on
@@ -37,18 +37,14 @@ const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 
 /// Seals a credential. The output is base64 of `nonce || ciphertext`.
-pub fn seal(
-    key: &[u8; KEY_LEN],
-    channel_id: &str,
-    plaintext: &str,
-) -> Result<String, MetadataError> {
+pub fn seal(key: &[u8; KEY_LEN], owner_id: &str, plaintext: &str) -> Result<String, MetadataError> {
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let cipher =
         Aes256Gcm::new_from_slice(key).map_err(|_| MetadataError::unavailable("cipher"))?;
     let payload = Payload {
         msg: plaintext.as_bytes(),
-        aad: channel_id.as_bytes(),
+        aad: owner_id.as_bytes(),
     };
     let ciphertext = cipher
         .encrypt(Nonce::from_slice(&nonce_bytes), payload)
@@ -62,7 +58,7 @@ pub fn seal(
 /// Opens a credential sealed by [`seal`].
 pub fn open(
     key: &[u8; KEY_LEN],
-    channel_id: &str,
+    owner_id: &str,
     cipher_text: &str,
 ) -> Result<String, MetadataError> {
     let combined = base64::engine::general_purpose::STANDARD
@@ -76,13 +72,13 @@ pub fn open(
         Aes256Gcm::new_from_slice(key).map_err(|_| MetadataError::unavailable("cipher"))?;
     let payload = Payload {
         msg: ciphertext,
-        aad: channel_id.as_bytes(),
+        aad: owner_id.as_bytes(),
     };
     let plaintext = cipher
         .decrypt(Nonce::from_slice(nonce_bytes), payload)
         .map_err(|_| {
             MetadataError::secret_unreadable(
-                "credential does not match this channel or the current master key",
+                "credential does not match this owner or the current master key",
             )
         })?;
     String::from_utf8(plaintext)
@@ -347,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn ciphertext_is_bound_to_the_channel() {
+    fn ciphertext_is_bound_to_the_owner() {
         let cipher = seal(&key(), "openai", "sk-secret-value").unwrap();
         let error = open(&key(), "gemini", &cipher).unwrap_err();
         assert!(matches!(error, MetadataError::SecretUnreadable(_)));

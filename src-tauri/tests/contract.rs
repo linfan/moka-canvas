@@ -1,5 +1,5 @@
 use moka_canvas::domain::validate::{
-    mention_node_ids, mention_spans, model_reference_shaped, resource_path_valid,
+    mention_node_ids, mention_spans, model_identifier_shaped, resource_path_valid,
     topological_order, validate_canvas, validate_moka_file, MAX_ASSET_TAGS, MAX_ASSET_TAG_LENGTH,
     MAX_ASSISTANT_MESSAGES_PER_SESSION, MAX_ASSISTANT_SESSIONS_PER_CANVAS, MAX_PROMPT_LENGTH,
     MAX_RESULT_SLOTS,
@@ -242,7 +242,8 @@ fn golden_canvas_stays_clean_without_generation_specs() {
 fn flags_a_spec_that_disagrees_with_its_node() {
     let mut canvas = golden_canvas();
     let mut broken = generation(Capability::Image, "Redraw @[node:missing] in ink");
-    broken.model = "painter".into();
+    // An old "channel::model" reference is not a model configuration id.
+    broken.model = "channel-1::painter".into();
     node_mut(&mut canvas, TEXT_NODE).data.generation = Some(broken);
 
     assert!(flagged(
@@ -463,10 +464,13 @@ fn mention_and_model_shapes() {
     assert!(mention_node_ids("no mentions here").is_empty());
     assert!(mention_node_ids("@[node:] and @[node").is_empty());
 
-    assert!(model_reference_shaped("main::painter"));
-    assert!(!model_reference_shaped("::painter"));
-    assert!(!model_reference_shaped("main::"));
-    assert!(!model_reference_shaped("painter"));
+    assert!(model_identifier_shaped("painter"));
+    // An old "channel::model" reference names nothing now, and saying so at
+    // validation beats an opaque refusal at run time.
+    assert!(!model_identifier_shaped("main::painter"));
+    assert!(!model_identifier_shaped("::painter"));
+    assert!(!model_identifier_shaped(""));
+    assert!(!model_identifier_shaped("two words"));
 }
 
 #[test]

@@ -1113,22 +1113,23 @@ async fn export_never_contains_personal_or_secret_data() {
 
     let app = test_app(temp.path());
 
-    // A channel configured with a real credential, in the layer where
+    // A model configured with a real credential, in the layer where
     // credentials live. The exporter never walks there, which is the structural
     // guarantee — but a guarantee nobody checks is only a claim.
     let response = app
         .clone()
         .oneshot(json_request(
             "PUT",
-            "/api/v1/providers/channels",
+            "/api/v1/models",
             json!({
-                "id": "main",
-                "name": "Main",
-                "baseUrl": CHANNEL_ADDRESS,
-                "protocol": "openai",
+                "id": "painter",
+                "category": "image",
+                "protocol": "openaiImages",
+                "url": format!("{CHANNEL_ADDRESS}/images/generations"),
+                "model": "painter-1",
+                "displayName": "Painter",
                 "enabled": true,
                 "apiKey": CHANNEL_KEY,
-                "models": [{ "id": "painter", "capability": "image", "alias": "", "enabled": true }],
             }),
         ))
         .await
@@ -1150,11 +1151,11 @@ async fn export_never_contains_personal_or_secret_data() {
     for (name, body) in [
         (
             docs::SECRETS_DOC,
-            json!({ "channels": { "main": { "cipher": "sealed", "apiKey": CHANNEL_KEY } } }),
+            json!({ "entries": { "painter": { "cipher": "sealed", "apiKey": CHANNEL_KEY } } }),
         ),
         (
-            docs::PROVIDERS_DOC,
-            json!({ "channels": [{ "id": "main", "baseUrl": CHANNEL_ADDRESS }] }),
+            docs::MODELS_DOC,
+            json!({ "models": [{ "id": "painter", "url": CHANNEL_ADDRESS }] }),
         ),
         (
             docs::META_DOC,

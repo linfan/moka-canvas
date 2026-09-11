@@ -20,18 +20,17 @@ use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
 use super::crypto::{open as open_sealed, seal, KeyProvider};
 use super::docs::{
-    self, DocumentCorruption, MetaDoc, PromptItemsDoc, PromptSourcesDoc, ProvidersDoc, RecentDoc,
-    SecretEntry, SecretsDoc, MANAGED_DOCUMENTS, META_DOC, PROMPT_ITEMS_DIR, PROMPT_SOURCES_DOC,
-    PROVIDERS_DOC, RECENT_DOC, SECRETS_DOC,
+    self, DocumentCorruption, MetaDoc, ModelsDoc, PromptItemsDoc, PromptSourcesDoc, RecentDoc,
+    SecretEntry, SecretsDoc, MANAGED_DOCUMENTS, META_DOC, MODELS_DOC, PROMPT_ITEMS_DIR,
+    PROMPT_SOURCES_DOC, RECENT_DOC, SECRETS_DOC,
 };
 use super::fs::{self, DirLock, DOCUMENT_MODE, SECRET_MODE};
 use super::migrate;
 use super::redact;
 use super::types::{
-    Channel, ChannelDraft, ChannelModel, ChannelRecord, Defaults, DocumentInfo, MetadataInfo,
-    MetadataStoreKind, Preferences, PromptItem, PromptPage, PromptQuery, PromptSource,
-    ProviderSnapshot, RecentProject, SecretInfo, SecretStorage, MAX_PROMPT_ITEMS_PER_SOURCE,
-    MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
+    Defaults, DocumentInfo, MetadataInfo, MetadataStoreKind, ModelConfig, ModelDraft, ModelRecord,
+    ModelsSnapshot, Preferences, PromptItem, PromptPage, PromptQuery, PromptSource, RecentProject,
+    SecretInfo, SecretStorage, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
 };
 use super::{MetadataError, MetadataStore, FILE_STORE, SCHEMA_VERSION};
 use crate::config::{MetadataConfig, RuntimeMode};
@@ -50,7 +49,7 @@ const WRITE_FAILURE_ESCALATION: u32 = 3;
 struct Snapshot {
     meta: MetaDoc,
     recent: RecentDoc,
-    providers: ProvidersDoc,
+    models: ModelsDoc,
     secrets: SecretsDoc,
     prompt_sources: PromptSourcesDoc,
     prompt_items: Mutex<PromptCache>,
@@ -143,27 +142,33 @@ impl FileMetadataStore {
         })?;
 
         let mut recovered = Vec::new();
-        let meta = load_meta(root, &mut recovered)?;
+        let mut meta = load_meta(root, &mut recovered)?;
         migrate::check_schema(meta.schema_version)?;
 
         let recent = load_or_reset(root, RECENT_DOC, &mut recovered);
-        let (providers, secrets) = load_providers_and_secrets(root, mode, &mut recovered)?;
+        let (models, secrets) = load_models_and_secrets(root, &mut recovered)?;
         let prompt_sources = load_or_reset(root, PROMPT_SOURCES_DOC, &mut recovered);
 
         let keys = Arc::new(KeyProvider::new(root, mode));
         keys.probe(!secrets.entries.is_empty())?;
 
-        // Only safe when the provider document is trustworthy: after a
-        // corruption reset every channel is gone, and collecting orphans would
+        // Only safe when the model document is trustworthy: after a corruption
+        // reset every configuration is gone, and collecting orphans would
         // delete credentials that are still valid.
-        let providers_intact = !recovered
-            .iter()
-            .any(|entry| entry.document == PROVIDERS_DOC);
-        let secrets = if providers_intact {
-            collect_orphan_secrets(root, &secrets, &providers, &mut recovered)?
+        let models_intact = !recovered.iter().any(|entry| entry.document == MODELS_DOC);
+        let secrets = if models_intact {
+            collect_orphan_secrets(root, &secrets, &models, &mut recovered)?
         } else {
             secrets
         };
+
+        // The header says what the documents mean; write the current version
+        // once the upgrade above has finished reading anything legacy.
+        if meta.schema_version != SCHEMA_VERSION {
+            meta.schema_version = SCHEMA_VERSION;
+            meta.updated_at = now_iso();
+            write_meta(root, &meta)?;
+        }
 
         let secret_storage = keys.storage();
         Ok(Self {
@@ -171,7 +176,7 @@ impl FileMetadataStore {
             inner: RwLock::new(Snapshot {
                 meta,
                 recent,
-                providers,
+                models,
                 secrets,
                 prompt_sources,
                 prompt_items: Mutex::new(PromptCache::new()),
@@ -242,21 +247,21 @@ impl FileMetadataStore {
         MetadataError::write_failed(format!("{name}: {error}"))
     }
 
-    async fn mutate_providers<F>(
+    async fn mutate_models<F>(
         &self,
         expected_revision: Option<u64>,
         change: F,
-    ) -> Result<ProvidersDoc, MetadataError>
+    ) -> Result<ModelsDoc, MetadataError>
     where
-        F: FnOnce(&mut ProvidersDoc) -> Result<(), MetadataError>,
+        F: FnOnce(&mut ModelsDoc) -> Result<(), MetadataError>,
     {
         let _sequence = self.write_seq.lock().await;
-        let mut next = self.inner.read().await.providers.clone();
-        check_revision("providers", expected_revision, next.revision)?;
+        let mut next = self.inner.read().await.models.clone();
+        check_revision("models", expected_revision, next.revision)?;
         change(&mut next)?;
         next.revision += 1;
-        self.persist(PROVIDERS_DOC, &next, DOCUMENT_MODE)?;
-        self.inner.write().await.providers = next.clone();
+        self.persist(MODELS_DOC, &next, DOCUMENT_MODE)?;
+        self.inner.write().await.models = next.clone();
         Ok(next)
     }
 
@@ -341,91 +346,70 @@ impl MetadataStore for FileMetadataStore {
         Ok(())
     }
 
-    async fn provider_snapshot(&self) -> Result<ProviderSnapshot, MetadataError> {
+    async fn models_snapshot(&self) -> Result<ModelsSnapshot, MetadataError> {
         let snapshot = self.inner.read().await;
-        Ok(ProviderSnapshot {
-            version: snapshot.providers.version,
-            revision: snapshot.providers.revision,
-            channels: snapshot.providers.channels.clone(),
-            defaults: snapshot.providers.defaults.clone(),
-            preferences: snapshot.providers.preferences.clone(),
+        Ok(ModelsSnapshot {
+            version: snapshot.models.version,
+            revision: snapshot.models.revision,
+            models: snapshot.models.models.clone(),
+            defaults: snapshot.models.defaults.clone(),
+            preferences: snapshot.models.preferences.clone(),
         })
     }
 
-    async fn upsert_channel(&self, draft: &ChannelDraft) -> Result<ChannelRecord, MetadataError> {
+    async fn upsert_model(&self, draft: &ModelDraft) -> Result<ModelRecord, MetadataError> {
         if draft.id.trim().is_empty() {
-            return Err(MetadataError::invalid("a channel needs an id"));
+            return Err(MetadataError::invalid("a model configuration needs an id"));
         }
-        let record = Channel {
+        let record = ModelConfig {
             id: draft.id.clone(),
-            name: draft.name.clone(),
-            base_url: draft.base_url.clone(),
+            category: draft.category,
             protocol: draft.protocol,
+            url: draft.url.clone(),
+            model: draft.model.clone(),
+            display_name: draft.display_name.clone(),
             enabled: draft.enabled,
-            models: draft.models.clone(),
-            capability_base_urls: draft.capability_base_urls.clone(),
         };
         let replacement = record.clone();
         let document = self
-            .mutate_providers(draft.expected_revision, move |providers| {
-                match providers
-                    .channels
+            .mutate_models(draft.expected_revision, move |models| {
+                match models
+                    .models
                     .iter_mut()
-                    .find(|channel| channel.id == replacement.id)
+                    .find(|model| model.id == replacement.id)
                 {
                     Some(existing) => *existing = replacement,
-                    None => providers.channels.push(replacement),
+                    None => models.models.push(replacement),
                 }
                 Ok(())
             })
             .await?;
         document
-            .channels
+            .models
             .into_iter()
-            .find(|channel| channel.id == record.id)
-            .ok_or_else(|| MetadataError::unavailable("channel vanished during write"))
+            .find(|model| model.id == record.id)
+            .ok_or_else(|| MetadataError::unavailable("model configuration vanished during write"))
     }
 
-    async fn delete_channel(
+    async fn delete_model(
         &self,
         id: &str,
         expected_revision: Option<u64>,
     ) -> Result<(), MetadataError> {
         let id = id.to_string();
         let target = id.clone();
-        self.mutate_providers(expected_revision, move |providers| {
-            providers.channels.retain(|channel| channel.id != target);
+        self.mutate_models(expected_revision, move |models| {
+            models.models.retain(|model| model.id != target);
             Ok(())
         })
         .await?;
-        // Providers first, then the credential. If the process dies between
+        // Configuration first, then the credential. If the process dies between
         // the two writes the leftover ciphertext is an orphan that startup
-        // collects; the reverse order would leave a channel with no key,
-        // which reads as a configuration the user cannot explain.
+        // collects; the reverse order would leave a model with no key, which
+        // reads as a configuration the user cannot explain.
         let target = id;
         self.mutate_secrets(move |secrets| {
             secrets.entries.remove(&target);
-            Ok(())
-        })
-        .await?;
-        Ok(())
-    }
-
-    async fn replace_channel_models(
-        &self,
-        channel_id: &str,
-        models: &[ChannelModel],
-        expected_revision: Option<u64>,
-    ) -> Result<(), MetadataError> {
-        let id = channel_id.to_string();
-        let replacement = models.to_vec();
-        self.mutate_providers(expected_revision, move |providers| {
-            let channel = providers
-                .channels
-                .iter_mut()
-                .find(|channel| channel.id == id)
-                .ok_or_else(|| MetadataError::not_found(format!("channel {id} does not exist")))?;
-            channel.models = replacement;
             Ok(())
         })
         .await?;
@@ -438,8 +422,8 @@ impl MetadataStore for FileMetadataStore {
         expected_revision: Option<u64>,
     ) -> Result<(), MetadataError> {
         let replacement = defaults.clone();
-        self.mutate_providers(expected_revision, move |providers| {
-            providers.defaults = replacement;
+        self.mutate_models(expected_revision, move |models| {
+            models.defaults = replacement;
             Ok(())
         })
         .await?;
@@ -452,20 +436,20 @@ impl MetadataStore for FileMetadataStore {
         expected_revision: Option<u64>,
     ) -> Result<(), MetadataError> {
         let replacement = preferences.clone();
-        self.mutate_providers(expected_revision, move |providers| {
-            providers.preferences = replacement;
+        self.mutate_models(expected_revision, move |models| {
+            models.preferences = replacement;
             Ok(())
         })
         .await?;
         Ok(())
     }
 
-    async fn put_secret(&self, channel_id: &str, key: &str) -> Result<SecretInfo, MetadataError> {
+    async fn put_secret(&self, model_id: &str, key: &str) -> Result<SecretInfo, MetadataError> {
         if key.is_empty() {
             return Err(MetadataError::invalid("a credential cannot be empty"));
         }
         let master = self.master_key().await?;
-        let cipher = seal(master.bytes(), channel_id, key)?;
+        let cipher = seal(master.bytes(), model_id, key)?;
         let info = SecretInfo {
             set: true,
             masked: Some(redact::masked(key)),
@@ -478,7 +462,7 @@ impl MetadataStore for FileMetadataStore {
             masked: info.masked.clone().unwrap_or_default(),
             rotated_at: info.rotated_at.clone().unwrap_or_default(),
         };
-        let id = channel_id.to_string();
+        let id = model_id.to_string();
         let storage = master.storage();
         self.mutate_secrets(move |secrets| {
             secrets.entries.insert(id, entry);
@@ -489,7 +473,7 @@ impl MetadataStore for FileMetadataStore {
         Ok(info)
     }
 
-    async fn get_secret(&self, channel_id: &str) -> Result<Option<String>, MetadataError> {
+    async fn get_secret(&self, model_id: &str) -> Result<Option<String>, MetadataError> {
         let cipher = {
             let entry = self
                 .inner
@@ -497,7 +481,7 @@ impl MetadataStore for FileMetadataStore {
                 .await
                 .secrets
                 .entries
-                .get(channel_id)
+                .get(model_id)
                 .cloned();
             match entry {
                 Some(entry) => entry.cipher,
@@ -505,7 +489,7 @@ impl MetadataStore for FileMetadataStore {
             }
         };
         let master = self.master_key().await?;
-        let id = channel_id.to_string();
+        let id = model_id.to_string();
         let plaintext =
             tokio::task::spawn_blocking(move || open_sealed(master.bytes(), &id, &cipher))
                 .await
@@ -515,8 +499,8 @@ impl MetadataStore for FileMetadataStore {
         Ok(Some(plaintext))
     }
 
-    async fn delete_secret(&self, channel_id: &str) -> Result<(), MetadataError> {
-        let id = channel_id.to_string();
+    async fn delete_secret(&self, model_id: &str) -> Result<(), MetadataError> {
+        let id = model_id.to_string();
         self.mutate_secrets(move |secrets| {
             secrets.entries.remove(&id);
             Ok(())
@@ -525,14 +509,14 @@ impl MetadataStore for FileMetadataStore {
         Ok(())
     }
 
-    async fn secret_state(&self, channel_id: &str) -> Result<Option<SecretInfo>, MetadataError> {
+    async fn secret_state(&self, model_id: &str) -> Result<Option<SecretInfo>, MetadataError> {
         Ok(self
             .inner
             .read()
             .await
             .secrets
             .entries
-            .get(channel_id)
+            .get(model_id)
             .map(|entry| SecretInfo {
                 set: true,
                 masked: Some(entry.masked.clone()),
@@ -708,7 +692,7 @@ impl MetadataStore for FileMetadataStore {
             let (bytes, revision) = match name {
                 META_DOC => (size_of(&path), snapshot.meta.schema_version as u64),
                 RECENT_DOC => (size_of(&path), snapshot.recent.revision),
-                PROVIDERS_DOC => (size_of(&path), snapshot.providers.revision),
+                MODELS_DOC => (size_of(&path), snapshot.models.revision),
                 SECRETS_DOC => (size_of(&path), snapshot.secrets.revision),
                 PROMPT_SOURCES_DOC => (size_of(&path), snapshot.prompt_sources.revision),
                 _ => (0, 0),
@@ -906,94 +890,48 @@ fn write_meta(root: &Path, meta: &MetaDoc) -> Result<(), MetadataError> {
     Ok(())
 }
 
-/// Loads the provider document, importing any plaintext credential an earlier
-/// build may have left behind.
-fn load_providers_and_secrets(
+/// Loads the model document, running the schema-2 upgrade when the directory
+/// still carries the legacy provider document.
+///
+/// The upgrade is a clean break: only the generation preferences survive it.
+/// Credentials stored against channel identifiers become orphans that the
+/// collector below drops, because a channel key was never a model key.
+fn load_models_and_secrets(
     root: &Path,
-    mode: RuntimeMode,
     recovered: &mut Vec<DocumentCorruption>,
-) -> Result<(ProvidersDoc, SecretsDoc), MetadataError> {
-    let path = root.join(PROVIDERS_DOC);
-    let Ok(raw) = std::fs::read(&path) else {
-        return Ok((
-            ProvidersDoc::default(),
-            load_or_reset(root, SECRETS_DOC, recovered),
-        ));
-    };
-
-    let legacy = match migrate::detect_plaintext_keys(&raw)? {
-        Some(legacy) => legacy,
-        None => {
-            let providers = load_or_reset(root, PROVIDERS_DOC, recovered);
-            return Ok((providers, load_or_reset(root, SECRETS_DOC, recovered)));
-        }
-    };
-
-    tracing::warn!(
-        target: "moka::metadata",
-        channels = legacy.credentials.len(),
-        "importing plaintext credentials left by an earlier build"
-    );
-
-    // Secrets first: if startup dies part way through, the next boot finds the
-    // plaintext document still in place and imports it again, which is
-    // idempotent. The reverse order could drop credentials on the floor.
-    let master = KeyProvider::new(root, mode);
-    let key = match master.acquire() {
-        Ok(key) => key,
-        Err(error) => {
-            // Without a master key the import cannot proceed, so leave the
-            // plaintext document untouched rather than half-migrating it.
-            return Err(error);
-        }
-    };
-    let mut secrets = load_or_reset::<SecretsDoc>(root, SECRETS_DOC, recovered);
-    for (channel_id, plaintext) in &legacy.credentials {
-        secrets.entries.insert(
-            channel_id.clone(),
-            SecretEntry {
-                cipher: seal(key.bytes(), channel_id, plaintext)?,
-                fingerprint: redact::fingerprint(plaintext),
-                masked: redact::masked(plaintext),
-                rotated_at: now_iso(),
-            },
-        );
+) -> Result<(ModelsDoc, SecretsDoc), MetadataError> {
+    let mut models: ModelsDoc = load_or_reset(root, MODELS_DOC, recovered);
+    if models.revision == 0 && models.models.is_empty() && migrate::needs_models_upgrade(root) {
+        models.preferences = migrate::upgrade_to_models(root)?;
+        // Written at once, so the surviving preferences are on the disk before
+        // anything can fail: an upgrade that only lived in memory would be
+        // lost to the next startup, which finds no legacy document to read.
+        let bytes = docs::serialize(MODELS_DOC, &models)
+            .map_err(|error| MetadataError::write_failed(error.reason))?;
+        fs::atomic_write(root, &root.join(MODELS_DOC), &bytes, DOCUMENT_MODE)
+            .map_err(|error| MetadataError::write_failed(format!("{MODELS_DOC}: {error}")))?;
     }
-    secrets.revision += 1;
-    let bytes = docs::serialize(SECRETS_DOC, &secrets)
-        .map_err(|error| MetadataError::write_failed(error.reason))?;
-    fs::atomic_write(root, &root.join(SECRETS_DOC), &bytes, SECRET_MODE)
-        .map_err(|error| MetadataError::write_failed(format!("{SECRETS_DOC}: {error}")))?;
-
-    let mut providers = legacy.providers;
-    providers.revision += 1;
-    let bytes = docs::serialize(PROVIDERS_DOC, &providers)
-        .map_err(|error| MetadataError::write_failed(error.reason))?;
-    // This rename is what removes the plaintext from disk: no copy of the
-    // original document is kept, because keeping one would defeat the import.
-    fs::atomic_write(root, &root.join(PROVIDERS_DOC), &bytes, DOCUMENT_MODE)
-        .map_err(|error| MetadataError::write_failed(format!("{PROVIDERS_DOC}: {error}")))?;
-
-    Ok((providers, secrets))
+    Ok((models, load_or_reset(root, SECRETS_DOC, recovered)))
 }
 
-/// Drops credentials whose channel no longer exists, the residue of a crash
-/// between the two writes of a channel deletion.
+/// Drops credentials whose model configuration no longer exists, the residue
+/// of a crash between the two writes of a deletion — or of the schema-2
+/// upgrade, which retires every channel identifier a key could be sealed to.
 fn collect_orphan_secrets(
     root: &Path,
     secrets: &SecretsDoc,
-    providers: &ProvidersDoc,
+    models: &ModelsDoc,
     recovered: &mut Vec<DocumentCorruption>,
 ) -> Result<SecretsDoc, MetadataError> {
-    let known: HashMap<&str, &Channel> = providers
-        .channels
+    let known: std::collections::HashSet<&str> = models
+        .models
         .iter()
-        .map(|channel| (channel.id.as_str(), channel))
+        .map(|model| model.id.as_str())
         .collect();
     let orphans: Vec<String> = secrets
         .entries
         .keys()
-        .filter(|id| !known.contains_key(id.as_str()))
+        .filter(|id| !known.contains(id.as_str()))
         .cloned()
         .collect();
     if orphans.is_empty() {
@@ -1016,7 +954,7 @@ fn collect_orphan_secrets(
     tracing::info!(
         target: "moka::metadata",
         orphans = orphans.len(),
-        "collected credentials whose channel no longer exists"
+        "collected credentials whose model configuration no longer exists"
     );
     Ok(collected)
 }
@@ -1079,7 +1017,7 @@ mod tests {
             br#"{"revision":1,"items":[{"id":"a","name":"A","path":"/tmp/a","lastOpened":"2026-01-01T00:00:00Z"}]}"#,
         )
         .unwrap();
-        std::fs::write(root.path().join(PROVIDERS_DOC), b"{\"revision\":").unwrap();
+        std::fs::write(root.path().join(MODELS_DOC), b"{\"revision\":").unwrap();
 
         let store = FileMetadataStore::open(root.path(), &config, RuntimeMode::Web).unwrap();
         let info = tokio::runtime::Runtime::new()
@@ -1088,7 +1026,7 @@ mod tests {
         assert!(info
             .documents
             .iter()
-            .any(|document| document.name == PROVIDERS_DOC && document.corrupt));
+            .any(|document| document.name == MODELS_DOC && document.corrupt));
     }
 
     #[test]

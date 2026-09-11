@@ -356,7 +356,7 @@ pub enum GenerationInputMode {
 pub struct GenerationSpec {
     pub capability: Capability,
     pub mode: GenerationMode,
-    /// `channelId::modelId`; empty means fall back to the provider defaults.
+    /// A model configuration id; empty means fall back to the category default.
     pub model: String,
     pub prompt: String,
     pub input_mode: GenerationInputMode,
@@ -987,8 +987,9 @@ pub struct RunStepRecord {
     /// a step that was waited out, which is most of them.
     ///
     /// This is the handle this process issued, not the provider's own; the
-    /// channel that created the job is recovered from the node's model
-    /// reference, so a poll cannot be pointed somewhere else by editing this.
+    /// model configuration that created the job is recovered from the node's
+    /// model reference, so a poll cannot be pointed somewhere else by editing
+    /// this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

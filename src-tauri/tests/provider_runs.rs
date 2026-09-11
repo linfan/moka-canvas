@@ -21,7 +21,7 @@
 //! puts the answer beside it rather than over it, and that an upstream answer
 //! already on the canvas is read rather than asked for again.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -42,7 +42,7 @@ use moka_canvas::domain::{
 };
 use moka_canvas::generate::AsyncTask;
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
-use moka_canvas::metadata::{ChannelDraft, ChannelModel, Defaults, Protocol};
+use moka_canvas::metadata::{Defaults, ModelDraft, Protocol};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use tokio::sync::Notify;
@@ -51,11 +51,7 @@ use tower::ServiceExt;
 /// Long enough that masking keeps a recognisable head and tail.
 const API_KEY: &str = "sk-test-1234567890abcd";
 
-/// The one channel every test here configures, so a reference is predictable.
-const CHANNEL: &str = "a-channel";
-
-/// Namespaced with the family a provider's newer answer endpoint expects, so
-/// what is asked for lands on the route the mock serves.
+/// The models every test here configures, each named by its own identifier.
 const WRITER: &str = "gpt-scribe-1";
 const PAINTER: &str = "painter-1";
 const SHOOTER: &str = "shooter-1";
@@ -116,49 +112,48 @@ fn budgeted(tune: impl FnOnce(&mut AppConfig)) -> Harness {
 }
 
 impl Harness {
-    /// Points the app at a throwaway provider and makes its models the defaults,
-    /// which is what Settings does before a generation can be placed at all.
+    /// Points the app at throwaway models and makes them the defaults, which
+    /// is what Settings does before a generation can be placed at all. One
+    /// configuration per model, addressed at the endpoint its category speaks
+    /// on the throwaway provider; text speaks the responses endpoint, which
+    /// is what the providers below serve.
     async fn configure(&self, base_url: &str, models: &[(&str, Capability)]) {
-        self.state
-            .providers
-            .upsert_channel(ChannelDraft {
-                id: CHANNEL.into(),
-                name: "A channel".into(),
-                base_url: base_url.into(),
-                protocol: Protocol::Openai,
-                enabled: true,
-                models: models
-                    .iter()
-                    .map(|(id, capability)| ChannelModel {
-                        id: (*id).into(),
-                        capability: *capability,
-                        alias: String::new(),
-                        enabled: true,
-                    })
-                    .collect(),
-                expected_revision: None,
-                capability_base_urls: HashMap::new(),
-            })
-            .await
-            .expect("the channel is stored");
-        self.state
-            .providers
-            .set_key(CHANNEL, Some(API_KEY))
-            .await
-            .expect("the credential is stored");
-
         let mut defaults = Defaults::default();
         for (id, capability) in models {
-            let reference = format!("{CHANNEL}::{id}");
+            let (protocol, suffix) = match capability {
+                Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
+                Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
+                Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
+                Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
+            };
+            self.state
+                .models
+                .upsert(ModelDraft {
+                    id: (*id).into(),
+                    category: *capability,
+                    protocol,
+                    url: format!("{base_url}{suffix}"),
+                    model: (*id).into(),
+                    display_name: (*id).into(),
+                    enabled: true,
+                    expected_revision: None,
+                })
+                .await
+                .expect("the model is stored");
+            self.state
+                .models
+                .set_key(id, Some(API_KEY))
+                .await
+                .expect("the credential is stored");
             match capability {
-                Capability::Text => defaults.text = Some(reference),
-                Capability::Image => defaults.image = Some(reference),
-                Capability::Audio => defaults.audio = Some(reference),
-                Capability::Video => defaults.video = Some(reference),
+                Capability::Text => defaults.text = Some((*id).to_string()),
+                Capability::Image => defaults.image = Some((*id).to_string()),
+                Capability::Audio => defaults.audio = Some((*id).to_string()),
+                Capability::Video => defaults.video = Some((*id).to_string()),
             }
         }
         self.state
-            .providers
+            .models
             .set_defaults(&defaults, None)
             .await
             .expect("the defaults are stored");
@@ -757,8 +752,9 @@ fn picture(width: u32, height: u32) -> Vec<u8> {
 
 /// The reference a generation spec stores: which channel answers, and which of
 /// its models. An empty one means the default the user set for the capability.
+/// A node names its model by the configuration's own identifier.
 fn reference(model: &str) -> String {
-    format!("{CHANNEL}::{model}")
+    model.to_string()
 }
 
 /// A node that already says something. There is nothing to run for it, which is
@@ -912,7 +908,7 @@ async fn left_behind(harness: &Harness, root: &str, canvas_id: &str) -> (String,
     let note = serde_json::to_value(AsyncTask {
         id: task_id.clone(),
         reference: JOB.to_string(),
-        protocol: Protocol::Openai,
+        protocol: Protocol::OpenaiVideos,
         capability: Capability::Video,
         model: reference(SHOOTER),
         created_at: started,
