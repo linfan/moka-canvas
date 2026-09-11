@@ -2188,3 +2188,87 @@ async fn a_generation_a_provider_refuses_leaves_the_node_saying_what_it_said_bef
     );
     assert_eq!(files_in(&root, "texts"), 0, "and wrote nothing");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn running_a_text_node_that_already_says_something_replaces_its_words_and_keeps_them() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let base_url = serve(answering(recorded.clone())).await;
+    harness
+        .configure(&base_url, &[(WRITER, Capability::Text)])
+        .await;
+    let (canvas_id, _root) = harness.project("Replaced").await;
+    // The words are on the node from the start: what is under test is a run
+    // asked of a node that is already saying something of its own.
+    let mut script = asking(
+        "n-script",
+        NodeKind::Text,
+        "Script",
+        &reference(WRITER),
+        "Write one sentence.",
+        None,
+    );
+    script["data"]["content"] = json!(KEPT);
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": script },
+        ]))
+        .await;
+
+    let run_id = harness.start(&canvas_id, json!(["n-script"])).await;
+    let finished = harness.settled(&run_id).await;
+    assert_eq!(finished["status"], "succeeded");
+
+    // Words are what a text node is made of, so the answer replaces what the
+    // node said rather than being put on a copy of it beside: no card, no edge,
+    // and what the node said stays reachable as a result of its own.
+    let document = harness.document().await;
+    let canvas = &document["moka"]["canvas"][0];
+    let nodes = canvas["nodes"].as_array().expect("a canvas has nodes");
+    assert_eq!(nodes.len(), 1, "a re-asked text node is not duplicated");
+    assert_eq!(
+        canvas["edges"]
+            .as_array()
+            .expect("a canvas has edges")
+            .len(),
+        0,
+        "and nothing is joined back to it"
+    );
+    let script = node_by_id(nodes, "n-script");
+    assert_eq!(script["data"]["content"], json!(SENTENCE));
+    let slots = script["data"]["resultSlots"]
+        .as_array()
+        .expect("results are recorded");
+    assert_eq!(slots.len(), 2);
+    assert_eq!(slots[0]["text"], json!(KEPT));
+    assert_eq!(slots[0]["isPrimary"], json!(false));
+    assert_eq!(slots[1]["text"], json!(SENTENCE));
+    assert_eq!(slots[1]["isPrimary"], json!(true));
+    assert_eq!(
+        slots[1]["assetId"], finished["steps"][0]["outputAssetIds"][0],
+        "the answer is the one the run filed"
+    );
+
+    // The same ask answered the same way is one result asked twice: the second
+    // run replaces the words again and the list does not grow.
+    let second = harness.start(&canvas_id, json!(["n-script"])).await;
+    assert_eq!(harness.settled(&second).await["status"], "succeeded");
+    assert_eq!(recorded.calls(), 2, "the provider was asked again");
+    let document = harness.document().await;
+    let nodes = document["moka"]["canvas"][0]["nodes"]
+        .as_array()
+        .expect("a canvas has nodes");
+    assert_eq!(nodes.len(), 1, "and the node is still the only one");
+    let script = node_by_id(nodes, "n-script");
+    assert_eq!(script["data"]["content"], json!(SENTENCE));
+    let slots = script["data"]["resultSlots"]
+        .as_array()
+        .expect("results are recorded");
+    assert_eq!(
+        slots.len(),
+        2,
+        "the repeated answer replaced its own slot rather than joining the list again"
+    );
+    assert_eq!(slots[0]["text"], json!(KEPT));
+    assert_eq!(slots[1]["isPrimary"], json!(true));
+}

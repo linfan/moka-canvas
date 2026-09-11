@@ -495,6 +495,21 @@ test("what the preview shows is what the provider is handed", async ({
   // where a click can reach it.
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Shift+1");
+  // Fitting is animated, so the node is still travelling when the key comes up
+  // and a click aimed at the middle of the surface would land wherever it was.
+  // The readout moves while the camera does and settles when it stops, which is
+  // the only thing on the page that says so.
+  const readout = page.locator(".zoom-readout");
+  await expect
+    .poll(
+      async () => {
+        const before = await readout.textContent();
+        await page.waitForTimeout(200);
+        return before === (await readout.textContent());
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
   const surface = await page.getByTestId("canvas-surface").boundingBox();
   expect(surface).not.toBeNull();
   const middle = {

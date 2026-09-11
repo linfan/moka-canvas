@@ -12,7 +12,7 @@ use super::{
     WorkflowValue,
 };
 use crate::domain::commands::make_node;
-use crate::domain::validate::MAX_TITLE_LENGTH;
+use crate::domain::validate::{MAX_RESULT_SLOTS, MAX_TITLE_LENGTH};
 use crate::domain::{
     new_id, now_iso, AssetId, CanvasDocument, Capability, DataType, DocumentCommand, EdgeEndpoint,
     MokaFile, NodeData, NodeId, NodeKind, NodePatch, PortDirection, ResultSlot, ResultSlotStatus,
@@ -148,12 +148,14 @@ enum Promotion {
 /// Where the first answer of a run goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Placement {
-    /// Onto the node that asked, which had nothing on it to lose.
+    /// Onto the node that asked: a node holding nothing has nothing to lose,
+    /// and a node holding words takes the new ones over the old, which stay
+    /// reachable as results of their own rather than as a copy of the node.
     Own,
-    /// Onto a card beside the node that asked, which already said or showed
-    /// something and keeps it: an answer written over what somebody put there
-    /// would take away the only copy of it, and asking again is how a canvas is
-    /// compared rather than how it is overwritten.
+    /// Onto a card beside the node that asked, which already showed a picture
+    /// and keeps showing it: an answer written over what somebody placed there
+    /// would take away the only copy of it, and asking a picture again is how
+    /// a canvas is compared rather than how it is overwritten.
     Beside,
 }
 
@@ -256,14 +258,6 @@ fn promotion_for(
     if !is_asked(node, requested) {
         return None;
     }
-    // Read off the node as the run saw it rather than as it stands when the
-    // answer lands: what somebody put there while it ran is theirs to keep, and
-    // a generation waited out is a long time to have changed one's mind.
-    let placement = if was_empty(node) {
-        Placement::Own
-    } else {
-        Placement::Beside
-    };
     let assets = artifacts.assets.clone().unwrap_or_default();
     let answers = match node.kind {
         NodeKind::Image | NodeKind::Audio | NodeKind::Video => {
@@ -273,6 +267,21 @@ fn promotion_for(
             text: artifacts.text.clone().unwrap_or_default(),
             asset_id: assets.into_iter().next(),
         }],
+    };
+    // Read off the node as the run saw it rather than as it stands when the
+    // answer lands: what somebody put there while it ran is theirs to keep, and
+    // a generation waited out is a long time to have changed one's mind.
+    //
+    // Words are written onto the node whatever it said before: a text node's
+    // content is the same stuff its answer is, so a second ask would otherwise
+    // put a near-copy of the node beside it and call the pair a comparison.
+    // What the node said stays reachable as a result, which is the keeping that
+    // matters for words; a picture overwritten is a picture gone.
+    let words = matches!(answers.first(), Some(Answer::Words { .. }));
+    let placement = if was_empty(node) || words {
+        Placement::Own
+    } else {
+        Placement::Beside
     };
     // An answer with no asset in it leaves a media node holding what it held:
     // there is nothing to point a card at.
@@ -1299,15 +1308,107 @@ fn promotion_commands(
         }
     }
     data.result_node_ids = Some(ids);
-    data.result_slots = Some(
-        answers
-            .iter()
-            .enumerate()
-            .map(|(index, answer)| answer.slot(index, own.is_some() && index == 0))
-            .collect(),
-    );
+    data.result_slots = Some(slots_after(live, answers, own.is_some(), placement));
     commands.push(write_back(canvas_id, node_id, data));
     Some(commands)
+}
+
+/// The slot list a promotion leaves on the node that asked.
+///
+/// An answer placed beside the node names the batch: the node keeps showing
+/// what it showed, and the list is what the cards hold. An answer written onto
+/// the node replaces what it held, so the results earlier runs left stay
+/// listed — demoted, in the order they were made — and words no slot ever held
+/// are kept as one more result: the node was their only copy, and the node is
+/// what the answer is written over. Where the list would grow past what a node
+/// may hold, the oldest kept results are what fall off, since a node over the
+/// ceiling is one no run can be started for.
+fn slots_after(
+    node: &WorkflowNode,
+    answers: &[Answer],
+    own: bool,
+    placement: Placement,
+) -> Vec<ResultSlot> {
+    let mut slots: Vec<ResultSlot> = match placement {
+        Placement::Own => {
+            let mut kept: Vec<ResultSlot> = node
+                .data
+                .result_slots
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|slot| slot.status == ResultSlotStatus::Succeeded)
+                .map(|slot| ResultSlot {
+                    is_primary: false,
+                    ..slot
+                })
+                .collect();
+            let preserved = preserved(node, &kept)
+                .filter(|slot| !answers.iter().any(|answer| same_answer(slot, answer)));
+            // A re-run that answers the same way is one result asked twice
+            // rather than two results to choose between: the kept copy makes
+            // way for the fresh one, which takes its place as the primary.
+            kept.retain(|slot| !answers.iter().any(|answer| same_answer(slot, answer)));
+            let room =
+                MAX_RESULT_SLOTS.saturating_sub(answers.len() + preserved.is_some() as usize);
+            if kept.len() > room {
+                kept.drain(0..kept.len() - room);
+            }
+            kept.extend(preserved);
+            kept
+        }
+        Placement::Beside => Vec::new(),
+    };
+    for (index, answer) in answers.iter().enumerate() {
+        slots.push(answer.slot(index, own && index == 0));
+    }
+    // Numbered from scratch: an inspector lists results by these ids, and what
+    // a result is called follows where it now stands rather than when it was
+    // first made.
+    for (index, slot) in slots.iter_mut().enumerate() {
+        slot.id = slot_id(index);
+    }
+    slots
+}
+
+/// Whether a kept result and a fresh answer hold one thing.
+///
+/// Words are known by what they say: a run files the same sentence as a new
+/// text asset every time it is asked, so comparing the assets would call one
+/// answer two, and the list is of results to choose between rather than of
+/// asks. A picture has no words to go by and is known by its asset instead.
+fn same_answer(slot: &ResultSlot, answer: &Answer) -> bool {
+    match (slot.text.as_deref(), answer.text()) {
+        (Some(one), Some(other)) => one == other,
+        _ => slot.asset_id.is_some() && slot.asset_id.as_ref() == answer.asset_id(),
+    }
+}
+
+/// What a node holds that no kept result holds: the words themselves, kept as
+/// one more result, because an answer written over them leaves the node as the
+/// only copy of them there ever was. Only a text node is asked, since only a
+/// text node's own content is what an answer replaces; a media node takes an
+/// answer onto itself only while it holds nothing.
+fn preserved(node: &WorkflowNode, kept: &[ResultSlot]) -> Option<ResultSlot> {
+    if node.kind != NodeKind::Text {
+        return None;
+    }
+    let text = node.data.content.as_deref()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    if kept.iter().any(|slot| slot.text.as_deref() == Some(text)) {
+        return None;
+    }
+    Some(ResultSlot {
+        // Named where the list it joins is numbered.
+        id: String::new(),
+        status: ResultSlotStatus::Succeeded,
+        asset_id: None,
+        text: Some(text.to_string()),
+        error: None,
+        is_primary: false,
+    })
 }
 
 /// The node that asked, written last: a crash on the way leaves cards nothing
@@ -1389,7 +1490,8 @@ mod tests {
     }
 
     /// A promotion whose first answer goes onto the node that asked, which is
-    /// what a node holding nothing gets.
+    /// what a node holding nothing gets — and what a node holding words gets
+    /// whatever it holds.
     fn onto(answers: Vec<Answer>) -> Promotion {
         Promotion::Answered {
             answers,
@@ -1398,7 +1500,7 @@ mod tests {
     }
 
     /// A promotion whose answers all go onto cards beside the node that asked,
-    /// which is what a node holding something gets.
+    /// which is what a node showing a picture gets when it asks again.
     fn beside(answers: Vec<Answer>) -> Promotion {
         Promotion::Answered {
             answers,
@@ -1517,7 +1619,7 @@ mod tests {
     }
 
     #[test]
-    fn a_node_holding_something_when_the_run_started_has_its_answer_placed_beside_it() {
+    fn a_node_holding_something_keeps_a_picture_beside_it_and_takes_words_onto_it() {
         let artifacts = StepArtifacts {
             text: Some("An answer.".to_string()),
             assets: Some(vec!["asset-1".to_string()]),
@@ -1542,11 +1644,14 @@ mod tests {
             Placement::Own
         );
 
+        // Words are what a text node is made of, so a second ask replaces the
+        // first rather than putting a near-copy of the node beside it: what the
+        // node said stays reachable as a result instead of as a duplicate node.
         let mut written_in = asking(NodeKind::Text, "script");
         written_in.data.content = Some("Written by hand.".to_string());
         assert_eq!(
             placement_of(promotion_for(&written_in, &artifacts, true)),
-            Placement::Beside
+            Placement::Own
         );
 
         let mut showing = asking(NodeKind::Image, "poster");
@@ -1831,70 +1936,138 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_a_node_already_saying_something_goes_onto_a_card_beside_it() {
+    fn words_written_over_what_a_node_said_keep_it_reachable_as_a_result() {
         let mut script = asking(NodeKind::Text, "script");
-        script.data.content = Some("What was there before.".to_string());
+        script.data.content = Some("Written by hand.".to_string());
         let moka = document(vec![script]);
         let commands = written(
             &moka,
             "script",
-            &beside(vec![words("A new answer.", Some("asset-text"))]),
+            &onto(vec![words("A new answer.", Some("asset-text"))]),
         );
         assert_eq!(
             commands.len(),
-            3,
-            "a card, the edge to it, and the node itself"
+            1,
+            "the node itself: no card beside it and no edge to one"
         );
-
-        let DocumentCommand::AddNode { node, .. } = &commands[0] else {
-            panic!("the answer gets a card of its own");
-        };
-        assert_eq!(node.kind, NodeKind::Text);
-        assert_eq!(node.title, "script 1", "the cards are the whole batch");
-        assert_eq!(node.data.content.as_deref(), Some("A new answer."));
+        let data = data_of(&commands[0]);
+        assert_eq!(data.content.as_deref(), Some("A new answer."));
+        let slots = slots_of(data);
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].id, "result");
+        assert_eq!(
+            slots[0].text.as_deref(),
+            Some("Written by hand."),
+            "what the node said before is a result now"
+        );
         assert!(
-            node.data.asset_id.is_none(),
-            "the asset the words were filed as travels on the slot, as it does on the node that asked"
+            slots[0].asset_id.is_none(),
+            "words typed by hand were never filed as anything"
         );
-        assert!(
-            slots_of(&node.data)[0].is_primary,
-            "a card's own answer is its primary"
-        );
+        assert!(!slots[0].is_primary);
+        assert_eq!(slots[1].id, "result-2");
+        assert_eq!(slots[1].text.as_deref(), Some("A new answer."));
+        assert_eq!(slots[1].asset_id.as_deref(), Some("asset-text"));
+        assert!(slots[1].is_primary, "the new answer is what the node shows");
+    }
 
-        let DocumentCommand::AddEdge { edge, .. } = &commands[1] else {
-            panic!("the card is joined back to the node it came from");
-        };
-        assert_eq!(edge.source.node_id, "node-script");
-        assert_eq!(edge.source.port_id, "out");
-        assert_eq!(
-            edge.target.node_id, node.id,
-            "and joined to the card rather than to nothing"
+    #[test]
+    fn a_re_run_over_an_answer_keeps_the_earlier_one_listed_once() {
+        let mut script = asking(NodeKind::Text, "script");
+        script.data.content = Some("The first answer.".to_string());
+        script.data.result_slots = Some(vec![
+            words("The first answer.", Some("asset-one")).slot(0, true)
+        ]);
+        let moka = document(vec![script]);
+        let commands = written(
+            &moka,
+            "script",
+            &onto(vec![words("The second answer.", Some("asset-two"))]),
         );
+        assert_eq!(commands.len(), 1);
+        let data = data_of(&commands[0]);
+        assert_eq!(data.content.as_deref(), Some("The second answer."));
+        let slots = slots_of(data);
         assert_eq!(
-            edge.target.port_id, "prompt",
-            "words go in where words are read"
+            slots.len(),
+            2,
+            "the first answer is still listed, and not listed twice"
         );
+        assert_eq!(slots[0].text.as_deref(), Some("The first answer."));
+        assert_eq!(slots[0].asset_id.as_deref(), Some("asset-one"));
+        assert!(!slots[0].is_primary, "what the node showed is a choice now");
+        assert_eq!(slots[1].text.as_deref(), Some("The second answer."));
+        assert!(slots[1].is_primary);
+    }
 
-        let parent = data_of(&commands[2]);
+    #[test]
+    fn an_identical_re_run_replaces_the_result_it_repeats() {
+        let mut script = asking(NodeKind::Text, "script");
+        script.data.content = Some("The same answer.".to_string());
+        script.data.result_slots = Some(vec![
+            words("The same answer.", Some("asset-one")).slot(0, true)
+        ]);
+        let moka = document(vec![script]);
+        let commands = written(
+            &moka,
+            "script",
+            &onto(vec![words("The same answer.", Some("asset-one"))]),
+        );
+        let data = data_of(&commands[0]);
+        let slots = slots_of(data);
         assert_eq!(
-            parent.content.as_deref(),
-            Some("What was there before."),
-            "what the node said is still what it says"
+            slots.len(),
+            1,
+            "the same answer asked for twice is one result, not two"
+        );
+        assert_eq!(slots[0].asset_id.as_deref(), Some("asset-one"));
+        assert!(slots[0].is_primary);
+    }
+
+    #[test]
+    fn a_slot_list_past_the_ceiling_loses_its_oldest_results_and_only_those() {
+        let mut script = asking(NodeKind::Text, "script");
+        script.data.content = Some("The newest of them.".to_string());
+        script.data.result_slots = Some(
+            (0..MAX_RESULT_SLOTS)
+                .map(|index| words(&format!("Answer {index}."), None).slot(index, index == 0))
+                .collect(),
+        );
+        let moka = document(vec![script]);
+        let commands = written(
+            &moka,
+            "script",
+            &onto(vec![words("One more.", Some("asset-new"))]),
+        );
+        let data = data_of(&commands[0]);
+        let slots = slots_of(data);
+        assert_eq!(
+            slots.len(),
+            MAX_RESULT_SLOTS,
+            "a node over the ceiling is one no run can be started for"
         );
         assert_eq!(
-            parent
-                .result_node_ids
-                .clone()
-                .expect("the card is recorded"),
-            vec![node.id.clone()]
+            slots.last().expect("a slot").text.as_deref(),
+            Some("One more."),
+            "the answer being written is never what falls off"
         );
-        let slots = slots_of(parent);
-        assert_eq!(slots.len(), 1);
-        assert_eq!(slots[0].text.as_deref(), Some("A new answer."));
-        assert_eq!(slots[0].asset_id.as_deref(), Some("asset-text"));
-        assert!(
-            !slots[0].is_primary,
-            "no answer is the node's own while it is holding something else"
+        assert!(slots.last().expect("a slot").is_primary);
+        assert_eq!(
+            slots[0].text.as_deref(),
+            Some("Answer 2."),
+            "the oldest kept results are what fall off"
+        );
+        assert_eq!(
+            slots[MAX_RESULT_SLOTS - 2].text.as_deref(),
+            Some("The newest of them."),
+            "what the node held is kept even when older answers fall off: it is the only copy of itself"
+        );
+        let ids: Vec<&str> = slots.iter().map(|slot| slot.id.as_str()).collect();
+        let wanted: Vec<String> = (0..MAX_RESULT_SLOTS).map(slot_id).collect();
+        assert_eq!(
+            ids,
+            wanted.iter().map(String::as_str).collect::<Vec<&str>>(),
+            "the list is numbered from scratch and stays numbered in order"
         );
     }
 
