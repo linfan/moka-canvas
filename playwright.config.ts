@@ -5,7 +5,7 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./e2e",
-  // A channel is configured against the stand-in provider's address, so it has
+  // A model is configured against the stand-in provider's address, so it has
   // to be listening before the first page opens, and is stopped after the last.
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",

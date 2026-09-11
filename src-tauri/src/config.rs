@@ -42,7 +42,7 @@ impl Default for ProjectsConfig {
     }
 }
 
-/// Application-level metadata: recent projects, provider channels, encrypted
+/// Application-level metadata: recent projects, model configurations, encrypted
 /// credentials, global preferences, and the prompt library cache. None of it
 /// belongs to a project, so none of it travels inside a project directory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

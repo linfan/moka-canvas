@@ -7,7 +7,7 @@ import type { SaveResult } from "./projects";
  *
  * None of them asks anybody for anything. They are arithmetic on pixels that are
  * already here, so they cost nothing, give the same answer twice, and there is
- * no channel to configure when one of them cannot be done.
+ * no model to configure when one of them cannot be done.
  */
 export type PictureTool = "crop" | "split" | "resize" | "tilt";
 

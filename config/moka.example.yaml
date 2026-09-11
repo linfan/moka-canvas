@@ -18,7 +18,7 @@ metadata:
 workflow:
   # Which step executors a run may use. "deterministic" answers the operations
   # that need nothing but the document; "provider" answers a generation node by
-  # calling a channel. Leaving out "provider" does not degrade generation, it
+  # calling a model. Leaving out "provider" does not degrade generation, it
   # refuses it: every such node fails validation as EXECUTOR_DISABLED.
   enabledExecutors: ["deterministic", "provider"]
 generate:

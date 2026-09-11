@@ -46,7 +46,7 @@ identity if you need that at all.
 
 ## Metadata directory
 
-Configuration, recent projects, provider channels, encrypted credentials, and
+Configuration, recent projects, model configurations, encrypted credentials, and
 the prompt library live in one directory resolved at startup. The default is the
 platform application-data directory (see [security.md](security.md)); override it
 per deployment:

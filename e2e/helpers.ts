@@ -121,46 +121,55 @@ export async function backToLauncher(page: Page) {
   });
 }
 
-/** The channel the stand-in is reached through, and the credential it is sent. */
-export const CHANNEL = "stand-in";
+/** The credential the stand-in is sent. */
 export const CHANNEL_KEY = "e2e-stand-in-credential";
 
+/** The full endpoint address each category speaks at on the stand-in. */
+function endpoint(capability: "text" | "image"): string {
+  return capability === "text"
+    ? `${PROVIDER_ADDRESS}/chat/completions`
+    : `${PROVIDER_ADDRESS}/images/generations`;
+}
+
 /**
- * Points one channel at the stand-in and makes each model the default for what
- * it offers.
+ * Points one model configuration per entry at the stand-in and makes each the
+ * default for its category.
  *
- * An upsert replaces rather than appends, so two specs pointing the same channel
- * never race over a revision.
+ * An upsert replaces rather than appends, so two specs configuring the same
+ * model never race over a revision.
  */
-export async function configureChannels(
+export async function configureModels(
   models: readonly {
     id: string;
     capability: "text" | "image";
     alias: string;
   }[],
 ): Promise<void> {
-  const put = await fetch(`${APP}/api/v1/providers/channels`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: CHANNEL,
-      name: "Stand-in",
-      baseUrl: PROVIDER_ADDRESS,
-      protocol: "openai",
-      enabled: true,
-      models: models.map((model) => ({ ...model, enabled: true })),
-      apiKey: CHANNEL_KEY,
-    }),
-  });
-  if (!put.ok) {
-    throw new Error(
-      `configuring the channel: ${put.status} ${await put.text()}`,
-    );
+  for (const model of models) {
+    const put = await fetch(`${APP}/api/v1/models`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: model.id,
+        category: model.capability,
+        protocol: model.capability === "text" ? "openaiChat" : "openaiImages",
+        url: endpoint(model.capability),
+        model: model.id,
+        displayName: model.alias,
+        enabled: true,
+        apiKey: CHANNEL_KEY,
+      }),
+    });
+    if (!put.ok) {
+      throw new Error(
+        `configuring the model ${model.id}: ${put.status} ${await put.text()}`,
+      );
+    }
   }
   const defaults = Object.fromEntries(
-    models.map((model) => [model.capability, `${CHANNEL}::${model.id}`]),
+    models.map((model) => [model.capability, model.id]),
   );
-  const patched = await fetch(`${APP}/api/v1/providers/defaults`, {
+  const patched = await fetch(`${APP}/api/v1/models/defaults`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(defaults),
@@ -173,15 +182,15 @@ export async function configureChannels(
 }
 
 /** Words only, which is what a conversation asked of a card needs. */
-export async function configureTextChannel(model: string): Promise<void> {
-  await configureChannels([
+export async function configureTextModel(model: string): Promise<void> {
+  await configureModels([
     { id: model, capability: "text", alias: "Storyteller" },
   ]);
 }
 
 /** A picture as well, for an ask that wants one put on the canvas. */
 export async function configureWordsAndPictures(): Promise<void> {
-  await configureChannels([
+  await configureModels([
     { id: PAINTER, capability: "image", alias: "Painter" },
     { id: STORYTELLER, capability: "text", alias: "Storyteller" },
   ]);

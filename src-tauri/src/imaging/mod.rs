@@ -1,9 +1,9 @@
 //! Working on a picture the project already holds, without asking anybody.
 //!
 //! Cutting a region out, dividing a sheet, resampling and tilting are
-//! arithmetic rather than generation: there is no channel to choose, nothing to
+//! arithmetic rather than generation: there is no model to choose, nothing to
 //! pay for, and nothing that can answer differently tomorrow. Doing them here
-//! means they still work in a project with no channel configured, and that
+//! means they still work in a project with no model configured, and that
 //! asking twice gives the same picture twice.
 //!
 //! What these share with a generation is where the answer goes. It lands beside

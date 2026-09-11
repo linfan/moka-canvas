@@ -56,8 +56,8 @@ export function ExportDialog({
       >
         <h2 id="export-title">Export package</h2>
         <p className="dialog-note">
-          The canvas, its nodes and the assets they hold. Model channels, API
-          keys and the prompt library are not part of a project, so they are
+          The canvas, its nodes and the assets they hold. Model configurations,
+          API keys and the prompt library are not part of a project, so they are
           never exported.
         </p>
         <label className="dialog-choice">

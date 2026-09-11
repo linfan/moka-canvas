@@ -31,14 +31,14 @@ Override the location with `MOKA_METADATA_DIR` (see
 A provider API key is written to disk only as ciphertext:
 
 ```
-base64( nonce(12 bytes) ‖ AES-256-GCM(master key, plaintext, aad = channel id) )
+base64( nonce(12 bytes) ‖ AES-256-GCM(master key, plaintext, aad = model config id) )
 ```
 
-The channel id is bound as additional authenticated data, so copying one
-channel's ciphertext under another channel's entry fails to decrypt rather than
-silently leaking a key to the wrong provider.
+The model configuration id is bound as additional authenticated data, so
+copying one model's ciphertext under another model's entry fails to decrypt
+rather than silently leaking a key to the wrong provider.
 
-`providers.json` carries no key field of any kind — not an empty one, not a
+`models.json` carries no key field of any kind — not an empty one, not a
 placeholder. Credentials live in `secrets.json`, which is written `0600` inside a
 `0700` directory on Unix.
 
@@ -103,7 +103,7 @@ HTTP layer reuse it rather than formatting keys themselves. Plaintext keys are
 never logged, never serialised into a response body, and never included in an
 error message.
 
-Rotation replaces the entry for a channel and updates `rotatedAt`. Previous
+Rotation replaces the entry for a model configuration and updates `rotatedAt`. Previous
 ciphertext is not retained, so an old copy of `secrets.json` cannot be used to
 recover a superseded key.
 
@@ -112,24 +112,20 @@ recover a superseded key.
 A key leaves this process only towards the host it belongs to, and the rules
 around that are deliberately narrow:
 
-- It goes out on a generation request, on a connectivity probe, on a listing of
-  what a channel offers, and on an inspection of an address that is not a
-  channel yet. Nothing else carries one.
-- An inspected credential is used for that one request and dropped. It is not
-  written to the metadata store, not returned in the answer — which reports the
-  provider's own complaint, never the key that provoked it — and not logged, the
-  request log carrying the method, the path, and the status only. That is why
-  asking an address what it offers is a separate call from importing it: a wrong
-  address or a wrong key must not leave a channel behind holding them.
+- It goes out on a generation request and on a connectivity probe, which asks
+  the model-list address derived from the model's own endpoint. Nothing else
+  carries one.
+- A probe reports the provider's own complaint, never the key that provoked it,
+  and the request log carries the method, the path, and the status only.
 - The plaintext is decrypted at send time and lives only inside that one
   in-flight request. Configuration holds ciphertext, the gateway decrypts once
   per call, and the task registry holds no credential at all — polling a video
   job resolves and decrypts afresh rather than reusing the key that started it.
-- It is sent only to the channel's own host. That includes an address a provider
+- It is sent only to the model's own host. That includes an address a provider
   hands back for a finished file: it is fetched with the credential only when it
   resolves to the same origin, and without one otherwise, because an image left
   on a third-party CDN is public by nature and a key following it would not be.
-- The channel's protocol decides which header carries it. It is never a query
+- The model's protocol decides which header carries it. It is never a query
   parameter, so it cannot survive in a proxy log or a browser history.
 - A provider's failure is reduced to its message: the envelope around it is
   dropped, a credential the message echoes back is replaced with the masked
@@ -200,7 +196,8 @@ A project package (`.moka`, a ZIP) can never contain application metadata:
 - credential names — `secrets.json`, `master.key`, and any `*.corrupt.*`
   quarantine copy — are excluded at **any** depth in the tree;
 - the other metadata documents (`meta.json`, `recent-projects.json`,
-  `providers.json`, `prompts/sources.json`) are excluded at the **project root**
+  `models.json`, the legacy `providers.json`, `prompts/sources.json`) are excluded at
+  the **project root**
   only, so a project that legitimately contains its own `assets/meta.json` still
   ships it.
 
@@ -215,8 +212,8 @@ export makes unless asked otherwise — takes the record of the run that made ea
 generated asset out of the document, so the asset still says what it was asked
 for and with which parameters, but not which run answered on which machine. A
 full backup keeps those records, which means it carries every prompt this
-machine asked and the name of every model that answered, an internal channel
-alias included. That is a choice the export dialog puts to the user, off by
+machine asked and the name of every model that answered, a display name
+somebody chose included. That is a choice the export dialog puts to the user, off by
 default and saying what it keeps; it is not a leak, but it is a reason to think
 about where a full backup is sent.
 
@@ -228,8 +225,8 @@ the layer starts from an empty one. Nothing is silently zeroed:
 - `/api/health` reports the affected documents with `corrupt: true` and sets
   `ok: false`, which names what was lost and lets the UI distinguish "reset
   because it was damaged" from "empty because it is new";
-- a damaged `providers.json` or `secrets.json` never causes `open_project` to
-  fail. Project work continues; the channels have to be entered again.
+- a damaged `models.json` or `secrets.json` never causes `open_project` to
+  fail. Project work continues; the models have to be entered again.
 
 The quarantine copy is preserved so the user can inspect what was lost. It is
 excluded from exports under the credential rule above.

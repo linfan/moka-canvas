@@ -4,7 +4,6 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   addNode,
   APP,
-  CHANNEL,
   CHANNEL_KEY,
   configureWordsAndPictures,
   createProject,
@@ -202,7 +201,7 @@ test("an image node asks the provider and files the answer as its own asset", as
     {
       capability: "image",
       mode: "generate",
-      model: `${CHANNEL}::${PAINTER}`,
+      model: PAINTER,
       prompt,
       inputMode: "manual",
       params: { size: "1024x1024", count: 1 },
@@ -212,7 +211,7 @@ test("an image node asks the provider and files the answer as its own asset", as
 
   // What it would ask for is readable before anything is asked.
   await expect(await inspected(page, "Capability")).toBe("Image");
-  await expect(await inspected(page, "Model")).toBe(`${CHANNEL}::${PAINTER}`);
+  await expect(await inspected(page, "Model")).toBe(PAINTER);
   await expect(excerptUnder(page, "Prompt")).toHaveText(prompt);
 
   await page
@@ -287,7 +286,7 @@ test("a text node keeps what the provider said, word for word", async ({
     {
       capability: "text",
       mode: "generate",
-      model: `${CHANNEL}::${STORYTELLER}`,
+      model: STORYTELLER,
       prompt: "Say one sentence about a lantern on a lake.",
       inputMode: "manual",
       params: { temperature: 0.4 },
@@ -342,7 +341,7 @@ test("a run that gave up leaves its mark, and its reason where pointed at", asyn
     {
       capability: "image",
       mode: "generate",
-      model: `${CHANNEL}::${PAINTER}`,
+      model: PAINTER,
       prompt: "Something the stand-in will not paint. [refuse]",
       inputMode: "manual",
       params: { size: "1024x1024", count: 1 },

@@ -94,7 +94,7 @@ impl Drop for LocalServer {
     }
 }
 
-/// Gives a first launch a channel to fill in instead of an empty list.
+/// Gives a first launch a model to fill in instead of an empty list.
 ///
 /// A failure is logged rather than fatal. The editor is usable without it —
 /// Settings creates the same model by hand — so refusing to start over a

@@ -1,4 +1,4 @@
-//! Application-level metadata: recent projects, provider channels, encrypted
+//! Application-level metadata: recent projects, model configurations, encrypted
 //! credentials, global preferences, and the prompt library cache.
 //!
 //! [`MetadataStore`] is the only way in or out. Callers receive domain types

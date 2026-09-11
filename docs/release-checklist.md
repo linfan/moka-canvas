@@ -89,21 +89,24 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
 7. Check the server log: one structured line per API request with request
    id, method, path, status, duration, and error code; no payloads, no
    filesystem internals beyond project paths, no secrets.
-8. Open the settings dialog from the launcher and from the editor: add a
-   provider through **Add a provider**, which asks the address and key
-   what they offer before storing anything — confirm that a wrong key
-   reports the provider's own refusal beside the fields and still lets
-   you continue, that what comes back is grouped by what each model can
-   make, that a kind guessed from an identifier can be corrected on its
-   row, that a model can be added by hand for a provider that lists
-   none, and that a default is offered only where that provider is the
-   only answer and none was set before. Then edit a stored channel's
-   models and capabilities, run a connectivity test, refresh its model
-   list against the provider, choose per-capability default models, and
-   adjust generation preferences; save, reload, and confirm everything
-   persisted. Editing the same channel in two windows at once surfaces a
-   conflict notice in the loser instead of silently overwriting.
-9. Generate against a channel you really configured. The text route
+8. Open the settings dialog from the launcher and from the editor: it
+   opens on one tab per model category — **Text**, **Image**, **Audio**,
+   **Video** — plus **Preferences**. On a category tab add a model
+   through **New … model** and confirm the form offers only the
+   protocols that category speaks (a video model is not offered a chat
+   endpoint), that picking a protocol starts the URL field from that
+   protocol's own complete endpoint address, and that the address is the
+   whole endpoint rather than a base URL. Confirm the credential is
+   written once and comes back only masked, that leaving the key field
+   blank on an edit keeps the stored key, and that clearing it is its own
+   explicit action. Duplicate a model and confirm the copy carries the
+   fields and the key and opens ready to be changed. Run a connectivity
+   test from a card, choose the category's default with the radio on its
+   cards, and adjust generation preferences; save, reload, and confirm
+   everything persisted. Editing the same configuration in two windows at
+   once surfaces a conflict notice in the loser instead of silently
+   overwriting.
+9. Generate against a model you really configured. The text route
    `POST /api/v1/generate/text` returns text; `/image` and `/audio`
    return the media base64-encoded beside a mime type, kind, and
    dimensions, and nothing appears in the project directory as a result.
@@ -112,7 +115,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
    frame. `POST /api/v1/generate/video` returns a handle instead: poll
    `GET /api/v1/generate/tasks/{id}` until it ends, then poll a handle
    you invented and confirm it is reported missing rather than
-   unfinished. Finally remove the channel's default model and confirm
+   unfinished. Finally remove the category's default model and confirm
    the answer is one problem document — code in the body and in
    `x-error-code`, the provider's message rather than its raw body, and
    no credential anywhere in it. The automated equivalent is
@@ -124,7 +127,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     node that made it, and under `assets/images/` with provenance
     carrying the run, the node, the inputs that travelled, and the
     parameters it was asked with. Search the project directory and an
-    exported package for the channel's key and find nothing, the
+    exported package for the model's key and find nothing, the
     snapshot included. Ask for several at once and confirm the node
     keeps the first while the rest become cards of their own. Run a
     node that is already showing an answer and confirm it goes on
@@ -149,7 +152,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     are offered, that each says what the global default is on the choice
     that leaves it out, and that choosing a shape reshapes a node that
     is still empty while leaving one that holds something alone. Empty
-    the prompt with nothing connected to it, remove the channel's model
+    the prompt with nothing connected to it, remove the model
     for that capability, and boot a deployment without the provider
     executor: each says why on the button instead of failing on the
     click. Ask for three images, stop a run part way, and ask a failed
@@ -226,7 +229,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     tool breaking. Finally paint a region for **Repaint** and confirm the
     marking is filed as an asset of its own, wired into the picture's
     mask port, with the words written into that picture's ask and nothing
-    spent from the dialog; and ask **Describe** against a channel you
+    spent from the dialog; and ask **Describe** against a model you
     really configured, confirming the reading is shown as it arrives,
     becomes a text node wired into the picture's prompt, and can be let
     go of half way through. The automated equivalents are
@@ -236,7 +239,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     Open the **Assistant** tab beside the inspector and confirm the head of
     the panel says what the conversation is about in counts — the selected
     cards and whatever feeds them — and that naming one more with `@` adds
-    it to that. Ask a question against a channel you really configured and
+    it to that. Ask a question against a model you really configured and
     confirm the answer arrives as it is written, then becomes a kept line;
     reload and confirm the same conversation is still there, that the list
     at the head offers every conversation this canvas has had, that a new
@@ -250,7 +253,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     about, wired to them, the file is filed once under `assets/images/`
     with provenance naming the run and the conversation that asked, and
     both **Show on canvas** and **Show in assets** go where they promise.
-    Make one fail — remove the model, or point the channel at a provider
+    Make one fail — remove the model, or point it at a provider
     that gives up — and confirm the trouble is a line in the conversation
     carrying the reason rather than a notice that fades, that **Ask the card
     again** offered from it re-runs the card that is there rather than
@@ -297,7 +300,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
 
 ## Metadata store (all platforms)
 
-Configuration, recent projects, provider channels, and encrypted credentials
+Configuration, recent projects, model configurations, and encrypted credentials
 live in the platform application-data directory, never in the program tree. See
 [security.md](security.md) and [deployment.md](deployment.md).
 
@@ -306,7 +309,7 @@ live in the platform application-data directory, never in the program tree. See
    expand it and confirm it is the OS application-data location for
    that platform, not the install directory.
 2. Confirm no metadata file landed in the program tree: nothing named
-   `meta.json`, `recent-projects.json`, `providers.json`,
+   `meta.json`, `recent-projects.json`, `models.json`,
    `secrets.json`, or `master.key` under the repository `data/`,
    the served `dist/`, or the executable's own directory.
 3. Store a real API key through the settings dialog (Channels → Edit →
@@ -314,7 +317,7 @@ live in the platform application-data directory, never in the program tree. See
    `grep -r "sk-"` over the metadata directory, `strings` over every
    file in it, and the captured HTTP responses and server log for
    that session. Only a fingerprint and a masked form may appear.
-   The dialog must not echo it either: reopen the channel and
+   The dialog must not echo it either: reopen the model and
    confirm the key field is empty with the masked form as its
    placeholder. The automated equivalent is
    `cargo test --test metadata_file`.
@@ -330,11 +333,11 @@ live in the platform application-data directory, never in the program tree. See
    tier next to the API key field, so confirm the two agree.
 6. Hard-kill the process (`kill -9`, or Force Quit / Task Manager),
    then relaunch: `tmp/` is empty, no document is reported
-   `corrupt`, channels and the recent-project list are intact, and
+   `corrupt`, model configurations and the recent-project list are intact, and
    the directory lock was released (no "in use by another process"
    error).
 7. Copy the whole metadata directory to another user account or
-   another machine and start the app there: channels, defaults,
+   another machine and start the app there: models, defaults,
    preferences, and the prompt library are all present. Stored API
    keys are **not** expected to work unless the master key travelled
    with them — that is the documented behaviour, not a defect.
@@ -375,10 +378,10 @@ Intended behaviour, recorded here so a tester does not file it as a defect.
    and the line that asked for it are separate entries deliberately: taking
    back what was said should not quietly delete a picture that was paid
    for.
-3. **A web deployment holds one set of channels and keys.** The metadata
-   store — channels, credentials, defaults, preferences — is a
+3. **A web deployment holds one set of models and keys.** The metadata
+   store — model configurations, credentials, defaults, preferences — is a
    single-user, file-backed store: the deployment's operator owns it and
-   every visitor asks through the same channels and spends the same keys.
+   every visitor asks through the same models and spends the same keys.
    Per-project or per-user keys are not part of this build; per-user
    metadata directories wait for a database-backed store. Serve a web
    build only where the operator means everyone to share what they

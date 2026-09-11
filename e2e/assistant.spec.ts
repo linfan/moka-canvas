@@ -3,7 +3,7 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   addNode,
   APP,
-  configureTextChannel,
+  configureTextModel,
   configureWordsAndPictures,
   createProject,
   openRecent,
@@ -248,7 +248,7 @@ test("a question asked over a card is answered and kept in the document", async 
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureTextChannel(STORYTELLER);
+  await configureTextModel(STORYTELLER);
 
   const name = "Asked Over The Canvas";
   await openWithWords(
@@ -306,7 +306,7 @@ test("an answer goes back onto the canvas, over a card or as one of its own", as
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureTextChannel(STORYTELLER);
+  await configureTextModel(STORYTELLER);
 
   await openWithWords(
     page,
@@ -355,7 +355,7 @@ test("a question already asked can be had back without asking it twice", async (
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureTextChannel(STORYTELLER);
+  await configureTextModel(STORYTELLER);
 
   await openWithWords(
     page,
@@ -393,7 +393,7 @@ test("a canvas holds several conversations, and reads the one it was pointed at"
   page,
 }) => {
   await fetch(`${PROVIDER_ORIGIN}/__reset`, { method: "POST" });
-  await configureTextChannel(STORYTELLER);
+  await configureTextModel(STORYTELLER);
 
   const name = "Several Conversations";
   await openWithWords(
