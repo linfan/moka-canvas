@@ -517,9 +517,44 @@ pub fn load_native_config(
     resource_dir: &Path,
 ) -> Result<AppConfig, ConfigError> {
     let raw = NATIVE_CONFIG_YAML
-        .replace("${appData}", &app_data_dir.to_string_lossy())
-        .replace("${resourceDir}", &resource_dir.to_string_lossy());
+        .replace("${appData}", &yaml_path(app_data_dir))
+        .replace("${resourceDir}", &yaml_path(resource_dir));
     parse_config(&raw)
+}
+
+/// Renders a path for substitution into a double-quoted YAML scalar.
+///
+/// Two things about a Windows path break the substitution. Its backslashes
+/// begin an escape inside a double-quoted scalar, so `"C:\Program Files"` is
+/// read as `\P`, which is not one, and the compiled-in configuration is
+/// refused over a path nobody typed. And the verbatim form the shell's
+/// resource directory arrives in stops the template's forward slash from
+/// being a separator, so a directory that is there reads as absent.
+fn yaml_path(path: &Path) -> String {
+    let plain = plain_path(path);
+    plain
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+/// Drops the `\\?\` verbatim prefix Windows hands back for a canonicalized
+/// path, which is what the desktop shell's resource directory arrives as.
+///
+/// A verbatim path is passed to the filesystem exactly as written, so the
+/// forward slash the configuration template joins with (`${resourceDir}/web`)
+/// stops being a separator and the directory that is there reads as absent.
+/// The prefix buys nothing here: these are short paths inside the install
+/// tree and the application data directory.
+fn plain_path(path: &Path) -> std::borrow::Cow<'_, Path> {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.starts_with("UNC\\") => {
+            std::borrow::Cow::Owned(PathBuf::from(format!(r"\\{}", &rest[4..])))
+        }
+        Some(rest) => std::borrow::Cow::Owned(PathBuf::from(rest)),
+        None => std::borrow::Cow::Borrowed(path),
+    }
 }
 
 fn parse_config(raw: &str) -> Result<AppConfig, ConfigError> {
@@ -661,6 +696,43 @@ mod tests {
         assert_eq!(
             config.server.static_dir,
             PathBuf::from("/tmp/moka-resources/web")
+        );
+    }
+
+    #[test]
+    fn a_windows_path_survives_substitution_into_the_native_config() {
+        // Both halves of a Windows path break the substitution: the
+        // backslashes start an escape inside a double-quoted scalar, and the
+        // verbatim prefix the shell hands back for the resource directory
+        // stops the template's forward slash from being a separator. Startup
+        // used to fail on the first with CONFIG_INVALID and, once that was
+        // escaped, on the second with CONFIG_STATIC_DIR_MISSING.
+        let app_data = Path::new("C:\\Users\\moka\\AppData\\Roaming\\MokaCanvas");
+        let resource = Path::new(r"\\?\C:\Program Files\Moka Canvas");
+        let config = load_native_config(app_data, resource).expect("native config must parse");
+        assert_eq!(
+            config.metadata.dir,
+            Some(PathBuf::from(
+                "C:\\Users\\moka\\AppData\\Roaming\\MokaCanvas/metadata"
+            ))
+        );
+        assert_eq!(
+            config.server.static_dir,
+            PathBuf::from("C:\\Program Files\\Moka Canvas/web")
+        );
+    }
+
+    #[test]
+    fn a_verbatim_share_path_keeps_its_share() {
+        // \\?\UNC\server\share is the verbatim spelling of \\server\share,
+        // not of a directory called UNC on some drive.
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\files\moka")).as_ref(),
+            Path::new(r"\\files\moka")
+        );
+        assert_eq!(
+            plain_path(Path::new("/tmp/moka")).as_ref(),
+            Path::new("/tmp/moka")
         );
     }
 
