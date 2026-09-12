@@ -17,7 +17,6 @@ import {
   type NodeId,
   type Rect,
   type ResourceEntry,
-  type RunStatus,
   type WorkflowNode,
 } from "../../../shared/domain";
 import { ModelPicker } from "../../settings/ModelPicker";
@@ -40,7 +39,12 @@ import {
 } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
-import { useLatestRunForNode, useRunStore } from "../stores/runStore";
+import {
+  isActive,
+  useLatestRunForNode,
+  useNodeRunStatus,
+  useRunStore,
+} from "../stores/runStore";
 import { GenerationParams, type ParamValue } from "./GenerationParams";
 import { InputPreview } from "./InputPreview";
 import { MentionField } from "./MentionField";
@@ -93,11 +97,6 @@ const MODE_LABELS: Record<GenerationMode, string> = {
 function holdsSomething(node: WorkflowNode): boolean {
   const data = node.data as { assetId?: string; content?: string };
   return Boolean(data.assetId) || (data.content ?? "").trim() !== "";
-}
-
-/** Whether a run still has something left to do. */
-function isGoing(status: RunStatus): boolean {
-  return status === "queued" || status === "running";
 }
 
 /**
@@ -170,6 +169,10 @@ export function PromptPanel() {
   const generationOn = useGenerationAvailable();
   const view = useModelStore((state) => state.view);
   const run = useLatestRunForNode(open?.nodeId ?? null);
+  // This node's own step, not the run's whole: a run that drove several nodes
+  // stays going after one of them has landed, and this panel is about the one
+  // node it is open on.
+  const stepStatus = useNodeRunStatus(open?.nodeId ?? null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const shownFor = useRef<NodeId | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -315,7 +318,7 @@ export function PromptPanel() {
     capability === "image" && holdsSomething(node) ? "edit" : "generate";
   const mode = stored && offered.includes(stored.mode) ? stored.mode : opening;
   const models = modelOptionsFor(view, capability);
-  const going = run !== null && isGoing(run.status);
+  const going = stepStatus !== null && isActive(stepStatus);
   const stopping = run !== null && going && run.cancelRequested;
   /**
    * Whether the run this node was last asked in is one worth asking again as a
@@ -718,7 +721,7 @@ export function PromptPanel() {
             title={refusal ?? undefined}
             type="button"
           >
-            {busy ? "Starting…" : again ? "Ask again" : "Run"}
+            {busy ? "Starting…" : "Run"}
           </button>
         )}
       </div>
