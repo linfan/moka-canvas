@@ -1110,7 +1110,10 @@ mod tests {
             Protocol::OpenaiSpeech,
             Protocol::OpenaiVideos,
         ] {
-            assert!(std::ptr::eq(openai, for_protocol(protocol.clone())), "{protocol:?}");
+            assert!(
+                std::ptr::eq(openai, for_protocol(protocol.clone())),
+                "{protocol:?}"
+            );
         }
         let gemini = for_protocol(Protocol::Gemini);
         assert!(std::ptr::eq(gemini, for_protocol(Protocol::GeminiVideo)));

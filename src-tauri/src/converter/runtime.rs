@@ -124,7 +124,9 @@ pub(crate) fn table_to_json(value: &mlua::Value) -> serde_json::Value {
         Number(n) => serde_json::Value::Number(
             serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
         ),
-        String(s) => serde_json::Value::String(s.to_str().map(|s| s.to_string()).unwrap_or_default()),
+        String(s) => {
+            serde_json::Value::String(s.to_str().map(|s| s.to_string()).unwrap_or_default())
+        }
         Table(t) => {
             let len = t.raw_len();
             if len > 0 {
@@ -139,7 +141,10 @@ pub(crate) fn table_to_json(value: &mlua::Value) -> serde_json::Value {
             let mut map = serde_json::Map::new();
             for pair in t.clone().pairs::<mlua::String, mlua::Value>() {
                 if let Ok((k, v)) = pair {
-                    map.insert(k.to_str().map(|s| s.to_string()).unwrap_or_default(), table_to_json(&v));
+                    map.insert(
+                        k.to_str().map(|s| s.to_string()).unwrap_or_default(),
+                        table_to_json(&v),
+                    );
                 }
             }
             serde_json::Value::Object(map)

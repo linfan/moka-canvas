@@ -19,8 +19,8 @@ use server::LocalServer;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 pub fn run() {
-    telemetry::init();
-    tauri::Builder::default()
+    telemetry::init_app();
+    let built = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -50,11 +50,20 @@ pub fn run() {
             app.manage(server);
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("failed to build Moka Canvas")
-        .run(|app, event| {
-            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
-                app.state::<Arc<LocalServer>>().shutdown();
-            }
-        });
+        .build(tauri::generate_context!());
+    let app = match built {
+        Ok(app) => app,
+        Err(error) => {
+            // A startup that fails has to say so somewhere a reader will look:
+            // the file telemetry opened, not a console a windowed program does
+            // not have.
+            tracing::error!("failed to build Moka Canvas: {error}");
+            std::process::exit(1);
+        }
+    };
+    app.run(|app, event| {
+        if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+            app.state::<Arc<LocalServer>>().shutdown();
+        }
+    });
 }

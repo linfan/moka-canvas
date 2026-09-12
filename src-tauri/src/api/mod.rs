@@ -38,7 +38,10 @@ impl ApiState {
     /// to open them.
     pub fn new(config: AppConfig, mode: RuntimeMode, root: &Path) -> anyhow::Result<Self> {
         let metadata = metadata::open(root, &config.metadata, mode)?;
-        let converter_root = root.parent().map(|p| p.join("converter")).unwrap_or_else(|| PathBuf::from("converter"));
+        let converter_root = root
+            .parent()
+            .map(|p| p.join("converter"))
+            .unwrap_or_else(|| PathBuf::from("converter"));
         Ok(Self::with_metadata(config, mode, metadata, converter_root))
     }
 
@@ -161,7 +164,10 @@ pub fn router() -> axum::Router<ApiState> {
         )
         .merge(model_router())
         .merge(generate_router())
-        .route("/api/v1/converter/protocols", get(routes::converter_protocols))
+        .route(
+            "/api/v1/converter/protocols",
+            get(routes::converter_protocols),
+        )
 }
 
 /// A generation request carries a prompt and references to assets already in

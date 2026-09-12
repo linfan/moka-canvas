@@ -138,9 +138,10 @@ Every rule above says the same thing about prompts and keys: they are not writte
 down. Telemetry carries counts, durations and outcomes, and deliberately nothing
 else — `src-tauri/src/telemetry.rs` builds its one log line out of names and
 numbers so that keeping a prompt out of it is not something every caller has to
-remember. The log lines go to the console and to a daily file under the `logs`
-subdirectory of the platform application data directory; what protects them is
-the shape of the line, not the place it lands.
+remember. The log lines go to a daily file under the `logs` subdirectory of the
+platform application data directory — and, for the server binary that somebody
+watches in a terminal, to the console beside it; the desktop app writes to the
+file alone. What protects them is the shape of the line, not the place it lands.
 
 There is one exception, and it is explicit rather than implied:
 `generate.debug.enabled`. Switched on, every call that reaches a provider is

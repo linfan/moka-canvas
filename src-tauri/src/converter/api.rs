@@ -36,9 +36,8 @@ fn register_json(lua: &Lua) -> LuaResult<()> {
     json.set(
         "decode",
         lua.create_function(|lua, text: String| {
-            let parsed: serde_json::Value =
-                serde_json::from_str(&text)
-                    .map_err(|e| mlua::Error::RuntimeError(format!("json.decode: {e}")))?;
+            let parsed: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| mlua::Error::RuntimeError(format!("json.decode: {e}")))?;
             json_to_lua(&lua, &parsed)
         })?,
     )?;
@@ -50,9 +49,7 @@ fn register_base64(lua: &Lua) -> LuaResult<()> {
     let base64 = lua.create_table()?;
     base64.set(
         "encode",
-        lua.create_function(|_, bytes: String| {
-            Ok(base64_encode(bytes.as_bytes()))
-        })?,
+        lua.create_function(|_, bytes: String| Ok(base64_encode(bytes.as_bytes())))?,
     )?;
     base64.set(
         "decode",

@@ -338,7 +338,12 @@ mod tests {
             .expect("the test configuration always sets a metadata directory");
         let metadata = crate::metadata::open(&dir, &config.metadata, RuntimeMode::Web)
             .expect("the metadata store opens inside a temporary directory");
-        let state = ApiState::with_metadata(config, RuntimeMode::Web, metadata, root.path().join("converter"));
+        let state = ApiState::with_metadata(
+            config,
+            RuntimeMode::Web,
+            metadata,
+            root.path().join("converter"),
+        );
 
         let scratch = dir.join("tmp");
         assert!(

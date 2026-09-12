@@ -52,9 +52,9 @@ impl LuaAdapter {
 
     /// Looks up the protocol entry from the converter registry.
     async fn lookup_entry(protocol: &str) -> Result<ProtocolEntry, ProviderError> {
-        let root = CONVERTER_ROOT.get().ok_or_else(|| {
-            ProviderError::invalid("converter root not initialised")
-        })?;
+        let root = CONVERTER_ROOT
+            .get()
+            .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
         let registry = ConverterRegistry::load(root).await;
         registry.protocols().get(protocol).cloned().ok_or_else(|| {
             ProviderError::invalid(format!("no converter script for protocol '{protocol}'"))
@@ -70,19 +70,18 @@ impl LuaAdapter {
         func: &str,
         args: Vec<Value>,
     ) -> Result<Value, ProviderError> {
-        let root = CONVERTER_ROOT.get().ok_or_else(|| {
-            ProviderError::invalid("converter root not initialised")
-        })?;
+        let root = CONVERTER_ROOT
+            .get()
+            .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
         let script_path = root.join(&entry.script);
-        let runtime = LuaRuntime::new().map_err(|e| {
-            ProviderError::invalid(format!("Lua runtime failed: {e}"))
-        })?;
+        let runtime = LuaRuntime::new()
+            .map_err(|e| ProviderError::invalid(format!("Lua runtime failed: {e}")))?;
         let script = runtime.load(&script_path).map_err(|e| {
             ProviderError::invalid(format!("failed to load script '{}': {e}", entry.script))
         })?;
-        runtime.call_json_value(&script, func, args).map_err(|e| {
-            ProviderError::invalid(format!("Lua '{func}' failed: {e}"))
-        })
+        runtime
+            .call_json_value(&script, func, args)
+            .map_err(|e| ProviderError::invalid(format!("Lua '{func}' failed: {e}")))
     }
 
     /// Converts a `ModelCall` to a JSON value the Lua scripts understand.
@@ -121,9 +120,9 @@ impl LuaAdapter {
         request_def: &Value,
     ) -> Result<(u16, String, String), ProviderError> {
         let method = request_def["method"].as_str().unwrap_or("POST");
-        let url = request_def["url"].as_str().ok_or_else(|| {
-            ProviderError::invalid("Lua script returned no URL")
-        })?;
+        let url = request_def["url"]
+            .as_str()
+            .ok_or_else(|| ProviderError::invalid("Lua script returned no URL"))?;
         let headers = request_def["headers"].as_object();
 
         let builder = match method {
@@ -144,7 +143,9 @@ impl LuaAdapter {
             if let Some(body) = request_def["body"].as_str() {
                 builder.body(body.to_string())
             } else {
-                return Err(ProviderError::invalid("Lua script returned no body for POST"));
+                return Err(ProviderError::invalid(
+                    "Lua script returned no body for POST",
+                ));
             }
         } else {
             builder
@@ -400,9 +401,8 @@ impl ProviderAdapter for LuaAdapter {
                 let mut items = Vec::new();
                 if let Some(items_val) = parsed.get("result").and_then(|r| r.get("items")) {
                     for (url, mime) in Self::collect_url_items(items_val) {
-                        items.push(
-                            Self::download_item(call, &url, &mime, Capability::Video).await?,
-                        );
+                        items
+                            .push(Self::download_item(call, &url, &mime, Capability::Video).await?);
                     }
                 }
                 Ok(TaskState::Succeeded(GenerateResult {
@@ -427,7 +427,9 @@ impl ProviderAdapter for LuaAdapter {
                     .unwrap_or("job failed")
                     .to_string(),
             )),
-            Some(other) => Err(ProviderError::Rejected(format!("unexpected status: {other}"))),
+            Some(other) => Err(ProviderError::Rejected(format!(
+                "unexpected status: {other}"
+            ))),
         }
     }
 }

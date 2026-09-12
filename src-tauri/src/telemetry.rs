@@ -3,11 +3,27 @@
 //!
 //! Request-level events are emitted by the middleware in [`crate::server`];
 //! this module owns the subscriber and the generation line. Every line goes to
-//! the console and to a daily file under the `logs` subdirectory of the
-//! platform application data directory — the same root the metadata directory
-//! is resolved from, so the logs of a run sit beside the state it wrote.
-//! `RUST_LOG` overrides the default `info` filter (for example
-//! `RUST_LOG=debug`).
+//! a daily file under the `logs` subdirectory of the platform application data
+//! directory — the same root the metadata directory is resolved from, so the
+//! logs of a run sit beside the state it wrote. The two runtimes write two
+//! files, `moka-app.log.<date>` for the desktop app and
+//! `moka-server.log.<date>` for the server binary, so a line in one is never
+//! mistaken for a line in the other.
+//!
+//! The desktop app writes to the file alone: a windowed program has no console
+//! to read and a line on stdout or stderr is a line nobody sees, so what the
+//! file does not carry is lost. The server binary also keeps the console layer,
+//! because it is started from a terminal by somebody watching it.
+//!
+//! The filter defaults to `info` and `RUST_LOG` overrides it in both runtimes
+//! (for example `RUST_LOG=debug`). The desktop app can also be told from the
+//! disk it runs on: a `log.level` file beside the `logs` directory —
+//! `%APPDATA%\dev.mokacanvas.compatibility\log.level` on Windows,
+//! `~/Library/Application Support/dev.mokacanvas.compatibility/log.level` on
+//! macOS, `~/.local/share/dev.mokacanvas.compatibility/log.level` on Linux —
+//! holding one filter directive (such as `debug`) is read at startup,
+//! because a program started by a double-click inherits no environment worth
+//! setting. `RUST_LOG` wins over the file when both are there.
 
 use crate::domain::Capability;
 use crate::generate::adapters::ModelCall;
@@ -18,38 +34,136 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 /// Subdirectory of the platform application data directory the log files go
-/// into. One file per day, named `moka.log.<date>`, kept rather than rotated
-/// away: a log that deletes itself is one a reader cannot go back to.
+/// into. One file per day per runtime, named `moka-app.log.<date>` or
+/// `moka-server.log.<date>`, kept rather than rotated away: a log that deletes
+/// itself is one a reader cannot go back to.
 pub const LOG_DIR_NAME: &str = "logs";
 
-/// Installs the tracing subscriber. Safe to call from more than one runtime
-/// entry point: the first call wins and later calls are no-ops.
+/// The file, beside [`LOG_DIR_NAME`], that tells the desktop app its filter
+/// when `RUST_LOG` is not set — a double-clicked program inherits no
+/// environment, so the level it logs at has to be somewhere it can read.
+pub const LOG_LEVEL_FILE_NAME: &str = "log.level";
+
+/// The daily file prefix of the desktop app.
+const APP_FILE_PREFIX: &str = "moka-app.log";
+
+/// The daily file prefix of the server binary.
+const SERVER_FILE_PREFIX: &str = "moka-server.log";
+
+/// The filter nothing else overrides.
+const DEFAULT_FILTER: &str = "info";
+
+/// Installs the tracing subscriber for the desktop app: the daily file and
+/// nothing else, at the level `RUST_LOG` or the `log.level` file asks for, and
+/// a panic hook so a crash is a line in the file rather than a window that
+/// closed. Safe to call from more than one runtime entry point: the first call
+/// wins and later calls are no-ops.
+pub fn init_app() {
+    std::panic::set_hook(Box::new(|info| {
+        tracing::error!("panic: {info}");
+    }));
+    install(false, APP_FILE_PREFIX, app_filter());
+}
+
+/// Installs the tracing subscriber for the server binary: the console, for the
+/// terminal it was started from, and the daily file beside it. `RUST_LOG`
+/// overrides the default `info` filter (for example `RUST_LOG=debug`).
 pub fn init() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let registry = tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer());
-    match file_writer() {
-        // ANSI escapes are for a terminal; a file wants plain text a reader can
-        // grep.
-        Some((dir, writer)) => {
-            let file = tracing_subscriber::fmt::layer()
-                .with_ansi(false)
-                .with_writer(writer);
-            let _ = registry.with(file).try_init();
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
+    install(true, SERVER_FILE_PREFIX, filter);
+}
+
+/// The filter the desktop app runs under: what the environment says, else what
+/// the `log.level` file says, else the default.
+fn app_filter() -> EnvFilter {
+    if let Ok(filter) = EnvFilter::try_from_default_env() {
+        return filter;
+    }
+    level_file_filter().unwrap_or_else(|| EnvFilter::new(DEFAULT_FILTER))
+}
+
+/// The filter the `log.level` file names, or nothing when the file is absent,
+/// blank, or says something that is not a filter. A file that cannot be read
+/// costs the app nothing: it logs at the default rather than failing over a
+/// file that is only there to help.
+fn level_file_filter() -> Option<EnvFilter> {
+    let root = crate::metadata::paths::platform_default().ok()?;
+    let path = root.join(LOG_LEVEL_FILE_NAME);
+    let directive = std::fs::read_to_string(&path).ok()?;
+    let directive = directive.trim();
+    if directive.is_empty() {
+        return None;
+    }
+    match EnvFilter::try_new(directive) {
+        Ok(filter) => Some(filter),
+        Err(error) => {
+            // The file is read before the subscriber exists, so the only place
+            // this complaint can go is the console that, on the desktop, nobody
+            // is looking at — and the default filter, which is the safe one.
+            eprintln!(
+                "{} is not a log filter ({error}); logging at {DEFAULT_FILTER}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Installs the subscriber: the file always, and the console only where a
+/// console is being watched.
+fn install(console: bool, file_prefix: &str, filter: EnvFilter) {
+    let registry = tracing_subscriber::registry().with(filter);
+    match (console, file_writer(file_prefix)) {
+        (true, Some((dir, writer))) => {
+            let _ = registry
+                .with(tracing_subscriber::fmt::layer())
+                .with(file_layer(writer))
+                .try_init();
             tracing::info!("writing logs to {}", dir.display());
         }
-        // A directory that cannot be had costs the console nothing: logging
-        // continues where it can rather than failing the process over a disk.
-        None => {
+        (false, Some((dir, writer))) => {
+            let _ = registry.with(file_layer(writer)).try_init();
+            tracing::info!("writing logs to {}", dir.display());
+        }
+        // A directory that cannot be had costs the server nothing: logging
+        // continues on the console where it can rather than failing the process
+        // over a disk. For the app it means no log at all, and that is said
+        // where the app can still say it — before the window is built, while a
+        // stderr redirection is the one channel anybody could have attached.
+        (true, None) => {
+            let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        }
+        (false, None) => {
             let _ = registry.try_init();
         }
     }
 }
 
+/// The layer that writes the daily file. ANSI escapes are for a terminal; a
+/// file wants plain text a reader can grep. Generic over the subscriber it is
+/// stacked on, which is whatever the branch that asks for it has built.
+fn file_layer<S>(
+    writer: tracing_appender::rolling::RollingFileAppender,
+) -> tracing_subscriber::fmt::Layer<
+    S,
+    tracing_subscriber::fmt::format::DefaultFields,
+    tracing_subscriber::fmt::format::Format,
+    tracing_appender::rolling::RollingFileAppender,
+>
+where
+    S: tracing::Subscriber,
+{
+    tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(writer)
+}
+
 /// The daily log file appender and the directory it writes into, or nothing
 /// (with the reason on stderr) when the platform directory cannot be had.
-fn file_writer() -> Option<(
+fn file_writer(
+    prefix: &str,
+) -> Option<(
     std::path::PathBuf,
     tracing_appender::rolling::RollingFileAppender,
 )> {
@@ -69,10 +183,7 @@ fn file_writer() -> Option<(
         return None;
     }
     private_directory(&dir);
-    Some((
-        dir.clone(),
-        tracing_appender::rolling::daily(&dir, "moka.log"),
-    ))
+    Some((dir.clone(), tracing_appender::rolling::daily(&dir, prefix)))
 }
 
 /// A directory only its owner can read, held the way the metadata and

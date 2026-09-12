@@ -120,6 +120,42 @@ docker run \
 The volume must be local to the host, for the reasons given above — a network
 volume reintroduces the atomicity problem.
 
+## Logging
+
+Both runtimes write one file per day under the `logs` subdirectory of the
+platform application data directory — the same root the metadata directory
+resolves from — and the two files never mix:
+
+| Runtime        | File                       | Also on console                  |
+| -------------- | -------------------------- | -------------------------------- |
+| `moka-server`  | `moka-server.log.<date>`   | yes — it is watched in a terminal |
+| desktop app    | `moka-app.log.<date>`      | no — a windowed program has no console |
+
+On Windows that directory is `%APPDATA%\dev.mokacanvas.compatibility\logs`, on
+macOS `~/Library/Application Support/dev.mokacanvas.compatibility/logs`, on
+Linux `$XDG_DATA_HOME/dev.mokacanvas.compatibility/logs` — usually
+`~/.local/share/dev.mokacanvas.compatibility/logs`. Files are kept, not rotated
+away.
+
+The filter defaults to `info`. `RUST_LOG` overrides it in both runtimes
+(`RUST_LOG=debug moka-server …`). The desktop app, which is normally started by
+a double-click and inherits no environment, can also be told from a file: write
+one filter directive into `log.level` beside the `logs` directory —
+`%APPDATA%\dev.mokacanvas.compatibility\log.level` on Windows,
+`~/.local/share/dev.mokacanvas.compatibility/log.level` on Linux — and restart:
+
+```sh
+# Windows
+echo debug > "%APPDATA%\dev.mokacanvas.compatibility\log.level"
+# Linux
+echo debug > ~/.local/share/dev.mokacanvas.compatibility/log.level
+```
+
+`RUST_LOG` wins over the file when both are there. A panicking app writes the
+panic to the log file before the window closes, and a startup that fails before
+the window is built is a line in the file rather than a program that seems
+never to have run.
+
 ## Credentials in server mode
 
 The desktop app takes its master key from the OS keychain. A server has no
