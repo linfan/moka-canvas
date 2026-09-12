@@ -295,7 +295,7 @@ async fn a_default_has_to_name_a_model_that_serves_the_category() {
 }
 
 #[tokio::test]
-async fn a_model_still_somebodys_default_cannot_be_deleted() {
+async fn deleting_a_default_model_clears_the_default_it_held() {
     let root = tempfile::tempdir().unwrap();
     let harness = harness(root.path());
     let mut painter = model_body("painter", Some(API_KEY));
@@ -303,7 +303,7 @@ async fn a_model_still_somebodys_default_cannot_be_deleted() {
     painter["protocol"] = json!("openaiImages");
     painter["url"] = json!("https://provider.test/v1/images/generations");
     put_model(&harness.app, painter).await;
-    send(
+    let (_, patched) = send(
         &harness.app,
         json_request(
             "PATCH",
@@ -313,24 +313,10 @@ async fn a_model_still_somebodys_default_cannot_be_deleted() {
     )
     .await;
 
-    let (status, problem) = send(
-        &harness.app,
-        plain_request("DELETE", "/api/v1/models/painter"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(problem["code"], "CONFLICT");
-    assert_eq!(problem["details"]["modelId"], "painter");
-    assert_eq!(problem["details"]["defaultFor"], json!(["image"]));
-
-    // Once nothing points at it the model goes, and the revision the client
-    // last read is what it says so with.
-    let (_, view) = send(
-        &harness.app,
-        json_request("PATCH", "/api/v1/models/defaults", json!({ "image": null })),
-    )
-    .await;
-    let revision = view["revision"].as_u64().unwrap();
+    // The removal is not refused for the default it holds: the default goes
+    // with the model, and the capability falls back to the first model that
+    // can serve it. The revision the client last read is what says so.
+    let revision = patched["revision"].as_u64().unwrap();
     let (status, view) = send(
         &harness.app,
         plain_request(
@@ -341,6 +327,7 @@ async fn a_model_still_somebodys_default_cannot_be_deleted() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(view["models"], json!([]));
+    assert_eq!(view["defaults"]["image"], json!(null));
 }
 
 #[tokio::test]

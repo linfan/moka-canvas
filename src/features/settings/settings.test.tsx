@@ -643,16 +643,22 @@ describe("model settings", () => {
     expect(id.value).toBe("writer-copy");
   });
 
-  it("sets a category's default from its own tab", async () => {
+  it("falls back to the first model as the default and records a hand-picked one", async () => {
     await openSettings();
-    // The gap the default closes is named before one is chosen.
-    expect(screen.getByTestId("text-gap").textContent).toContain(
-      "No default text model",
-    );
+    // Nothing was picked by hand, so the first model that can serve the
+    // category is shown as the default a node falls back to.
+    expect(screen.queryByTestId("text-gap")).toBeNull();
+    expect(
+      (
+        screen.getByRole("radio", {
+          name: "Use Writer as the default text model",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
 
     fireEvent.click(
       await screen.findByRole("radio", {
-        name: "Use Writer as the default text model",
+        name: "Use Scribe as the default text model",
       }),
     );
 
@@ -660,11 +666,31 @@ describe("model settings", () => {
       expect(writesTo("/api/v1/models/defaults")).toHaveLength(1),
     );
     expect(writesTo("/api/v1/models/defaults")[0].body).toEqual({
-      text: "writer",
+      text: "scribe",
       expectedRevision: 1,
     });
-    // The gap is gone and the choice is shown as made.
-    await waitFor(() => expect(screen.queryByTestId("text-gap")).toBeNull());
+    // The hand-picked choice is the one shown as made.
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("radio", {
+            name: "Use Scribe as the default text model",
+          }) as HTMLInputElement
+        ).checked,
+      ).toBe(true),
+    );
+  });
+
+  it("shows the next model as the default when the stored one is gone", async () => {
+    // The stored default points at a model the list no longer holds; the
+    // first model that can serve is the default now, with no warning to act
+    // on because there is nothing broken.
+    view = {
+      ...view,
+      defaults: { ...view.defaults, text: "ghost" },
+    };
+    await openSettings();
+    expect(screen.queryByTestId("text-gap")).toBeNull();
     expect(
       (
         screen.getByRole("radio", {

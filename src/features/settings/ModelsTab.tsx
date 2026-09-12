@@ -1,7 +1,7 @@
 import type { ModelView } from "../../api";
 import { CAPABILITY_LABELS, type Capability } from "../../shared/domain";
 import { ModelEditor } from "./ModelEditor";
-import { protocolLabel, useModelStore } from "./modelStore";
+import { effectiveDefaultId, protocolLabel, useModelStore } from "./modelStore";
 import { SecretStorageNote } from "./SecretStorageNote";
 
 function ModelCard({
@@ -146,9 +146,10 @@ export function ModelsTab({ category }: { category: Capability }) {
   const models = (view?.models ?? []).filter(
     (model) => model.category === category,
   );
-  const defaultId = view?.defaults[category] ?? null;
-  const defaultMissing =
-    defaultId !== null && !models.some((model) => model.id === defaultId);
+  // The default nobody had to pick: the stored choice when it still serves,
+  // and the first enabled model otherwise — the same fallback the server
+  // resolves a generation through.
+  const defaultId = effectiveDefaultId(view, category);
 
   return (
     <div className="settings-section">
@@ -182,18 +183,8 @@ export function ModelsTab({ category }: { category: Capability }) {
           </ul>
           {defaultId === null && (
             <p className="settings-hint" data-testid={`${lower}-gap`}>
-              No default {lower} model: a {lower} node that names no model of
-              its own will be refused. Pick one above.
-            </p>
-          )}
-          {defaultMissing && (
-            <p
-              className="settings-hint"
-              data-testid={`${lower}-gap`}
-              role="alert"
-            >
-              The default points at “{defaultId}”, which is gone or disabled.
-              Pick another above.
+              No enabled {lower} model: a {lower} node that names no model of
+              its own will be refused. Enable one above, or add one.
             </p>
           )}
         </>

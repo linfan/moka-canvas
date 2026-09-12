@@ -40,6 +40,27 @@ export function modelOptionsFor(
     .map((model) => ({ reference: model.id, label: model.displayName }));
 }
 
+/**
+ * The default a category actually generates with: the stored choice while it
+ * still names an enabled model of the category, and the first enabled model
+ * otherwise. This mirrors the server's own fallback, so what the list shows
+ * as the default is what a node naming no model of its own gets.
+ */
+export function effectiveDefaultId(
+  view: ModelsView | null,
+  capability: Capability,
+): string | null {
+  if (!view) return null;
+  const serving = view.models.filter(
+    (model) => model.enabled && model.category === capability,
+  );
+  const stored = view.defaults[capability];
+  if (stored !== null && serving.some((model) => model.id === stored)) {
+    return stored;
+  }
+  return serving[0]?.id ?? null;
+}
+
 /** One protocol the form may offer for a category. */
 export interface ProtocolChoice {
   id: string;

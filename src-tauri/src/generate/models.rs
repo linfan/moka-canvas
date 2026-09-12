@@ -291,9 +291,11 @@ impl ModelRepo {
         offered
     }
 
-    /// Removes a model configuration and its credential, refusing while it is
-    /// still a category's default. Deleting it anyway would leave a default
-    /// that resolves to nothing and a generation button that fails opaquely.
+    /// Removes a model configuration and its credential. A default that
+    /// named it is cleared in the same breath: with no stored default the
+    /// capability falls back to the first model that can serve it, so the
+    /// removal never leaves a generation refused and never needs refusing
+    /// itself.
     pub async fn delete(
         &self,
         id: &str,
@@ -305,17 +307,15 @@ impl ModelRepo {
                 "model configuration {id} does not exist"
             )));
         }
-        let capabilities: Vec<String> = referencing_capabilities(&snapshot.defaults, id)
-            .iter()
-            .map(|capability| capability.to_string())
-            .collect();
-        if !capabilities.is_empty() {
-            return Err(ProviderError::InUse {
-                model: id.to_string(),
-                capabilities,
-            });
+        self.metadata.delete_model(id, expected_revision).await?;
+        let mut defaults = snapshot.defaults.clone();
+        if clear_references(&mut defaults, id) {
+            // The removal already moved the revision, so this write rides on
+            // whatever the store holds now rather than on a revision that is
+            // stale by definition.
+            self.metadata.set_defaults(&defaults, None).await?;
         }
-        Ok(self.metadata.delete_model(id, expected_revision).await?)
+        Ok(())
     }
 
     /// Creates a new configuration from an existing one, credential included.
@@ -588,13 +588,22 @@ fn default_for(defaults: &Defaults, capability: Capability) -> Option<&str> {
         .filter(|reference| !reference.is_empty())
 }
 
-/// The capabilities whose default points at a model configuration.
-fn referencing_capabilities(defaults: &Defaults, model_id: &str) -> Vec<&'static str> {
-    defaults_by_capability(defaults)
-        .into_iter()
-        .filter(|(_, reference)| reference.map(str::trim) == Some(model_id))
-        .map(|(capability, _)| capability.as_str())
-        .collect()
+/// Clears every default that points at one model configuration, reporting
+/// whether there was anything to clear.
+fn clear_references(defaults: &mut Defaults, model_id: &str) -> bool {
+    let mut cleared = false;
+    for slot in [
+        &mut defaults.text,
+        &mut defaults.image,
+        &mut defaults.audio,
+        &mut defaults.video,
+    ] {
+        if slot.as_deref().map(str::trim) == Some(model_id) {
+            *slot = None;
+            cleared = true;
+        }
+    }
+    cleared
 }
 
 /// Resolves what one generation is placed with, from a snapshot already in
@@ -611,14 +620,30 @@ pub fn resolve_within(
     capability: Capability,
 ) -> Result<ResolvedModel, ProviderError> {
     let named = reference.trim();
-    let reference = if named.is_empty() {
-        default_for(&snapshot.defaults, capability).ok_or_else(|| {
-            ProviderError::not_configured(capability.as_str(), "no default model is set")
-        })?
-    } else {
-        named
-    };
-    resolve_in(snapshot, reference, capability)
+    if !named.is_empty() {
+        return resolve_in(snapshot, named, capability);
+    }
+    // The default is the stored one while it still names a model that can
+    // serve the capability. One that was deleted or disabled since — or no
+    // stored default at all — falls back to the first model that can serve,
+    // so a capability with models is never refused for want of a hand-picked
+    // default.
+    if let Some(stored) = default_for(&snapshot.defaults, capability) {
+        if let Ok(resolved) = resolve_in(snapshot, stored, capability) {
+            return Ok(resolved);
+        }
+    }
+    match snapshot
+        .models
+        .iter()
+        .find(|model| model.enabled && model.category == capability)
+    {
+        Some(model) => resolve_in(snapshot, &model.id, capability),
+        None => Err(ProviderError::not_configured(
+            capability.as_str(),
+            "no default model is set",
+        )),
+    }
 }
 
 fn resolve_in(
@@ -823,23 +848,41 @@ mod tests {
         let resolved = resolve_within(&snapshot, "", Capability::Image).unwrap();
         assert_eq!(resolved.config_id, "painter");
 
+        // No stored default: the first enabled model of the capability serves.
+        let resolved = resolve_within(&snapshot, "", Capability::Text).unwrap();
+        assert_eq!(resolved.config_id, "writer");
+
+        // A stored default that is gone falls back the same way.
+        snapshot.defaults.text = Some("ghost".to_string());
+        let resolved = resolve_within(&snapshot, "", Capability::Text).unwrap();
+        assert_eq!(resolved.config_id, "writer");
+
+        // So does one that was disabled since it was chosen: "backup" is the
+        // second text model, and "writer" stays the fallback ahead of it.
+        snapshot.defaults.text = Some("backup".to_string());
+        snapshot.models[2].enabled = false;
+        let resolved = resolve_within(&snapshot, "", Capability::Text).unwrap();
+        assert_eq!(resolved.config_id, "writer");
+
         let error = resolve_within(&snapshot, "", Capability::Video).unwrap_err();
         assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
         assert!(error.to_string().contains("no default"), "{error}");
     }
 
     #[test]
-    fn only_a_default_naming_the_model_blocks_its_removal() {
-        let defaults = Defaults {
+    fn clearing_defaults_names_the_models_they_point_at() {
+        let mut defaults = Defaults {
             image: Some("painter".to_string()),
             text: Some("backup".to_string()),
             ..Default::default()
         };
-        assert_eq!(referencing_capabilities(&defaults, "painter"), ["image"]);
-        assert_eq!(referencing_capabilities(&defaults, "backup"), ["text"]);
-        assert!(referencing_capabilities(&defaults, "gone").is_empty());
         assert_eq!(default_for(&defaults, Capability::Image), Some("painter"));
         assert_eq!(default_for(&defaults, Capability::Video), None);
+
+        assert!(!clear_references(&mut defaults, "gone"));
+        assert!(clear_references(&mut defaults, "painter"));
+        assert_eq!(defaults.image, None);
+        assert_eq!(defaults.text.as_deref(), Some("backup"));
     }
 
     #[test]

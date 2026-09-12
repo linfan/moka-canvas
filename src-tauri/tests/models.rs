@@ -110,7 +110,7 @@ async fn a_key_cannot_be_stored_for_a_model_that_does_not_exist() {
 }
 
 #[tokio::test]
-async fn a_model_that_is_a_default_cannot_be_deleted() {
+async fn deleting_a_default_model_clears_the_default() {
     let root = tempfile::tempdir().unwrap();
     let repo = repo(root.path());
     repo.upsert(draft("painter", Capability::Image))
@@ -121,17 +121,13 @@ async fn a_model_that_is_a_default_cannot_be_deleted() {
         .await
         .unwrap();
 
-    let error = repo.delete("painter", None).await.unwrap_err();
-    assert_eq!(error.code(), "CONFLICT");
-    assert_eq!(
-        error.details().and_then(|d| d.get("modelId").cloned()),
-        Some(json!("painter"))
-    );
-
-    // Clearing the default releases it, key and all.
-    repo.set_defaults(&Defaults::default(), None).await.unwrap();
+    // The removal carries the default away with it rather than being refused
+    // for it: a capability with no stored default falls back to the first
+    // model that can serve.
     repo.delete("painter", None).await.unwrap();
-    assert!(repo.view().await.unwrap().models.is_empty());
+    let view = repo.view().await.unwrap();
+    assert!(view.models.is_empty());
+    assert_eq!(view.defaults.image, None);
     assert_eq!(
         repo.credential("painter").await.unwrap_err().code(),
         "PROVIDER_NOT_CONFIGURED"

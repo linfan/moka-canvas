@@ -40,13 +40,6 @@ pub enum ProviderError {
         found: String,
     },
 
-    /// The model is still the default for at least one category.
-    #[error("model {model} is still the default for {capabilities:?}")]
-    InUse {
-        model: String,
-        capabilities: Vec<String>,
-    },
-
     #[error("the provider rejected the stored credential: {0}")]
     Auth(String),
 
@@ -123,7 +116,6 @@ impl ProviderError {
             Self::Io(_) => "INTERNAL",
             Self::NotConfigured { .. } | Self::KeyMissing { .. } => "PROVIDER_NOT_CONFIGURED",
             Self::CapabilityMismatch { .. } => "MODEL_CAPABILITY_MISMATCH",
-            Self::InUse { .. } => "CONFLICT",
             Self::Auth(_) => "PROVIDER_AUTH",
             Self::RateLimited { .. } => "PROVIDER_RATE_LIMIT",
             Self::Timeout(_) => "PROVIDER_TIMEOUT",
@@ -155,13 +147,6 @@ impl ProviderError {
     /// leave the client guessing which part of its state to repair.
     pub fn details(&self) -> Option<serde_json::Value> {
         match self {
-            Self::InUse {
-                model,
-                capabilities,
-            } => Some(serde_json::json!({
-                "modelId": model,
-                "defaultFor": capabilities,
-            })),
             Self::CapabilityMismatch {
                 reference,
                 capability,
