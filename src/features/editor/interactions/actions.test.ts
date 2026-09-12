@@ -7,11 +7,13 @@ import {
   goldenNodeIds,
 } from "../../../shared/domain/fixtures";
 import {
+  DEFAULT_NODE_WIDTH,
   GROUP_DETACH_THRESHOLD_PX,
   MOKA_FRAGMENT_MIME,
   findNode,
   type GenerationSpec,
   type MokaFile,
+  type Rect,
   type ResultSlot,
 } from "../../../shared/domain";
 import { execute, redo, undo } from "../commands/execute";
@@ -857,5 +859,70 @@ describe("editTextContent", () => {
     expect(
       (after.data as { generation: GenerationSpec }).generation.prompt,
     ).toBe(asked);
+  });
+});
+
+describe("addNodeAt placement", () => {
+  /** Whether two node cards cover any part of each other. */
+  function overlaps(a: { bounds: Rect }, b: { bounds: Rect }): boolean {
+    return (
+      a.bounds.x < b.bounds.x + b.bounds.width &&
+      b.bounds.x < a.bounds.x + a.bounds.width &&
+      a.bounds.y < b.bounds.y + b.bounds.height &&
+      b.bounds.y < a.bounds.y + a.bounds.height
+    );
+  }
+
+  function canvasNow() {
+    return useProjectStore.getState().moka!.canvas[0];
+  }
+
+  it("moves a dropped card clear of the nodes already there", () => {
+    hydrate();
+    const target = canvasNow().nodes.find((node) => node.kind === "image")!;
+    // Dropped right on top of the image node: the spot asked for is taken,
+    // so the card lands below the canvas's cards instead of inside one.
+    const made = addNodeAt(
+      { x: target.bounds.x + 60, y: target.bounds.y + 50 },
+      "audio",
+      null,
+    )!;
+    const node = findNode(canvasNow(), made)!;
+    for (const other of canvasNow().nodes) {
+      if (other.id === node.id) continue;
+      expect(overlaps(node, other), `overlaps ${other.title}`).toBe(false);
+    }
+  });
+
+  it("keeps a card dragged off a connection clear of the node it came from", () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    const source = findNode(canvasNow(), ids.image)!;
+    // A short wire is released close to where it started: the drop point is
+    // on the source node itself, the case that used to bury the new card
+    // under the one it is wired to.
+    const made = addNodeAt(
+      { x: source.bounds.x + 20, y: source.bounds.y + 20 },
+      "operation",
+      { nodeId: ids.image, portId: "out" },
+    )!;
+    const node = findNode(canvasNow(), made)!;
+    for (const other of canvasNow().nodes) {
+      if (other.id === node.id) continue;
+      expect(overlaps(node, other), `overlaps ${other.title}`).toBe(false);
+    }
+    // The connection the drag asked for is still what arrived.
+    const edge = canvasNow().edges.find(
+      (entry) => entry.target.nodeId === made,
+    );
+    expect(edge?.source).toEqual({ nodeId: ids.image, portId: "out" });
+  });
+
+  it("leaves a drop on empty canvas where it was asked for", () => {
+    hydrate();
+    const made = addNodeAt({ x: 2000, y: 2000 }, "audio", null)!;
+    const node = findNode(canvasNow(), made)!;
+    expect(node.bounds.x).toBe(2000 - DEFAULT_NODE_WIDTH / 2);
+    expect(node.bounds.y).toBe(2000 - 40);
   });
 });

@@ -1,5 +1,6 @@
 import {
   CASCADE_DROP_OFFSET,
+  DEFAULT_NODE_HEIGHT,
   DEFAULT_NODE_WIDTH,
   GROUP_DETACH_THRESHOLD_PX,
   MAX_TEXT_CONTENT_LENGTH,
@@ -80,6 +81,49 @@ const NODE_DROP_OFFSET: Point = { x: DEFAULT_NODE_WIDTH / 2, y: 40 };
 
 /** Room for the wire between a node and the one made out of it. */
 const BESIDE_GAP_PX = 80;
+
+/** Breathing room a new card keeps from the ones already on the canvas. */
+const NODE_CLEARANCE_PX = 24;
+
+/** Whether two rectangles come within `clearance` of touching. */
+function rectsOverlap(a: Rect, b: Rect, clearance: number): boolean {
+  return (
+    a.x < b.x + b.width + clearance &&
+    b.x < a.x + a.width + clearance &&
+    a.y < b.y + b.height + clearance &&
+    b.y < a.y + a.height + clearance
+  );
+}
+
+/**
+ * Where a new default-sized card can sit at `desired` without covering any
+ * node already on the canvas: the spot asked for when it is clear, and one
+ * card-height below at a time until it is when it is not. A connection
+ * released close to the node it was dragged from — the usual case, since the
+ * wire only reaches so far — would otherwise bury the new card under the one
+ * it is wired to.
+ */
+function unoccupiedPosition(canvas: CanvasDocument, desired: Point): Point {
+  const spot = { x: desired.x, y: desired.y };
+  const occupied = () =>
+    canvas.nodes.some((node) =>
+      rectsOverlap(
+        {
+          x: spot.x,
+          y: spot.y,
+          width: DEFAULT_NODE_WIDTH,
+          height: DEFAULT_NODE_HEIGHT,
+        },
+        node.bounds,
+        NODE_CLEARANCE_PX,
+      ),
+    );
+  // Bounded so a canvas tiled wall-to-wall with nodes cannot spin here.
+  for (let step = 0; occupied() && step < 64; step += 1) {
+    spot.y += DEFAULT_NODE_HEIGHT + NODE_CLEARANCE_PX;
+  }
+  return spot;
+}
 
 /** The active canvas document, or null when nothing is open. */
 export function activeCanvas(): CanvasDocument | null {
@@ -1592,10 +1636,13 @@ export function addNodeAt(
 ): NodeId | null {
   const canvas = activeCanvas();
   if (!canvas) return null;
-  const node = createNode(kind, {
-    x: world.x - NODE_DROP_OFFSET.x,
-    y: world.y - NODE_DROP_OFFSET.y,
-  });
+  const node = createNode(
+    kind,
+    unoccupiedPosition(canvas, {
+      x: world.x - NODE_DROP_OFFSET.x,
+      y: world.y - NODE_DROP_OFFSET.y,
+    }),
+  );
   if (textContent !== undefined && node.kind === "text") {
     node.data = { ...node.data, content: textContent };
   }
