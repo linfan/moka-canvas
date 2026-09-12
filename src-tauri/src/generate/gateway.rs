@@ -416,10 +416,15 @@ fn merged(mut request: GenerateRequest, preferences: &Preferences) -> GenerateRe
             offer(params, "format", &preferences.audio.format);
             offer(params, "instructions", &preferences.audio.instructions);
             offer_value(params, "speed", preferences.audio.speed);
+            offer_value(params, "sampleRate", preferences.audio.sample_rate);
+            offer_value(params, "volume", preferences.audio.volume);
+            offer_value(params, "rate", preferences.audio.rate);
+            offer_value(params, "pitch", preferences.audio.pitch);
         }
         Capability::Video => {
             offer(params, "resolution", &preferences.video.resolution);
             offer(params, "mode", &preferences.video.mode);
+            offer(params, "ratio", &preferences.video.ratio);
             offer_value(params, "seconds", preferences.video.seconds);
             offer_value(params, "generateAudio", preferences.video.generate_audio);
             offer_value(params, "watermark", preferences.video.watermark);
@@ -576,12 +581,17 @@ mod tests {
                 generate_audio: false,
                 watermark: true,
                 mode: "reference".into(),
+                ratio: "16:9".into(),
             },
             audio: crate::metadata::AudioPreferences {
                 voice: "nova".into(),
                 format: "wav".into(),
                 speed: 1.25,
                 instructions: "speak slowly".into(),
+                sample_rate: 24000,
+                volume: 80,
+                rate: 1.1,
+                pitch: 1.0,
             },
         }
     }
@@ -625,12 +635,17 @@ mod tests {
         assert_eq!(video.params["generateAudio"], false);
         assert_eq!(video.params["watermark"], true);
         assert_eq!(video.params["mode"], "reference");
+        assert_eq!(video.params["ratio"], "16:9");
 
         let audio = merged(request(Capability::Audio, json!({})), &preferences());
         assert_eq!(audio.params["voice"], "nova");
         assert_eq!(audio.params["format"], "wav");
         assert_eq!(audio.params["speed"], 1.25);
         assert_eq!(audio.params["instructions"], "speak slowly");
+        assert_eq!(audio.params["sampleRate"], 24000);
+        assert_eq!(audio.params["volume"], 80);
+        assert_eq!(audio.params["rate"], 1.1);
+        assert_eq!(audio.params["pitch"], 1.0);
 
         let text = merged(request(Capability::Text, json!({})), &preferences());
         assert_eq!(text.params["reasoningEffort"], "high");

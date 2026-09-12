@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use super::adapter::set_converter_root;
 use super::registry::{ConverterRegistry, ProtocolEntry};
 
 /// One batch of built-in scripts.
@@ -101,18 +102,29 @@ pub const BUILTIN_GROUPS: &[ScriptGroup] = &[
             },
         ],
     },
-    // Batch 2: Wan3.0 Video
+    // Batch 2: Bailian Video + Bailian Speech
     ScriptGroup {
         batch: 2,
-        scripts: &[ScriptDef {
-            protocol_id: "wan3Video",
-            capability: "video",
-            display_name: "Alibaba Cloud · Wan3.0 Video",
-            url_example: "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
-            subdir: "video",
-            filename: "wan3-video.lua",
-            source: include_str!("../../converter-scripts/video/wan3-video.lua"),
-        }],
+        scripts: &[
+            ScriptDef {
+                protocol_id: "bailianVideo",
+                capability: "video",
+                display_name: "Alibaba Cloud · Bailian Video",
+                url_example: "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
+                subdir: "video",
+                filename: "bailian-video.lua",
+                source: include_str!("../../converter-scripts/video/bailian-video.lua"),
+            },
+            ScriptDef {
+                protocol_id: "bailianSpeech",
+                capability: "audio",
+                display_name: "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
+                url_example: "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer",
+                subdir: "audio",
+                filename: "bailian-speech.lua",
+                source: include_str!("../../converter-scripts/audio/bailian-speech.lua"),
+            },
+        ],
     },
 ];
 
@@ -157,5 +169,6 @@ pub async fn ensure_deployed(root: &Path) -> Result<(), Box<dyn std::error::Erro
         registry.set_batch(max_deployed).await?;
     }
 
+    set_converter_root(root.to_path_buf());
     Ok(())
 }

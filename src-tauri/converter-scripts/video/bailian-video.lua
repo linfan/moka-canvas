@@ -1,5 +1,5 @@
--- Alibaba Cloud · Wan3.0 Video (video generation, async job)
--- Protocol: wan3Video  Capability: video
+-- Alibaba Cloud · Bailian Video (video generation, async job)
+-- Protocol: bailianVideo  Capability: video
 --
 -- API reference:
 --   https://help.aliyun.com/zh/model-studio/wan3-video-generation-api-reference
@@ -10,7 +10,7 @@
 --   3. Poll GET /api/v1/tasks/{task_id} until SUCCEEDED or FAILED
 
 function build_task_request(call, req, inputs)
-    local body = {model = "wan3.0-video"}
+    local body = {model = call.model}
     body.input = {prompt = req.prompt}
 
     -- Handle reference media (first_frame, last_frame, reference_image, etc.)
@@ -29,7 +29,7 @@ function build_task_request(call, req, inputs)
         end
     end
 
-    -- Map request params to Wan3.0 API parameters
+    -- Map request params to Bailian API parameters
     local params = {}
     if req.params.resolution then params.resolution = req.params.resolution end
     if req.params.ratio then params.ratio = req.params.ratio end
@@ -62,7 +62,7 @@ function parse_task_response(status, headers, body)
     if not ref or ref == "" then
         return {error = "No task_id in response"}
     end
-    -- Wan3.0 recommends polling every ~15 seconds
+    -- Bailian recommends polling every ~15 seconds
     return {reference = ref, poll_interval_ms = 15000}
 end
 

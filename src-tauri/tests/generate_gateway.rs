@@ -102,7 +102,7 @@ impl Rig {
                 .upsert(ModelDraft {
                     id: id.clone(),
                     category: entry.capability,
-                    protocol,
+                    protocol: protocol.clone(),
                     url: endpoint_of(base_url, protocol, &id),
                     model: id.clone(),
                     display_name: id.clone(),
@@ -259,6 +259,7 @@ fn endpoint_of(base_url: &str, protocol: Protocol, model_id: &str) -> String {
             format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
         }
         Protocol::Custom => format!("{base_url}/v1/chat/completions"),
+        Protocol::LuaScript(_) => format!("{base_url}/v1/lua/{model_id}"),
     }
 }
 

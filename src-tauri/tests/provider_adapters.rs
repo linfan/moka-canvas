@@ -144,7 +144,7 @@ fn speaking(
         model: model_id.to_string(),
         display_name: format!("Model {model_id}"),
         category: capability,
-        protocol,
+        protocol: protocol.clone(),
         url: endpoint_of(protocol, base_url, model_id),
     };
     ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
@@ -165,6 +165,7 @@ fn endpoint_of(protocol: Protocol, base_url: &str, model_id: &str) -> String {
             format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
         }
         Protocol::Custom => format!("{base_url}/v1/chat/completions"),
+        Protocol::LuaScript(_) => format!("{base_url}/v1/lua/{model_id}"),
     }
 }
 

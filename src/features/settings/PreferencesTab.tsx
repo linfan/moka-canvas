@@ -192,6 +192,14 @@ function GenerationDefaults() {
               value={draft.video.mode}
             />
           </label>
+          <label className="dialog-field">
+            <span>Aspect ratio</span>
+            <input
+              onChange={(event) => editVideo({ ratio: event.target.value })}
+              placeholder="16:9"
+              value={draft.video.ratio}
+            />
+          </label>
         </div>
         <label className="settings-check">
           <input
@@ -243,6 +251,57 @@ function GenerationDefaults() {
               step={0.05}
               type="number"
               value={draft.audio.speed}
+            />
+          </label>
+          <label className="dialog-field">
+            <span>Sample rate</span>
+            <input
+              max={48000}
+              min={8000}
+              onChange={(event) =>
+                editAudio({ sampleRate: toNumber(event.target.value, 22050) })
+              }
+              step={100}
+              type="number"
+              value={draft.audio.sampleRate}
+            />
+          </label>
+          <label className="dialog-field">
+            <span>Volume</span>
+            <input
+              max={100}
+              min={0}
+              onChange={(event) =>
+                editAudio({ volume: toNumber(event.target.value, 50) })
+              }
+              type="number"
+              value={draft.audio.volume}
+            />
+          </label>
+          <label className="dialog-field">
+            <span>Rate</span>
+            <input
+              max={2}
+              min={0.5}
+              onChange={(event) =>
+                editAudio({ rate: toNumber(event.target.value, 1) })
+              }
+              step={0.05}
+              type="number"
+              value={draft.audio.rate}
+            />
+          </label>
+          <label className="dialog-field">
+            <span>Pitch</span>
+            <input
+              max={2}
+              min={0.5}
+              onChange={(event) =>
+                editAudio({ pitch: toNumber(event.target.value, 1) })
+              }
+              step={0.05}
+              type="number"
+              value={draft.audio.pitch}
             />
           </label>
         </div>

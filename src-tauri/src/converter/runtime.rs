@@ -87,6 +87,25 @@ impl LuaRuntime {
         let result = func.call::<mlua::Value>(args)?;
         Ok(result)
     }
+
+    /// Calls a function with [`serde_json::Value`] arguments. Converts each
+    /// argument to a Lua value, calls the function, and converts the result
+    /// back to JSON.
+    pub fn call_json_value(
+        &self,
+        _script: &ScriptRef,
+        func: &str,
+        args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, mlua::Error> {
+        let lua = self.lua.blocking_lock();
+        let func: Function = lua.globals().get(func)?;
+        let lua_args: Result<Vec<mlua::Value>, mlua::Error> = args
+            .into_iter()
+            .map(|arg| json_to_lua(&lua, &arg))
+            .collect();
+        let result = func.call::<mlua::Value>(lua_args?)?;
+        Ok(table_to_json(&result))
+    }
 }
 
 impl Default for LuaRuntime {

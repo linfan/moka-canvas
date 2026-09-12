@@ -280,7 +280,7 @@ export const FRAGMENT_SCHEMA_VERSION = 1;
 export const GENERATION_PARAM_KEYS: Record<Capability, readonly string[]> = {
   text: ["temperature", "maxTokens", "reasoningEffort", "instructions"],
   image: ["size", "quality", "background", "count"],
-  audio: ["voice", "format", "speed", "instructions", "music"],
+  audio: ["voice", "format", "speed", "instructions", "music", "sampleRate", "volume", "rate", "pitch"],
   video: [
     "seconds",
     "resolution",

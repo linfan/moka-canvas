@@ -720,7 +720,7 @@ mod tests {
     use crate::metadata::{ImagePreferences, VideoPreferences};
 
     fn model(id: &str, category: Capability) -> ModelConfig {
-        let protocol = protocols_for(category)[0];
+        let protocol = protocols_for(category)[0].clone();
         ModelConfig {
             id: id.to_string(),
             category,

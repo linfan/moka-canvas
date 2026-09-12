@@ -44,6 +44,7 @@ export interface VideoPreferences {
   generateAudio: boolean;
   watermark: boolean;
   mode: string;
+  ratio: string;
 }
 
 export interface AudioPreferences {
@@ -51,6 +52,10 @@ export interface AudioPreferences {
   format: string;
   speed: number;
   instructions: string;
+  sampleRate: number;
+  volume: number;
+  rate: number;
+  pitch: number;
 }
 
 /** Global generation defaults; a node's own parameters override these. */

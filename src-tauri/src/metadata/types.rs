@@ -270,13 +270,14 @@ impl Default for ImagePreferences {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct VideoPreferences {
     pub seconds: u32,
     pub resolution: String,
     pub generate_audio: bool,
     pub watermark: bool,
     pub mode: String,
+    pub ratio: String,
 }
 
 impl Default for VideoPreferences {
@@ -287,17 +288,22 @@ impl Default for VideoPreferences {
             generate_audio: true,
             watermark: false,
             mode: "auto".to_string(),
+            ratio: String::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AudioPreferences {
     pub voice: String,
     pub format: String,
     pub speed: f64,
     pub instructions: String,
+    pub sample_rate: u32,
+    pub volume: u32,
+    pub rate: f64,
+    pub pitch: f64,
 }
 
 impl Default for AudioPreferences {
@@ -307,6 +313,10 @@ impl Default for AudioPreferences {
             format: "mp3".to_string(),
             speed: 1.0,
             instructions: String::new(),
+            sample_rate: 22050,
+            volume: 50,
+            rate: 1.0,
+            pitch: 1.0,
         }
     }
 }

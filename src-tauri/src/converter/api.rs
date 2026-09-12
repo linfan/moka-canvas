@@ -125,7 +125,11 @@ mod tests {
             r#"
             local tbl = {a = 1, b = {2, 3}}
             local encoded = json.encode(tbl)
-            assert(encoded == '{"a":1,"b":[2,3]}', "encode failed: " .. encoded)
+            -- Re-decode to verify roundtrip (avoid key-order fragility)
+            local rt = json.decode(encoded)
+            assert(rt.a == 1, "roundtrip a failed: " .. tostring(rt.a))
+            assert(rt.b[1] == 2, "roundtrip b[1] failed: " .. tostring(rt.b[1]))
+            assert(rt.b[2] == 3, "roundtrip b[2] failed: " .. tostring(rt.b[2]))
 
             local decoded = json.decode('{"x":"y"}')
             assert(decoded.x == "y", "decode failed")

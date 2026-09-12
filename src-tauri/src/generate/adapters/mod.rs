@@ -140,11 +140,11 @@ impl ModelCall {
     /// A post to an address derived from the configured one — an edit
     /// endpoint beside a generation endpoint, say. The credential follows it
     /// because the derivation cannot leave the origin.
-    fn post_at(&self, url: &str) -> reqwest::RequestBuilder {
+    pub(crate) fn post_at(&self, url: &str) -> reqwest::RequestBuilder {
         self.credentialed(self.client.post(url.to_string()))
     }
 
-    fn get(&self, url: &str) -> reqwest::RequestBuilder {
+    pub(crate) fn get(&self, url: &str) -> reqwest::RequestBuilder {
         self.credentialed(self.client.get(url.to_string()))
     }
 
@@ -152,7 +152,7 @@ impl ModelCall {
     /// configured endpoint. The credential follows it only where the address
     /// is on the same origin: an image left on a third-party CDN is public by
     /// nature, and a key sent after it would not be.
-    fn fetch(&self, address: &str) -> reqwest::RequestBuilder {
+    pub(crate) fn fetch(&self, address: &str) -> reqwest::RequestBuilder {
         let request = self.client.get(address);
         if origin_of(address).is_some() && origin_of(address) == self.origin() {
             self.credentialed(request)
@@ -1110,7 +1110,7 @@ mod tests {
             Protocol::OpenaiSpeech,
             Protocol::OpenaiVideos,
         ] {
-            assert!(std::ptr::eq(openai, for_protocol(protocol)), "{protocol:?}");
+            assert!(std::ptr::eq(openai, for_protocol(protocol.clone())), "{protocol:?}");
         }
         let gemini = for_protocol(Protocol::Gemini);
         assert!(std::ptr::eq(gemini, for_protocol(Protocol::GeminiVideo)));
