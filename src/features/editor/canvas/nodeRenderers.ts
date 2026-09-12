@@ -7,6 +7,16 @@ import type {
 } from "../../../shared/domain";
 import type { NodeRunView } from "../stores/runStore";
 import { NODE_HEADER_HEIGHT, PORT_RADIUS, canvasTheme } from "./theme";
+import {
+  HALO_GLOW_BLUR,
+  HALO_GLOW_STROKE,
+  HALO_STROKE,
+  haloArcs,
+  haloFrame,
+  haloOffset,
+  haloRing,
+  type HaloArcs,
+} from "./halo";
 import { layoutPorts, type PortView } from "./portLayout";
 import {
   generationSummary,
@@ -14,6 +24,24 @@ import {
   waveformPeaks,
   type MediaCardInfo,
 } from "./mediaCards";
+
+/** The two strokes of a running card's ring, and how they are cut. */
+export interface HaloView {
+  /** The soft light under the arcs, which is the one that breathes. */
+  glow: Rect;
+  /** The bright arcs themselves, which travel round the card. */
+  arcs: Rect;
+  /** How the arcs are cut out of a ring round a card of this size. */
+  pattern: HaloArcs;
+  /** The size and standoff the pattern was cut for; either asks for it again. */
+  width: number;
+  height: number;
+  offset: number;
+  /** Waiting its turn rather than being worked on: slower and fainter. */
+  waiting: boolean;
+  /** The colour of the kind of node this is, which is the colour of its ring. */
+  color: string;
+}
 
 export interface NodeVisualState {
   selected: boolean;
@@ -46,6 +74,11 @@ export interface NodeView {
   progress: { track: Rect; fill: Rect; stripes: Line } | null;
   /** How many results the last ask made, where it made more than one. */
   resultCount: Text | null;
+  /**
+   * The ring of light round a card whose node is being worked on; null while
+   * nothing is. Drawn under the card, moved by the controller's own clock.
+   */
+  halo: HaloView | null;
   media: {
     signature: string;
     thumb: Rect | null;
@@ -341,6 +374,7 @@ export function createNodeView(
     failMark: null,
     progress: null,
     resultCount: null,
+    halo: null,
     media: { signature: "", thumb: null, badge: null, bars: [] },
   };
   syncMedia(view, node, media);
@@ -567,6 +601,126 @@ function syncRunMarks(
   }
 }
 
+/**
+ * The ring of light round a card whose node is being worked on.
+ *
+ * Made the moment a run reaches the node and taken away the moment it leaves,
+ * so a card nobody has asked carries nothing and one whose run has ended goes
+ * quiet again. Both strokes are put under the card rather than over it: the
+ * light belongs behind what it is lighting, and the card stays as readable as
+ * it was.
+ */
+function syncHalo(view: NodeView, node: WorkflowNode, visual: NodeVisualState) {
+  const status = visual.run?.status ?? null;
+  const lit = status === "queued" || status === "running";
+  if (!lit) {
+    view.halo?.glow.remove();
+    view.halo?.arcs.remove();
+    view.halo = null;
+    return;
+  }
+  const waiting = status === "queued";
+  const color = canvasTheme.kindAccent[node.kind] ?? canvasTheme.nodeMuted;
+  const offset = haloOffset(visual.selected);
+  if (!view.halo) {
+    const ring = haloRing(node.bounds, offset);
+    const glow = new Rect({
+      ...ring,
+      fill: "#00000000",
+      stroke: color,
+      strokeWidth: HALO_GLOW_STROKE,
+      shadow: { x: 0, y: 0, blur: HALO_GLOW_BLUR, color },
+      hittable: false,
+    });
+    const arcs = new Rect({
+      ...ring,
+      fill: "#00000000",
+      stroke: color,
+      strokeWidth: HALO_STROKE,
+      strokeCap: "round",
+      hittable: false,
+    });
+    view.group.addAt(glow, 0);
+    view.group.addAt(arcs, 1);
+    view.halo = {
+      glow,
+      arcs,
+      pattern: { dash: 0, gap: 0, lap: 0, arcs: 0 },
+      width: -1,
+      height: -1,
+      offset: -1,
+      waiting,
+      color,
+    };
+  } else if (view.halo.color !== color) {
+    view.halo.color = color;
+    view.halo.glow.set({
+      stroke: color,
+      shadow: { x: 0, y: 0, blur: HALO_GLOW_BLUR, color },
+    });
+    view.halo.arcs.set({ stroke: color });
+  }
+  if (view.halo.waiting !== waiting) view.halo.waiting = waiting;
+  placeHalo(view, node.bounds, offset);
+}
+
+/**
+ * Puts the ring round a card of this size, cutting its arcs again only where
+ * the card itself changed size: the cut follows the distance round the ring,
+ * and that distance is worth measuring once per resize rather than per frame.
+ */
+function placeHalo(
+  view: NodeView,
+  bounds: { width: number; height: number },
+  offset: number,
+) {
+  const halo = view.halo;
+  if (!halo) return;
+  const ring = haloRing(bounds, offset);
+  halo.glow.set(ring);
+  halo.arcs.set(ring);
+  // Both the card's size and its standoff decide how far it is round the ring,
+  // so either one changing asks for the arcs to be cut again.
+  if (
+    halo.width !== bounds.width ||
+    halo.height !== bounds.height ||
+    halo.offset !== offset
+  ) {
+    halo.width = bounds.width;
+    halo.height = bounds.height;
+    halo.offset = offset;
+    halo.pattern = haloArcs(bounds, offset);
+    halo.arcs.set({ dashPattern: [halo.pattern.dash, halo.pattern.gap] });
+  }
+}
+
+/**
+ * One frame of the ring's movement, asked for by the controller's clock.
+ *
+ * Kept apart from the drawing above on purpose: everything else about a card is
+ * redrawn when something about the node changes, while this is redrawn because
+ * time passed, and folding the two together would repaint whole cards sixty
+ * times a second for as long as anything on the canvas is running.
+ */
+export function advanceHalo(view: NodeView, at: number) {
+  const halo = view.halo;
+  if (!halo) return;
+  const frame = haloFrame(at, halo.pattern.lap, halo.waiting);
+  halo.glow.set({ opacity: frame.glow });
+  halo.arcs.set({ dashOffset: frame.dashOffset, opacity: frame.arc });
+}
+
+/**
+ * The leaves a running card's ring is drawn with.
+ *
+ * Asked for by the export, which takes a picture of the document rather than of
+ * the moment: a ring that says "this is working right now" has no business
+ * being baked into a file somebody keeps.
+ */
+export function haloLeaves(view: NodeView): Rect[] {
+  return view.halo ? [view.halo.glow, view.halo.arcs] : [];
+}
+
 function applyVisual(view: NodeView, visual: NodeVisualState) {
   const { frame, title, summary, group } = view;
   frame.strokeWidth = visual.selected ? 2 : visual.hovered ? 1.5 : 1;
@@ -585,6 +739,7 @@ function applyVisual(view: NodeView, visual: NodeVisualState) {
     port.dot.visible = !visual.lowDetail;
   }
   syncRunMarks(view, view.node, visual);
+  syncHalo(view, view.node, visual);
   group.opacity = visual.dimmed ? 0.35 : 1;
 }
 
@@ -640,6 +795,7 @@ export function previewNodeBounds(
   view.statusDot?.set(markSlot(bounds.width, DOT_SIZE));
   view.failMark?.set(markSlot(bounds.width, FAIL_SIZE));
   view.resultCount?.set(countSlot(bounds.width));
+  placeHalo(view, bounds, haloOffset(view.visual.selected));
   if (view.progress) {
     placeMeasure(
       view.progress,

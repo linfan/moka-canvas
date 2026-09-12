@@ -959,7 +959,7 @@ function type(value: string) {
 /** The control that sends an ask, whatever it reads as at the moment. */
 function ask() {
   return within(panel()).getByRole("button", {
-    name: /^(Run|Ask again|Stop|Stopping…|Starting…)$/,
+    name: /^(Run|Stop|Stopping…|Starting…)$/,
   });
 }
 
@@ -1047,6 +1047,38 @@ describe("driving one node's run", () => {
     ).toBe(true);
   });
 
+  it("offers a run of its own once this node's part has landed", async () => {
+    // One run drove two nodes and this one has finished its part: the run is
+    // still going, but there is nothing left of it for this node to stop. What
+    // it offers is another run of its own, and that is what a click asks for.
+    await openWithRun(
+      makeRun({
+        status: "running",
+        requestedNodeIds: [ids.image, ids.text],
+        steps: [
+          { nodeId: ids.image, status: "succeeded" },
+          { nodeId: ids.text, status: "running", progress: 0.4 },
+        ],
+      }),
+    );
+    expect(ask()).toHaveProperty("textContent", "Run");
+
+    type("A heron at dawn, painted");
+    await settle();
+    fireEvent.click(ask());
+    await settle();
+    // What a finished node asks for is a run of its own, not the stopping of
+    // the one it has already finished its part of.
+    expect(
+      api.calls.some((call) => call.url.endsWith("/runs/run-1/cancel")),
+    ).toBe(false);
+    expect(
+      api.calls.filter(
+        (call) => call.url.endsWith("/runs") && call.method === "POST",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("asks a run that gave up again as a follower of itself", async () => {
     await openWithRun(
       makeRun({
@@ -1054,7 +1086,7 @@ describe("driving one node's run", () => {
         steps: [{ nodeId: ids.image, status: "failed", error: "Refused" }],
       }),
     );
-    expect(ask()).toHaveProperty("textContent", "Ask again");
+    expect(ask()).toHaveProperty("textContent", "Run");
 
     // A retry is asked against the document as it now stands, so what is typed
     // since the run gave up still counts.

@@ -20,7 +20,14 @@ import { useProjectStore } from "./projectStore";
 
 const POLL_INTERVAL_MS = 800;
 
-function isActive(status: RunStatus): boolean {
+/**
+ * Whether a status is one that still has something left to do.
+ *
+ * Shared because the same question is asked of two different things — a run, and
+ * one node's step inside it — and an answer that differs between the two is how
+ * a node comes to offer to stop a run it has already finished its part of.
+ */
+export function isActive(status: RunStatus): boolean {
   return status === "queued" || status === "running";
 }
 
@@ -589,9 +596,21 @@ export async function retryRun(runId: RunId) {
   }
 }
 
-/** Latest run step status for a node, preferring runs that are still active. */
-export function useNodeRunStatus(nodeId: NodeId): RunStatus | null {
-  return useRunStore((state) => stepOf(state.byNode, nodeId)?.status ?? null);
+/**
+ * The status of a node's own step, preferring runs that are still active.
+ *
+ * This is the node's part rather than the run's whole: a run that drove several
+ * nodes stays going after one of them has landed, and a control that read the
+ * run would keep offering to stop work this node has already finished.
+ *
+ * Asked of no node it answers nothing, for the reason useLatestRunForNode gives:
+ * a hook has to be called the same way every time round, whichever node — or
+ * none — is in hand.
+ */
+export function useNodeRunStatus(nodeId: NodeId | null): RunStatus | null {
+  return useRunStore((state) =>
+    nodeId === null ? null : (stepOf(state.byNode, nodeId)?.status ?? null),
+  );
 }
 
 /**

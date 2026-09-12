@@ -1157,6 +1157,33 @@ describe("generation UI", () => {
     expect(params).toMatch(/"count": 2/);
   });
 
+  it("offers no cancel for a node whose own part of a run has landed", async () => {
+    api.runs = [
+      generationRun({
+        status: "running",
+        requestedNodeIds: [generated.image, generated.text],
+        steps: [
+          { nodeId: generated.image, status: "succeeded" },
+          { nodeId: generated.text, status: "running", progress: 0.4 },
+        ],
+      }),
+    ];
+    await openEditor();
+    selectNode(generated.image);
+
+    await screen.findByRole("button", { name: "▶ Run this node" });
+    // The run this node was asked in is still going, but not for this node: the
+    // inspector says where its own part landed, and the only control on offer is
+    // another run of its own.
+    expect(inspected("Status")).toBe("Succeeded");
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(
+      screen.queryByRole("progressbar", {
+        name: "How far this node's run has got",
+      }),
+    ).toBeNull();
+  });
+
   it("says why nothing can be generated where no provider is published", async () => {
     api.executors = ["deterministic"];
     await openEditor();
@@ -1337,6 +1364,27 @@ describe("reaching a generation from the menu", () => {
     ).toBe(true);
     // Optimistic, so the card stops offering a control that was just used.
     expect(useRunStore.getState().runs[0]?.cancelRequested).toBe(true);
+  });
+
+  it("offers no stop for a node whose own part of a run has landed", async () => {
+    api.runs = [
+      generationRun({
+        status: "running",
+        requestedNodeIds: [generated.image, generated.text],
+        steps: [
+          { nodeId: generated.image, status: "succeeded" },
+          { nodeId: generated.text, status: "running", progress: 0.4 },
+        ],
+      }),
+    ];
+    await openEditor();
+    menuOn(generated.image);
+
+    await screen.findByRole("menu", { name: "Context menu" });
+    // The run is still going, but for the other node it drove. This one has
+    // landed, so there is nothing of its own to stop, and nothing to retry.
+    expect(screen.queryByRole("menuitem", { name: "Stop" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Retry" })).toBeNull();
   });
 
   it("offers to ask again for a run that gave up", async () => {

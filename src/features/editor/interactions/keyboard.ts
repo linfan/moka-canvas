@@ -26,6 +26,21 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/**
+ * Words the page itself has selected, as opposed to nodes the canvas has.
+ *
+ * The canvas is painted, so a selection can only be words — in a panel, a
+ * dialog, a title. Those words are what a copy or a cut means when they are
+ * selected, even while nodes are selected too: answering with a fragment
+ * would bury what was pointed at under a JSON blob, and a cut would delete
+ * nodes nobody asked about.
+ */
+export function pageTextSelected(): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  return selection.toString().trim() !== "";
+}
+
 /** One line of the shortcuts dialog: the keys that work and what they do. */
 export interface ShortcutRow {
   label: string;
@@ -181,6 +196,8 @@ export function useEditorKeyboard() {
 
       if (mod) {
         const key = event.key.toLowerCase();
+        // Selected words belong to the browser, which copies them as words.
+        if ((key === "c" || key === "x") && pageTextSelected()) return;
         if (key === "z" && event.shiftKey) {
           event.preventDefault();
           redo();

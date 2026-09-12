@@ -23,7 +23,7 @@ import {
 } from "../interactions/actions";
 import { useAppStore } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
-import { nodeRun, retryRun, useRunStore } from "../stores/runStore";
+import { isActive, nodeRun, retryRun, useRunStore } from "../stores/runStore";
 import { useClampedMenuPosition } from "./useClampedMenuPosition";
 
 interface Item {
@@ -121,8 +121,10 @@ export function ContextMenu() {
     // Read at the moment the menu is opened rather than watched: it is not on
     // screen long enough for a record arriving while it is open to matter.
     const asked = targetNode ? nodeRun(targetId) : null;
-    const going =
-      asked?.run.status === "queued" || asked?.run.status === "running";
+    // This node's own step rather than the run's whole, for the reason the
+    // inspector gives: a run of several nodes is still going after one of them
+    // has landed, and that one has nothing left to stop.
+    const going = asked !== null && isActive(asked.step.status);
     if (asked && going) {
       const runId = asked.run.id;
       items.push({

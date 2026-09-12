@@ -30,6 +30,7 @@ import { useEditorStore } from "../stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
 import {
   RUN_STATUS_LABEL,
+  isActive,
   retryRun,
   useLatestRunForNode,
   useNodeGenerationAssets,
@@ -552,9 +553,17 @@ function RunSection({
   const generationOn = useGenerationAvailable();
   const progress = useNodeRunProgress(node.id);
   const failure = useNodeRunError(node.id);
-  const active = run?.status === "queued" || run?.status === "running";
   const said = useNodeStreamText(node.id);
   const step = run?.steps.find((entry) => entry.nodeId === node.id);
+  /**
+   * Whether this node's own part of the run is still going.
+   *
+   * Read from the step rather than from the run: a run that drove several nodes
+   * stays going after one of them has landed, and a node that has finished has
+   * no business offering to stop work it is no longer part of. What it offers
+   * instead is another run of its own.
+   */
+  const active = step !== undefined && isActive(step.status);
   const slots = (node.data as { resultSlots?: ResultSlot[] }).resultSlots ?? [];
   const relevantIssues = issues.filter(
     (issue) => !issue.nodeId || issue.nodeId === node.id,
