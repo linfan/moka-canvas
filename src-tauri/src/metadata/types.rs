@@ -305,7 +305,9 @@ pub struct AudioPreferences {
 impl Default for AudioPreferences {
     fn default() -> Self {
         Self {
-            voice: "alloy".to_string(),
+            // No voice is invented: what a model answers to is its own, and a
+            // name from one vendor means nothing to another.
+            voice: String::new(),
             format: "mp3".to_string(),
             speed: 1.0,
             instructions: String::new(),
@@ -585,7 +587,9 @@ mod tests {
         assert_eq!(preferences.video.seconds, 6);
         assert!(preferences.video.generate_audio);
         assert!(!preferences.video.watermark);
-        assert_eq!(preferences.audio.voice, "alloy");
+        // Left blank on purpose: the voice a model answers to is named by the
+        // model, so one is never chosen for it here.
+        assert_eq!(preferences.audio.voice, "");
         assert_eq!(preferences.reasoning_effort, "auto");
     }
 

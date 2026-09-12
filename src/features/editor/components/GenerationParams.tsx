@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { GenerationPreferences } from "../../../api";
 import {
   AUDIO_FORMATS,
-  AUDIO_VOICES,
   GENERATION_SHAPES,
   IMAGE_BACKGROUNDS,
   IMAGE_QUALITIES,
@@ -145,11 +144,11 @@ export function GenerationParams({
   if (capability === "audio") {
     return (
       <div className="prompt-panel-params">
-        <Choice
+        <Words
           fallback={defaults?.audio.voice}
           label="Voice"
           onChange={(value) => onChange("voice", value)}
-          options={AUDIO_VOICES}
+          placeholder="The voice the model knows"
           value={word(params, "voice")}
         />
         <Choice

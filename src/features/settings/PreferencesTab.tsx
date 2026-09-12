@@ -228,7 +228,7 @@ function GenerationDefaults() {
             <span>Voice</span>
             <input
               onChange={(event) => editAudio({ voice: event.target.value })}
-              placeholder="alloy"
+              placeholder="The voice the model knows"
               value={draft.audio.voice}
             />
           </label>

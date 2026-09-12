@@ -327,14 +327,6 @@ export const VIDEO_RESOLUTIONS = ["480", "720", "1080"] as const;
  */
 export const VIDEO_IMAGE_MODES = ["auto", "reference"] as const;
 
-export const AUDIO_VOICES = [
-  "alloy",
-  "echo",
-  "fable",
-  "onyx",
-  "nova",
-  "shimmer",
-] as const;
 export const AUDIO_FORMATS = [
   "mp3",
   "wav",

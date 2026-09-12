@@ -774,6 +774,27 @@ describe("the parameters a node carries", () => {
     });
   });
 
+  it("takes an audio node's voice by hand, since models name their own", async () => {
+    const empty = withEmptyNodes();
+    await openEditor();
+    selectNode(empty.audio);
+    await settle();
+    openParams();
+    await settle();
+    // No list to choose from: what a model answers to is its own, so the field
+    // is typed into rather than picked.
+    expect(
+      within(panel()).queryByRole("combobox", { name: "Voice" }),
+    ).toBeNull();
+    const voice = within(panel()).getByRole("textbox", { name: "Voice" });
+
+    fireEvent.change(voice, { target: { value: "some-model-voice" } });
+    expect(specOf(empty.audio)?.params.voice).toBeUndefined();
+    fireEvent.blur(voice);
+    await settle();
+    expect(specOf(empty.audio)?.params.voice).toBe("some-model-voice");
+  });
+
   it("files an audio result where the node says rather than by default", async () => {
     const empty = withEmptyNodes();
     await openEditor();
