@@ -312,7 +312,7 @@ mod tests {
                 "build_task_request",
                 vec![
                     serde_json::json!({"url": "https://ws.test/video-synthesis", "model": "wan2.2-t2v"}),
-                    serde_json::json!({"prompt": "a cat", "params": {"seconds": "6"}}),
+                    serde_json::json!({"prompt": "a cat", "params": {"seconds": "6", "resolution": "720"}}),
                     serde_json::json!([{"role": "firstFrame", "data_url": "https://img.test/1.png"}]),
                 ],
             )
@@ -324,6 +324,9 @@ mod tests {
         assert_eq!(body["input"]["prompt"], "a cat");
         assert_eq!(body["input"]["media"][0]["type"], "first_frame");
         assert_eq!(body["parameters"]["duration"], 6);
+        // The API only takes the tiers with a trailing P, so the bare tier the
+        // request carries is dressed before it travels.
+        assert_eq!(body["parameters"]["resolution"], "720P");
     }
 
     #[test]

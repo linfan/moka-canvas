@@ -31,7 +31,15 @@ function build_task_request(call, req, inputs)
 
     -- Map request params to Bailian API parameters
     local params = {}
-    if req.params.resolution then params.resolution = req.params.resolution end
+    -- Resolution travels as a tier ("720"); this API spells it with a
+    -- trailing P ("720P").
+    if req.params.resolution then
+        local resolution = string.upper(req.params.resolution)
+        if string.match(resolution, "^%d+$") then
+            resolution = resolution .. "P"
+        end
+        params.resolution = resolution
+    end
     if req.params.ratio then params.ratio = req.params.ratio end
     if req.params.seconds then params.duration = tonumber(req.params.seconds) end
     if req.params.generateAudio ~= nil then params.audio = req.params.generateAudio end
