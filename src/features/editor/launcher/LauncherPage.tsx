@@ -75,9 +75,13 @@ export function LauncherPage() {
   return (
     <div className="launcher">
       <header className="launcher-hero">
-        <span className="brand-mark" aria-hidden="true">
-          M
-        </span>
+        {/* The same artwork the packaged app and the browser tab use. */}
+        <img
+          alt=""
+          aria-hidden="true"
+          className="brand-mark"
+          src="/favicon.png"
+        />
         <h1>Moka Canvas</h1>
         <p>
           Local-first video workflow boards, saved as plain project folders.

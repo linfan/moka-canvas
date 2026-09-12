@@ -81,15 +81,9 @@ h2 {
 }
 
 .brand-mark {
-  align-items: center;
-  background: linear-gradient(135deg, #ff9ecb, #b78bff 52%, #7ee2a8);
   border-radius: 50%;
-  color: var(--on-primary);
-  display: inline-flex;
-  font-size: 14px;
-  font-weight: 700;
+  display: block;
   height: 28px;
-  justify-content: center;
   width: 28px;
 }
 

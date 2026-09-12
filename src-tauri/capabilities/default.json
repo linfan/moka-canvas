@@ -1,7 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the local web container.",
+  "description": "Default capability for the local web container. The main window loads the bundled frontend over the local HTTP server rather than from the asset protocol, so the loopback origin must be listed as a remote context for the permissions to reach it.",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
   "permissions": ["core:default", "dialog:default"]
 }

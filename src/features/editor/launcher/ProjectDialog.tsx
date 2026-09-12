@@ -27,6 +27,24 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** Run a native picker and surface its failure instead of dropping it. */
+  const pick = async (
+    run: () => Promise<string | null>,
+    apply: (picked: string) => void,
+  ) => {
+    setError(null);
+    try {
+      const picked = await run();
+      if (picked) apply(picked);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "The file dialog could not open",
+      );
+    }
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -89,8 +107,9 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
               {nativePickers && (
                 <button
                   onClick={() =>
-                    void pickDirectory("Choose project folder").then(
-                      (picked) => picked && setDirectory(picked),
+                    void pick(
+                      () => pickDirectory("Choose project folder"),
+                      setDirectory,
                     )
                   }
                   type="button"
@@ -129,9 +148,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
               {nativePickers && (
                 <button
                   onClick={() =>
-                    void pickFile("Open project", ["moka"]).then(
-                      (picked) => picked && setPath(picked),
-                    )
+                    void pick(() => pickFile("Open project", ["moka"]), setPath)
                   }
                   type="button"
                 >
@@ -154,10 +171,11 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
                 />
                 <button
                   onClick={() =>
-                    void pickFile("Import project package", [
-                      "zip",
-                      "mokapkg",
-                    ]).then((picked) => picked && setPath(picked))
+                    void pick(
+                      () =>
+                        pickFile("Import project package", ["zip", "mokapkg"]),
+                      setPath,
+                    )
                   }
                   type="button"
                 >
