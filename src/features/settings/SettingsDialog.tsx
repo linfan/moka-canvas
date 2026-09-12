@@ -27,6 +27,8 @@ const TABS: { id: SettingsTab; label: string }[] = [
 export function SettingsDialog() {
   const open = useModelStore((state) => state.open);
   const tab = useModelStore((state) => state.tab);
+  const editing = useModelStore((state) => state.editing);
+  const view = useModelStore((state) => state.view);
   const error = useModelStore((state) => state.error);
   const errorCode = useModelStore((state) => state.errorCode);
   const loading = useModelStore((state) => state.loading);
@@ -45,6 +47,16 @@ export function SettingsDialog() {
   if (!open) return null;
 
   const close = () => useModelStore.getState().closeSettings();
+
+  // A model editor carries its own Save and Cancel; a Done beside them is a
+  // third way out that says nothing about the half-written form it leaves
+  // behind. The footer belongs to the list, so it stays away while the
+  // editor is what the tab shows — the same condition ModelsTab renders on.
+  const editorOpen =
+    tab !== "preferences" &&
+    editing !== null &&
+    (editing === "new" ||
+      (view?.models ?? []).some((model) => model.id === editing));
 
   return (
     <div className="dialog-backdrop" onClick={close} role="presentation">
@@ -114,11 +126,13 @@ export function SettingsDialog() {
           </p>
         )}
 
-        <div className="dialog-actions">
-          <button onClick={close} type="button">
-            Done
-          </button>
-        </div>
+        {!editorOpen && (
+          <div className="dialog-actions">
+            <button onClick={close} type="button">
+              Done
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

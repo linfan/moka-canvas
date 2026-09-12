@@ -643,6 +643,21 @@ describe("model settings", () => {
     expect(id.value).toBe("writer-copy");
   });
 
+  it("leaves the editor to its own Save and Cancel", async () => {
+    await openSettings();
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+    // The form carries its own ways out; a Done beside them is a third door
+    // that says nothing about the half-written form it leaves behind.
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+  });
+
   it("falls back to the first model as the default and records a hand-picked one", async () => {
     await openSettings();
     // Nothing was picked by hand, so the first model that can serve the
