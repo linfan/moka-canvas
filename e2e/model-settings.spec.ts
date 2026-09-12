@@ -28,8 +28,12 @@ test("a model written from the form is stored, tested, and kept", async ({
   );
 
   // An identifier of its own: the suite shares one metadata store, and the
-  // other specs already configured the stand-in's own model ids.
+  // other specs already configured the stand-in's own model ids. What the form
+  // suggests from the display name is checked before it is replaced.
   await dialog.getByLabel("Display name").fill("Typed Model");
+  await expect(dialog.getByLabel("Model identifier")).toHaveValue(
+    /^typed_model_[a-z0-9]{6}$/,
+  );
   await dialog.getByLabel("Model identifier").fill("typed-model");
   await dialog.getByLabel("Endpoint URL").fill(CHAT_URL);
   await dialog.getByLabel("Model name").fill("typed-model-1");

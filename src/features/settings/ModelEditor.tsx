@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ModelDraft, ModelView } from "../../api";
 import {
   CAPABILITY_LABELS,
@@ -11,6 +11,7 @@ import {
   type ModelProtocol,
 } from "../../shared/domain";
 import { useModelStore } from "./modelStore";
+import { uniqueModelId } from "./modelId";
 
 interface Props {
   /** The stored configuration being edited, or null for a new one. */
@@ -22,6 +23,8 @@ interface Props {
 
 interface FormState {
   id: string;
+  /** Whether the identifier was typed, or is still the suggested one. */
+  idTouched: boolean;
   protocol: ModelProtocol;
   url: string;
   model: string;
@@ -35,6 +38,7 @@ function initialForm(model: ModelView | null, category: Capability): FormState {
     const protocol = PROTOCOLS_BY_CATEGORY[category][0];
     return {
       id: "",
+      idTouched: false,
       protocol,
       url: PROTOCOL_URL_EXAMPLES[protocol],
       model: "",
@@ -45,6 +49,7 @@ function initialForm(model: ModelView | null, category: Capability): FormState {
   }
   return {
     id: model.id,
+    idTouched: true,
     protocol: model.protocol,
     url: model.url,
     model: model.model,
@@ -62,6 +67,10 @@ function initialForm(model: ModelView | null, category: Capability): FormState {
  * model alone. A copy of another configuration is a starting point rather
  * than a relationship — duplicating carries the fields and the key, and the
  * two can then diverge without touching each other.
+ *
+ * The identifier is the one field nobody has to think about: it is suggested
+ * from the display name and can be overwritten, because what it does — stay
+ * the reference a node holds — matters more than what it reads as.
  */
 export function ModelEditor({ model, category, onDone }: Props) {
   const saving = useModelStore((state) => state.saving);
@@ -86,24 +95,57 @@ export function ModelEditor({ model, category, onDone }: Props) {
     edit({ protocol, url });
   };
 
-  const id = form.id.trim();
-  const idTaken =
-    model === null &&
-    (view?.models ?? []).some(
-      (entry) => entry.id.toLowerCase() === id.toLowerCase(),
-    );
+  /** Whether a stored configuration already answers to an identifier. */
+  const isTaken = useCallback(
+    (candidate: string) =>
+      (view?.models ?? []).some(
+        (entry) => entry.id.toLowerCase() === candidate.toLowerCase(),
+      ),
+    [view],
+  );
+
+  /**
+   * The identifier this form will save.
+   *
+   * A new configuration is handed one derived from its display name, which
+   * follows the name as it is typed — writing an identifier is optional,
+   * having one is not. Typing one takes over, and clearing the field hands it
+   * back to the suggestion rather than saving nothing. An existing
+   * configuration's identifier is the one its nodes already store.
+   */
+  const identifier = useMemo(() => {
+    if (model !== null) return model.id;
+    if (form.idTouched) return form.id.trim();
+    return uniqueModelId(form.displayName, isTaken);
+  }, [model, form.idTouched, form.id, form.displayName, isTaken]);
+
+  const chooseId = (typed: string) => {
+    if (typed.trim() === "") {
+      edit({ id: "", idTouched: false });
+      return;
+    }
+    edit({ id: typed, idTouched: true });
+  };
+
+  const idTaken = model === null && isTaken(identifier);
+  const idShaped = !/\s/.test(identifier);
+  const idProblem = idTaken
+    ? "Another model already uses this identifier."
+    : idShaped
+      ? null
+      : "An identifier cannot contain spaces.";
   const urlShaped = /^https?:\/\/\S+$/.test(form.url.trim());
   const canSave =
     !saving &&
-    id !== "" &&
     !idTaken &&
+    idShaped &&
     form.displayName.trim() !== "" &&
     form.model.trim() !== "" &&
     urlShaped;
 
   const save = async () => {
     const draft: ModelDraft = {
-      id,
+      id: identifier,
       category,
       protocol: form.protocol,
       url: form.url.trim(),
@@ -133,7 +175,10 @@ export function ModelEditor({ model, category, onDone }: Props) {
       <h3 className="settings-heading">
         {model === null
           ? `New ${CAPABILITY_LABELS[category].toLowerCase()} model`
-          : `Edit “${model.displayName}”`}
+          : // The category went out of the form as a field of its own; the
+            // heading is where an editor says which kind of model this is,
+            // because the protocol choices below follow from it.
+            `Edit “${model.displayName}” · ${CAPABILITY_LABELS[category].toLowerCase()}`}
       </h3>
 
       <label className="dialog-field">
@@ -154,30 +199,27 @@ export function ModelEditor({ model, category, onDone }: Props) {
           aria-label="Model identifier"
           disabled={model !== null}
           maxLength={MAX_MODEL_ID_LENGTH}
-          onChange={(event) => edit({ id: event.target.value })}
-          placeholder="lowercase-id"
+          onChange={(event) => chooseId(event.target.value)}
           title={
             model !== null
               ? "Nodes reference this identifier, so it cannot change; duplicate the model to create a variant"
               : undefined
           }
-          value={form.id}
+          value={identifier}
         />
       </label>
-      {idTaken && (
-        <p className="settings-hint" role="alert">
-          Another model already uses this identifier.
+      {model === null && (
+        <p className="settings-hint">
+          Suggested from the display name, and yours to overwrite — clearing it
+          asks for a new suggestion. Nodes store it, so it cannot change once
+          the model is saved.
         </p>
       )}
-
-      <label className="dialog-field">
-        <span>Category</span>
-        <input
-          aria-label="Category"
-          disabled
-          value={CAPABILITY_LABELS[category]}
-        />
-      </label>
+      {idProblem && (
+        <p className="settings-hint" role="alert">
+          {idProblem}
+        </p>
+      )}
 
       <label className="dialog-field">
         <span>Protocol</span>

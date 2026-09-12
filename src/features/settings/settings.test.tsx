@@ -372,6 +372,96 @@ describe("model settings", () => {
     });
   });
 
+  it("suggests an identifier from the display name", async () => {
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "GPT-4o mini (OpenAI)" },
+    });
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "gpt-4o-mini" },
+    });
+
+    // Readable, and nobody had to invent it.
+    const id = screen.getByLabelText("Model identifier") as HTMLInputElement;
+    const suggested = id.value;
+    expect(suggested).toMatch(/^gpt-4o_mini_openai_[a-z0-9]{6}$/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await screen.findByText("GPT-4o mini (OpenAI)");
+
+    const [write] = writesTo("/api/v1/models");
+    expect(write.body).toMatchObject({
+      id: suggested,
+      category: "text",
+      displayName: "GPT-4o mini (OpenAI)",
+    });
+  });
+
+  it("hands the identifier back to the suggestion when it is cleared", async () => {
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "Composer" },
+    });
+    const id = screen.getByLabelText("Model identifier") as HTMLInputElement;
+
+    // Typing one takes over.
+    fireEvent.change(id, { target: { value: "my-own" } });
+    expect(id.value).toBe("my-own");
+
+    // Clearing it does not leave the form with nothing to save.
+    fireEvent.change(id, { target: { value: "" } });
+    expect(id.value).toMatch(/^composer_[a-z0-9]{6}$/);
+
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "composer-1" },
+    });
+    const suggested = id.value;
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await screen.findByText("Composer");
+
+    const [write] = writesTo("/api/v1/models");
+    expect(write.body).toMatchObject({ id: suggested });
+  });
+
+  it("says the category by the tab and the heading, not by a field of its own", async () => {
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+
+    // The tab is already on Text and the heading says so again; a disabled
+    // input repeating it a third time is a field nobody can act on.
+    expect(
+      screen.getByRole("heading", { name: "New text model" }),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Category")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      within(cardOf("Writer")).getByRole("button", { name: "Edit" }),
+    );
+    expect(screen.queryByLabelText("Category")).toBeNull();
+    // An editor names the category in its heading instead, so the form still
+    // says which kind of model is being changed.
+    expect(
+      screen.getByRole("heading", { name: "Edit “Writer” · text" }),
+    ).toBeTruthy();
+    // What the category decides is still visible: only text protocols.
+    const protocol = screen.getByLabelText("Protocol") as HTMLSelectElement;
+    expect(Array.from(protocol.options).map((option) => option.value)).toEqual([
+      "openaiChat",
+      "openaiResponses",
+      "gemini",
+    ]);
+  });
+
   it("offers each category only the protocols that serve it", async () => {
     await openSettings();
     fireEvent.click(await screen.findByRole("tab", { name: "Video" }));
