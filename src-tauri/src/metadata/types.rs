@@ -164,13 +164,14 @@ impl<'de> Deserialize<'de> for Protocol {
     }
 }
 
-/// The protocol choices on offer for one category of model.
+/// The built-in protocol choices on offer for one category of model.
 ///
 /// The list differs per category because each category speaks a different
 /// endpoint shape: a text model posts messages, an image model posts a
-/// prompt to an images endpoint, and a video model starts a job. The
-/// settings form and the server-side validation both read this one list, so
-/// what may be chosen and what may be stored cannot disagree.
+/// prompt to an images endpoint, and a video model starts a job. A Lua
+/// converter script the registry deploys under a category is offered beside
+/// these; validation reads both lists, so what may be chosen and what may
+/// be stored cannot disagree.
 pub fn protocols_for(capability: Capability) -> &'static [Protocol] {
     match capability {
         Capability::Text => &[
@@ -178,8 +179,8 @@ pub fn protocols_for(capability: Capability) -> &'static [Protocol] {
             Protocol::OpenaiResponses,
             Protocol::Gemini,
         ],
-        Capability::Image => &[Protocol::OpenaiImages, Protocol::Gemini],
-        Capability::Audio => &[Protocol::OpenaiSpeech, Protocol::Gemini],
+        Capability::Image => &[Protocol::OpenaiImages],
+        Capability::Audio => &[Protocol::OpenaiSpeech],
         Capability::Video => &[Protocol::OpenaiVideos, Protocol::GeminiVideo],
     }
 }

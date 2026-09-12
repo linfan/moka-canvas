@@ -150,17 +150,18 @@ export const MODEL_PROTOCOLS = [
 export type ModelProtocol = (typeof MODEL_PROTOCOLS)[number];
 
 /**
- * The protocols on offer per category, mirroring `protocols_for` on the
- * server: the form offers one list and a write is refused against the same
- * one, so what may be chosen and what may be stored cannot disagree.
+ * The built-in protocols per category, the fallback the form offers while
+ * the converter registry has not been read (or could not be). The registry
+ * behind `/api/v1/converter/protocols` is the truth: it deploys `gemini`
+ * under `text` alone, and may carry scripts no build ever heard of.
  */
 export const PROTOCOLS_BY_CATEGORY: Record<
   Capability,
   readonly ModelProtocol[]
 > = {
   text: ["openaiChat", "openaiResponses", "gemini"],
-  image: ["openaiImages", "gemini"],
-  audio: ["openaiSpeech", "gemini"],
+  image: ["openaiImages"],
+  audio: ["openaiSpeech"],
   video: ["openaiVideos", "geminiVideo"],
 };
 

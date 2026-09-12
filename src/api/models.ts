@@ -1,4 +1,4 @@
-import type { Capability, ModelProtocol } from "../shared/domain";
+import type { Capability } from "../shared/domain";
 import { http } from "./client";
 
 /**
@@ -18,7 +18,12 @@ export interface ApiKeyView {
 export interface ModelView {
   id: string;
   category: Capability;
-  protocol: ModelProtocol;
+  /**
+   * The protocol's wire name. Built-in protocols are the names
+   * `MODEL_PROTOCOLS` lists; a Lua converter script carries its registry id
+   * (e.g. `"bailianVideo"`), so this is the open set of strings, not a union.
+   */
+  protocol: string;
   /** The full endpoint address requests are sent to — not a base URL. */
   url: string;
   /** The model name the provider knows, sent in the body where one travels. */
@@ -91,7 +96,7 @@ export interface ProbeReport {
 export interface ModelDraft {
   id: string;
   category: Capability;
-  protocol: ModelProtocol;
+  protocol: string;
   url: string;
   model: string;
   displayName: string;
@@ -126,16 +131,21 @@ function modelPath(id: string, suffix = ""): string {
   return `/api/v1/models/${encodeURIComponent(id)}${suffix}`;
 }
 
-/** One protocol entry from the converter registry. */
+/**
+ * One protocol entry from the converter registry. The capability it serves
+ * is the key its group hangs under, not a field of its own.
+ */
 export interface ProtocolEntry {
-  capability: string;
   script: string;
-  display_name: string;
-  url_example: string;
+  displayName: string;
+  urlExample: string;
 }
 
+/** The registry's protocols: capability → protocol id → entry. */
+export type ProtocolGroups = Record<string, Record<string, ProtocolEntry>>;
+
 export interface ProtocolsResponse {
-  protocols: Record<string, ProtocolEntry>;
+  protocols: ProtocolGroups;
 }
 
 /** Model / configuration API helpers. */

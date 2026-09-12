@@ -7,8 +7,15 @@ import {
   type ModelsView,
   type PreferencesPatch,
   type ProbeReport,
+  type ProtocolGroups,
 } from "../../api";
-import { PROTOCOLS_BY_CATEGORY, type Capability } from "../../shared/domain";
+import {
+  PROTOCOLS_BY_CATEGORY,
+  PROTOCOL_LABELS,
+  PROTOCOL_URL_EXAMPLES,
+  type Capability,
+  type ModelProtocol,
+} from "../../shared/domain";
 
 /** The settings tabs: one per model category, plus the global preferences. */
 export type SettingsTab = Capability | "preferences";
@@ -33,9 +40,74 @@ export function modelOptionsFor(
     .map((model) => ({ reference: model.id, label: model.displayName }));
 }
 
-/** A sensible starting protocol when a category is picked in the form. */
-export function firstProtocol(capability: Capability) {
-  return PROTOCOLS_BY_CATEGORY[capability][0];
+/** One protocol the form may offer for a category. */
+export interface ProtocolChoice {
+  id: string;
+  label: string;
+  urlExample: string;
+}
+
+/**
+ * The protocols a category offers, read from the converter registry.
+ *
+ * The registry is the truth: it deploys each script under the capability it
+ * serves, and it may carry scripts this build has never heard of. Built-in
+ * ids keep their familiar order and go first; scripts beyond them follow,
+ * alphabetically by the name a reader picks one by. While the registry has
+ * not arrived — or the read failed — the built-in list stands in, so the
+ * form is never empty.
+ */
+export function protocolChoices(
+  protocols: ProtocolGroups | null,
+  capability: Capability,
+): ProtocolChoice[] {
+  const group = protocols?.[capability];
+  if (!group) {
+    return PROTOCOLS_BY_CATEGORY[capability].map((id) => ({
+      id,
+      label: PROTOCOL_LABELS[id],
+      urlExample: PROTOCOL_URL_EXAMPLES[id],
+    }));
+  }
+  const builtin = PROTOCOLS_BY_CATEGORY[capability].filter(
+    (id): id is ModelProtocol => id in group,
+  );
+  const extra = Object.keys(group)
+    .filter((id) => !builtin.includes(id as ModelProtocol))
+    .sort((a, b) => group[a].displayName.localeCompare(group[b].displayName));
+  return [...builtin, ...extra].map((id) => ({
+    id,
+    label: protocolLabel(protocols, id),
+    urlExample: protocolUrlExample(protocols, id),
+  }));
+}
+
+/** What a protocol is called, registry first and its bare id last. */
+export function protocolLabel(
+  protocols: ProtocolGroups | null,
+  id: string,
+): string {
+  const entry = findProtocol(protocols, id);
+  if (entry) return entry.displayName;
+  return PROTOCOL_LABELS[id as ModelProtocol] ?? id;
+}
+
+/** The example address a protocol speaks at, empty when none is known. */
+export function protocolUrlExample(
+  protocols: ProtocolGroups | null,
+  id: string,
+): string {
+  const entry = findProtocol(protocols, id);
+  if (entry) return entry.urlExample;
+  return PROTOCOL_URL_EXAMPLES[id as ModelProtocol] ?? "";
+}
+
+function findProtocol(protocols: ProtocolGroups | null, id: string) {
+  if (!protocols) return undefined;
+  for (const group of Object.values(protocols)) {
+    if (group[id]) return group[id];
+  }
+  return undefined;
 }
 
 /** What a per-model test is doing, and what it last produced. */
@@ -93,6 +165,13 @@ interface ModelState {
   /** The category a "new" editor starts on. */
   newCategory: Capability;
   view: ModelsView | null;
+  /**
+   * The converter registry's protocols, grouped by capability. Null until
+   * the read lands — or forever, if it failed, and the built-in list stands
+   * in. Fetched once per session: it changes when the app deploys scripts,
+   * which is a restart, not a setting.
+   */
+  protocols: ProtocolGroups | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -115,6 +194,7 @@ interface ModelState {
     reference?: string | null,
   ) => void;
   load: () => Promise<void>;
+  loadProtocols: () => Promise<void>;
   saveModel: (draft: ModelDraft) => Promise<boolean>;
   removeModel: (id: string) => Promise<boolean>;
   /** Copies a configuration, credential included, and opens the copy. */
@@ -172,6 +252,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
     editing: null,
     newCategory: "text",
     view: null,
+    protocols: null,
     loading: false,
     saving: false,
     error: null,
@@ -223,6 +304,9 @@ export const useModelStore = create<ModelState>()((set, get) => {
 
     async load() {
       if (get().loading) return;
+      // The registry read rides along but never holds the view up, and a
+      // failed read leaves the built-in protocol list standing in.
+      void get().loadProtocols();
       set({ loading: true });
       try {
         set({
@@ -233,6 +317,17 @@ export const useModelStore = create<ModelState>()((set, get) => {
         });
       } catch (error) {
         set({ loading: false, ...describe(error, "Failed to load settings") });
+      }
+    },
+
+    async loadProtocols() {
+      if (get().protocols !== null) return;
+      try {
+        const response = await modelsApi.fetchProtocols();
+        set({ protocols: response.protocols });
+      } catch {
+        // Quiet on purpose: the form falls back to the built-in list, and
+        // a settings dialog that cannot save says so loudly enough.
       }
     },
 

@@ -3,7 +3,7 @@
 //! This module executes Lua converter scripts to build HTTP requests and parse
 //! responses, enabling new vendor protocols without recompiling the backend.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -31,6 +31,12 @@ pub fn set_converter_root(root: PathBuf) {
     let _ = CONVERTER_ROOT.set(root);
 }
 
+/// The converter root directory, once startup has set it. Model validation
+/// reads the registry through it to learn which Lua protocols exist.
+pub fn converter_root() -> Option<&'static Path> {
+    CONVERTER_ROOT.get().map(PathBuf::as_path)
+}
+
 /// The shared instance returned by [`for_protocol`] for Lua-backed protocols.
 pub(super) static LUA_ADAPTER: LuaAdapter = LuaAdapter;
 
@@ -56,7 +62,7 @@ impl LuaAdapter {
             .get()
             .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
         let registry = ConverterRegistry::load(root).await;
-        registry.protocols().get(protocol).cloned().ok_or_else(|| {
+        registry.find(protocol).cloned().ok_or_else(|| {
             ProviderError::invalid(format!("no converter script for protocol '{protocol}'"))
         })
     }

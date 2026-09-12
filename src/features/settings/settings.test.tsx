@@ -29,6 +29,68 @@ const CONFIG = {
 const KEY = "sk-test-1234567890abcd";
 const MASKED = "sk-…abcd";
 
+/**
+ * The converter registry as the server reports it: protocols grouped by the
+ * capability they serve, the way deploy writes meta.json.
+ */
+const REGISTRY = {
+  text: {
+    openaiChat: {
+      script: "text/openai-chat.lua",
+      displayName: "OpenAI-compatible · Chat Completions",
+      urlExample: "https://api.openai.com/v1/chat/completions",
+    },
+    openaiResponses: {
+      script: "text/openai-responses.lua",
+      displayName: "OpenAI-compatible · Responses API",
+      urlExample: "https://api.openai.com/v1/responses",
+    },
+    gemini: {
+      script: "text/gemini.lua",
+      displayName: "Google Gemini · generateContent",
+      urlExample:
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+    },
+  },
+  image: {
+    openaiImages: {
+      script: "image/openai-images.lua",
+      displayName: "OpenAI-compatible · Images API",
+      urlExample: "https://api.openai.com/v1/images/generations",
+    },
+  },
+  audio: {
+    openaiSpeech: {
+      script: "audio/openai-speech.lua",
+      displayName: "OpenAI-compatible · Speech API",
+      urlExample: "https://api.openai.com/v1/audio/speech",
+    },
+    bailianSpeech: {
+      script: "audio/bailian-speech.lua",
+      displayName: "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
+      urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/tts",
+    },
+  },
+  video: {
+    openaiVideos: {
+      script: "video/openai-videos.lua",
+      displayName: "OpenAI-compatible · Videos API",
+      urlExample: "https://api.openai.com/v1/videos",
+    },
+    geminiVideo: {
+      script: "video/gemini-video.lua",
+      displayName: "Google Gemini · long-running (Veo)",
+      urlExample:
+        "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
+    },
+    bailianVideo: {
+      script: "video/bailian-video.lua",
+      displayName: "Alibaba Cloud · Bailian Video",
+      urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/video-synthesis",
+    },
+  },
+};
+
 interface Call {
   method: string;
   url: string;
@@ -169,6 +231,10 @@ function route(url: string, method: string, body: unknown): Response {
   if (url === "/api/v1/recent-projects") return json([]);
 
   if (path === "/api/v1/models" && method === "GET") return json(view);
+
+  if (path === "/api/v1/converter/protocols" && method === "GET") {
+    return json({ protocols: REGISTRY });
+  }
 
   if (path === "/api/v1/models" && method === "PUT") {
     if (refuseNextWrite) {
@@ -472,15 +538,39 @@ describe("model settings", () => {
     const protocol = (await screen.findByLabelText(
       "Protocol",
     )) as HTMLSelectElement;
+    // The registry's own scripts join the built-ins: a video the build has
+    // never heard of is still one a reader can pick.
+    await screen.findByRole("option", { name: /Bailian Video/ });
     expect([...protocol.options].map((option) => option.value)).toEqual([
       "openaiVideos",
       "geminiVideo",
+      "bailianVideo",
     ]);
 
     // Picking the other shape offers its own complete address.
     fireEvent.change(protocol, { target: { value: "geminiVideo" } });
     const url = screen.getByLabelText("Endpoint URL") as HTMLInputElement;
     expect(url.value).toContain(":predictLongRunning");
+    fireEvent.change(protocol, { target: { value: "bailianVideo" } });
+    expect(url.value).toContain("video-synthesis");
+  });
+
+  it("lists a script the registry holds under its own capability only", async () => {
+    await openSettings();
+    // Gemini speaks generateContent, which the registry deploys under text
+    // alone: the audio tab must not offer it, and must offer the script the
+    // registry does hold there.
+    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New audio model" }),
+    );
+
+    await screen.findByRole("option", { name: /Bailian Speech/ });
+    const protocol = screen.getByLabelText("Protocol") as HTMLSelectElement;
+    expect([...protocol.options].map((option) => option.value)).toEqual([
+      "openaiSpeech",
+      "bailianSpeech",
+    ]);
   });
 
   it("keeps a stored credential when an edit does not mention it", async () => {

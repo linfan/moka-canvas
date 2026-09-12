@@ -244,18 +244,51 @@ impl ModelRepo {
                 "a model name must be at most {MAX_NAME_LEN} characters"
             )));
         }
-        if !protocols_for(draft.category).contains(&draft.protocol) {
-            let offered: Vec<&str> = protocols_for(draft.category)
-                .iter()
-                .map(Protocol::as_str)
-                .collect();
+        if !Self::protocol_serves(draft.category, &draft.protocol).await {
+            let offered = Self::offered_protocols(draft.category).await;
             return Err(ProviderError::invalid(format!(
-                "the {:?} protocol cannot serve a {} model; the choices are {offered:?}",
-                draft.protocol,
+                "the {} protocol cannot serve a {} model; the choices are {offered:?}",
+                draft.protocol.wire_name(),
                 draft.category.as_str()
             )));
         }
         Ok(self.metadata.upsert_model(&draft).await?)
+    }
+
+    /// Whether a protocol may serve one category of model: either it is on
+    /// the built-in list, or it names a Lua converter script the registry
+    /// holds under that category.
+    async fn protocol_serves(category: Capability, protocol: &Protocol) -> bool {
+        if protocols_for(category).contains(protocol) {
+            return true;
+        }
+        match protocol {
+            Protocol::LuaScript(name) => Self::offered_protocols(category)
+                .await
+                .iter()
+                .any(|offered| offered == name),
+            _ => false,
+        }
+    }
+
+    /// Every protocol name a category accepts: the built-ins plus whatever
+    /// the converter registry deploys under that category. When the
+    /// converter root is not set — a unit test, or a startup that failed
+    /// before deploy — only the built-ins are on offer.
+    async fn offered_protocols(category: Capability) -> Vec<String> {
+        let mut offered: Vec<String> = protocols_for(category)
+            .iter()
+            .map(|protocol| protocol.as_str().to_string())
+            .collect();
+        if let Some(root) = crate::converter::converter_root() {
+            let registry = crate::converter::ConverterRegistry::load(root).await;
+            if let Some(group) = registry.protocols_for(category.as_str()) {
+                offered.extend(group.keys().cloned());
+            }
+        }
+        offered.sort();
+        offered.dedup();
+        offered
     }
 
     /// Removes a model configuration and its credential, refusing while it is

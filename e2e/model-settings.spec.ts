@@ -103,10 +103,12 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
   await dialog.getByRole("button", { name: "New video model" }).click();
   const protocol = dialog.getByLabel("Protocol");
   await expect(protocol).toHaveValue("openaiVideos");
-  // A chat endpoint cannot serve a video model, so it is not on offer.
+  // A chat endpoint cannot serve a video model, so it is not on offer; the
+  // registry's own video scripts are, beside the built-ins.
   await expect(protocol.locator("option")).toHaveText([
     "OpenAI-compatible · Videos API",
     "Google Gemini · long-running (Veo)",
+    "Alibaba Cloud · Bailian Video",
   ]);
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
     "https://api.openai.com/v1/videos",
