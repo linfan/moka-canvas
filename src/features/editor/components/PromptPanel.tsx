@@ -12,6 +12,7 @@ import {
   nowIso,
   type AssetId,
   type Capability,
+  type GenerationInputMode,
   type GenerationMode,
   type GenerationSpec,
   type NodeId,
@@ -46,10 +47,10 @@ import { InputPreview } from "./InputPreview";
 import { MentionField } from "./MentionField";
 import { ReferenceBar } from "./ReferenceBar";
 
-const PANEL_WIDTH = 320;
-const PANEL_HEIGHT = 220;
-/** The tallest the panel gets, which is with every parameter it has showing. */
-const PANEL_HEIGHT_PARAMS = 360;
+/** What the panel's own chrome takes: head, model, actions, and the gaps. */
+const PANEL_HEIGHT = 160;
+/** The same, with every parameter it has showing. */
+const PANEL_HEIGHT_PARAMS = 300;
 /** What the panel grows by once it is counting a prompt out loud. */
 const PANEL_HEIGHT_COUNT = 22;
 /** What the panel grows by once it is showing what a node will send. */
@@ -62,6 +63,15 @@ const PANEL_HEIGHT_REFERENCES = 34;
 const PANEL_HEIGHT_CHIPS = 28;
 /** Gap left between the panel and the node, and between it and a canvas edge. */
 const GAP = 8;
+/** The height the prompt field has before the reader drags it. */
+const FIELD_HEIGHT = 120;
+/** The narrowest and widest the panel gets from the size of its node. */
+const PANEL_MIN_WIDTH = 300;
+const PANEL_MAX_WIDTH = 720;
+/** What the panel's padding and border take off the field's own width. */
+const PANEL_CHROME = 22;
+/** How much wider than its node the panel comes up, so words have room. */
+const PANEL_WIDTH_FACTOR = 1.3;
 
 /**
  * The parameter that states the shape of what a node makes, and so the shape the
@@ -74,25 +84,29 @@ const SHAPE_PARAM: Record<Capability, string | null> = {
   audio: null,
 };
 
-/** The modes each kind of node can be asked in. */
-const MODES: Record<Capability, readonly GenerationMode[]> = {
-  text: ["generate", "question", "extend"],
-  image: ["generate", "edit"],
-  audio: ["generate", "extend"],
-  video: ["generate", "extend"],
-};
-
-const MODE_LABELS: Record<GenerationMode, string> = {
-  generate: "Generate",
-  edit: "Edit",
-  extend: "Extend",
-  question: "Question",
-};
-
 /** Whether a node already holds something rather than waiting to be filled. */
 function holdsSomething(node: WorkflowNode): boolean {
   const data = node.data as { assetId?: string; content?: string };
   return Boolean(data.assetId) || (data.content ?? "").trim() !== "";
+}
+
+/**
+ * Whether what a node holds is a picture.
+ *
+ * Read off the registry where the asset is known, since a text node may hold a
+ * picture of its own; the node's kind answers where the registry has not caught
+ * up with a document that was just opened.
+ */
+function holdsAnImage(
+  node: WorkflowNode,
+  resources: ReadonlyMap<AssetId, ResourceEntry>,
+): boolean {
+  const assetId = (node.data as { assetId?: string }).assetId;
+  if (!assetId) return false;
+  const entry = resources.get(assetId as AssetId);
+  return entry
+    ? (entry.mime ?? "").startsWith("image/")
+    : node.kind === "image";
 }
 
 /** Whether a run still has something left to do. */
@@ -145,8 +159,15 @@ function refusalFor(asked: {
 }
 
 /**
- * Asks one node for something: the mode, the model, the words, and the button
- * that sends them.
+ * Asks one node for something: the model, the words behind the fold, and the
+ * button that sends them.
+ *
+ * Nothing here is offered as a mode to pick. Where the ask takes what it is
+ * given from is read off the panel rather than chosen on it: a node the wiring
+ * feeds comes up folded and takes what arrives; unfolding the words turns the
+ * ask to what the prompt points at; a node nothing arrives at keeps a list by
+ * hand. What it asks to do follows the same way: an image asked with a picture
+ * among its inputs changes that picture, and every other ask starts over.
  *
  * A DOM panel under the node rather than part of its card, because a card drawn
  * on a canvas has no room for a form and a child element in it would break the
@@ -181,6 +202,14 @@ export function PromptPanel() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [offering, setOffering] = useState(false);
   const [picking, setPicking] = useState(false);
+  /** Whether the words are out, which is now where the inputs come from. */
+  const [promptShown, setPromptShown] = useState(true);
+  /** The size the reader dragged the field to, or null for the node's own. */
+  const [fieldSize, setFieldSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const foldedFor = useRef<NodeId | null>(null);
 
   // Built once per document rather than once per keystroke: a project may hold
   // thousands of assets and the field asks after every one of them.
@@ -196,6 +225,16 @@ export function PromptPanel() {
     moka?.canvas[0] ??
     null;
   const node = open && canvas ? findNode(canvas, open.nodeId) : null;
+  // Each node brings its own default: a node nothing arrives at is asked in
+  // words, so its field comes up out; a node already being fed shows what feeds
+  // it, and the words wait behind the fold until the reader asks for them.
+  if (node && canvas && foldedFor.current !== node.id) {
+    foldedFor.current = node.id;
+    setPromptShown(
+      !canvas.edges.some((edge) => edge.target.nodeId === node.id),
+    );
+    setFieldSize(null);
+  }
   // What the field may mention, worked out here rather than in it: the field
   // narrows this list on every keystroke, and walking the canvas each time it
   // does would cost more than the narrowing.
@@ -308,12 +347,44 @@ export function PromptPanel() {
   const spec = stored ?? defaultGenerationSpec(node.kind);
   if (!spec) return null;
 
-  const offered = MODES[capability];
-  // An image node already holding something is more often to be changed than
-  // started over, so that is what its panel starts on.
-  const opening: GenerationMode =
-    capability === "image" && holdsSomething(node) ? "edit" : "generate";
-  const mode = stored && offered.includes(stored.mode) ? stored.mode : opening;
+  /** Everything arriving at this node, which is what feeds a folded ask. */
+  const wired = canvas.edges.filter((edge) => edge.target.nodeId === node.id);
+
+  /**
+   * Where the ask takes what it is given from, read off the panel rather than
+   * chosen on it: the fold is the choice. Words out with nothing wired in is a
+   * list kept by hand; words out beside a wiring is the prompt's own pointing,
+   * since a reader who unfolded the field is writing the ask rather than
+   * leaving it to the wires; words folded away leaves the wiring to speak.
+   */
+  const inputModeFor = (shown: boolean): GenerationInputMode => {
+    if (wired.length > 0) return shown ? "mentions" : "upstream";
+    return mentionNodeIds(prompt).length > 0 ? "mentions" : "manual";
+  };
+
+  /**
+   * What this kind of node is being asked to do, which nothing is offered as a
+   * choice either: an image asked with a picture among its inputs is changing
+   * that picture, and every other ask anywhere is starting over.
+   */
+  const modeFor = (taken: GenerationInputMode): GenerationMode => {
+    if (capability !== "image") return "generate";
+    const fed =
+      taken === "upstream"
+        ? wired.map((edge) => edge.source.nodeId)
+        : taken === "manual"
+          ? spec.referenceNodeIds
+          : mentionNodeIds(prompt);
+    return fed.some((id) => {
+      const source = findNode(canvas, id);
+      return source !== undefined && holdsAnImage(source, resources);
+    })
+      ? "edit"
+      : "generate";
+  };
+
+  const inputMode = inputModeFor(promptShown);
+  const mode = modeFor(inputMode);
   const models = modelOptionsFor(view, capability);
   const going = run !== null && isGoing(run.status);
   const stopping = run !== null && going && run.cancelRequested;
@@ -362,6 +433,7 @@ export function PromptPanel() {
       {
         ...spec,
         mode,
+        inputMode,
         prompt,
         ...patch,
         updatedAt: nowIso(),
@@ -394,18 +466,14 @@ export function PromptPanel() {
   };
 
   /**
-   * Takes the words as they are typed, and writes through the one thing about
-   * them that is a choice rather than a draft of one.
+   * Takes the words as they are typed.
    *
-   * A mention reaches a provider only where the ask takes its context from the
-   * prompt, so leaving the mode on upstream would let the field draw a reference
-   * that nothing will send — the disagreement this panel exists to prevent.
+   * Nothing is written through here any more: where the ask takes its inputs
+   * from is read off the fold and the words themselves, so a keystroke is only
+   * ever a draft.
    */
   const changePrompt = (next: string) => {
     setPrompt(next);
-    if (spec.inputMode === "mentions") return;
-    if (mentionSpans(next).length <= mentionSpans(prompt).length) return;
-    commit({ inputMode: "mentions", prompt: next });
   };
 
   /**
@@ -509,6 +577,21 @@ export function PromptPanel() {
 
   const dismiss = () => useEditorStore.getState().closePromptPanel();
 
+  /**
+   * Folds the words away, or brings them back.
+   *
+   * The fold is now where the ask takes its inputs from, so an ask already in
+   * the document is written again as the fold moves: a spec left saying
+   * "mentions" over a folded field would send nothing at all.
+   */
+  const fold = () => {
+    const shown = !promptShown;
+    setPromptShown(shown);
+    if (!stored) return;
+    const taken = inputModeFor(shown);
+    commit({ inputMode: taken, mode: modeFor(taken) });
+  };
+
   // The camera is read for its own sake as much as for the zoom: it is what
   // re-renders the panel as the view moves, since worldToClient answers from the
   // live camera without telling anyone it changed.
@@ -521,13 +604,15 @@ export function PromptPanel() {
   // a second reading of it that only ever decides how much room to leave is
   // not one that can disagree with what is drawn.
   const references =
-    spec.inputMode === "upstream"
-      ? canvas.edges.filter((edge) => edge.target.nodeId === node.id).length
-      : spec.inputMode === "manual"
+    inputMode === "upstream"
+      ? wired.length
+      : inputMode === "manual"
         ? spec.referenceNodeIds.length
         : 0;
+  const fieldHeight = fieldSize?.height ?? FIELD_HEIGHT;
   const tall =
     (paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT) +
+    (promptShown ? fieldHeight : 0) +
     PANEL_HEIGHT_REFERENCES +
     (references === 0 ? PANEL_HEIGHT_COUNT : 0) +
     (picking ? PANEL_HEIGHT_OFFER : 0) +
@@ -535,15 +620,27 @@ export function PromptPanel() {
     (counted ? PANEL_HEIGHT_COUNT : 0) +
     (dangling ? PANEL_HEIGHT_COUNT : 0) +
     (offering ? PANEL_HEIGHT_OFFER : 0) +
-    Math.ceil((chips + references) / 2) * PANEL_HEIGHT_CHIPS;
+    Math.ceil(((promptShown ? chips : 0) + references) / 2) *
+      PANEL_HEIGHT_CHIPS;
+  // As wide as the node it belongs to asks for, times a little for the words:
+  // a panel narrower than its own node reads as belonging to something else.
+  // A field the reader dragged decides instead, since a size taken by hand is
+  // a size to keep.
+  const width = fieldSize
+    ? Math.max(PANEL_MIN_WIDTH, fieldSize.width + PANEL_CHROME)
+    : Math.min(
+        PANEL_MAX_WIDTH,
+        Math.max(
+          PANEL_MIN_WIDTH,
+          Math.round(node.bounds.width * PANEL_WIDTH_FACTOR * zoom),
+        ),
+      );
   const style: React.CSSProperties = {
-    left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${
-      PANEL_WIDTH + GAP
-    }px))`,
+    left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${width + GAP}px))`,
     top: `clamp(${GAP}px, ${(origin?.y ?? 0) + GAP * zoom}px, calc(100% - ${
       tall + GAP
     }px))`,
-    width: PANEL_WIDTH,
+    width,
   };
 
   return (
@@ -555,19 +652,20 @@ export function PromptPanel() {
       style={style}
     >
       <div className="prompt-panel-head">
-        <div aria-label="Mode" className="prompt-panel-modes" role="group">
-          {offered.map((option) => (
-            <button
-              aria-pressed={option === mode}
-              className={option === mode ? "is-active" : ""}
-              key={option}
-              onClick={() => commit({ mode: option })}
-              type="button"
-            >
-              {MODE_LABELS[option]}
-            </button>
-          ))}
-        </div>
+        <button
+          aria-expanded={promptShown}
+          aria-label="Prompt"
+          className="prompt-panel-fold"
+          onClick={fold}
+          title={
+            promptShown
+              ? "Fold the prompt away and take what is given from the wiring"
+              : "Unfold the prompt and say in words what is given"
+          }
+          type="button"
+        >
+          {promptShown ? "▾" : "▸"} Prompt
+        </button>
         <button
           aria-label="Close the generation panel"
           className="prompt-panel-close"
@@ -614,32 +712,39 @@ export function PromptPanel() {
         node={node}
         onCut={(edge) => disconnectEdge(edge.id)}
         onFind={locate}
-        onMode={(mode) => commit({ inputMode: mode })}
         onMove={(edge, portId) => moveInput(edge.id, portId)}
         onPicking={setPicking}
         onPoint={(nodeIds) => commit({ referenceNodeIds: nodeIds })}
         onTakeAsset={(assetId) => void takeAsset(assetId)}
         onTakeFiles={takeFiles}
         resources={resources}
-        spec={spec}
+        // The panel's own reading of where the ask takes its inputs from,
+        // rather than the document's: the fold has just moved and the document
+        // catches up when something is written.
+        spec={{ ...spec, inputMode }}
       />
 
-      <MentionField
-        canvas={canvas}
-        choices={choices}
-        inputRef={areaRef}
-        issues={issues}
-        key={`prompt-${node.id}`}
-        label={`Prompt for ${node.title}`}
-        onChange={changePrompt}
-        onCommit={commitPrompt}
-        onDismiss={dismiss}
-        onOffer={setOffering}
-        onSubmit={() => void ask()}
-        placeholder="What should this node make?"
-        resources={resources}
-        value={prompt}
-      />
+      {promptShown && (
+        <MentionField
+          canvas={canvas}
+          choices={choices}
+          fieldSize={fieldSize}
+          inputRef={areaRef}
+          issues={issues}
+          key={`prompt-${node.id}`}
+          label={`Prompt for ${node.title}`}
+          offerAtCaret
+          onChange={changePrompt}
+          onCommit={commitPrompt}
+          onDismiss={dismiss}
+          onFieldResize={setFieldSize}
+          onOffer={setOffering}
+          onSubmit={() => void ask()}
+          placeholder="What should this node make?"
+          resources={resources}
+          value={prompt}
+        />
+      )}
 
       {dangling && (
         <p className="prompt-panel-warn" role="alert">

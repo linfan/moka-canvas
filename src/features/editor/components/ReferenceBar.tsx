@@ -3,7 +3,6 @@ import {
   findNode,
   type AssetId,
   type CanvasDocument,
-  type GenerationInputMode,
   type GenerationSpec,
   type NodeId,
   type PortDefinition,
@@ -23,21 +22,9 @@ import { useEditorStore } from "../stores/editorStore";
 /**
  * Where an ask takes what it is given from.
  *
- * Named for what the reader does rather than for the mechanism: the wiring is
- * one way to hand a node something, a list kept by hand is another, and the
- * prompt's own pointing is a third.
+ * No longer a choice on the bar: the fold beside the prompt decides it, and the
+ * bar only shows what the decision means for what will be sent.
  */
-const MODE_LABELS: Record<GenerationInputMode, string> = {
-  upstream: "Wired in",
-  manual: "By hand",
-  mentions: "In the prompt",
-};
-
-const MODES: readonly GenerationInputMode[] = [
-  "upstream",
-  "manual",
-  "mentions",
-];
 
 /** One edge arriving at this node, which is one thing it is being given. */
 interface Arrival {
@@ -117,8 +104,6 @@ export interface ReferenceBarProps {
   onCut: (edge: WorkflowEdge) => void;
   /** Brings a node into view on the canvas. */
   onFind: (nodeId: NodeId) => void;
-  /** Chooses where the ask takes what it is given from. */
-  onMode: (mode: GenerationInputMode) => void;
   /** Moves an arrival to another of this node's inputs. */
   onMove: (edge: WorkflowEdge, portId: string) => void;
   /**
@@ -151,7 +136,6 @@ export function ReferenceBar({
   spec,
   onCut,
   onFind,
-  onMode,
   onMove,
   onPoint,
   onPicking,
@@ -218,36 +202,6 @@ export function ReferenceBar({
       }}
       role="group"
     >
-      <div
-        aria-label="Where the ask takes what it is given from"
-        className="reference-modes"
-        role="group"
-      >
-        {MODES.map((mode) => (
-          <button
-            aria-pressed={mode === spec.inputMode}
-            className={mode === spec.inputMode ? "is-active" : ""}
-            key={mode}
-            onClick={() => onMode(mode)}
-            title={
-              mode === "upstream"
-                ? "Whatever is connected to this node is what it is given"
-                : mode === "manual"
-                  ? "Only the nodes listed here, in this order"
-                  : "Only the nodes the prompt points at with @"
-            }
-            type="button"
-          >
-            {MODE_LABELS[mode]}
-            {mode === "upstream" && arrivals.length > 0
-              ? ` ${arrivals.length}`
-              : mode === "manual" && pointed.length > 0
-                ? ` ${pointed.length}`
-                : ""}
-          </button>
-        ))}
-      </div>
-
       {spec.inputMode === "upstream" &&
         (arrivals.length === 0 ? (
           <p className="reference-empty">

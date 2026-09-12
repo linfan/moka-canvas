@@ -1133,13 +1133,24 @@ export async function attachAssetsToNode(
   }
   if (made.length === 0) return;
   const spec = (target.data as { generation?: GenerationSpec }).generation;
-  if (spec?.inputMode === "manual") {
-    setNodeGeneration(canvas.id, targetNodeId, {
-      ...spec,
-      referenceNodeIds: [...spec.referenceNodeIds, ...made],
-      updatedAt: nowIso(),
-    });
-    return;
+  // Where the ask keeps a list by hand, the new nodes join it. Read off the
+  // spec where there is one, and off the wiring where there is not: a node
+  // nothing arrives at keeps a list, which is the panel's own default.
+  const wired = canvas.edges.some(
+    (edge) => edge.target.nodeId === targetNodeId,
+  );
+  const byHand = spec ? spec.inputMode === "manual" : !wired;
+  if (byHand) {
+    const base = spec ?? defaultGenerationSpec(target.kind);
+    if (base) {
+      setNodeGeneration(canvas.id, targetNodeId, {
+        ...base,
+        inputMode: "manual",
+        referenceNodeIds: [...base.referenceNodeIds, ...made],
+        updatedAt: nowIso(),
+      });
+      return;
+    }
   }
   const unwired = made.filter((nodeId) => !feedInto(nodeId, targetNodeId));
   if (unwired.length > 0) {

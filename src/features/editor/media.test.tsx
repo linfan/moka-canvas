@@ -14,6 +14,7 @@ import {
   goldenNodeIds,
 } from "../../shared/domain/fixtures";
 import type {
+  GenerationSpec,
   MediaNodeData,
   MokaFile,
   NodeData,
@@ -696,7 +697,7 @@ describe("editor shell integration", () => {
     expect(canvas.nodes).toHaveLength(5);
   });
 
-  it("files and wires a file dropped on what the node is given", async () => {
+  it("files and lists a file dropped on what the node is given", async () => {
     const ids = goldenNodeIds();
     await openGolden();
     await screen.findByRole("button", { name: "Canvas 1" });
@@ -725,14 +726,19 @@ describe("editor shell integration", () => {
 
     const canvas = useProjectStore.getState().moka!.canvas[0];
     const made = canvas.nodes.find((node) => node.title === "drop.png")!;
-    // One node, wired in: the canvas under the panel did not take the same
+    // One node, listed by hand: nothing is wired into this node, so what it is
+    // given is a list, and the canvas under the panel did not take the same
     // drop a second time.
     expect(canvas.nodes).toHaveLength(5);
-    expect(canvas.edges).toContainEqual(
-      expect.objectContaining({
-        source: { nodeId: made.id, portId: "out" },
-        target: { nodeId: ids.image, portId: "images" },
-      }),
+    const spec = (
+      canvas.nodes.find((node) => node.id === ids.image)!.data as {
+        generation?: GenerationSpec;
+      }
+    ).generation;
+    expect(spec?.inputMode).toBe("manual");
+    expect(spec?.referenceNodeIds).toEqual([made.id]);
+    expect(canvas.edges.some((edge) => edge.target.nodeId === ids.image)).toBe(
+      false,
     );
   });
 

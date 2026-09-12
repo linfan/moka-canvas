@@ -116,7 +116,6 @@ const SHEET = sheet(
 
 const cut = vi.fn();
 const find = vi.fn();
-const mode = vi.fn();
 const move = vi.fn();
 const point = vi.fn();
 const picking = vi.fn();
@@ -143,7 +142,6 @@ function Bar({
       node={node}
       onCut={cut}
       onFind={find}
-      onMode={mode}
       onMove={move}
       onPicking={picking}
       onPoint={point}
@@ -188,16 +186,7 @@ function carryingFiles(files: File[]) {
 const FILE = new File(["x"], "lantern.png", { type: "image/png" });
 
 beforeEach(() => {
-  for (const spy of [
-    cut,
-    find,
-    mode,
-    move,
-    point,
-    picking,
-    tookAsset,
-    tookFiles,
-  ]) {
+  for (const spy of [cut, find, move, point, picking, tookAsset, tookFiles]) {
     spy.mockClear();
   }
 });
@@ -212,10 +201,6 @@ describe("what is wired in", () => {
     expect(words.textContent).toContain("Prompt");
     expect(picture.textContent).toContain("Plate");
     expect(picture.textContent).toContain("Images");
-    // Counted on the mode that is showing them, where it can be seen at a glance.
-    expect(screen.getByRole("button", { name: /Wired in/ }).textContent).toBe(
-      "Wired in 2",
-    );
   });
 
   it("says so when nothing is", () => {
@@ -283,16 +268,13 @@ describe("what is wired in", () => {
 });
 
 describe("where the ask takes what it is given from", () => {
-  it("is a choice, and the one showing is the one written", () => {
+  it("is not a choice on the bar: the fold beside the prompt decides", () => {
     render(<Bar inputMode="manual" referenceNodeIds={["n-plate"]} />);
-    const chosen = screen.getByRole("button", { name: /By hand/ });
-    expect(chosen).toHaveProperty("ariaPressed", "true");
-    expect(chosen.textContent).toBe("By hand 1");
-
-    fireEvent.click(screen.getByRole("button", { name: /Wired in/ }));
-    expect(mode).toHaveBeenCalledWith("upstream");
-    fireEvent.click(screen.getByRole("button", { name: /In the prompt/ }));
-    expect(mode).toHaveBeenCalledWith("mentions");
+    expect(screen.queryByRole("button", { name: /By hand/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Wired in/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /In the prompt/ })).toBeNull();
+    // And what the fold decided is simply shown, here the list by hand.
+    expect(rows()[0].textContent).toContain("Plate");
   });
 
   it("says what the prompt's own pointing means for what will be sent", () => {

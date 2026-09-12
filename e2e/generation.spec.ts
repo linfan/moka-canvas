@@ -357,7 +357,10 @@ test("a run that gave up leaves its mark, and its reason where pointed at", asyn
   });
 
   // The card keeps what it held and gains a mark in its corner. The mark is too
-  // small to carry the reason, so pointing at the card asks for it.
+  // small to carry the reason, so pointing at the card asks for it. The panel
+  // that came up with the selection hangs over the card, and the note is read
+  // by pointing at the card itself, so the panel goes away first.
+  await page.keyboard.press("Escape");
   const surface = await page.getByTestId("canvas-surface").boundingBox();
   await page.mouse.move(
     surface!.x + surface!.width * 0.55,
@@ -515,6 +518,9 @@ test("what the preview shows is what the provider is handed", async ({
     x: surface!.x + surface!.width / 2,
     y: surface!.y + surface!.height / 2,
   };
+  // The panel that came up with the selection covers the card it belongs to,
+  // and the menu is asked for on the card itself, so the panel goes away first.
+  await page.keyboard.press("Escape");
   await page.mouse.click(middle.x, middle.y, { button: "right" });
 
   // Words are a place to start from: what is made of them is fed by them and

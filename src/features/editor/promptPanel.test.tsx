@@ -423,31 +423,55 @@ describe("the generation panel", () => {
     expect(screen.queryByRole("menuitem", { name: "Generate…" })).toBeNull();
   });
 
-  it("offers only the modes its kind of node can be asked in", async () => {
+  it("has one fold in place of a choice of modes", async () => {
     await openEditor();
-    // An image holding something starts on changing it rather than starting over.
     selectNode(ids.image);
     await settle();
-    const modes = within(panel()).getByRole("group", { name: "Mode" });
-    expect(
-      within(modes)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Generate", "Edit"]);
-    expect(
-      within(modes)
-        .getByRole("button", { name: "Edit" })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
+    expect(within(panel()).queryByRole("group", { name: "Mode" })).toBeNull();
+    // Nothing is wired into this node, so the words are out from the start.
+    const fold = within(panel()).getByRole("button", { name: "Prompt" });
+    expect(fold).toHaveProperty("ariaExpanded", "true");
 
-    selectNode(ids.text);
+    fireEvent.click(fold);
     await settle();
-    const textModes = within(panel()).getByRole("group", { name: "Mode" });
+    expect(fold).toHaveProperty("ariaExpanded", "false");
     expect(
-      within(textModes)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Generate", "Question", "Extend"]);
+      within(panel()).queryByRole("textbox", { name: /Prompt for/ }),
+    ).toBeNull();
+  });
+
+  it("folds the words away for a node the wiring already feeds", async () => {
+    const fed = withFedNode();
+    await openEditor();
+    selectNode(fed);
+    await settle();
+    const fold = within(panel()).getByRole("button", { name: "Prompt" });
+    expect(fold).toHaveProperty("ariaExpanded", "false");
+    expect(
+      within(panel()).queryByRole("textbox", { name: /Prompt for/ }),
+    ).toBeNull();
+
+    // An ask written while folded takes what arrives on the wiring.
+    fireEvent.click(within(panel()).getByRole("button", { name: "Preview" }));
+    await settle();
+    expect(specOf(fed)?.inputMode).toBe("upstream");
+
+    // Unfolding the words by hand turns the ask to what the prompt points at.
+    fireEvent.click(fold);
+    await settle();
+    expect(specOf(fed)?.inputMode).toBe("mentions");
+  });
+
+  it("asks an image node to change what arrives when a picture arrives", async () => {
+    const fed = withPictureFedNode();
+    await openEditor();
+    selectNode(fed);
+    await settle();
+    fireEvent.click(within(panel()).getByRole("button", { name: "Preview" }));
+    await settle();
+    // A picture among the inputs, so the ask is to change it rather than to
+    // start over; and nothing is offered as a choice anywhere.
+    expect(specOf(fed)?.mode).toBe("edit");
   });
 
   it("writes the prompt when the field loses focus", async () => {
@@ -464,8 +488,10 @@ describe("the generation panel", () => {
     await settle();
     const spec = specOf(ids.image);
     expect(spec?.prompt).toBe("A poster of the lake");
-    // The mode on show is the mode written, not the spec's own default.
-    expect(spec?.mode).toBe("edit");
+    // Nothing arrives at this node, so the ask starts over and the words are
+    // kept beside a list by hand rather than taken from a wiring.
+    expect(spec?.mode).toBe("generate");
+    expect(spec?.inputMode).toBe("manual");
   });
 
   it("writes nothing when it came up on its own and nothing was typed", async () => {
@@ -886,6 +912,36 @@ function withFedNode() {
   return target.id;
 }
 
+/**
+ * A document with one empty image node that words and a picture arrive at,
+ * which is a node asked to change what arrives rather than to start over.
+ */
+function withPictureFedNode() {
+  const moka = buildGoldenMokaFile();
+  const words = createNode("text", { x: 800, y: 400 });
+  const source = createNode("image", { x: 800, y: 0 });
+  const target = createNode("image", { x: 1200, y: 0 });
+  words.data = { content: "Paint it over at dusk." };
+  source.data = { assetId: ids.assetImage };
+  moka.canvas[0].nodes.push(words, source, target);
+  moka.canvas[0].edges.push(
+    {
+      id: "edge-picture",
+      source: { nodeId: source.id, portId: "out" },
+      target: { nodeId: target.id, portId: "images" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      id: "edge-words",
+      source: { nodeId: words.id, portId: "out" },
+      target: { nodeId: target.id, portId: "prompt" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  );
+  api.moka = () => moka;
+  return target.id;
+}
+
 /** Opens the editor on a run the server is already holding for the image node. */
 async function openWithRun(run: RunRecord) {
   api.runs = [run];
@@ -1194,28 +1250,32 @@ describe("a prompt that points at other nodes", () => {
     return within(panel()).getByRole("textbox");
   }
 
-  it("takes the ask out of the upstream when a mention is written into it", async () => {
+  it("takes the ask out of the by-hand list when a mention is written into it", async () => {
     await openEditor();
+    // Nothing is wired into this node, so with the words out it starts as a
+    // list kept by hand.
     selectNode(ids.image);
     await settle();
     type("A heron at dawn");
     fireEvent.blur(prompt());
     await settle();
-    expect(specOf(ids.image)?.inputMode).toBe("upstream");
+    expect(specOf(ids.image)?.inputMode).toBe("manual");
 
     // A mention reaches a provider only where the ask takes its context from
-    // the prompt, so writing one carries the node into that mode with it.
+    // the prompt, so writing one carries the node into that mode with it. The
+    // mode is read off the words rather than chosen, so it follows them.
     type(`Paint over @[node:${ids.text}]`);
+    fireEvent.blur(prompt());
     await settle();
     expect(specOf(ids.image)?.inputMode).toBe("mentions");
     expect(specOf(ids.image)?.prompt).toContain(`@[node:${ids.text}]`);
 
-    // Taking the mention back out does not take the choice with it. The mode
-    // is written where it can be read, so moving it on its own would pull the
-    // inputs out from under whoever is looking at them.
+    // Taking the mention back out takes the ask back to the list by hand,
+    // since there is no longer a pointing in the words to send by.
     type("Paint over the lake");
+    fireEvent.blur(prompt());
     await settle();
-    expect(specOf(ids.image)?.inputMode).toBe("mentions");
+    expect(specOf(ids.image)?.inputMode).toBe("manual");
   });
 });
 
@@ -1233,15 +1293,11 @@ describe("what a node is given", () => {
     await openEditor();
     selectNode(ids.image);
     await settle();
-    expect(given().textContent).toContain(
-      "Nothing is wired into this node yet.",
-    );
+    // Nothing is wired into this node, so what it is given starts as a list
+    // kept by hand, with no place to choose to be reached first.
+    expect(given().textContent).toContain("Nothing is listed yet.");
 
-    fireEvent.click(within(given()).getByRole("button", { name: /By hand/ }));
-    await settle();
-    expect(specOf(ids.image)?.inputMode).toBe("manual");
     const before = steps();
-
     fireEvent.click(within(given()).getByRole("button", { name: "Point at…" }));
     await settle();
     fireEvent.click(
@@ -1250,6 +1306,7 @@ describe("what a node is given", () => {
       ).getByRole("button", { name: /Brief/ }),
     );
     await settle();
+    expect(specOf(ids.image)?.inputMode).toBe("manual");
     expect(specOf(ids.image)?.referenceNodeIds).toEqual([ids.text]);
     // One step, so one undo takes the list back whole rather than halfway.
     expect(steps()).toBe(before + 1);

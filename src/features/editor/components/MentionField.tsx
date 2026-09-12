@@ -45,6 +45,62 @@ function MentionLook({
   );
 }
 
+/** The size a dragged field is held within, so it stays a field. */
+const FIELD_MIN_WIDTH = 220;
+const FIELD_MIN_HEIGHT = 60;
+
+/**
+ * Where the caret sits inside a field, in the field's own coordinates.
+ *
+ * A textarea keeps no map of its own lines, so the words up to the caret are
+ * laid out a second time in a mirror of the field — same font, same width,
+ * same wrapping — and the point the mirror puts them down at is the point the
+ * field has put the caret at. The mirror never shows; it exists to be measured
+ * and to be taken away again.
+ */
+function caretPoint(
+  area: HTMLTextAreaElement,
+  at: number,
+): { left: number; top: number } | null {
+  const style = window.getComputedStyle(area);
+  const mirror = document.createElement("div");
+  for (const prop of [
+    "borderWidth",
+    "boxSizing",
+    "fontFamily",
+    "fontSize",
+    "fontStyle",
+    "fontWeight",
+    "letterSpacing",
+    "lineHeight",
+    "paddingBottom",
+    "paddingLeft",
+    "paddingRight",
+    "paddingTop",
+    "textIndent",
+    "textTransform",
+    "wordSpacing",
+  ] as const) {
+    mirror.style[prop] = style[prop];
+  }
+  mirror.style.overflowWrap = "break-word";
+  mirror.style.position = "absolute";
+  mirror.style.visibility = "hidden";
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.width = `${area.clientWidth}px`;
+  mirror.textContent = area.value.slice(0, at);
+  const mark = document.createElement("span");
+  mark.textContent = "\u200b";
+  mirror.appendChild(mark);
+  document.body.appendChild(mirror);
+  const point = {
+    left: mark.offsetLeft - area.scrollLeft,
+    top: mark.offsetTop + mark.offsetHeight - area.scrollTop,
+  };
+  mirror.remove();
+  return point;
+}
+
 /** A candidate row, carrying the place it holds in the keyboard's own list. */
 interface OfferRow {
   label: string;
@@ -56,8 +112,8 @@ interface OfferRow {
  * The prompt field, which knows that `@[node:<id>]` points at another card
  * rather than being prose.
  *
- * A textarea with the mentions offered over it and listed under it, rather than
- * a rich field with the tokens hidden inside. A token is forty-four characters
+ * A textarea with the mentions offered at the caret and listed under it, rather
+ * than a rich field with the tokens hidden inside. A token is forty-four characters
  * across and a chip is not, so a chip laid over the words would put every
  * character behind it somewhere the caret is not — and an input method
  * composing under a transparent caret composes where nobody can read it. So the
@@ -78,8 +134,11 @@ export function MentionField({
   label,
   placeholder,
   inputRef,
+  fieldSize = null,
+  offerAtCaret = false,
   onChange,
   onCommit,
+  onFieldResize,
   onSubmit,
   onDismiss,
   onOffer,
@@ -99,9 +158,20 @@ export function MentionField({
   label: string;
   placeholder: string;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  /** The size the reader dragged the field to, or null for its own default. */
+  fieldSize?: { width: number; height: number } | null;
+  /**
+   * Whether the offer hangs from the @ itself rather than from an edge of the
+   * field. Asked for by a panel whose field stands alone on the canvas, where
+   * an offer at the foot of a tall field is easy to miss; a panel that keeps
+   * its field at the foot of a column leaves the offer where the CSS puts it.
+   */
+  offerAtCaret?: boolean;
   onChange: (next: string) => void;
   /** Losing focus, with the field's words as they stand. */
   onCommit: () => void;
+  /** The reader dragged the field's corner, which the panel grows with. */
+  onFieldResize?: (size: { width: number; height: number }) => void;
   onSubmit: () => void;
   onDismiss: () => void;
   /**
@@ -119,6 +189,10 @@ export function MentionField({
   );
   const [active, setActive] = useState(0);
   const [looked, setLooked] = useState<number | null>(null);
+  /** Where the @ being typed sits, which is where the offer hangs from. */
+  const [caret, setCaret] = useState<{ left: number; top: number } | null>(
+    null,
+  );
 
   const groups = useMemo(
     () => narrowMentions(choices, typed?.query ?? ""),
@@ -148,10 +222,19 @@ export function MentionField({
    * from: moving through a list with the arrow keys moves the caret nowhere, and
    * a field that forgot the selection at every key could not be driven by one.
    */
-  const retake = (prompt: string, caret: number) => {
-    const next = mentionBeingTyped(prompt, caret);
+  const retake = (prompt: string, caretAt: number) => {
+    const next = mentionBeingTyped(prompt, caretAt);
     if (next?.query !== typed?.query) setActive(0);
     setTyped(next);
+    // Hung from the @ itself rather than from the foot of the field: an offer
+    // that appears where the point of the sentence is cannot be missed, and
+    // one at the other end of a tall field can.
+    const area = inputRef.current;
+    setCaret(
+      next && offerAtCaret && area
+        ? caretPoint(area, Math.min(next.start, area.value.length))
+        : null,
+    );
   };
 
   const insert = (choice: MentionChoice) => {
@@ -175,6 +258,39 @@ export function MentionField({
   const remove = (span: MentionSpan) => {
     onChange(value.slice(0, span.start) + value.slice(span.end));
     setLooked(null);
+  };
+
+  /**
+   * Takes the field's corner and drags it.
+   *
+   * The size is handed up rather than held here: the panel is as wide as the
+   * field asks it to be, and only the panel knows what else has to move along.
+   */
+  const resize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const area = inputRef.current;
+    if (!area || !onFieldResize) return;
+    event.preventDefault();
+    const start = {
+      x: event.clientX,
+      y: event.clientY,
+      width: area.offsetWidth,
+      height: area.offsetHeight,
+    };
+    const move = (moved: PointerEvent) => {
+      onFieldResize({
+        width: Math.max(FIELD_MIN_WIDTH, start.width + moved.clientX - start.x),
+        height: Math.max(
+          FIELD_MIN_HEIGHT,
+          start.height + moved.clientY - start.y,
+        ),
+      });
+    };
+    const letGo = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", letGo);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", letGo);
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -237,35 +353,60 @@ export function MentionField({
 
   return (
     <div className="mention-field">
-      <textarea
-        aria-activedescendant={
-          offered && rows[chosen] ? `${listId}-${chosen}` : undefined
-        }
-        aria-controls={listId}
-        aria-expanded={offered}
-        aria-label={label}
-        className="prompt-panel-input"
-        onBlur={() => {
-          setTyped(null);
-          onCommit();
-        }}
-        onChange={(event) => {
-          const { value: next, selectionStart } = event.target;
-          onChange(next);
-          retake(next, selectionStart ?? next.length);
-        }}
-        onClick={(event) =>
-          retake(event.currentTarget.value, event.currentTarget.selectionStart)
-        }
-        onKeyDown={onKeyDown}
-        onKeyUp={(event) =>
-          retake(event.currentTarget.value, event.currentTarget.selectionStart)
-        }
-        placeholder={placeholder}
-        ref={inputRef}
-        rows={3}
-        value={value}
-      />
+      <div className="mention-field-area">
+        <textarea
+          aria-activedescendant={
+            offered && rows[chosen] ? `${listId}-${chosen}` : undefined
+          }
+          aria-controls={listId}
+          aria-expanded={offered}
+          aria-label={label}
+          className="prompt-panel-input"
+          onBlur={() => {
+            setTyped(null);
+            setCaret(null);
+            onCommit();
+          }}
+          onChange={(event) => {
+            const { value: next, selectionStart } = event.target;
+            onChange(next);
+            retake(next, selectionStart ?? next.length);
+          }}
+          onClick={(event) =>
+            retake(
+              event.currentTarget.value,
+              event.currentTarget.selectionStart,
+            )
+          }
+          onKeyDown={onKeyDown}
+          onKeyUp={(event) =>
+            retake(
+              event.currentTarget.value,
+              event.currentTarget.selectionStart,
+            )
+          }
+          placeholder={placeholder}
+          ref={inputRef}
+          rows={5}
+          style={
+            fieldSize
+              ? {
+                  height: `${fieldSize.height}px`,
+                  width: `${fieldSize.width}px`,
+                }
+              : undefined
+          }
+          value={value}
+        />
+        {onFieldResize && (
+          <div
+            aria-hidden="true"
+            className="mention-field-grip"
+            onPointerDown={resize}
+            title="Drag to make the prompt field wider or taller"
+          />
+        )}
+      </div>
 
       {offered && (
         <div
@@ -273,6 +414,27 @@ export function MentionField({
           className="mention-offer"
           id={listId}
           role="listbox"
+          style={
+            caret
+              ? {
+                  bottom: "auto",
+                  // Kept off the field's right edge, where it would hang over
+                  // the panel and read as belonging to the canvas instead.
+                  left: `${Math.max(
+                    0,
+                    Math.min(
+                      caret.left,
+                      Math.max(
+                        0,
+                        (inputRef.current?.clientWidth ?? caret.left + 180) -
+                          180,
+                      ),
+                    ),
+                  )}px`,
+                  top: `${caret.top}px`,
+                }
+              : undefined
+          }
         >
           {rows.length === 0 && (
             <p className="prompt-panel-note">

@@ -1608,7 +1608,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .prompt-panel-modes button,
-.prompt-panel-close {
+.prompt-panel-close,
+.prompt-panel-fold {
   border-radius: 6px;
   font-size: 11px;
   padding: 4px 7px;
@@ -1616,6 +1617,18 @@ button.danger:hover:not(:disabled) {
 
 .prompt-panel-modes button {
   flex: 1;
+}
+
+/* The one control left in the head: the words behind it are either out or
+   folded away, and where the ask takes what it is given from follows. */
+.prompt-panel-fold {
+  color: var(--muted);
+  flex: 1;
+  text-align: left;
+}
+
+.prompt-panel-fold[aria-expanded="true"] {
+  color: inherit;
 }
 
 .prompt-panel-close {
@@ -1635,9 +1648,36 @@ button.danger:hover:not(:disabled) {
 }
 
 .prompt-panel-input {
-  font-size: 12px;
-  min-height: 58px;
-  padding: 6px 8px;
+  box-sizing: border-box;
+  font-size: 13px;
+  min-height: 120px;
+  padding: 8px 10px;
+  resize: none;
+  width: 100%;
+}
+
+/* The field and the corner it is dragged by, which is the panel's own width
+   and height as much as the field's. */
+.mention-field-area {
+  display: grid;
+  position: relative;
+}
+
+.mention-field-grip {
+  border-bottom: 9px solid var(--muted);
+  border-left: 9px solid transparent;
+  border-radius: 0 0 4px;
+  bottom: 1px;
+  cursor: nwse-resize;
+  height: 0;
+  opacity: 0.5;
+  position: absolute;
+  right: 1px;
+  width: 0;
+}
+
+.mention-field-grip:hover {
+  opacity: 1;
 }
 
 .prompt-panel-count {
@@ -2190,18 +2230,6 @@ button.danger:hover:not(:disabled) {
 .reference-bar.is-dropping {
   outline: 1px dashed var(--muted);
   outline-offset: 3px;
-}
-
-.reference-modes {
-  display: flex;
-  gap: 4px;
-}
-
-.reference-modes button {
-  border-radius: 6px;
-  flex: 1;
-  font-size: 11px;
-  padding: 3px 6px;
 }
 
 .reference-empty {
