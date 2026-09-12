@@ -109,7 +109,8 @@ pub fn ensure_isolated(dir: &Path, static_dir: &Path) -> Result<PathBuf, ConfigE
         )));
     }
     let resolved = normalize(dir);
-    for forbidden in forbidden_roots(static_dir) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    for forbidden in forbidden_roots(static_dir, &cwd) {
         if is_within(&resolved, &forbidden) {
             return Err(ConfigError::MetadataDirInvalid(format!(
                 "{} must not live inside {}",
@@ -129,17 +130,31 @@ pub fn ensure_isolated(dir: &Path, static_dir: &Path) -> Result<PathBuf, ConfigE
     Ok(resolved)
 }
 
-fn forbidden_roots(static_dir: &Path) -> Vec<PathBuf> {
+/// The directories the metadata directory may not sit inside.
+///
+/// A filesystem root is deliberately absent from the result: it is not the
+/// program's tree, and since every absolute path starts with it, keeping it
+/// would reject the one directory the app always resolves to. That is not
+/// hypothetical — Finder launches the app with the working directory set to
+/// `/`, so a root kept as a forbidden root turns every launch from the Dock,
+/// a DMG, or Spotlight into a startup failure.
+fn forbidden_roots(static_dir: &Path, cwd: &Path) -> Vec<PathBuf> {
     let mut roots = vec![normalize(static_dir)];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             roots.push(normalize(parent));
         }
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.push(normalize(&cwd));
-    }
+    roots.push(normalize(cwd));
+    roots.retain(|root| !is_filesystem_root(root));
     roots
+}
+
+/// Whether `path` is the top of its filesystem — `/` on Unix, `C:\` on
+/// Windows. A root has no parent, which is exactly the property that makes it
+/// useless as a boundary: nothing is outside it.
+fn is_filesystem_root(path: &Path) -> bool {
+    path.parent().is_none()
 }
 
 fn is_within(candidate: &Path, root: &Path) -> bool {
@@ -250,6 +265,44 @@ mod tests {
         let static_dir = root.path().join("static");
         let error = ensure_isolated(&blocker.join("metadata"), &static_dir).unwrap_err();
         assert!(matches!(error, ConfigError::MetadataDirInvalid(_)));
+    }
+
+    #[test]
+    fn a_filesystem_root_is_not_a_forbidden_root() {
+        // What Finder hands the app as its working directory.
+        assert!(is_filesystem_root(Path::new("/")));
+        // What a shell in the repository hands it.
+        assert!(!is_filesystem_root(Path::new("/tmp")));
+
+        let roots = forbidden_roots(Path::new("/tmp"), Path::new("/"));
+        assert!(
+            !roots.iter().any(|root| root == Path::new("/")),
+            "a launch from / must not forbid every absolute directory: {roots:?}"
+        );
+        assert!(
+            roots
+                .iter()
+                .any(|root| root.as_os_str() == normalize(Path::new("/tmp")).as_os_str()),
+            "the static assets stay forbidden wherever the launch comes from: {roots:?}"
+        );
+    }
+
+    #[test]
+    fn a_launch_from_the_filesystem_root_still_isolates_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let static_dir = root.path().join("static");
+        std::fs::create_dir_all(&static_dir).unwrap();
+
+        // The whole rule, evaluated as a launch from `/` sees it.
+        let resolved = normalize(&root.path().join("metadata"));
+        for forbidden in forbidden_roots(&static_dir, Path::new("/")) {
+            assert!(
+                !is_within(&resolved, &forbidden),
+                "{} was rejected as inside {}",
+                resolved.display(),
+                forbidden.display()
+            );
+        }
     }
 
     #[test]

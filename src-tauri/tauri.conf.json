@@ -30,6 +30,7 @@
       "icons/moka-file.ico": "moka-file.ico"
     },
     "macOS": {
+      "signingIdentity": "-",
       "dmg": {
         "background": "installer/dmg-background.png",
         "windowSize": {

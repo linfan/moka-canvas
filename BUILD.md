@@ -62,7 +62,7 @@ Builds the frontend, compiles the `moka-server` release binary, and stages a sel
 make package-macos
 ```
 
-Produces `Moka Canvas_<version>_<arch>.dmg` (`aarch64` on Apple Silicon, `x64` on Intel), copied into `release/` (the tauri-bundler output remains under `src-tauri/target/release/bundle/dmg/`), with the branded background and app/Applications drop slots configured via `bundle.macOS.dmg` in `src-tauri/tauri.conf.json`. Unsigned; Gatekeeper may warn on first launch.
+Produces `Moka Canvas_<version>_<arch>.dmg` (`aarch64` on Apple Silicon, `x64` on Intel), copied into `release/` (the tauri-bundler output remains under `src-tauri/target/release/bundle/dmg/`), with the branded background and app/Applications drop slots configured via `bundle.macOS.dmg` in `src-tauri/tauri.conf.json`. The `.app` bundle is ad-hoc signed (`bundle.macOS.signingIdentity` = `"-"`); the DMG itself is left unsigned, which Tauri does deliberately for self-signed identities. Gatekeeper still warns on first launch because ad-hoc signatures are not notarized — right-click and choose Open.
 
 > Rebuilding deletes the previous DMG, so eject any mounted copy before running `make package-macos` again — otherwise the DMG stays mounted as a leftover volume and the Finder styling step fails with a generic `error running bundle_dmg.sh`.
 
@@ -131,4 +131,23 @@ Removes `dist/`, `release/`, `src-tauri/target/`, and TypeScript build caches (`
 
 ## Signing and notarization
 
-Release signing (Authenticode for Windows, Developer ID + notarization for macOS) requires organization-specific credentials and is out of scope for this baseline.
+### macOS ad-hoc signing (default)
+
+`bundle.macOS.signingIdentity` is set to `"-"` in `src-tauri/tauri.conf.json`, so the bundler ad-hoc signs the `.app` inside out — external binaries such as `moka-server` and any frameworks first, then the bundle itself. Without this the bundle ships with no `_CodeSignature/CodeResources` at all, only the linker-generated ad-hoc signature on each Mach-O, and `codesign --verify` fails with `code has no resources but signature indicates they must be present`. Verify a build with:
+
+```sh
+codesign --verify --verbose=3 "Moka Canvas.app"
+codesign -dv --verbose=2 "Moka Canvas.app"   # expect Sealed Resources version=2
+```
+
+Ad-hoc signing proves the bundle's contents are intact and consistent with each other. It does **not** satisfy Gatekeeper: ad-hoc signatures cannot be notarized, so a downloaded DMG still prompts, and `spctl` keeps rejecting it. It is what a build with no Apple credentials available can honestly claim, and nothing more.
+
+### Developer ID signing and notarization (release)
+
+Release signing (Authenticode for Windows, Developer ID + notarization for macOS) requires organization-specific credentials and is out of scope for this baseline. When they are available, macOS needs no config change: the CLI reads `APPLE_SIGNING_IDENTITY` and lets it win over `signingIdentity`, so a real identity is supplied per-build without editing the tracked config.
+
+```sh
+APPLE_SIGNING_IDENTITY="Developer ID Application: <org> (<team id>)" make package-macos
+```
+
+Notarization is then attempted automatically when `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` (or the `APPLE_API_KEY*` equivalents) are present, and skipped with a warning when they are not. Note that the DMG stays unsigned whenever the identity is `"-"` — Tauri skips self-signed DMGs on purpose — so signing the DMG itself also requires a real identity.
