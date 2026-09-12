@@ -930,6 +930,9 @@ pub async fn upsert_model(
     json: Result<Json<UpsertModelRequest>, JsonRejection>,
 ) -> Result<Json<ModelsView>, Problem> {
     let Json(request) = json_or_problem(json)?;
+    // Read before the write: a credential only copies into a configuration
+    // that did not exist yet, so an edit can never swap the key it has.
+    let is_new = state.models.model(&request.model.id).await.is_err();
     let record = state.models.upsert(request.model).await?;
     // Second, so a credential is never stored against a configuration that
     // was refused. Blank counts as absent: the field arrives empty on every
@@ -942,6 +945,19 @@ pub async fn upsert_model(
         .filter(|key| !key.is_empty());
     if let Some(api_key) = api_key {
         state.models.set_key(&record.id, Some(api_key)).await?;
+    } else if is_new {
+        let source = request
+            .copy_key_from
+            .as_deref()
+            .map(str::trim)
+            .filter(|source| !source.is_empty());
+        if let Some(source) = source {
+            // A source with no key — or no longer there — copies nothing;
+            // the creation itself is not something to refuse over it.
+            if let Ok(key) = state.models.credential(source).await {
+                state.models.set_key(&record.id, Some(&key)).await?;
+            }
+        }
     }
     models_view(&state).await
 }
@@ -965,17 +981,6 @@ pub async fn set_model_key(
         .models
         .set_key(&id, request.api_key.as_deref())
         .await?;
-    models_view(&state).await
-}
-
-/// Creates a new configuration from an existing one, credential included:
-/// the quick way to configure a second model that lives at the same address.
-pub async fn duplicate_model(
-    State(state): State<ApiState>,
-    Path(id): Path<String>,
-    Query(revision): Query<RevisionQuery>,
-) -> Result<Json<ModelsView>, Problem> {
-    state.models.duplicate(&id, revision.revision).await?;
     models_view(&state).await
 }
 

@@ -85,7 +85,7 @@ function ModelCard({
         <button
           aria-label={`Copy ${model.displayName}`}
           disabled={saving}
-          onClick={() => void useModelStore.getState().duplicateModel(model.id)}
+          onClick={() => useModelStore.getState().duplicateModel(model.id)}
           title="Create a new configuration from this one, key included"
           type="button"
         >
@@ -124,6 +124,7 @@ export function ModelsTab({ category }: { category: Capability }) {
   const view = useModelStore((state) => state.view);
   const saving = useModelStore((state) => state.saving);
   const editing = useModelStore((state) => state.editing);
+  const copyOf = useModelStore((state) => state.copyOf);
   const lower = CAPABILITY_LABELS[category].toLowerCase();
 
   if (editing !== null) {
@@ -133,10 +134,15 @@ export function ModelsTab({ category }: { category: Capability }) {
         : (view?.models.find((entry) => entry.id === editing) ?? null);
     // A model deleted since the editor opened is not one to keep a form on.
     if (editing === "new" || model !== null) {
+      const copySource =
+        editing === "new" && copyOf !== null
+          ? (view?.models.find((entry) => entry.id === copyOf) ?? null)
+          : null;
       return (
         <ModelEditor
           category={model?.category ?? category}
           model={model}
+          copySource={copySource}
           onDone={() => useModelStore.getState().closeEditor()}
         />
       );

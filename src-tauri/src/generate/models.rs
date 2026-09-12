@@ -318,44 +318,6 @@ impl ModelRepo {
         Ok(())
     }
 
-    /// Creates a new configuration from an existing one, credential included.
-    ///
-    /// The copy is what "quick create" means: the address, protocol, and key
-    /// are usually the parts worth repeating, and the key is the one part the
-    /// client cannot copy itself because it never sees it.
-    pub async fn duplicate(
-        &self,
-        id: &str,
-        expected_revision: Option<u64>,
-    ) -> Result<ModelRecord, ProviderError> {
-        let snapshot = self.metadata.models_snapshot().await?;
-        let source = snapshot.models.iter().find(|m| m.id == id).ok_or_else(|| {
-            ProviderError::not_found(format!("model configuration {id} does not exist"))
-        })?;
-        let new_id = unused_copy_id(&snapshot.models, id);
-        let mut display_name = format!("{} (copy)", source.display_name);
-        if display_name.chars().count() > MAX_NAME_LEN {
-            display_name = display_name.chars().take(MAX_NAME_LEN).collect();
-        }
-        let draft = ModelDraft {
-            id: new_id.clone(),
-            category: source.category,
-            protocol: source.protocol.clone(),
-            url: source.url.clone(),
-            model: source.model.clone(),
-            display_name,
-            enabled: source.enabled,
-            expected_revision,
-        };
-        let record = self.metadata.upsert_model(&draft).await?;
-        // Copied after the configuration exists, so a credential is never left
-        // pointing at a configuration that was refused.
-        if let Some(key) = self.metadata.get_secret(id).await? {
-            self.metadata.put_secret(&new_id, &key).await?;
-        }
-        Ok(record)
-    }
-
     /// Stores or clears a credential. An empty value means "clear", so the
     /// client never has to distinguish between a blank field and a removal.
     pub async fn set_key(&self, id: &str, key: Option<&str>) -> Result<ApiKeyView, ProviderError> {
@@ -555,19 +517,6 @@ pub fn gemini_stream_url(url: &str) -> String {
 pub fn gemini_root(url: &str) -> Option<String> {
     let cut = url.trim_end_matches('/').rfind("/models/")?;
     Some(url[..cut].to_string())
-}
-
-/// An identifier for a copy that is not in use yet. Bounded by the same
-/// ceiling as any identifier, so a long source cannot produce an invalid one.
-fn unused_copy_id(models: &[ModelConfig], id: &str) -> String {
-    let stem: String = id.chars().take(MAX_IDENTIFIER_LEN - 8).collect();
-    let mut candidate = format!("{stem}-copy");
-    let mut counter = 2;
-    while models.iter().any(|model| model.id == candidate) {
-        candidate = format!("{stem}-copy-{counter}");
-        counter += 1;
-    }
-    candidate.chars().take(MAX_IDENTIFIER_LEN).collect()
 }
 
 fn defaults_by_capability(defaults: &Defaults) -> [(Capability, Option<&str>); 4] {
@@ -962,17 +911,6 @@ mod tests {
             Some("https://api.test/v1beta")
         );
         assert_eq!(gemini_root("https://api.test/other"), None);
-    }
-
-    #[test]
-    fn a_copy_identifier_stays_unused_and_bounded() {
-        let models = vec![model("writer", Capability::Text)];
-        assert_eq!(unused_copy_id(&models, "writer"), "writer-copy");
-        let mut models = models;
-        models.push(model("writer-copy", Capability::Text));
-        assert_eq!(unused_copy_id(&models, "writer"), "writer-copy-2");
-        let long = unused_copy_id(&[], &"a".repeat(400));
-        assert!(long.chars().count() <= MAX_IDENTIFIER_LEN, "{long}");
     }
 
     #[test]

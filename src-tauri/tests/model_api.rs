@@ -433,7 +433,6 @@ async fn the_model_routes_refuse_an_identifier_that_is_not_there() {
     for (method, uri) in [
         ("DELETE", "/api/v1/models/nope"),
         ("POST", "/api/v1/models/nope/probe"),
-        ("POST", "/api/v1/models/nope/duplicate"),
     ] {
         let (status, problem) = send(&harness.app, plain_request(method, uri)).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}");
@@ -495,27 +494,43 @@ async fn a_reachable_model_probes_ok() {
 }
 
 #[tokio::test]
-async fn a_duplicate_creates_a_working_copy_including_the_key() {
+async fn a_creation_can_carry_the_key_of_the_model_it_copies() {
     let root = tempfile::tempdir().unwrap();
     let harness = harness(root.path());
     put_model(&harness.app, model_body("main", Some(API_KEY))).await;
 
-    let (status, view) = send(
-        &harness.app,
-        plain_request("POST", "/api/v1/models/main/duplicate"),
-    )
-    .await;
+    // The client never sees a stored key, so a copy names the configuration
+    // to take it from instead of sending it. The identifier is the copy's
+    // own: the client picks it, the way it picks any new model's.
+    let mut body = model_body("main_copy", None);
+    body["copyKeyFrom"] = json!("main");
+    let (status, view) = send(&harness.app, json_request("PUT", "/api/v1/models", body)).await;
     assert_eq!(status, StatusCode::OK, "{view}");
     assert_eq!(view["models"].as_array().unwrap().len(), 2);
     let copy = view["models"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|model| model["id"] == "main-copy")
+        .find(|model| model["id"] == "main_copy")
         .expect("the copy is in the view");
     assert_eq!(copy["url"], "https://provider.test/v1/chat/completions");
-    assert_eq!(copy["displayName"], "Model main (copy)");
     assert_eq!(copy["apiKey"]["masked"], MASKED_KEY, "the key came along");
+
+    // An edit of an existing model ignores the field: the key it has is the
+    // key it keeps, whatever source the request names.
+    let mut body = model_body("main_copy", None);
+    body["displayName"] = json!("Renamed copy");
+    body["copyKeyFrom"] = json!("ghost");
+    let (status, view) = send(&harness.app, json_request("PUT", "/api/v1/models", body)).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    let edited = view["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == "main_copy")
+        .expect("the edit is in the view");
+    assert_eq!(edited["displayName"], "Renamed copy");
+    assert_eq!(edited["apiKey"]["masked"], MASKED_KEY);
 }
 
 #[tokio::test]

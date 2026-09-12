@@ -185,6 +185,12 @@ interface ModelState {
   editing: string | "new" | null;
   /** The category a "new" editor starts on. */
   newCategory: Capability;
+  /**
+   * The configuration a "new" editor is a copy of. The copy is a draft like
+   * any other: nothing is stored until the form saves, and the identifier is
+   * a suggestion the form is free to overwrite until then.
+   */
+  copyOf: string | null;
   view: ModelsView | null;
   /**
    * The converter registry's protocols, grouped by capability. Null until
@@ -218,8 +224,8 @@ interface ModelState {
   loadProtocols: () => Promise<void>;
   saveModel: (draft: ModelDraft) => Promise<boolean>;
   removeModel: (id: string) => Promise<boolean>;
-  /** Copies a configuration, credential included, and opens the copy. */
-  duplicateModel: (id: string) => Promise<boolean>;
+  /** Opens a new-model editor pre-filled as a copy of one configuration. */
+  duplicateModel: (id: string) => void;
   setKey: (id: string, apiKey: string | null) => Promise<boolean>;
   /** Makes one model its category's default, or clears the default. */
   setDefault: (capability: Capability, id: string | null) => Promise<boolean>;
@@ -272,6 +278,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
     tab: "text",
     editing: null,
     newCategory: "text",
+    copyOf: null,
     view: null,
     protocols: null,
     loading: false,
@@ -287,11 +294,11 @@ export const useModelStore = create<ModelState>()((set, get) => {
     closeSettings() {
       // Back to the list on the next open: an editor left open on a model is
       // a surprise to whoever opens settings for something else.
-      set({ open: false, editing: null });
+      set({ open: false, editing: null, copyOf: null });
     },
 
     setTab(tab) {
-      set({ tab, editing: null });
+      set({ tab, editing: null, copyOf: null });
     },
 
     editModel(id) {
@@ -302,15 +309,22 @@ export const useModelStore = create<ModelState>()((set, get) => {
         open: true,
         tab: category === "preferences" ? "text" : category,
         editing: id,
+        copyOf: null,
       });
     },
 
     newModel(category) {
-      set({ open: true, tab: category, newCategory: category, editing: "new" });
+      set({
+        open: true,
+        tab: category,
+        newCategory: category,
+        editing: "new",
+        copyOf: null,
+      });
     },
 
     closeEditor() {
-      set({ editing: null });
+      set({ editing: null, copyOf: null });
     },
 
     openModelForCapability(capability, reference = null) {
@@ -320,7 +334,12 @@ export const useModelStore = create<ModelState>()((set, get) => {
         reference !== null && models.some((model) => model.id === reference);
       // Straight to the model a node named when it still exists, so the thing
       // that would serve the node is the thing the editor opens on.
-      set({ open: true, tab: capability, editing: known ? reference : null });
+      set({
+        open: true,
+        tab: capability,
+        editing: known ? reference : null,
+        copyOf: null,
+      });
     },
 
     async load() {
@@ -373,22 +392,22 @@ export const useModelStore = create<ModelState>()((set, get) => {
       });
     },
 
-    async duplicateModel(id) {
-      const before = new Set((get().view?.models ?? []).map((m) => m.id));
-      const saved = await write("Failed to copy the model", (revision) =>
-        modelsApi.duplicate(id, revision ?? undefined),
+    duplicateModel(id) {
+      const source = (get().view?.models ?? []).find(
+        (model) => model.id === id,
       );
-      if (!saved) return false;
-      const added = (get().view?.models ?? []).find(
-        (model) => !before.has(model.id),
-      );
-      if (added) {
-        // Straight to the copy: the point of duplicating is to change
-        // something about it, and the id is the first thing that has to move
-        // if the original stays.
-        set({ tab: added.category, editing: added.id });
-      }
-      return true;
+      if (!source) return;
+      // The copy is a draft, not a write: the point of duplicating is to
+      // change something before it exists — the identifier above all — so
+      // nothing is stored until the form saves, and an abandoned copy leaves
+      // nothing behind.
+      set({
+        open: true,
+        tab: source.category,
+        newCategory: source.category,
+        editing: "new",
+        copyOf: id,
+      });
     },
 
     setKey(id, apiKey) {
@@ -431,6 +450,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
         tab: "text",
         editing: null,
         newCategory: "text",
+        copyOf: null,
         view: null,
         loading: false,
         saving: false,

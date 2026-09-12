@@ -107,6 +107,12 @@ export interface ModelDraft {
    * separate call, so an unrelated edit cannot cost a working key.
    */
   apiKey?: string | null;
+  /**
+   * The configuration a new one copies its credential from: the client never
+   * sees a stored key, so a copy names where to take it from. Honoured on a
+   * creation only — an edit keeps the key it has.
+   */
+  copyKeyFrom?: string | null;
 }
 
 export interface DefaultsPatch {
@@ -173,17 +179,6 @@ export const modelsApi = {
     return http.request<ModelsView>(modelPath(id, "/key"), {
       method: "POST",
       body: { apiKey },
-    });
-  },
-
-  /**
-   * Creates a new configuration from an existing one, credential included:
-   * the quick way to configure a second model at the same address.
-   */
-  duplicate(id: string, revision?: number): Promise<ModelsView> {
-    const query = revision === undefined ? "" : `?revision=${revision}`;
-    return http.request<ModelsView>(`${modelPath(id, "/duplicate")}${query}`, {
-      method: "POST",
     });
   },
 

@@ -17,6 +17,8 @@ import { uniqueModelId } from "./modelId";
 interface Props {
   /** The stored configuration being edited, or null for a new one. */
   model: ModelView | null;
+  /** The configuration a new one is a copy of, or null for a plain new one. */
+  copySource?: ModelView | null;
   /** The category a new configuration starts on. */
   category: Capability;
   onDone: () => void;
@@ -37,9 +39,28 @@ interface FormState {
 
 function initialForm(
   model: ModelView | null,
+  copySource: ModelView | null,
   category: Capability,
   protocols: ProtocolGroups | null,
 ): FormState {
+  if (model === null && copySource !== null) {
+    // A copy starts from the source's fields, including the protocol it may
+    // alone speak; the identifier is left to the suggestion, which follows
+    // the display name the way a plain new model's does.
+    return {
+      id: "",
+      idTouched: false,
+      protocol: copySource.protocol,
+      url: copySource.url,
+      model: copySource.model,
+      displayName: `${copySource.displayName} (copy)`.slice(
+        0,
+        MAX_MODEL_NAME_LENGTH,
+      ),
+      enabled: copySource.enabled,
+      apiKey: "",
+    };
+  }
   if (model === null) {
     const choice = protocolChoices(protocols, category)[0];
     return {
@@ -78,12 +99,17 @@ function initialForm(
  * from the display name and can be overwritten, because what it does — stay
  * the reference a node holds — matters more than what it reads as.
  */
-export function ModelEditor({ model, category, onDone }: Props) {
+export function ModelEditor({
+  model,
+  copySource = null,
+  category,
+  onDone,
+}: Props) {
   const saving = useModelStore((state) => state.saving);
   const view = useModelStore((state) => state.view);
   const protocols = useModelStore((state) => state.protocols);
   const [form, setForm] = useState<FormState>(() =>
-    initialForm(model, category, protocols),
+    initialForm(model, copySource, category, protocols),
   );
 
   const edit = (patch: Partial<FormState>) =>
@@ -183,8 +209,13 @@ export function ModelEditor({ model, category, onDone }: Props) {
     };
     // A blank key field keeps whatever is stored; typing one replaces it.
     // Clearing is its own button, so saving an unrelated edit cannot cost a
-    // working key.
-    if (form.apiKey.trim() !== "") draft.apiKey = form.apiKey.trim();
+    // working key. A copy names its source instead: the client never sees
+    // the key, so the server takes it from the configuration being copied.
+    if (form.apiKey.trim() !== "") {
+      draft.apiKey = form.apiKey.trim();
+    } else if (model === null && copySource !== null) {
+      draft.copyKeyFrom = copySource.id;
+    }
     const saved = await useModelStore.getState().saveModel(draft);
     if (saved) onDone();
   };
@@ -201,12 +232,14 @@ export function ModelEditor({ model, category, onDone }: Props) {
   return (
     <div className="settings-section">
       <h3 className="settings-heading">
-        {model === null
-          ? `New ${CAPABILITY_LABELS[category].toLowerCase()} model`
-          : // The category went out of the form as a field of its own; the
+        {model !== null
+          ? // The category went out of the form as a field of its own; the
             // heading is where an editor says which kind of model this is,
             // because the protocol choices below follow from it.
-            `Edit “${model.displayName}” · ${CAPABILITY_LABELS[category].toLowerCase()}`}
+            `Edit “${model.displayName}” · ${CAPABILITY_LABELS[category].toLowerCase()}`
+          : copySource !== null
+            ? `Copy “${copySource.displayName}” · ${CAPABILITY_LABELS[category].toLowerCase()}`
+            : `New ${CAPABILITY_LABELS[category].toLowerCase()} model`}
       </h3>
 
       <label className="dialog-field">
@@ -297,7 +330,9 @@ export function ModelEditor({ model, category, onDone }: Props) {
           placeholder={
             model?.apiKey.set
               ? `Stored (${model.apiKey.masked ?? "key"}) — leave blank to keep`
-              : "sk-…"
+              : copySource?.apiKey.set
+                ? `Copied from “${copySource.displayName}” — leave blank to keep`
+                : "sk-…"
           }
           type="password"
           value={form.apiKey}

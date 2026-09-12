@@ -168,9 +168,15 @@ function fixture(): ModelsView {
 
 function upsert(draft: ModelDraft) {
   const stored = view.models.find((entry) => entry.id === draft.id);
+  // A creation may name a configuration to take the credential from; an
+  // edit keeps whatever is stored, the way the server does.
+  const copied =
+    stored === undefined && draft.copyKeyFrom
+      ? view.models.find((entry) => entry.id === draft.copyKeyFrom)?.apiKey
+      : undefined;
   const key = draft.apiKey?.trim()
     ? { set: true, masked: MASKED }
-    : (stored?.apiKey ?? { set: false, masked: null });
+    : (stored?.apiKey ?? copied ?? { set: false, masked: null });
   const record: ModelView = {
     id: draft.id,
     category: draft.category,
@@ -187,30 +193,6 @@ function upsert(draft: ModelDraft) {
     models: stored
       ? view.models.map((entry) => (entry.id === draft.id ? record : entry))
       : [...view.models, record],
-  };
-}
-
-/** The server-side copy: a new identifier and the credential along with it. */
-function duplicate(id: string) {
-  const source = view.models.find((entry) => entry.id === id);
-  if (!source) return;
-  let candidate = `${id}-copy`;
-  let counter = 2;
-  while (view.models.some((entry) => entry.id === candidate)) {
-    candidate = `${id}-copy-${counter}`;
-    counter += 1;
-  }
-  view = {
-    ...view,
-    revision: view.revision + 1,
-    models: [
-      ...view.models,
-      {
-        ...source,
-        id: candidate,
-        displayName: `${source.displayName} (copy)`.slice(0, 120),
-      },
-    ],
   };
 }
 
@@ -303,10 +285,6 @@ function route(url: string, method: string, body: unknown): Response {
             : entry,
         ),
       };
-      return json(view);
-    }
-    if (suffix === "/duplicate" && method === "POST") {
-      duplicate(id);
       return json(view);
     }
     if (suffix === "/probe" && method === "POST") {
@@ -618,29 +596,46 @@ describe("model settings", () => {
     confirm.mockRestore();
   });
 
-  it("copies a model, key included, and opens the copy", async () => {
+  it("copies a model into a draft the save creates, key included", async () => {
     await openSettings();
     fireEvent.click(
       within(cardOf("Writer")).getByRole("button", { name: "Copy Writer" }),
     );
 
-    await waitFor(() =>
-      expect(writesTo("/api/v1/models/writer/duplicate")).toHaveLength(1),
-    );
-    // The editor opens on the copy, which is what "quick create" means: the
-    // fields worth repeating are filled in and the key came along.
+    // The editor opens on a draft of the copy: the fields worth repeating
+    // are filled in, and nothing has been written yet.
     const display = (await screen.findByLabelText(
       "Display name",
     )) as HTMLInputElement;
     expect(display.value).toBe("Writer (copy)");
-    // The credential came along: the field offers to keep it rather than
-    // asking for it again.
+    expect(writesTo("/api/v1/models")).toHaveLength(0);
+
+    // The credential comes along on the save: the field says so rather than
+    // asking for a key nobody can read back.
     const key = screen.getByLabelText("API key") as HTMLInputElement;
-    expect(key.placeholder).toContain(MASKED);
+    expect(key.placeholder).toContain("Writer");
     expect(key.value).toBe("");
 
+    // The identifier is a suggestion from the name, the way a new model's
+    // is — not a fixed "-copy" — and it is editable until the save.
     const id = screen.getByLabelText("Model identifier") as HTMLInputElement;
-    expect(id.value).toBe("writer-copy");
+    expect(id.value).toMatch(/^writer_copy_[a-z0-9]{6}$/);
+    fireEvent.change(id, { target: { value: "my-writer" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await screen.findByText("Writer (copy)");
+
+    const [write] = writesTo("/api/v1/models");
+    expect(write.body).toMatchObject({
+      id: "my-writer",
+      displayName: "Writer (copy)",
+      copyKeyFrom: "writer",
+    });
+    expect("apiKey" in (write.body as object)).toBe(false);
+    // The credential came along with the copy.
+    expect(
+      within(cardOf("Writer (copy)")).getByText(`Key ${MASKED}`),
+    ).toBeTruthy();
   });
 
   it("leaves the editor to its own Save and Cancel", async () => {

@@ -210,6 +210,12 @@ pub struct UpsertModelRequest {
     pub model: ModelDraft,
     #[serde(default)]
     pub api_key: Option<String>,
+    /// The configuration a new one copies its credential from. The client
+    /// never sees a stored key, so a copy names where to take it from rather
+    /// than sending it. Honoured on a creation only — an edit keeps the key it
+    /// has — and a source with no key simply copies nothing.
+    #[serde(default)]
+    pub copy_key_from: Option<String>,
 }
 
 /// Sets or clears one model configuration's credential on its own.

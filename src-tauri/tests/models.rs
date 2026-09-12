@@ -316,41 +316,6 @@ async fn a_write_against_a_stale_revision_is_refused() {
     repo.upsert(current).await.unwrap();
 }
 
-#[tokio::test]
-async fn a_copy_carries_the_configuration_and_the_key() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo(root.path());
-    repo.upsert(draft("painter", Capability::Image))
-        .await
-        .unwrap();
-    repo.set_key("painter", Some(API_KEY)).await.unwrap();
-
-    let copy = repo.duplicate("painter", None).await.unwrap();
-    assert_eq!(copy.id, "painter-copy");
-    assert_eq!(copy.url, "https://provider.test/v1/images/generations");
-    assert_eq!(copy.display_name, "Model painter (copy)");
-    assert_eq!(repo.credential("painter-copy").await.unwrap(), API_KEY);
-
-    // A second copy does not collide with the first.
-    let second = repo.duplicate("painter", None).await.unwrap();
-    assert_eq!(second.id, "painter-copy-2");
-
-    let view = repo.view().await.unwrap();
-    assert_eq!(view.models.len(), 3);
-    assert!(view
-        .models
-        .iter()
-        .all(|model| model.api_key.set || model.id == "painter"));
-}
-
-#[tokio::test]
-async fn a_copy_of_a_model_that_does_not_exist_is_refused() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo(root.path());
-    let error = repo.duplicate("ghost", None).await.unwrap_err();
-    assert_eq!(error.code(), "NOT_FOUND");
-}
-
 /// Stands up a provider that answers a model list, so a probe has something
 /// real to ask. Returns the base address the configured endpoint is built on.
 async fn provider(status: StatusCode, body: serde_json::Value) -> String {

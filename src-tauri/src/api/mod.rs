@@ -209,10 +209,6 @@ fn model_router() -> axum::Router<ApiState> {
         )
         .route("/api/v1/models/{id}", delete(routes::delete_model))
         .route("/api/v1/models/{id}/key", post(routes::set_model_key))
-        .route(
-            "/api/v1/models/{id}/duplicate",
-            post(routes::duplicate_model),
-        )
         .route("/api/v1/models/{id}/probe", post(routes::probe_model))
         .route("/api/v1/models/defaults", patch(routes::patch_defaults))
         .route(
