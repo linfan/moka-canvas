@@ -14,10 +14,8 @@
 //! | `parse_poll_response(status, headers, body)` | number, table, string | `{status, result, error}` | video |
 
 use std::path::Path;
-use std::sync::Arc;
 
 use mlua::{Function, Lua, Result as LuaResult, Value};
-use tokio::sync::Mutex;
 
 use super::api;
 
@@ -26,9 +24,15 @@ pub struct ScriptRef {
     _name: String,
 }
 
-/// The shared Lua runtime.
+/// A Lua runtime, held for as long as the one call that made it needs it.
+///
+/// No lock and no reference count. A runtime is built inside the adapter's
+/// `call_lua`, used, and dropped before that function returns, so nothing else
+/// can ever reach it; and `Lua` is not `Send` without mlua's `send` feature, so
+/// a mutex around it could not make it shareable across threads even if two
+/// callers existed. What the pair would add is the pretence of contention.
 pub struct LuaRuntime {
-    lua: Arc<Mutex<Lua>>,
+    lua: Lua,
 }
 
 impl LuaRuntime {
@@ -43,14 +47,12 @@ impl LuaRuntime {
 
         api::register(&lua)?;
 
-        Ok(Self {
-            lua: Arc::new(Mutex::new(lua)),
-        })
+        Ok(Self { lua })
     }
 
     /// Loads a script file and returns a reference to it.
     pub fn load(&self, path: &Path) -> Result<ScriptRef, mlua::Error> {
-        let lua = self.lua.blocking_lock();
+        let lua = &self.lua;
         let source = std::fs::read_to_string(path).map_err(|e| {
             mlua::Error::RuntimeError(format!("cannot read script {}: {e}", path.display()))
         })?;
@@ -67,7 +69,7 @@ impl LuaRuntime {
 
     /// Checks whether a loaded script exports the named function.
     pub fn has_function(&self, _script: &ScriptRef, name: &str) -> bool {
-        let lua = self.lua.blocking_lock();
+        let lua = &self.lua;
         lua.globals()
             .get::<Value>(name)
             .map(|v| matches!(v, Value::Function(_)))
@@ -82,7 +84,7 @@ impl LuaRuntime {
         func: &str,
         args: Vec<mlua::Value>,
     ) -> Result<mlua::Value, mlua::Error> {
-        let lua = self.lua.blocking_lock();
+        let lua = &self.lua;
         let func: Function = lua.globals().get(func)?;
         let result = func.call::<mlua::Value>(args)?;
         Ok(result)
@@ -97,12 +99,10 @@ impl LuaRuntime {
         func: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, mlua::Error> {
-        let lua = self.lua.blocking_lock();
+        let lua = &self.lua;
         let func: Function = lua.globals().get(func)?;
-        let lua_args: Result<Vec<mlua::Value>, mlua::Error> = args
-            .into_iter()
-            .map(|arg| json_to_lua(&lua, &arg))
-            .collect();
+        let lua_args: Result<Vec<mlua::Value>, mlua::Error> =
+            args.into_iter().map(|arg| json_to_lua(lua, &arg)).collect();
         let result = func.call::<mlua::Value>(lua_args?)?;
         Ok(table_to_json(&result))
     }
@@ -139,13 +139,11 @@ pub(crate) fn table_to_json(value: &mlua::Value) -> serde_json::Value {
                 return serde_json::Value::Array(arr);
             }
             let mut map = serde_json::Map::new();
-            for pair in t.clone().pairs::<mlua::String, mlua::Value>() {
-                if let Ok((k, v)) = pair {
-                    map.insert(
-                        k.to_str().map(|s| s.to_string()).unwrap_or_default(),
-                        table_to_json(&v),
-                    );
-                }
+            for (k, v) in t.clone().pairs::<mlua::String, mlua::Value>().flatten() {
+                map.insert(
+                    k.to_str().map(|s| s.to_string()).unwrap_or_default(),
+                    table_to_json(&v),
+                );
             }
             serde_json::Value::Object(map)
         }
@@ -164,7 +162,7 @@ pub fn json_to_lua(lua: &Lua, value: &serde_json::Value) -> LuaResult<mlua::Valu
             } else if let Some(f) = n.as_f64() {
                 Ok(mlua::Value::Number(f))
             } else {
-                Ok(mlua::Value::String(lua.create_string(&n.to_string())?))
+                Ok(mlua::Value::String(lua.create_string(n.to_string())?))
             }
         }
         serde_json::Value::String(s) => Ok(mlua::Value::String(lua.create_string(s)?)),
@@ -215,7 +213,7 @@ mod tests {
     #[test]
     fn runtime_creates_and_registers_apis() {
         let rt = test_runtime();
-        let lua = rt.lua.blocking_lock();
+        let lua = &rt.lua;
         assert!(lua.globals().get::<mlua::Value>("json").is_ok());
         assert!(lua.globals().get::<mlua::Value>("base64").is_ok());
         assert!(lua.globals().get::<mlua::Value>("log").is_ok());
@@ -225,7 +223,7 @@ mod tests {
     #[test]
     fn json_table_to_value_roundtrip() {
         let rt = test_runtime();
-        let lua = rt.lua.blocking_lock();
+        let lua = &rt.lua;
         let tbl = lua.create_table().unwrap();
         tbl.set("a", 1).unwrap();
         let inner = lua.create_table().unwrap();
@@ -240,7 +238,7 @@ mod tests {
     #[test]
     fn base64_encode_decode() {
         let rt = test_runtime();
-        let lua = rt.lua.blocking_lock();
+        let lua = &rt.lua;
         let b64_table: mlua::Table = lua.globals().get("base64").unwrap();
         let encode: Function = b64_table.get("encode").unwrap();
         let decode: Function = b64_table.get("decode").unwrap();

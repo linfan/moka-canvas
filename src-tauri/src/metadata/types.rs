@@ -54,9 +54,10 @@ pub struct RecentProject {
 /// `Custom` is reserved; nothing implements it yet. `LuaScript` names a
 /// converter script the user placed in the converter directory (or one of the
 /// built-in scripts that was deployed there).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Protocol {
     /// OpenAI-compatible chat completions (`POST .../chat/completions`).
+    #[default]
     OpenaiChat,
     /// OpenAI-compatible responses endpoint (`POST .../responses`).
     OpenaiResponses,
@@ -74,12 +75,6 @@ pub enum Protocol {
     /// A protocol backed by a Lua converter script. The string is the protocol
     /// identifier from the converter meta.json (e.g. `"wan3Video"`).
     LuaScript(String),
-}
-
-impl Default for Protocol {
-    fn default() -> Self {
-        Self::OpenaiChat
-    }
 }
 
 impl Protocol {

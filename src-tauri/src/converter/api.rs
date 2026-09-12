@@ -38,7 +38,7 @@ fn register_json(lua: &Lua) -> LuaResult<()> {
         lua.create_function(|lua, text: String| {
             let parsed: serde_json::Value = serde_json::from_str(&text)
                 .map_err(|e| mlua::Error::RuntimeError(format!("json.decode: {e}")))?;
-            json_to_lua(&lua, &parsed)
+            json_to_lua(lua, &parsed)
         })?,
     )?;
     lua.globals().set("json", json)?;

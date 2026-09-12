@@ -126,10 +126,10 @@ Both runtimes write one file per day under the `logs` subdirectory of the
 platform application data directory — the same root the metadata directory
 resolves from — and the two files never mix:
 
-| Runtime        | File                       | Also on console                  |
-| -------------- | -------------------------- | -------------------------------- |
-| `moka-server`  | `moka-server.log.<date>`   | yes — it is watched in a terminal |
-| desktop app    | `moka-app.log.<date>`      | no — a windowed program has no console |
+| Runtime       | File                     | Also on console                        |
+| ------------- | ------------------------ | -------------------------------------- |
+| `moka-server` | `moka-server.log.<date>` | yes — it is watched in a terminal      |
+| desktop app   | `moka-app.log.<date>`    | no — a windowed program has no console |
 
 On Windows that directory is `%APPDATA%\MokaCanvas\logs`, on
 macOS `~/Library/Application Support/MokaCanvas/logs`, on

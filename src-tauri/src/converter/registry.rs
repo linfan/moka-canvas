@@ -20,22 +20,13 @@ pub struct ProtocolEntry {
 }
 
 /// The converter directory metadata document.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConverterMeta {
     #[serde(default)]
     pub current_batch: u32,
     #[serde(default)]
     pub protocols: HashMap<String, ProtocolEntry>,
-}
-
-impl Default for ConverterMeta {
-    fn default() -> Self {
-        Self {
-            current_batch: 0,
-            protocols: HashMap::new(),
-        }
-    }
 }
 
 /// Holds the loaded registry state.
@@ -61,8 +52,7 @@ impl ConverterRegistry {
     /// Persist the current metadata to disk.
     pub async fn save(&self) -> Result<(), std::io::Error> {
         let meta_path = self.root.join("meta.json");
-        let text = serde_json::to_string_pretty(&self.meta)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let text = serde_json::to_string_pretty(&self.meta).map_err(std::io::Error::other)?;
         tokio::fs::write(&meta_path, text).await
     }
 
