@@ -17,7 +17,7 @@
 			<string>moka-file</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>dev.mokacanvas.compatibility.moka</string>
+				<string>app.mokacanvas.moka</string>
 			</array>
 			<key>LSHandlerRank</key>
 			<string>Owner</string>
@@ -27,7 +27,7 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>dev.mokacanvas.compatibility.moka</string>
+			<string>app.mokacanvas.moka</string>
 			<key>UTTypeDescription</key>
 			<string>Moka Canvas Document</string>
 			<key>UTTypeConformsTo</key>

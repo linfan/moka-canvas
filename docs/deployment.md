@@ -131,24 +131,24 @@ resolves from — and the two files never mix:
 | `moka-server`  | `moka-server.log.<date>`   | yes — it is watched in a terminal |
 | desktop app    | `moka-app.log.<date>`      | no — a windowed program has no console |
 
-On Windows that directory is `%APPDATA%\dev.mokacanvas.compatibility\logs`, on
-macOS `~/Library/Application Support/dev.mokacanvas.compatibility/logs`, on
-Linux `$XDG_DATA_HOME/dev.mokacanvas.compatibility/logs` — usually
-`~/.local/share/dev.mokacanvas.compatibility/logs`. Files are kept, not rotated
+On Windows that directory is `%APPDATA%\MokaCanvas\logs`, on
+macOS `~/Library/Application Support/MokaCanvas/logs`, on
+Linux `$XDG_DATA_HOME/mokacanvas/logs` — usually
+`~/.local/share/mokacanvas/logs`. Files are kept, not rotated
 away.
 
 The filter defaults to `info`. `RUST_LOG` overrides it in both runtimes
 (`RUST_LOG=debug moka-server …`). The desktop app, which is normally started by
 a double-click and inherits no environment, can also be told from a file: write
 one filter directive into `log.level` beside the `logs` directory —
-`%APPDATA%\dev.mokacanvas.compatibility\log.level` on Windows,
-`~/.local/share/dev.mokacanvas.compatibility/log.level` on Linux — and restart:
+`%APPDATA%\MokaCanvas\log.level` on Windows,
+`~/.local/share/mokacanvas/log.level` on Linux — and restart:
 
 ```sh
 # Windows
-echo debug > "%APPDATA%\dev.mokacanvas.compatibility\log.level"
+echo debug > "%APPDATA%\MokaCanvas\log.level"
 # Linux
-echo debug > ~/.local/share/dev.mokacanvas.compatibility/log.level
+echo debug > ~/.local/share/mokacanvas/log.level
 ```
 
 `RUST_LOG` wins over the file when both are there. A panicking app writes the

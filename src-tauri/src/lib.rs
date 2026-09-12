@@ -29,7 +29,11 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app: &mut tauri::App| -> Result<(), Box<dyn Error>> {
-            let app_data = app.path().app_data_dir()?;
+            // The metadata directory is keyed to the product name, not to
+            // the bundle identifier Tauri's `app_data_dir()` is derived from:
+            // the server binary and the desktop app must land in the same
+            // place, and the server has no bundle identifier to ask.
+            let app_data = metadata::paths::platform_default()?;
             std::fs::create_dir_all(&app_data)?;
             let resource_dir = app.path().resource_dir()?;
             let config = config::load_native_config(&app_data, &resource_dir)?;

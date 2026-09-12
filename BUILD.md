@@ -117,7 +117,7 @@ or run `make clean` once. Afterwards, Windows may still show the old icon from i
 
 `*.moka` documents are registered to open with the app and use their own document icon (the previous app icon design), built as `src-tauri/icons/moka-file.icns` / `moka-file.ico` and shipped via `bundle.resources` in `src-tauri/tauri.conf.json`:
 
-- **macOS**: `src-tauri/Info.plist` (auto-merged into the bundle's Info.plist by Tauri) declares the `dev.mokacanvas.compatibility.moka` UTI and document type with `CFBundleTypeIconFile` = `moka-file`.
+- **macOS**: `src-tauri/Info.plist` (auto-merged into the bundle's Info.plist by Tauri) declares the `app.mokacanvas.moka` UTI and document type with `CFBundleTypeIconFile` = `moka-file`.
 - **Windows (NSIS)**: the forked `installer/installer.nsi` hardcodes `APP_ASSOCIATE`/`APP_UNASSOCIATE` for `.moka` with `DefaultIcon` = `$INSTDIR\moka-file.ico`. This replaces the upstream `{{#each file_associations}}` loop, which cannot use a separate document icon — re-apply the divergence when re-diffing against the upstream template.
 - The MSI bundle (built by `package-windows` on a Windows host) does **not** register the association; distribute the NSIS setup exe.
 

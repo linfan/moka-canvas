@@ -18,9 +18,10 @@
 //! The filter defaults to `info` and `RUST_LOG` overrides it in both runtimes
 //! (for example `RUST_LOG=debug`). The desktop app can also be told from the
 //! disk it runs on: a `log.level` file beside the `logs` directory —
-//! `%APPDATA%\dev.mokacanvas.compatibility\log.level` on Windows,
-//! `~/Library/Application Support/dev.mokacanvas.compatibility/log.level` on
-//! macOS, `~/.local/share/dev.mokacanvas.compatibility/log.level` on Linux —
+//! `%APPDATA%\MokaCanvas\log.level` on Windows,
+//! `~/Library/Application Support/MokaCanvas/log.level` on
+//! macOS, `~/.local/share/mokacanvas/log.level` on Linux (the XDG path is
+//! lowercased) —
 //! holding one filter directive (such as `debug`) is read at startup,
 //! because a program started by a double-click inherits no environment worth
 //! setting. `RUST_LOG` wins over the file when both are there.

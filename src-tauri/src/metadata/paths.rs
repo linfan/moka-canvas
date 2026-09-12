@@ -11,10 +11,19 @@ use crate::config::{ConfigError, MetadataConfig, RuntimeMode};
 
 /// Bundle identifier shared by the desktop app and the standalone server.
 ///
-/// Both runtime forms derive their directory from this single constant. If
-/// they ever disagreed, one machine would keep two mutually invisible sets of
-/// settings.
-pub const APP_ID: &str = "dev.mokacanvas.compatibility";
+/// Names the app to the operating system — Tauri's `identifier`, the macOS
+/// bundle ID, the keyring service in [`super::crypto`] — and must stay in
+/// reverse-DNS form because those registries demand it. The directory on
+/// disk is keyed to [`APP_DIR_NAME`] instead.
+pub const APP_ID: &str = "app.mokacanvas";
+
+/// Name of the directory, under the platform application data directory,
+/// that everything the runtimes write lives in.
+///
+/// Deliberately not the bundle identifier: `app.mokacanvas` is the reverse-DNS
+/// name Tauri and the OS registries demand, while this is the name a person
+/// reading `Application Support` can recognize.
+pub const APP_DIR_NAME: &str = "MokaCanvas";
 
 /// Directory name appended to the platform application data directory.
 pub const DIR_NAME: &str = "metadata";
@@ -87,10 +96,11 @@ fn expand_app_data(dir: &Path, mode: RuntimeMode, app_data: Option<&Path>) -> Pa
 
 /// The platform application data directory, without the [`DIR_NAME`] suffix.
 ///
-/// Derived from [`APP_ID`] so that it matches the desktop shell's own
-/// `app_data_dir()` on macOS, Windows, and Linux.
+/// Derived from [`APP_DIR_NAME`] rather than [`APP_ID`]: the desktop shell's
+/// `app_data_dir()` is keyed to the bundle identifier, and this deliberately
+/// is not, so that what lands on disk carries the product name.
 pub fn platform_default() -> Result<PathBuf, ConfigError> {
-    directories::ProjectDirs::from("", "", APP_ID)
+    directories::ProjectDirs::from("", "", APP_DIR_NAME)
         .map(|dirs| dirs.data_dir().to_path_buf())
         .ok_or_else(|| {
             ConfigError::MetadataDirInvalid(

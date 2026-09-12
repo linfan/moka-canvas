@@ -954,6 +954,8 @@ Section Uninstall
     SetShellVarContext current
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+    ; The metadata/log directory is keyed to the product name, not the bundle id.
+    RmDir /r "$APPDATA\MokaCanvas"
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL
