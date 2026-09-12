@@ -150,13 +150,12 @@ pub async fn ensure_deployed(root: &Path) -> Result<(), Box<dyn std::error::Erro
             tokio::fs::write(&script_path, def.source).await?;
 
             let entry = ProtocolEntry {
-                capability: def.capability.to_string(),
                 script: format!("{}/{}", def.subdir, def.filename),
                 display_name: def.display_name.to_string(),
                 url_example: def.url_example.to_string(),
             };
             registry
-                .add_protocol(def.protocol_id, entry)
+                .add_protocol(def.capability, def.protocol_id, entry)
                 .await
                 .map_err(|e| format!("failed to update meta.json: {e}"))?;
         }

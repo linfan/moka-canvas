@@ -14,5 +14,5 @@ pub mod deploy;
 pub mod registry;
 pub mod runtime;
 
-pub use adapter::LuaAdapter;
-pub use registry::{protocol_list, ConverterRegistry};
+pub use adapter::{converter_root, LuaAdapter};
+pub use registry::ConverterRegistry;

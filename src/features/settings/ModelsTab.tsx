@@ -1,11 +1,7 @@
 import type { ModelView } from "../../api";
-import {
-  CAPABILITY_LABELS,
-  PROTOCOL_LABELS,
-  type Capability,
-} from "../../shared/domain";
+import { CAPABILITY_LABELS, type Capability } from "../../shared/domain";
 import { ModelEditor } from "./ModelEditor";
-import { useModelStore } from "./modelStore";
+import { protocolLabel, useModelStore } from "./modelStore";
 import { SecretStorageNote } from "./SecretStorageNote";
 
 function ModelCard({
@@ -19,6 +15,7 @@ function ModelCard({
 }) {
   const saving = useModelStore((state) => state.saving);
   const activity = useModelStore((state) => state.activity[model.id]);
+  const protocols = useModelStore((state) => state.protocols);
   const probe = activity?.probe ?? null;
   const lower = CAPABILITY_LABELS[category].toLowerCase();
 
@@ -38,7 +35,7 @@ function ModelCard({
       <div className="model-card-head">
         <strong>{model.displayName}</strong>
         <span className="model-card-tag">
-          {PROTOCOL_LABELS[model.protocol]}
+          {protocolLabel(protocols, model.protocol)}
         </span>
         {!model.enabled && <span className="model-card-tag">off</span>}
         <label className="settings-check">

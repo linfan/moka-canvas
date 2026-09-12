@@ -250,6 +250,52 @@ async fn a_protocol_the_category_does_not_offer_is_refused() {
 }
 
 #[tokio::test]
+async fn a_lua_protocol_the_converter_registry_offers_is_accepted() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo(root.path());
+
+    // Deploy the built-in scripts, which also points the process-wide
+    // converter root at this directory. The root is set once and every test
+    // in this binary shares it, so the directory is leaked to outlive the
+    // test rather than pulled out from under a later one.
+    let converter = tempfile::tempdir().unwrap();
+    let path: &'static Path = Box::leak(converter.keep().into_boxed_path());
+    moka_canvas::converter::deploy::ensure_deployed(path)
+        .await
+        .unwrap();
+
+    // A video script the registry holds under `video` may serve a video
+    // model, even though no built-in variant knows its name.
+    let bailian = ModelDraft {
+        protocol: Protocol::from_wire_name("bailianVideo"),
+        ..draft("director", Capability::Video)
+    };
+    repo.upsert(bailian).await.unwrap();
+
+    // A script that serves audio still cannot serve a video model.
+    let mismatched = ModelDraft {
+        protocol: Protocol::from_wire_name("bailianSpeech"),
+        ..draft("voiceover", Capability::Video)
+    };
+    let error = repo.upsert(mismatched).await.unwrap_err();
+    assert_eq!(error.code(), "VALIDATION_FAILED");
+    // The refusal names the protocol by its wire name and lists what the
+    // category does offer, the registry's scripts included.
+    assert!(error.to_string().contains("bailianSpeech"), "{error}");
+    assert!(error.to_string().contains("bailianVideo"), "{error}");
+
+    // A name no script answers to is refused too.
+    let invented = ModelDraft {
+        protocol: Protocol::from_wire_name("wandProtocol"),
+        ..draft("wand", Capability::Video)
+    };
+    assert_eq!(
+        repo.upsert(invented).await.unwrap_err().code(),
+        "VALIDATION_FAILED"
+    );
+}
+
+#[tokio::test]
 async fn a_write_against_a_stale_revision_is_refused() {
     let root = tempfile::tempdir().unwrap();
     let repo = repo(root.path());

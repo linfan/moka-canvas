@@ -1,16 +1,17 @@
 import { useCallback, useMemo, useState } from "react";
-import type { ModelDraft, ModelView } from "../../api";
+import type { ModelDraft, ModelView, ProtocolGroups } from "../../api";
 import {
   CAPABILITY_LABELS,
   MAX_MODEL_ID_LENGTH,
   MAX_MODEL_NAME_LENGTH,
-  PROTOCOLS_BY_CATEGORY,
-  PROTOCOL_LABELS,
-  PROTOCOL_URL_EXAMPLES,
   type Capability,
-  type ModelProtocol,
 } from "../../shared/domain";
-import { useModelStore } from "./modelStore";
+import {
+  protocolChoices,
+  protocolLabel,
+  protocolUrlExample,
+  useModelStore,
+} from "./modelStore";
 import { uniqueModelId } from "./modelId";
 
 interface Props {
@@ -25,7 +26,8 @@ interface FormState {
   id: string;
   /** Whether the identifier was typed, or is still the suggested one. */
   idTouched: boolean;
-  protocol: ModelProtocol;
+  /** A protocol id from the converter registry, or a built-in name. */
+  protocol: string;
   url: string;
   model: string;
   displayName: string;
@@ -33,14 +35,18 @@ interface FormState {
   apiKey: string;
 }
 
-function initialForm(model: ModelView | null, category: Capability): FormState {
+function initialForm(
+  model: ModelView | null,
+  category: Capability,
+  protocols: ProtocolGroups | null,
+): FormState {
   if (model === null) {
-    const protocol = PROTOCOLS_BY_CATEGORY[category][0];
+    const choice = protocolChoices(protocols, category)[0];
     return {
       id: "",
       idTouched: false,
-      protocol,
-      url: PROTOCOL_URL_EXAMPLES[protocol],
+      protocol: choice.id,
+      url: choice.urlExample,
       model: "",
       displayName: "",
       enabled: true,
@@ -75,22 +81,44 @@ function initialForm(model: ModelView | null, category: Capability): FormState {
 export function ModelEditor({ model, category, onDone }: Props) {
   const saving = useModelStore((state) => state.saving);
   const view = useModelStore((state) => state.view);
+  const protocols = useModelStore((state) => state.protocols);
   const [form, setForm] = useState<FormState>(() =>
-    initialForm(model, category),
+    initialForm(model, category, protocols),
   );
 
   const edit = (patch: Partial<FormState>) =>
     setForm((state) => ({ ...state, ...patch }));
 
-  const protocols = PROTOCOLS_BY_CATEGORY[category];
+  /**
+   * What the protocol picker offers. A stored configuration whose script
+   * has since left the registry still gets a line, so the form names what
+   * is saved instead of silently falling back to another shape.
+   */
+  const choices = useMemo(() => {
+    const offered = protocolChoices(protocols, category);
+    const storedMissing =
+      form.protocol !== "" &&
+      !offered.some((choice) => choice.id === form.protocol);
+    return storedMissing
+      ? [
+          {
+            id: form.protocol,
+            label: protocolLabel(protocols, form.protocol),
+            urlExample: protocolUrlExample(protocols, form.protocol),
+          },
+          ...offered,
+        ]
+      : offered;
+  }, [protocols, category, form.protocol]);
 
-  const chooseProtocol = (protocol: ModelProtocol) => {
+  const chooseProtocol = (protocol: string) => {
     // A form still carrying the example of the previous shape adopts the
     // new one; an address somebody typed is theirs to keep.
-    const previousExample = PROTOCOL_URL_EXAMPLES[form.protocol];
+    const previousExample = protocolUrlExample(protocols, form.protocol);
+    const nextExample = protocolUrlExample(protocols, protocol);
     const url =
       form.url.trim() === "" || form.url.trim() === previousExample
-        ? PROTOCOL_URL_EXAMPLES[protocol]
+        ? nextExample
         : form.url;
     edit({ protocol, url });
   };
@@ -225,14 +253,12 @@ export function ModelEditor({ model, category, onDone }: Props) {
         <span>Protocol</span>
         <select
           aria-label="Protocol"
-          onChange={(event) =>
-            chooseProtocol(event.target.value as ModelProtocol)
-          }
+          onChange={(event) => chooseProtocol(event.target.value)}
           value={form.protocol}
         >
-          {protocols.map((protocol) => (
-            <option key={protocol} value={protocol}>
-              {PROTOCOL_LABELS[protocol]}
+          {choices.map((choice) => (
+            <option key={choice.id} value={choice.id}>
+              {choice.label}
             </option>
           ))}
         </select>
@@ -243,7 +269,7 @@ export function ModelEditor({ model, category, onDone }: Props) {
         <input
           aria-label="Endpoint URL"
           onChange={(event) => edit({ url: event.target.value })}
-          placeholder={PROTOCOL_URL_EXAMPLES[form.protocol]}
+          placeholder={protocolUrlExample(protocols, form.protocol)}
           value={form.url}
         />
       </label>
