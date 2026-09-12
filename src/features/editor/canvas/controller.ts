@@ -45,7 +45,9 @@ import { createEdgeView, updateEdgeView, type EdgeView } from "./edgeRenderer";
 import { GridBackground, type GridMode } from "./gridRenderer";
 import { MinimapView } from "./minimap";
 import {
+  advanceHalo,
   createNodeView,
+  haloLeaves,
   portAnchorWorld,
   previewNodeBounds,
   sameRun,
@@ -238,6 +240,8 @@ export class LeaferEditorController {
   private lastTap: { time: number; view: Point; key: string } | null = null;
   private guides: Line[] = [];
   private animation: { frame: number } | null = null;
+  /** The clock the rings of running cards are moved by; null while none are. */
+  private haloTick: number | null = null;
 
   private cameraEndTimer: ReturnType<typeof setTimeout> | null = null;
   private disposers: (() => void)[] = [];
@@ -401,6 +405,7 @@ export class LeaferEditorController {
         this.nodeViews.delete(nodeId);
       }
     }
+    this.syncHaloLoop();
 
     this.reconcileEdges(
       scene,
@@ -509,11 +514,15 @@ export class LeaferEditorController {
       SNAPSHOT_MAX_SIDE / Math.max(width, height),
     );
     const canvas = Creator.canvas!({ width, height, pixelRatio: density });
+    // The ring a running card wears says something about this moment rather
+    // than about the document, so it is kept out of the picture.
+    const halos = [...this.nodeViews.values()].flatMap(haloLeaves);
     const hidden = [
       this.grid.canvas,
       this.minimap.group,
       this.interactionLayer,
       this.selectionLayer,
+      ...halos,
     ];
     const wasVisible = hidden.map((leaf) => leaf.visible);
     hidden.forEach((leaf) => (leaf.visible = false));
@@ -554,6 +563,7 @@ export class LeaferEditorController {
 
   dispose() {
     this.cancelGesture();
+    this.stopHaloLoop();
     if (this.animation) cancelAnimationFrame(this.animation.frame);
     if (this.cameraEndTimer) clearTimeout(this.cameraEndTimer);
     this.observer?.disconnect();
@@ -568,7 +578,41 @@ export class LeaferEditorController {
 
   // --- internals ---------------------------------------------------------
 
+  /**
+   * Keeps the ring clock running exactly as long as something is lit.
+   *
+   * Started when the first card begins to be worked on and stopped when the
+   * last one finishes, rather than left turning with nothing to move: a canvas
+   * with nothing running should cost no frames at all, and one with a single
+   * node running should cost no more than the ring it is drawing.
+   */
+  private syncHaloLoop() {
+    let lit = false;
+    for (const view of this.nodeViews.values()) {
+      if (view.halo) {
+        lit = true;
+        break;
+      }
+    }
+    if (lit && this.haloTick === null) {
+      const step = (now: number) => {
+        for (const view of this.nodeViews.values()) advanceHalo(view, now);
+        this.haloTick = requestAnimationFrame(step);
+      };
+      this.haloTick = requestAnimationFrame(step);
+    } else if (!lit) {
+      this.stopHaloLoop();
+    }
+  }
+
+  private stopHaloLoop() {
+    if (this.haloTick === null) return;
+    cancelAnimationFrame(this.haloTick);
+    this.haloTick = null;
+  }
+
   private clearScene() {
+    this.stopHaloLoop();
     for (const view of this.nodeViews.values()) view.group.destroy();
     this.nodeViews.clear();
     for (const record of this.edgeViews.values()) record.view.group.destroy();
