@@ -52,18 +52,23 @@ impl LuaRuntime {
 
     /// Loads a script file and returns a reference to it.
     pub fn load(&self, path: &Path) -> Result<ScriptRef, mlua::Error> {
-        let lua = &self.lua;
         let source = std::fs::read_to_string(path).map_err(|e| {
             mlua::Error::RuntimeError(format!("cannot read script {}: {e}", path.display()))
         })?;
-        let chunk = lua.load(&source);
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        self.load_source(&name, &source)
+    }
+
+    /// Loads script text under a name its errors are reported by.
+    pub fn load_source(&self, name: &str, source: &str) -> Result<ScriptRef, mlua::Error> {
+        let chunk = self.lua.load(source).set_name(name);
         chunk.exec()?;
         Ok(ScriptRef {
-            _name: path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown")
-                .to_string(),
+            _name: name.to_string(),
         })
     }
 
@@ -86,7 +91,10 @@ impl LuaRuntime {
     ) -> Result<mlua::Value, mlua::Error> {
         let lua = &self.lua;
         let func: Function = lua.globals().get(func)?;
-        let result = func.call::<mlua::Value>(args)?;
+        // A Vec<Value> on its own would convert to one Lua table — a single
+        // argument — leaving every parameter after the first nil inside the
+        // script. MultiValue is what spreads the elements as arguments.
+        let result = func.call::<mlua::Value>(mlua::MultiValue::from_vec(args))?;
         Ok(result)
     }
 
@@ -103,7 +111,8 @@ impl LuaRuntime {
         let func: Function = lua.globals().get(func)?;
         let lua_args: Result<Vec<mlua::Value>, mlua::Error> =
             args.into_iter().map(|arg| json_to_lua(lua, &arg)).collect();
-        let result = func.call::<mlua::Value>(lua_args?)?;
+        // Spread as arguments, not passed as one table: see `call_json`.
+        let result = func.call::<mlua::Value>(mlua::MultiValue::from_vec(lua_args?))?;
         Ok(table_to_json(&result))
     }
 }
@@ -233,6 +242,88 @@ mod tests {
 
         let json = table_to_json(&mlua::Value::Table(tbl));
         assert_eq!(json, serde_json::json!({"a": 1, "b": [2, 3]}));
+    }
+
+    #[test]
+    fn a_script_function_receives_every_argument() {
+        let rt = test_runtime();
+        // The bug this pins: a Vec of values converts to one Lua table, so
+        // without spreading, `call` was the whole list and `req` was nil —
+        // "attempt to index a nil value (local 'req')" at the first field
+        // a script read off the request.
+        let script = rt
+            .load_source(
+                "args",
+                r#"
+                function build_request(call, req, inputs)
+                    return {
+                        method = "POST",
+                        url = call.url .. "/" .. req.prompt .. "/" .. #inputs,
+                    }
+                end
+                "#,
+            )
+            .unwrap();
+        let out = rt
+            .call_json_value(
+                &script,
+                "build_request",
+                vec![
+                    serde_json::json!({"url": "https://provider.test"}),
+                    serde_json::json!({"prompt": "hello", "params": {}}),
+                    serde_json::json!([{"role": "firstFrame"}]),
+                ],
+            )
+            .unwrap();
+        assert_eq!(out["method"], "POST");
+        assert_eq!(out["url"], "https://provider.test/hello/1");
+    }
+
+    #[test]
+    fn the_bailian_scripts_build_their_requests() {
+        let rt = test_runtime();
+        let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
+
+        // Audio: the non-streaming CosyVoice TTS shape.
+        let speech = rt.load(&scripts.join("audio/bailian-speech.lua")).unwrap();
+        let out = rt
+            .call_json_value(
+                &speech,
+                "build_request",
+                vec![
+                    serde_json::json!({"url": "https://ws.test/tts", "model": "cosyvoice-v1"}),
+                    serde_json::json!({"prompt": "hello", "params": {"voice": "longxiaochun"}}),
+                    serde_json::json!([]),
+                ],
+            )
+            .unwrap();
+        assert_eq!(out["url"], "https://ws.test/tts");
+        let body: serde_json::Value =
+            serde_json::from_str(out["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["model"], "cosyvoice-v1");
+        assert_eq!(body["input"]["text"], "hello");
+        assert_eq!(body["input"]["voice"], "longxiaochun");
+
+        // Video: the async DashScope task shape.
+        let video = rt.load(&scripts.join("video/bailian-video.lua")).unwrap();
+        let out = rt
+            .call_json_value(
+                &video,
+                "build_task_request",
+                vec![
+                    serde_json::json!({"url": "https://ws.test/video-synthesis", "model": "wan2.2-t2v"}),
+                    serde_json::json!({"prompt": "a cat", "params": {"seconds": "6"}}),
+                    serde_json::json!([{"role": "firstFrame", "data_url": "https://img.test/1.png"}]),
+                ],
+            )
+            .unwrap();
+        assert_eq!(out["headers"]["X-DashScope-Async"], "enable");
+        let body: serde_json::Value =
+            serde_json::from_str(out["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["model"], "wan2.2-t2v");
+        assert_eq!(body["input"]["prompt"], "a cat");
+        assert_eq!(body["input"]["media"][0]["type"], "first_frame");
+        assert_eq!(body["parameters"]["duration"], 6);
     }
 
     #[test]
