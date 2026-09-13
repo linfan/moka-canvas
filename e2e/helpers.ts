@@ -85,6 +85,21 @@ export async function openRecent(page: Page, name: string) {
     .click();
 }
 
+/**
+ * Turn the column beside the canvas over to its assets face.
+ *
+ * The column holds two faces — the project's canvases and the files it is made
+ * of — and opens on the tree, so anything asked of the shelf (importing a file,
+ * reading a row) says so first rather than assuming which face is showing.
+ */
+export async function showAssets(page: Page) {
+  const tab = page.getByTestId("left-tab-assets");
+  if ((await tab.getAttribute("aria-selected")) !== "true") {
+    await tab.click();
+  }
+  await expect(page.getByLabel("Import files", { exact: true })).toBeAttached();
+}
+
 /** Open the question an export asks about what the package should carry. */
 export async function askToExport(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "Export", exact: true }).click();

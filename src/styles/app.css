@@ -626,12 +626,12 @@ h2 {
   padding: 2px 6px;
 }
 
-.canvas-tab-add {
-  background: transparent;
-  border: 1px dashed var(--stroke);
+.canvas-tabs-hint {
   color: var(--muted);
   flex: none;
-  padding: 4px 10px;
+  font-size: 11px;
+  padding: 0 6px;
+  white-space: nowrap;
 }
 
 .save-status {
@@ -675,6 +675,266 @@ h2 {
 
 .editor-side {
   border-right: 1px solid var(--stroke);
+
+  /* The column turns over between two faces rather than scrolling as one, so
+     the choice of face stays put and the face chosen scrolls on its own. */
+  gap: 12px;
+  overflow: hidden;
+}
+
+.editor-side > .side-resources {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The left column's two faces, and the canvas tree that is one of them. */
+.side-panel-tabs {
+  border-bottom: 1px solid var(--stroke);
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding-bottom: 8px;
+}
+
+.side-panel-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  flex: 1;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+
+.side-panel-tabs button.is-active {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+  color: var(--ink);
+}
+
+.side-tree {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.side-tree-head {
+  align-items: center;
+  display: flex;
+  flex: none;
+  justify-content: space-between;
+}
+
+.side-tree-head h2 {
+  margin: 0;
+}
+
+.side-tree-new {
+  display: flex;
+  gap: 4px;
+}
+
+.side-tree-new button {
+  background: transparent;
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 7px;
+}
+
+.side-tree-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 40px;
+}
+
+.tree-root,
+.tree-branch {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* A level in is a line down the left of it, so a deep tree can be followed by
+   eye rather than by counting the indent of each row. */
+.tree-branch {
+  border-left: 1px solid var(--stroke);
+  margin-left: 9px;
+  padding-left: 5px;
+}
+
+.tree-row {
+  align-items: center;
+  border-radius: var(--radius-sm);
+  column-gap: 2px;
+  display: flex;
+  min-width: 0;
+  padding: 1px 4px;
+  position: relative;
+}
+
+.tree-row:hover {
+  background: var(--surface-raised);
+}
+
+.tree-row.is-active {
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--stroke);
+}
+
+.tree-row.is-active .tree-label {
+  color: var(--ink);
+}
+
+.tree-caret {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  flex: none;
+  font-size: 9px;
+  padding: 3px 2px;
+  width: 18px;
+}
+
+.tree-caret.is-blank {
+  visibility: hidden;
+}
+
+.tree-glyph {
+  color: var(--muted);
+  flex: none;
+  font-size: 12px;
+  text-align: center;
+  width: 15px;
+}
+
+.tree-label {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 2px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-count {
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.tree-rename {
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+  padding: 3px 4px;
+}
+
+/* Offered on the row rather than beside every row: a tree with a button on each
+   of forty rows is a tree nobody can read. */
+.tree-peek {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  opacity: 0;
+  padding: 2px 4px;
+}
+
+.tree-row:hover .tree-peek,
+.tree-peek:focus-visible {
+  opacity: 1;
+}
+
+.tree-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+  padding: 4px 4px 4px 22px;
+}
+
+/* Where the row being dragged would land, said before it is let go: inside a
+   folder is the folder ringed, and beside a row is a line at the edge it was
+   aimed at. */
+.tree-row.is-drop-inside {
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.tree-row.is-drop-before::before,
+.tree-row.is-drop-after::after {
+  background: var(--primary);
+  border-radius: 1px;
+  content: "";
+  height: 2px;
+  left: 2px;
+  position: absolute;
+  right: 2px;
+}
+
+.tree-row.is-drop-before::before {
+  top: -1px;
+}
+
+.tree-row.is-drop-after::after {
+  bottom: -1px;
+}
+
+.tree-menu {
+  max-width: 280px;
+}
+
+/* The four kinds of thing a board can be given, as the tabs the shelf is read
+   through. */
+.side-asset-kinds {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.side-asset-kinds button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  display: flex;
+  flex: 1;
+  font-size: 12px;
+  gap: 4px;
+  justify-content: center;
+  padding: 5px 2px;
+}
+
+.side-asset-kinds button.is-active {
+  background: var(--surface-raised);
+  border-color: var(--muted);
+  color: var(--ink);
+}
+
+.side-asset-kinds button span {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* The row a reader was brought to from the tree, marked rather than left to be
+   found somewhere in a list of a hundred. */
+.resource-row.is-focused {
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--muted);
 }
 
 .editor-inspector,
@@ -682,7 +942,6 @@ h2 {
   border-left: 1px solid var(--stroke);
 }
 
-.side-canvas-list,
 .side-resource-list,
 .inspector-list {
   display: grid;
@@ -691,17 +950,6 @@ h2 {
   padding: 0;
 }
 
-.side-canvas-list button {
-  align-items: baseline;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  padding: 9px 11px;
-  text-align: left;
-  width: 100%;
-}
-
-.side-canvas-list span,
 .inspector-list span {
   color: var(--muted);
   font-size: 12px;

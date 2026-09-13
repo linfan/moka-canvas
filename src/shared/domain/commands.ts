@@ -8,6 +8,9 @@ import {
   MAX_CANVAS_NAME_LENGTH,
   MAX_CANVASES_PER_PROJECT,
   MAX_EDGES_PER_CANVAS,
+  MAX_FOLDER_DEPTH,
+  MAX_FOLDER_NAME_LENGTH,
+  MAX_FOLDERS_PER_PROJECT,
   MAX_NODES_PER_CANVAS,
   MAX_TITLE_LENGTH,
   ZOOM_MAX,
@@ -16,13 +19,27 @@ import {
 import type {
   AssistantSession,
   CanvasDocument,
+  CanvasFolder,
   DocumentCommand,
   DocumentSettings,
+  FolderId,
   MokaFile,
   NodeId,
   WorkflowEdge,
   WorkflowNode,
 } from "./types";
+import {
+  canvasFolderOf,
+  canvasSiblingIndex,
+  childFolders,
+  descendantFolderIds,
+  folderById,
+  folderCanvases,
+  folderDepth,
+  folderSiblingIndex,
+  foldersOf,
+  subtreeDepth,
+} from "./folders";
 import { findNode, validateBounds, validateEdgeCandidate } from "./validate";
 
 export class CommandError extends Error {
@@ -65,6 +82,80 @@ function replaceCanvas(moka: MokaFile, canvas: CanvasDocument): MokaFile {
     ...moka,
     canvas: moka.canvas.map((c) => (c.id === canvas.id ? canvas : c)),
   };
+}
+
+/**
+ * A project carrying these folders, or carrying the field not at all when it
+ * has none.
+ *
+ * A tree emptied of its folders writes what it would have written had nobody
+ * ever tidied it, which is the honest reading of it: there is nothing to show
+ * and an empty list would claim a drawer was made.
+ */
+function withFolders(moka: MokaFile, folders: CanvasFolder[]): MokaFile {
+  return { ...moka, folders: folders.length > 0 ? folders : undefined };
+}
+
+/**
+ * Puts `item` into `list` at the place `index` names among `peers`.
+ *
+ * The two lists a tree is made of are each a slice of one flat list, so a place
+ * among siblings has to be turned back into a place in the flat list: before the
+ * sibling it was asked to land ahead of, after the last of them when it was
+ * asked for the end, and at the end of everything when it has no siblings at
+ * all — where among none it lands cannot be seen.
+ *
+ * `peers` must already exclude the item, which is what a move does first.
+ */
+function spliceAmong<T>(list: T[], peers: T[], index: number, item: T): T[] {
+  const at = Math.min(Math.max(index, 0), peers.length);
+  const next = [...list];
+  if (at < peers.length) {
+    next.splice(next.indexOf(peers[at]), 0, item);
+  } else if (peers.length > 0) {
+    next.splice(next.indexOf(peers[peers.length - 1]) + 1, 0, item);
+  } else {
+    next.push(item);
+  }
+  return next;
+}
+
+function folderOf(
+  moka: MokaFile,
+  folderId: FolderId | null | undefined,
+): FolderId | null {
+  if (folderId === null || folderId === undefined) return null;
+  if (!folderById(moka, folderId)) {
+    throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+  }
+  return folderId;
+}
+
+function checkFolderName(name: string) {
+  if (name.length === 0) {
+    throw new CommandError("VALIDATION_FAILED", "Folder name is empty");
+  }
+  if (name.length > MAX_FOLDER_NAME_LENGTH) {
+    throw new CommandError("VALIDATION_FAILED", "Folder name is too long");
+  }
+}
+
+/**
+ * Whether a folder put here would take the tree past the depth it is kept to.
+ *
+ * Measured over the document as it would be, so what the folder carries under
+ * it counts as well as the folder itself: a drawer with two levels in it needs
+ * two levels of room where it is dropped.
+ */
+function checkFolderDepth(candidate: MokaFile, folderId: FolderId) {
+  const depth =
+    folderDepth(candidate, folderId) + subtreeDepth(candidate, folderId) - 1;
+  if (depth > MAX_FOLDER_DEPTH) {
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      `Folders nest at most ${MAX_FOLDER_DEPTH} deep`,
+    );
+  }
 }
 
 function sessionOf(
@@ -713,6 +804,9 @@ function applyOne(
         throw new CommandError("VALIDATION_FAILED", "Canvas limit reached");
       if (moka.canvas.some((c) => c.id === command.canvas.id))
         throw new CommandError("CONFLICT", "Canvas id already exists");
+      // A canvas born into a folder names it, so the folder has to be there:
+      // one that is not would leave the board somewhere no tree can show it.
+      folderOf(moka, command.canvas.folderId ?? null);
       const index = Math.min(
         Math.max(command.index ?? moka.canvas.length, 0),
         moka.canvas.length,
@@ -771,6 +865,185 @@ function applyOne(
       return {
         next: { ...moka, canvas: list },
         inverse: [{ type: "addCanvas", canvas: removed, index }],
+      };
+    }
+
+    case "addFolder": {
+      const folders = foldersOf(moka);
+      if (folders.length + 1 > MAX_FOLDERS_PER_PROJECT)
+        throw new CommandError("VALIDATION_FAILED", "Folder limit reached");
+      if (folders.some((folder) => folder.id === command.folder.id))
+        throw new CommandError("CONFLICT", "Folder id already exists");
+      checkFolderName(command.folder.name);
+      const parentId = folderOf(moka, command.folder.parentId ?? null);
+      const placed = { ...command.folder, parentId: parentId ?? undefined };
+      const siblings = childFolders(moka, parentId);
+      const next = spliceAmong(
+        folders,
+        siblings,
+        command.index ?? siblings.length,
+        placed,
+      );
+      const candidate = withFolders(moka, next);
+      checkFolderDepth(candidate, placed.id);
+      return {
+        next: candidate,
+        inverse: [{ type: "removeFolder", folderId: placed.id }],
+      };
+    }
+
+    case "renameFolder": {
+      const folder = folderById(moka, command.folderId);
+      if (!folder)
+        throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+      checkFolderName(command.name);
+      const previous = folder.name;
+      return {
+        next: withFolders(
+          moka,
+          foldersOf(moka).map((item) =>
+            item.id === folder.id ? { ...item, name: command.name } : item,
+          ),
+        ),
+        inverse: [
+          {
+            type: "renameFolder",
+            folderId: folder.id,
+            name: previous,
+          },
+        ],
+      };
+    }
+
+    case "moveFolder": {
+      const folders = foldersOf(moka);
+      const folder = folderById(moka, command.folderId);
+      if (!folder)
+        throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+      const parentId = folderOf(moka, command.parentId);
+      if (parentId === folder.id)
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "A folder cannot be moved into itself",
+        );
+      if (descendantFolderIds(moka, folder.id).includes(parentId ?? ""))
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          "A folder cannot be moved into one it holds",
+        );
+      const previousParent = folder.parentId ?? null;
+      const previousIndex = folderSiblingIndex(moka, folder.id);
+      const without = folders.filter((item) => item.id !== folder.id);
+      const siblings = without.filter(
+        (item) => (item.parentId ?? null) === parentId,
+      );
+      const moved: CanvasFolder = {
+        ...folder,
+        parentId: parentId ?? undefined,
+      };
+      const next = spliceAmong(without, siblings, command.index, moved);
+      const candidate = withFolders(moka, next);
+      checkFolderDepth(candidate, folder.id);
+      return {
+        next: candidate,
+        inverse: [
+          {
+            type: "moveFolder",
+            folderId: folder.id,
+            parentId: previousParent,
+            index: previousIndex,
+          },
+        ],
+      };
+    }
+
+    case "removeFolder": {
+      const folders = foldersOf(moka);
+      const position = folders.findIndex(
+        (item) => item.id === command.folderId,
+      );
+      if (position < 0)
+        throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+      const removed = folders[position];
+      const parentId = removed.parentId ?? null;
+      const previousIndex = folderSiblingIndex(moka, removed.id);
+      // What the folder held is not held by nothing: its folders and its
+      // canvases go up into the folder that held it, which is what makes
+      // tidying the tree something a reader can do without risking a board.
+      const heldFolders = childFolders(moka, removed.id).map(
+        (folder, index) => ({ folder, index }),
+      );
+      const heldCanvases = folderCanvases(moka, removed.id).map(
+        (canvas, index) => ({ canvas, index }),
+      );
+      const heldCanvasIds = new Set(
+        heldCanvases.map(({ canvas }) => canvas.id),
+      );
+      // Each folder it held takes its place in the list, in the order they were
+      // read, so what a drawer held stays where the drawer was rather than going
+      // to the end of the shelf it was poured into.
+      const nextFolders = folders.flatMap((item) =>
+        item.id === removed.id
+          ? heldFolders.map(({ folder }) => ({
+              ...folder,
+              parentId: parentId ?? undefined,
+            }))
+          : [item],
+      );
+      const nextCanvases = moka.canvas.map((canvas) =>
+        heldCanvasIds.has(canvas.id)
+          ? { ...canvas, folderId: parentId ?? undefined }
+          : canvas,
+      );
+      const inverse: DocumentCommand[] = [
+        { type: "addFolder", folder: removed, index: previousIndex },
+      ];
+      for (const { folder, index } of heldFolders) {
+        inverse.push({
+          type: "moveFolder",
+          folderId: folder.id,
+          parentId: removed.id,
+          index,
+        });
+      }
+      for (const { canvas, index } of heldCanvases) {
+        inverse.push({
+          type: "moveCanvas",
+          canvasId: canvas.id,
+          folderId: removed.id,
+          index,
+        });
+      }
+      return {
+        next: { ...withFolders(moka, nextFolders), canvas: nextCanvases },
+        inverse,
+      };
+    }
+
+    case "moveCanvas": {
+      const canvas = canvasOf(moka, command.canvasId);
+      const folderId = folderOf(moka, command.folderId);
+      const previousFolder = canvasFolderOf(canvas);
+      const previousIndex = canvasSiblingIndex(moka, canvas.id);
+      const without = moka.canvas.filter((c) => c.id !== canvas.id);
+      const peers = without.filter((c) => (c.folderId ?? null) === folderId);
+      const moved: CanvasDocument = {
+        ...canvas,
+        folderId: folderId ?? undefined,
+      };
+      return {
+        next: {
+          ...moka,
+          canvas: spliceAmong(without, peers, command.index, moved),
+        },
+        inverse: [
+          {
+            type: "moveCanvas",
+            canvasId: canvas.id,
+            folderId: previousFolder,
+            index: previousIndex,
+          },
+        ],
       };
     }
   }

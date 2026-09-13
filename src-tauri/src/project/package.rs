@@ -869,6 +869,7 @@ mod tests {
                 images: vec![made, brought],
                 ..ResourceRegistry::default()
             },
+            folders: None,
             canvas: vec![canvas],
         }
     }

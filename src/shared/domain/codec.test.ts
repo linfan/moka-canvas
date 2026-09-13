@@ -9,6 +9,7 @@ import {
   buildGoldenMokaFile,
   buildLegacyV1MokaFile,
   buildShelfMokaFile,
+  buildTreeMokaFile,
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 import { derivePorts } from "./factories";
@@ -24,6 +25,8 @@ const CONVERSATION_JSON = join(FIXTURE_DIR, "conversation.moka.json");
 const CONVERSATION_BINARY = join(FIXTURE_DIR, "conversation.canvas.moka");
 const SHELF_JSON = join(FIXTURE_DIR, "shelf.moka.json");
 const SHELF_BINARY = join(FIXTURE_DIR, "shelf.canvas.moka");
+const TREE_JSON = join(FIXTURE_DIR, "tree.moka.json");
+const TREE_BINARY = join(FIXTURE_DIR, "tree.canvas.moka");
 const LEGACY_BINARY = join(FIXTURE_DIR, "v1-legacy.moka");
 
 function normalize(value: unknown): unknown {
@@ -325,6 +328,34 @@ describe("moka codec", () => {
       Buffer.from(readFileSync(SHELF_BINARY)).equals(Buffer.from(encoded)),
     ).toBe(true);
     expect(readFileSync(SHELF_JSON, "utf8")).toBe(json);
+  });
+
+  it("round-trips the canvas tree", () => {
+    const tree = buildTreeMokaFile();
+    const decoded = decodeMokaFile(encodeMokaFile(tree));
+    expect(normalize(decoded)).toEqual(normalize(tree));
+  });
+
+  /**
+   * The shared pair the other language reads: it decodes the binary to this
+   * model and writes the binary back byte for byte, so where a board sits in
+   * the tree is one contract rather than two opinions about it.
+   */
+  it("matches the shared tree fixtures", () => {
+    const tree = buildTreeMokaFile();
+    const encoded = encodeMokaFile(tree);
+    const json = `${JSON.stringify(tree, null, 2)}\n`;
+
+    if (process.env.UPDATE_FIXTURES === "1" || !existsSync(TREE_BINARY)) {
+      mkdirSync(FIXTURE_DIR, { recursive: true });
+      writeFileSync(TREE_BINARY, encoded);
+      writeFileSync(TREE_JSON, json);
+    }
+
+    expect(
+      Buffer.from(readFileSync(TREE_BINARY)).equals(Buffer.from(encoded)),
+    ).toBe(true);
+    expect(readFileSync(TREE_JSON, "utf8")).toBe(json);
   });
 
   it("reads an asset stored before the shelf existed as saying nothing", () => {

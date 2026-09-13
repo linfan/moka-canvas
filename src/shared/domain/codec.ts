@@ -15,6 +15,7 @@ import type {
   AssistantSession,
   AssistantToolCall,
   CanvasDocument,
+  CanvasFolder,
   GroupMembership,
   MokaFile,
   NodeData,
@@ -236,6 +237,17 @@ function encodeCanvas(canvas: CanvasDocument): Record<string, unknown> {
   };
   if (canvas.sessions !== undefined)
     doc.sessions = canvas.sessions.map(encodeSession);
+  if (canvas.folderId !== undefined) doc.folderId = canvas.folderId;
+  return doc;
+}
+
+function encodeFolder(folder: CanvasFolder): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    id: folder.id,
+    name: folder.name,
+  };
+  if (folder.parentId !== undefined) doc.parentId = folder.parentId;
+  doc.createdAt = folder.createdAt;
   return doc;
 }
 
@@ -316,7 +328,7 @@ function encodeMetadata(metadata: ProjectMetadata): Record<string, unknown> {
 }
 
 export function encodeMokaFile(moka: MokaFile, maxBytes?: number): Uint8Array {
-  const doc = {
+  const doc: Record<string, unknown> = {
     version: moka.version,
     metadata: encodeMetadata(moka.metadata),
     resources: Object.fromEntries(
@@ -325,8 +337,9 @@ export function encodeMokaFile(moka: MokaFile, maxBytes?: number): Uint8Array {
         (moka.resources[category] ?? []).map(encodeResource),
       ]),
     ),
-    canvas: moka.canvas.map(encodeCanvas),
   };
+  if (moka.folders !== undefined) doc.folders = moka.folders.map(encodeFolder);
+  doc.canvas = moka.canvas.map(encodeCanvas);
   const bson = serialize(doc);
   const bytes = new Uint8Array(4 + bson.length);
   bytes.set(MOKA_MAGIC, 0);
@@ -638,6 +651,26 @@ function decodeCanvas(value: unknown): CanvasDocument {
       snapToGrid: Boolean(settings.snapToGrid),
     },
     sessions: decodeSessions(doc.sessions),
+    folderId: optionalString(doc.folderId),
+  });
+}
+
+/**
+ * The folders a project has, or undefined when it has none.
+ *
+ * Undefined and not an empty list, so that a document written before folders
+ * existed is read and written back as the bytes it arrived with.
+ */
+function decodeFolders(value: unknown): CanvasFolder[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return asArray(value, "folders").map((folder) => {
+    const doc = asRecord(folder, "folders[]");
+    return {
+      id: asString(doc.id, "folders[].id"),
+      name: asString(doc.name, "folders[].name"),
+      parentId: optionalString(doc.parentId),
+      createdAt: asString(doc.createdAt, "folders[].createdAt"),
+    };
   });
 }
 
@@ -698,6 +731,13 @@ export function decodeMokaFile(bytes: Uint8Array): MokaFile {
   ) as MokaFile["resources"];
 
   const canvas = asArray(doc.canvas, "canvas").map(decodeCanvas);
+  const folders = decodeFolders(doc.folders);
 
-  return { version: MOKA_FILE_VERSION, metadata, resources, canvas };
+  return {
+    version: MOKA_FILE_VERSION,
+    metadata,
+    resources,
+    ...(folders !== undefined ? { folders } : {}),
+    canvas,
+  };
 }

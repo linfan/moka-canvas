@@ -9,6 +9,9 @@ import {
   MAX_ASSISTANT_MESSAGES_PER_SESSION,
   MAX_ASSISTANT_SESSIONS_PER_CANVAS,
   MAX_EDGES_PER_CANVAS,
+  MAX_FOLDER_DEPTH,
+  MAX_FOLDER_NAME_LENGTH,
+  MAX_FOLDERS_PER_PROJECT,
   MAX_NODES_PER_CANVAS,
   MAX_PROMPT_LENGTH,
   MAX_RESULT_SLOTS,
@@ -30,6 +33,7 @@ import type {
   WorkflowEdge,
   WorkflowNode,
 } from "./types";
+import { folderDepth, foldersOf } from "./folders";
 
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -657,8 +661,74 @@ function shelfIssues(entry: ResourceEntry): ValidationIssue[] {
   return issues;
 }
 
+/**
+ * What is wrong with the canvas tree.
+ *
+ * A folder naming a parent that is not there is a fault in the document rather
+ * than an empty drawer: the boards under it would sit somewhere no tree can
+ * show, so it is said outright instead of being quietly read as a folder at the
+ * project root. A name that leads round in a circle is a fault for the same
+ * reason, and is named as one rather than reported as too deep.
+ */
+function folderIssues(moka: MokaFile): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const say = (message: string) =>
+    issues.push({ code: "VALIDATION_FAILED", message });
+  const folders = foldersOf(moka);
+  if (folders.length > MAX_FOLDERS_PER_PROJECT) {
+    say(`Project exceeds the folder limit (${MAX_FOLDERS_PER_PROJECT})`);
+  }
+  const ids = new Set(folders.map((folder) => folder.id));
+  if (ids.size !== folders.length) say("Duplicate folder id");
+  for (const folder of folders) {
+    if (folder.name.length === 0) say(`Folder ${folder.id} has no name`);
+    if (folder.name.length > MAX_FOLDER_NAME_LENGTH) {
+      say(
+        `Folder "${folder.name}" has a name over ${MAX_FOLDER_NAME_LENGTH} characters`,
+      );
+    }
+    if (folder.parentId !== undefined && !ids.has(folder.parentId)) {
+      say(`Folder "${folder.name}" sits in a folder that is not there`);
+      continue;
+    }
+    if (holdsItself(moka, folder.id)) {
+      say(`Folder "${folder.name}" is inside itself`);
+      continue;
+    }
+    if (folderDepth(moka, folder.id) > MAX_FOLDER_DEPTH) {
+      say(
+        `Folder "${folder.name}" sits deeper than the ${MAX_FOLDER_DEPTH} levels allowed`,
+      );
+    }
+  }
+  for (const canvas of moka.canvas) {
+    if (canvas.folderId !== undefined && !ids.has(canvas.folderId)) {
+      issues.push({
+        code: "FOLDER_NOT_FOUND",
+        message: `Canvas "${canvas.name}" sits in a folder that is not there`,
+        canvasId: canvas.id,
+      });
+    }
+  }
+  return issues;
+}
+
+/** Whether walking up from a folder leads back to it. */
+function holdsItself(moka: MokaFile, folderId: string): boolean {
+  const seen = new Set<string>();
+  let current = foldersOf(moka).find((folder) => folder.id === folderId);
+  while (current?.parentId !== undefined) {
+    if (seen.has(current.parentId)) return true;
+    seen.add(current.parentId);
+    const parentId = current.parentId;
+    current = foldersOf(moka).find((folder) => folder.id === parentId);
+  }
+  return false;
+}
+
 export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  issues.push(...folderIssues(moka));
   const canvasIds = new Set<string>();
   for (const canvas of moka.canvas) {
     if (canvasIds.has(canvas.id)) {

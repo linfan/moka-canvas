@@ -2,7 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { APP, createProject, persistedNodeCount, projectHome } from "./helpers";
+import {
+  APP,
+  createProject,
+  persistedNodeCount,
+  projectHome,
+  showAssets,
+} from "./helpers";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -116,6 +122,7 @@ async function openWithAPicture(page: Page, name: string): Promise<string> {
   await page.goto("/");
   await createProject(page, join(projectHome(slug), "project"), name);
 
+  await showAssets(page);
   await page.getByLabel("Import files", { exact: true }).setInputFiles({
     name: SOURCE_NAME,
     mimeType: "image/png",

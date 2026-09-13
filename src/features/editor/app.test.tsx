@@ -96,18 +96,19 @@ describe("app boot", () => {
     const recent = await screen.findByText("Golden Fixture");
     fireEvent.click(recent);
 
-    // Both canvas tabs and the shell chrome appear.
-    const tab = await screen.findByRole("button", { name: "Canvas 1" });
+    // The board a project opens onto has a tab, and the tree holds them both.
+    const tab = await screen.findByTestId("canvas-tab-Canvas 1");
     expect(tab).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Canvas 2" })).toBeTruthy();
+    expect(screen.queryByTestId("canvas-tab-Canvas 2")).toBeNull();
     const host = screen.getByTestId("canvas-host");
     expect(within(host).getByText("4 nodes · 2 edges")).toBeTruthy();
     expect(screen.getByText("Saved")).toBeTruthy();
     expect(useAppStore.getState().phase).toBe("editing");
 
-    // Switching canvases swaps the scene summary.
+    // Opening a board from the tree puts a tab up and swaps the scene summary.
     fireEvent.click(screen.getByRole("button", { name: "Canvas 2" }));
     expect(await within(host).findByText("0 nodes · 0 edges")).toBeTruthy();
+    expect(screen.getByTestId("canvas-tab-Canvas 2")).toBeTruthy();
   });
 
   it("never lets the native context menu appear over its own", async () => {

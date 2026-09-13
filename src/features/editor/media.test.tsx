@@ -461,6 +461,14 @@ describe("editor shell integration", () => {
     };
   }
 
+  /**
+   * The shelf lives behind the assets face of the left column, since what a
+   * project holds and what it is made of are two ways of reading one column.
+   */
+  function showAssets() {
+    fireEvent.click(screen.getByTestId("left-tab-assets"));
+  }
+
   async function openGolden(
     selfCheck: SelfCheckReport = { ok: true, issues: [] },
   ) {
@@ -475,7 +483,7 @@ describe("editor shell integration", () => {
   it("shows asset metadata and actions for a selected image node", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     act(() => {
       useEditorStore
         .getState()
@@ -496,7 +504,7 @@ describe("editor shell integration", () => {
   it("files a text node's words to the shelf from the inspector", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     act(() => {
       useEditorStore
         .getState()
@@ -525,7 +533,7 @@ describe("editor shell integration", () => {
   it("renders input chips and disconnects a single edge", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     act(() => {
       useEditorStore
         .getState()
@@ -542,7 +550,7 @@ describe("editor shell integration", () => {
   it("opens the delete confirmation from the inspector", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     act(() => {
       useEditorStore
         .getState()
@@ -592,7 +600,8 @@ describe("editor shell integration", () => {
       screen.getByRole("button", { name: "Open with missing assets" }),
     );
     expect(useAppStore.getState().phase).toBe("editing");
-    // The broken asset is flagged in the resource panel.
+    // The broken asset is flagged on the shelf.
+    showAssets();
     const row = screen.getByText("lake.png").closest(".resource-row");
     expect(row?.textContent).toContain("broken");
   });
@@ -731,7 +740,7 @@ describe("editor shell integration", () => {
   it("puts a file dropped on a node in place of what that node held", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     aimAt(ids.image);
 
     fireEvent.drop(screen.getByTestId("canvas-host"), {
@@ -759,7 +768,7 @@ describe("editor shell integration", () => {
   it("lays a file the node cannot hold on the canvas instead", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     aimAt(ids.text);
 
     fireEvent.drop(screen.getByTestId("canvas-host"), {
@@ -789,7 +798,7 @@ describe("editor shell integration", () => {
   it("files and lists a file dropped on what the node is given", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     act(() => {
       useEditorStore.setState({ promptPanel: null, promptPanelOnSelect: true });
       useEditorStore
@@ -833,7 +842,7 @@ describe("editor shell integration", () => {
 
   it("takes files off a paste, filed and laid out like a drop", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
 
     const consumed = fireEvent.paste(window, {
       clipboardData: {
@@ -858,9 +867,10 @@ describe("editor shell integration", () => {
     expect(state.moka!.canvas[0].nodes).toHaveLength(5);
   });
 
-  it("lists assets in the resource panel with use counts", async () => {
+  it("lists assets on the shelf with use counts", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
+    showAssets();
     const row = screen.getByText("lake.png").closest(".resource-row");
     expect(row?.textContent).toContain("2.0 KB");
     expect(row?.textContent).toContain("1 use");
@@ -869,7 +879,7 @@ describe("editor shell integration", () => {
   it("fills a waiting node from what the project already holds", async () => {
     const ids = goldenNodeIds();
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     act(() => {
       addNodeAt({ x: 0, y: 0 }, "image", null);
     });

@@ -5,3 +5,4 @@ export * from "./validate";
 export * from "./commands";
 export * from "./codec";
 export * from "./factories";
+export * from "./folders";

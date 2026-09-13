@@ -255,7 +255,7 @@ async function openEditor() {
     await useProjectStore.getState().open("/tmp/golden");
     useAppStore.getState().setPhase("editing");
   });
-  await screen.findByRole("button", { name: "Canvas 1" });
+  await screen.findByTestId("canvas-tab-Canvas 1");
   await settle();
 }
 

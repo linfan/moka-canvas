@@ -287,7 +287,7 @@ async function openGolden(
   );
   render(<App />);
   fireEvent.click(await screen.findByText("Golden Fixture"));
-  await screen.findByRole("button", { name: "Canvas 1" });
+  await screen.findByTestId("canvas-tab-Canvas 1");
 }
 
 /**

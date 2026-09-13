@@ -17,6 +17,7 @@ import {
   type SaveResult,
 } from "../../../api/projects";
 import { isApiError } from "../../../api/client";
+import { useOpenCanvases } from "./openCanvases";
 
 export type SaveStatus = "saved" | "saving" | "conflicted" | "error";
 
@@ -111,10 +112,28 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
       flushTimer = null;
       // A flush from the previously open project must not be awaited here.
       flushInFlight = null;
+      // Which boards this machine was left looking at is kept beside the
+      // project rather than in it, so taking up the document takes up that list
+      // too and opens onto the board the work was left on.
+      const openedOnto = useOpenCanvases.getState().adopt(opened.moka);
+      // A read of a document that is already open is not a reopening: a run
+      // files what it made by rewriting the document, and a reader who was
+      // looking at one board when that happened has not asked to be moved to
+      // another. So the board being looked at is kept where it still exists, and
+      // only a project opened for the first time lands where it was left.
+      const before = get();
+      const sameProject = before.moka?.metadata.id === opened.moka.metadata.id;
+      const staying =
+        sameProject &&
+        before.activeCanvasId !== null &&
+        opened.moka.canvas.some((canvas) => canvas.id === before.activeCanvasId)
+          ? before.activeCanvasId
+          : null;
       set({
         root: opened.root,
         moka: opened.moka,
-        activeCanvasId: opened.moka.canvas[0]?.id ?? null,
+        activeCanvasId:
+          staying ?? openedOnto ?? opened.moka.canvas[0]?.id ?? null,
         selfCheck: opened.selfCheck,
         saveStatus: "saved",
         saveError: null,
@@ -167,6 +186,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
       flushTimer = null;
       flushInFlight = null;
       readInFlight = null;
+      useOpenCanvases.getState().forget();
       set({
         root: null,
         moka: null,

@@ -171,7 +171,7 @@ function LineActions({
         )}
         {(filed.get(made.runId)?.length ?? 0) > 0 && (
           <button
-            onClick={() => useEditorStore.getState().openResourcesPanel()}
+            onClick={() => useEditorStore.getState().setLeftPanelTab("assets")}
             type="button"
           >
             Show in assets

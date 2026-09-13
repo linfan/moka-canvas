@@ -10,6 +10,7 @@ import {
   openRecent,
   persistedNodeCount,
   projectHome,
+  showAssets,
 } from "./helpers";
 import {
   PAINTER,
@@ -223,8 +224,10 @@ test("an image node asks the provider and files the answer as its own asset", as
     timeout: 20_000,
   });
 
-  // The answer is a resource of the project, and the panel says which node made
-  // it — the link back that makes a generated asset navigable.
+  // The answer is a resource of the project, and the shelf says which node made
+  // it — the link back that makes a generated asset navigable. The shelf is the
+  // assets face of the column beside the canvas, which opens on the tree.
+  await showAssets(page);
   const origin = page.getByRole("button", { name: /which made/ });
   await expect(origin).toBeVisible({ timeout: 10_000 });
 

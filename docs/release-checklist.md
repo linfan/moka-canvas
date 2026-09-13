@@ -19,17 +19,52 @@ npm run test:e2e  # Playwright: critical path, provider settings, a
 1. Run the staged server: `./moka-server --static-dir dist --port 8080`.
 2. `GET /api/health` and `GET /api/ready` return 200 with check details.
 3. Create a project, add nodes of every kind across two canvases, connect
-   them, save, close, reopen — tab order, cameras, and content persist.
+   them, save, close, reopen — the order the tree reads, the cameras, and
+   the content all persist.
+   - Arrange the project's canvases in the tree on the **Project** face of
+     the column beside the canvas: make a folder, a folder inside it, and
+     a board in each; rename both; drag a board into a folder and back out
+     to the top level, and a folder into another, letting go above, below,
+     and inside a row to check that the mark under the pointer is where it
+     lands. Save, close, reopen, and confirm the tree reads the same. Undo
+     each of those and confirm it gives back what it took, a move included.
+     Try to drop a folder into itself and into one it holds and confirm
+     neither is offered. Delete a folder holding a board and confirm the
+     question says how many boards move up, and that they do — nothing on a
+     board is lost by tidying the tree. The automated equivalents are
+     `npm test` (`ProjectTree`, `folders`, `canvasTree`) and
+     `cargo test --test tree`.
+   - Open a board from the tree and confirm a tab appears for it on the
+     strip across the top; open a second, close one, and confirm the board
+     beside it is looked at rather than nothing. Close the project and
+     reopen it: the boards left open come back open, and the project opens
+     onto the one last looked at. That remembering is this machine's, so
+     confirm a package imported elsewhere opens onto its first board.
+     Delete a board that has a tab up and confirm its tab goes with it. The
+     automated equivalents are `npm test` (`openCanvases`, `app`).
+   - Open a board in the tree and confirm it unfolds into **Text**,
+     **Image**, **Audio**, and **Video** whether or not it uses all four;
+     that what is under each is what that board's cards point at rather
+     than what the project holds; and that right-clicking a file there
+     offers **Show in assets**, which turns the column over to the shelf,
+     on the kind that file is filed under, with that one row marked and in
+     view.
 4. Import small and large image/audio/video fixtures; preview each, then
    remove them safely (referencing nodes are flagged, never silently
    deleted).
-   - The resource column is the shelf. Give a file words and a note on its
-     row, mark it a keeper, and confirm the shelf narrows by a word, by
-     shelf, by origin, by keepers, and by every word chosen at once — a
-     second word narrows the list rather than emptying it — and that the
-     search reaches a file by its name, its words, its note, and its
-     summary. The automated equivalents are `npm test` (`SidePanel`,
-     `shelfFilter`).
+   - The **Assets** face of the same column is the shelf, cut into the four
+     kinds a board can be given. Confirm that **Import…** files what is
+     chosen; that each kind tab lists only what belongs to it and counts
+     what it holds whether or not a filter is narrowing it; and that audio
+     offers the choice between music and a voice, being two shelves, while
+     no other kind asks a question with one answer. Give a file words and a
+     note on its row, mark it a keeper, and confirm the shelf narrows by a
+     word, by shelf, by origin, by keepers, and by every word chosen at
+     once — a second word narrows the list rather than emptying it — and
+     that the search reaches a file by its name, its words, its note, and
+     its summary. Drag a file from the shelf onto the canvas and confirm it
+     becomes a card where it was let go. The automated equivalents are
+     `npm test` (`AssetsPanel`, `shelfFilter`).
    - Save a text node's words as material from the inspector and from
      the node's menu: a row appears on the shelf under `texts/` holding
      exactly what the node holds, and filing the unchanged node again
@@ -62,6 +97,14 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
      `history/` — and that the manifest has `personalHistory: false`
      with every rule that skipped a file listed beside its count and
      the bytes it freed.
+   - Confirm the canvas tree travelled: a folder made before the export is
+     there after the import, holding what it held, since the tree is
+     document state and goes where the work goes. Confirm which boards were
+     open did **not** travel, and that the imported project opens onto its
+     first board — that is this machine's business, like the theme, and a
+     package carries none of it. The automated equivalents are
+     `cargo test --test contract` (`tree_binary_decodes_to_tree_json_model`,
+     `tree_re_encode_is_byte_canonical`) and `npm test` (`codec`).
    - Tick the run-history choice and confirm `history/runs/**` arrives
      and the manifest says `personalHistory: true`. Unticked, the
      pointer from each generated asset back to the run that made it is
@@ -122,7 +165,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
 10. Generate from a node rather than from the API, which is the path a
     canvas takes. Write a spec on an image node in the panel under it
     (item 11) and run it: the answer appears on the node, in the
-    resource panel behind a badge naming the
+    assets panel behind a badge naming the
     node that made it, and under `assets/images/` with provenance
     carrying the run, the node, the inputs that travelled, and the
     parameters it was asked with. Search the project directory and an
@@ -187,7 +230,7 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     whole, and followed back to the card it names. Delete the node a
     mention names and confirm the chip says so and the button refuses
     rather than sending an ask that quietly means something else. Drop
-    an asset from the resource panel onto the bar in each of the two
+    an asset from the assets panel onto the bar in each of the two
     modes that take one and confirm it is wired in beside the node in
     one and listed by it in the other; confirm the bar is not a place to
     leave one in the mode where the prompt decides. Move a wired-in

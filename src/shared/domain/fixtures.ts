@@ -556,3 +556,47 @@ export function buildShelfMokaFile(): MokaFile {
 
   return moka;
 }
+
+export function treeIds() {
+  return {
+    folderDrafts: fixtureId(40),
+    folderInside: fixtureId(41),
+    folderKept: fixtureId(42),
+  };
+}
+
+/**
+ * The golden document with its canvases filed into a tree.
+ *
+ * One folder holds a board and a folder of its own, another holds nothing, and
+ * one board is left at the project root — which is what pins that a canvas in a
+ * folder says where it sits and a canvas in none carries no answer at all
+ * rather than an empty one.
+ */
+export function buildTreeMokaFile(): MokaFile {
+  const tree = treeIds();
+  const moka = buildGoldenMokaFile();
+
+  moka.folders = [
+    {
+      id: tree.folderDrafts,
+      name: "Drafts",
+      createdAt: T0,
+    },
+    {
+      id: tree.folderInside,
+      name: "Inside",
+      parentId: tree.folderDrafts,
+      createdAt: T1,
+    },
+    {
+      id: tree.folderKept,
+      name: "Kept",
+      createdAt: T0,
+    },
+  ];
+  moka.canvas = moka.canvas.map((canvas, index) =>
+    index === 0 ? { ...canvas, folderId: tree.folderDrafts } : canvas,
+  );
+  return moka;
+}

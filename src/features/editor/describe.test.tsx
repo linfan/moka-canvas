@@ -247,7 +247,7 @@ async function openDescribe(): Promise<HTMLElement> {
   const ids = goldenNodeIds();
   render(<App />);
   fireEvent.click(await screen.findByText("Golden Fixture"));
-  await screen.findByRole("button", { name: "Canvas 1" });
+  await screen.findByTestId("canvas-tab-Canvas 1");
   act(() => {
     useEditorStore
       .getState()

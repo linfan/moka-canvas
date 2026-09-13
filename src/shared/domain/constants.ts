@@ -32,6 +32,17 @@ export const MAX_RESULT_SLOTS = 16;
 export const MAX_NODES_PER_CANVAS = 5_000;
 export const MAX_EDGES_PER_CANVAS = 10_000;
 export const MAX_CANVASES_PER_PROJECT = 64;
+/** How many directories one project's canvas tree holds. */
+export const MAX_FOLDERS_PER_PROJECT = 256;
+export const MAX_FOLDER_NAME_LENGTH = 80;
+/**
+ * How deep a folder may sit in another.
+ *
+ * A ceiling on the tree rather than on the work: past this a reader is
+ * navigating a filing system instead of choosing a board, and a document that
+ * arrives deeper is refused rather than silently flattened.
+ */
+export const MAX_FOLDER_DEPTH = 8;
 export const MAX_RESOURCES_PER_CATEGORY = 10_000;
 
 /** How many conversations one canvas carries. */
@@ -357,6 +368,7 @@ export const PROBLEM_CODES = [
   "NODE_NOT_FOUND",
   "EDGE_NOT_FOUND",
   "CANVAS_NOT_FOUND",
+  "FOLDER_NOT_FOUND",
   "GROUP_INVALID",
   "SESSION_NOT_FOUND",
   "MESSAGE_NOT_FOUND",

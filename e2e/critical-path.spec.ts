@@ -11,6 +11,7 @@ import {
   openRecent,
   persistedNodeCount,
   projectHome,
+  showAssets,
 } from "./helpers";
 
 // A tiny valid PNG (1x1 transparent pixel) used for asset import.
@@ -39,8 +40,8 @@ test("launcher boots, project persists across reload, and export/import roundtri
 
   // Add a text node via the quick-add menu.
   await addNode(page, "Text");
-  const canvasList = page.getByRole("complementary").getByRole("list").first();
-  await expect(canvasList.getByText("1 nodes · 0 edges")).toBeVisible();
+  const hint = page.getByTestId("canvas-host").locator(".editor-canvas-hint");
+  await expect(hint).toHaveText("1 nodes · 0 edges");
   await expect(page.getByText("Added Text")).toBeVisible();
   await page.keyboard.press("Escape");
   // Autosave is debounced; wait for the server to hold the node before
@@ -55,9 +56,11 @@ test("launcher boots, project persists across reload, and export/import roundtri
   await expect(
     page.getByRole("banner").getByText("E2E Flow", { exact: true }),
   ).toBeVisible({ timeout: 10_000 });
-  await expect(canvasList.getByText("1 nodes · 0 edges")).toBeVisible();
+  await expect(hint).toHaveText("1 nodes · 0 edges");
 
-  // Import an image asset through the resource panel.
+  // Import an image asset through the shelf, which is the assets face of the
+  // column beside the canvas.
+  await showAssets(page);
   const importInput = page.getByLabel("Import files", { exact: true });
   await importInput.setInputFiles({
     name: "tiny.png",
@@ -96,7 +99,7 @@ test("launcher boots, project persists across reload, and export/import roundtri
   ).toBeVisible({ timeout: 10_000 });
   // Both cards came back: the one that was typed and the one the shelf put
   // there when it took the file in.
-  await expect(canvasList.getByText("2 nodes · 0 edges")).toBeVisible();
+  await expect(hint).toHaveText("2 nodes · 0 edges");
   await expect(
     page.getByRole("button", { name: /^tiny\.png 70 B/ }),
   ).toBeVisible();
@@ -112,6 +115,7 @@ test("missing asset surfaces the self-check dialog and blocks export", async ({
   await page.goto("/");
   await createProject(page, join(home, "project"), "Missing Asset");
 
+  await showAssets(page);
   const importInput = page.getByLabel("Import files", { exact: true });
   await importInput.setInputFiles({
     name: "tiny.png",

@@ -1,14 +1,20 @@
 use std::collections::{HashMap, HashSet};
 
+use super::folders::{
+    canvas_folder_of, canvas_sibling_index, child_folders, descendant_folder_ids, folder_by_id,
+    folder_canvases, folder_depth, folder_sibling_index, folders_of, subtree_depth,
+};
 use super::validate::{
     bounds_valid, resource_path_valid, validate_edge_candidate, MAX_ASSISTANT_MESSAGES_PER_SESSION,
     MAX_ASSISTANT_MESSAGE_LENGTH, MAX_ASSISTANT_SESSIONS_PER_CANVAS, MAX_ASSISTANT_TITLE_LENGTH,
-    MAX_CANVASES_PER_PROJECT, MAX_CANVAS_NAME_LENGTH, MAX_EDGES_PER_CANVAS, MAX_NODES_PER_CANVAS,
+    MAX_CANVASES_PER_PROJECT, MAX_CANVAS_NAME_LENGTH, MAX_EDGES_PER_CANVAS,
+    MAX_FOLDERS_PER_PROJECT, MAX_FOLDER_DEPTH, MAX_FOLDER_NAME_LENGTH, MAX_NODES_PER_CANVAS,
     MAX_TITLE_LENGTH, ZOOM_MAX, ZOOM_MIN,
 };
 use super::{
-    AssistantMessage, AssistantSession, CanvasDocument, DocumentCommand, GroupMembership,
-    MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue, SettingsPatch, WorkflowNode,
+    AssistantMessage, AssistantSession, CanvasDocument, CanvasFolder, DocumentCommand,
+    GroupMembership, MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue, SettingsPatch,
+    WorkflowNode,
 };
 use thiserror::Error;
 
@@ -37,6 +43,102 @@ impl CommandError {
 fn canvas_of<'a>(moka: &'a MokaFile, canvas_id: &str) -> Result<&'a CanvasDocument, CommandError> {
     moka.canvas(canvas_id)
         .ok_or_else(|| CommandError::new("CANVAS_NOT_FOUND", "Canvas not found"))
+}
+
+/// A project carrying these folders, or carrying the field not at all when it
+/// has none, so a tree emptied of its folders writes what it would have written
+/// had nobody ever tidied it.
+fn with_folders(moka: &MokaFile, folders: Vec<CanvasFolder>) -> MokaFile {
+    MokaFile {
+        folders: if folders.is_empty() {
+            None
+        } else {
+            Some(folders)
+        },
+        ..moka.clone()
+    }
+}
+
+fn check_folder_name(name: &str) -> Result<(), CommandError> {
+    if name.is_empty() {
+        return Err(CommandError::new(
+            "VALIDATION_FAILED",
+            "Folder name is empty",
+        ));
+    }
+    if name.chars().count() > MAX_FOLDER_NAME_LENGTH {
+        return Err(CommandError::new(
+            "VALIDATION_FAILED",
+            "Folder name is too long",
+        ));
+    }
+    Ok(())
+}
+
+/// The folder named here, checked against the document: a canvas or a folder
+/// put somewhere the tree does not hold would be somewhere no reader can reach.
+fn folder_of<'a>(
+    moka: &'a MokaFile,
+    folder_id: Option<&str>,
+) -> Result<Option<&'a str>, CommandError> {
+    match folder_id {
+        None => Ok(None),
+        Some(id) => folder_by_id(moka, id)
+            .map(|folder| Some(folder.id.as_str()))
+            .ok_or_else(|| CommandError::new("FOLDER_NOT_FOUND", "Folder not found")),
+    }
+}
+
+/// Whether a folder put here would take the tree past the depth it is kept to.
+///
+/// Measured over the document as it would be, so what the folder carries under
+/// it counts as well as the folder itself: a drawer with two levels in it needs
+/// two levels of room where it is dropped.
+fn check_folder_depth(candidate: &MokaFile, folder_id: &str) -> Result<(), CommandError> {
+    let depth = folder_depth(candidate, folder_id) + subtree_depth(candidate, folder_id) - 1;
+    if depth > MAX_FOLDER_DEPTH {
+        return Err(CommandError::new(
+            "VALIDATION_FAILED",
+            format!("Folders nest at most {MAX_FOLDER_DEPTH} deep"),
+        ));
+    }
+    Ok(())
+}
+
+/// Puts `item` into `list` at the place `index` names among `peers`.
+///
+/// The two lists a tree is made of are each a slice of one flat list, so a place
+/// among siblings has to be turned back into a place in the flat list: before
+/// the sibling it was asked to land ahead of, after the last of them when it was
+/// asked for the end, and at the end of everything when it has no siblings at
+/// all — where among none it lands cannot be seen.
+///
+/// `peers` must already exclude the item, which is what a move does first.
+fn splice_among<T: Clone, F: Fn(&T) -> &str>(
+    list: Vec<T>,
+    peers: &[T],
+    index: usize,
+    item: T,
+    id_of: F,
+) -> Vec<T> {
+    let at = index.min(peers.len());
+    let mut next = list;
+    let flat = if at < peers.len() {
+        let wanted = id_of(&peers[at]);
+        next.iter().position(|held| id_of(held) == wanted)
+    } else if let Some(last) = peers.last() {
+        let wanted = id_of(last);
+        next.iter()
+            .position(|held| id_of(held) == wanted)
+            .map(|position| position + 1)
+    } else {
+        None
+    };
+    match flat {
+        Some(position) => next.insert(position, item),
+        None => next.push(item),
+    }
+    next
 }
 
 fn clamp_zoom(zoom: f64) -> f64 {
@@ -842,6 +944,10 @@ fn apply_one(
             if moka.canvas(&canvas.id).is_some() {
                 return Err(CommandError::new("CONFLICT", "Canvas id already exists"));
             }
+            // A canvas born into a folder names it, so the folder has to be
+            // there: one that is not would leave the board somewhere no tree can
+            // show it.
+            folder_of(moka, canvas.folder_id.as_deref())?;
             let mut next = moka.clone();
             let index = (*index).unwrap_or(next.canvas.len()).min(next.canvas.len());
             next.canvas.insert(index, canvas.clone());
@@ -920,6 +1026,252 @@ fn apply_one(
                 vec![DocumentCommand::AddCanvas {
                     canvas: removed,
                     index: Some(position),
+                }],
+            ))
+        }
+
+        DocumentCommand::AddFolder { folder, index } => {
+            let folders = folders_of(moka).to_vec();
+            if folders.len() + 1 > MAX_FOLDERS_PER_PROJECT {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Folder limit reached",
+                ));
+            }
+            if folders.iter().any(|item| item.id == folder.id) {
+                return Err(CommandError::new("CONFLICT", "Folder id already exists"));
+            }
+            check_folder_name(&folder.name)?;
+            let parent_id = folder_of(moka, folder.parent_id.as_deref())?;
+            let placed = CanvasFolder {
+                parent_id: parent_id.map(str::to_string),
+                ..folder.clone()
+            };
+            let siblings: Vec<CanvasFolder> = folders
+                .iter()
+                .filter(|item| item.parent_id.as_deref() == parent_id)
+                .cloned()
+                .collect();
+            let at = index.unwrap_or(siblings.len());
+            let next = splice_among(
+                folders,
+                &siblings,
+                at,
+                placed.clone(),
+                |folder: &CanvasFolder| folder.id.as_str(),
+            );
+            let candidate = with_folders(moka, next);
+            check_folder_depth(&candidate, &placed.id)?;
+            Ok((
+                candidate,
+                vec![DocumentCommand::RemoveFolder {
+                    folder_id: placed.id.clone(),
+                }],
+            ))
+        }
+
+        DocumentCommand::RenameFolder { folder_id, name } => {
+            let folder = folder_by_id(moka, folder_id)
+                .ok_or_else(|| CommandError::new("FOLDER_NOT_FOUND", "Folder not found"))?
+                .clone();
+            check_folder_name(name)?;
+            let previous = folder.name.clone();
+            let next = folders_of(moka)
+                .iter()
+                .map(|item| {
+                    if item.id == folder.id {
+                        CanvasFolder {
+                            name: name.clone(),
+                            ..item.clone()
+                        }
+                    } else {
+                        item.clone()
+                    }
+                })
+                .collect();
+            Ok((
+                with_folders(moka, next),
+                vec![DocumentCommand::RenameFolder {
+                    folder_id: folder.id.clone(),
+                    name: previous,
+                }],
+            ))
+        }
+
+        DocumentCommand::MoveFolder {
+            folder_id,
+            parent_id,
+            index,
+        } => {
+            let folder = folder_by_id(moka, folder_id)
+                .ok_or_else(|| CommandError::new("FOLDER_NOT_FOUND", "Folder not found"))?
+                .clone();
+            let parent = folder_of(moka, parent_id.as_deref())?;
+            if parent == Some(folder.id.as_str()) {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "A folder cannot be moved into itself",
+                ));
+            }
+            if descendant_folder_ids(moka, folder_id)
+                .iter()
+                .any(|id| Some(id.as_str()) == parent)
+            {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "A folder cannot be moved into one it holds",
+                ));
+            }
+            let previous_parent = folder.parent_id.clone();
+            let previous_index = folder_sibling_index(moka, folder_id);
+            let without: Vec<CanvasFolder> = folders_of(moka)
+                .iter()
+                .filter(|item| item.id != folder.id)
+                .cloned()
+                .collect();
+            let siblings: Vec<CanvasFolder> = without
+                .iter()
+                .filter(|item| item.parent_id.as_deref() == parent)
+                .cloned()
+                .collect();
+            let moved = CanvasFolder {
+                parent_id: parent.map(str::to_string),
+                ..folder
+            };
+            let next = splice_among(
+                without,
+                &siblings,
+                *index,
+                moved,
+                |folder: &CanvasFolder| folder.id.as_str(),
+            );
+            let candidate = with_folders(moka, next);
+            check_folder_depth(&candidate, folder_id)?;
+            Ok((
+                candidate,
+                vec![DocumentCommand::MoveFolder {
+                    folder_id: folder_id.clone(),
+                    parent_id: previous_parent,
+                    index: previous_index,
+                }],
+            ))
+        }
+
+        DocumentCommand::RemoveFolder { folder_id } => {
+            let folders = folders_of(moka);
+            let position = folders
+                .iter()
+                .position(|item| item.id == *folder_id)
+                .ok_or_else(|| CommandError::new("FOLDER_NOT_FOUND", "Folder not found"))?;
+            let removed = folders[position].clone();
+            let parent_id = removed.parent_id.clone();
+            let previous_index = folder_sibling_index(moka, folder_id);
+            // What the folder held is not held by nothing: its folders and its
+            // canvases go up into the folder that held it, which is what makes
+            // tidying the tree something a reader can do without risking a board.
+            let held_folders = child_folders(moka, Some(folder_id));
+            let held_canvases = folder_canvases(moka, Some(folder_id));
+            let held_ids: HashSet<&str> = held_canvases
+                .iter()
+                .map(|canvas| canvas.id.as_str())
+                .collect();
+            // Each folder it held takes its place in the list, in the order they
+            // were read, so what a drawer held stays where the drawer was rather
+            // than going to the end of the shelf it was poured into.
+            let mut next_folders: Vec<CanvasFolder> = Vec::with_capacity(folders.len());
+            for item in folders {
+                if item.id != removed.id {
+                    next_folders.push(item.clone());
+                    continue;
+                }
+                for held in &held_folders {
+                    next_folders.push(CanvasFolder {
+                        parent_id: parent_id.clone(),
+                        ..(*held).clone()
+                    });
+                }
+            }
+            let next_canvas: Vec<CanvasDocument> = moka
+                .canvas
+                .iter()
+                .map(|canvas| {
+                    if held_ids.contains(canvas.id.as_str()) {
+                        CanvasDocument {
+                            folder_id: parent_id.clone(),
+                            ..canvas.clone()
+                        }
+                    } else {
+                        canvas.clone()
+                    }
+                })
+                .collect();
+            let mut inverse = vec![DocumentCommand::AddFolder {
+                folder: removed.clone(),
+                index: Some(previous_index),
+            }];
+            for (index, held) in held_folders.iter().enumerate() {
+                inverse.push(DocumentCommand::MoveFolder {
+                    folder_id: held.id.clone(),
+                    parent_id: Some(removed.id.clone()),
+                    index,
+                });
+            }
+            for (index, held) in held_canvases.iter().enumerate() {
+                inverse.push(DocumentCommand::MoveCanvas {
+                    canvas_id: held.id.clone(),
+                    folder_id: Some(removed.id.clone()),
+                    index,
+                });
+            }
+            let next = with_folders(moka, next_folders);
+            Ok((
+                MokaFile {
+                    canvas: next_canvas,
+                    ..next
+                },
+                inverse,
+            ))
+        }
+
+        DocumentCommand::MoveCanvas {
+            canvas_id,
+            folder_id,
+            index,
+        } => {
+            let canvas = canvas_of(moka, canvas_id)?.clone();
+            let parent = folder_of(moka, folder_id.as_deref())?;
+            let previous_parent = canvas_folder_of(&canvas).map(str::to_string);
+            let previous_index = canvas_sibling_index(moka, canvas_id);
+            let without: Vec<CanvasDocument> = moka
+                .canvas
+                .iter()
+                .filter(|item| item.id != canvas.id)
+                .cloned()
+                .collect();
+            let peers: Vec<CanvasDocument> = without
+                .iter()
+                .filter(|item| item.folder_id.as_deref() == parent)
+                .cloned()
+                .collect();
+            let moved = CanvasDocument {
+                folder_id: parent.map(str::to_string),
+                ..canvas
+            };
+            Ok((
+                MokaFile {
+                    canvas: splice_among(
+                        without,
+                        &peers,
+                        *index,
+                        moved,
+                        |canvas: &CanvasDocument| canvas.id.as_str(),
+                    ),
+                    ..moka.clone()
+                },
+                vec![DocumentCommand::MoveCanvas {
+                    canvas_id: canvas_id.clone(),
+                    folder_id: previous_parent,
+                    index: previous_index,
                 }],
             ))
         }

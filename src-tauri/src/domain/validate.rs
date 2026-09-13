@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use super::folders::{folder_depth, folders_of, holds_itself};
 use super::{
     generation_capability_for, CanvasDocument, Capability, Cardinality, DataType, MokaFile, NodeId,
     NodeKind, PortDirection, ResourceEntry, ValidationIssue, WorkflowEdge, WorkflowNode,
@@ -12,6 +13,15 @@ pub const MAX_CANVAS_NAME_LENGTH: usize = 80;
 pub const MAX_NODES_PER_CANVAS: usize = 5_000;
 pub const MAX_EDGES_PER_CANVAS: usize = 10_000;
 pub const MAX_CANVASES_PER_PROJECT: usize = 64;
+/// How many directories one project's canvas tree holds.
+pub const MAX_FOLDERS_PER_PROJECT: usize = 256;
+pub const MAX_FOLDER_NAME_LENGTH: usize = 80;
+/// How deep a folder may sit in another.
+///
+/// A ceiling on the tree rather than on the work: past this a reader is
+/// navigating a filing system instead of choosing a board, and a document that
+/// arrives deeper is refused rather than silently flattened.
+pub const MAX_FOLDER_DEPTH: usize = 8;
 pub const MAX_PROMPT_LENGTH: usize = 20_000;
 pub const MAX_RESULT_SLOTS: usize = 16;
 pub const ZOOM_MIN: f64 = 0.05;
@@ -695,8 +705,85 @@ fn shelf_issues(entry: &ResourceEntry) -> Vec<ValidationIssue> {
     issues
 }
 
-pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
+/// What is wrong with the canvas tree; mirrors `folderIssues` in TypeScript.
+///
+/// A folder naming a parent that is not there is a fault in the document rather
+/// than an empty drawer: the boards under it would sit somewhere no tree can
+/// show, so it is said outright instead of being quietly read as a folder at the
+/// project root. A name that leads round in a circle is a fault for the same
+/// reason, and is named as one rather than reported as too deep.
+fn folder_issues(moka: &MokaFile) -> Vec<ValidationIssue> {
+    let say = |message: String| ValidationIssue {
+        code: "VALIDATION_FAILED".into(),
+        message,
+        canvas_id: None,
+        node_id: None,
+        port_id: None,
+        edge_id: None,
+    };
     let mut issues = Vec::new();
+    let folders = folders_of(moka);
+    if folders.len() > MAX_FOLDERS_PER_PROJECT {
+        issues.push(say(format!(
+            "Project exceeds the folder limit ({MAX_FOLDERS_PER_PROJECT})"
+        )));
+    }
+    let ids: HashSet<&str> = folders.iter().map(|folder| folder.id.as_str()).collect();
+    if ids.len() != folders.len() {
+        issues.push(say("Duplicate folder id".into()));
+    }
+    for folder in folders {
+        if folder.name.is_empty() {
+            issues.push(say(format!("Folder {} has no name", folder.id)));
+        }
+        if folder.name.chars().count() > MAX_FOLDER_NAME_LENGTH {
+            issues.push(say(format!(
+                "Folder \"{}\" has a name over {MAX_FOLDER_NAME_LENGTH} characters",
+                folder.name
+            )));
+        }
+        if let Some(parent_id) = &folder.parent_id {
+            if !ids.contains(parent_id.as_str()) {
+                issues.push(say(format!(
+                    "Folder \"{}\" sits in a folder that is not there",
+                    folder.name
+                )));
+                continue;
+            }
+        }
+        if holds_itself(moka, &folder.id) {
+            issues.push(say(format!("Folder \"{}\" is inside itself", folder.name)));
+            continue;
+        }
+        if folder_depth(moka, &folder.id) > MAX_FOLDER_DEPTH {
+            issues.push(say(format!(
+                "Folder \"{}\" sits deeper than the {MAX_FOLDER_DEPTH} levels allowed",
+                folder.name
+            )));
+        }
+    }
+    for canvas in &moka.canvas {
+        if let Some(folder_id) = &canvas.folder_id {
+            if !ids.contains(folder_id.as_str()) {
+                issues.push(ValidationIssue {
+                    code: "FOLDER_NOT_FOUND".into(),
+                    message: format!(
+                        "Canvas \"{}\" sits in a folder that is not there",
+                        canvas.name
+                    ),
+                    canvas_id: Some(canvas.id.clone()),
+                    node_id: None,
+                    port_id: None,
+                    edge_id: None,
+                });
+            }
+        }
+    }
+    issues
+}
+
+pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
+    let mut issues = folder_issues(moka);
     let mut canvas_ids = HashSet::new();
     for canvas in &moka.canvas {
         if !canvas_ids.insert(canvas.id.as_str()) {

@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod folders;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};
@@ -693,6 +694,25 @@ pub struct AssistantSession {
     pub updated_at: IsoTimestamp,
 }
 
+/// A directory in the project's canvas tree; mirrors the TypeScript
+/// `CanvasFolder` field for field, including key order.
+///
+/// Folders hold canvases and other folders, and hold nothing else: they are a
+/// way of arranging the boards a project has rather than a container of its own.
+/// The parent is left off rather than named for a folder at the project root,
+/// which is what a document written before folders existed says about every
+/// canvas in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanvasFolder {
+    pub id: String,
+    pub name: String,
+    /// The folder holding this one; absent means the project root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    pub created_at: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasDocument {
@@ -712,6 +732,13 @@ pub struct CanvasDocument {
     /// reason: nothing stored had to change to make room for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sessions: Option<Vec<AssistantSession>>,
+    /// The folder this canvas sits in, when it sits in one.
+    ///
+    /// Left off rather than named for a canvas at the project root, so a
+    /// document written before folders existed is read and written back as the
+    /// bytes it arrived with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
 }
 
 impl CanvasDocument {
@@ -734,6 +761,7 @@ impl CanvasDocument {
             groups: Vec::new(),
             settings: DocumentSettings::default(),
             sessions: None,
+            folder_id: None,
         }
     }
 }
@@ -743,6 +771,12 @@ pub struct MokaFile {
     pub version: String,
     pub metadata: ProjectMetadata,
     pub resources: ResourceRegistry,
+    /// The directories of the canvas tree, in the order the tree reads them.
+    ///
+    /// Left off rather than left empty on a document that has no folders, which
+    /// is every document written before they existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folders: Option<Vec<CanvasFolder>>,
     pub canvas: Vec<CanvasDocument>,
 }
 
@@ -902,6 +936,38 @@ pub enum DocumentCommand {
     ReorderCanvas { canvas_id: CanvasId, index: usize },
     #[serde(rename_all = "camelCase")]
     RemoveCanvas { canvas_id: CanvasId },
+    /// The canvas tree.
+    ///
+    /// A folder is added whole, its parent named on it rather than beside it,
+    /// and `index` is the place it takes among that parent's folders. What a
+    /// canvas sits in is moved by `MoveCanvas`, whose `index` is the place it
+    /// takes among the canvases of the folder it lands in — both are read
+    /// within their own siblings, since the tree holds folders and canvases as
+    /// two lists.
+    #[serde(rename_all = "camelCase")]
+    AddFolder {
+        folder: CanvasFolder,
+        index: Option<usize>,
+    },
+    #[serde(rename_all = "camelCase")]
+    RenameFolder { folder_id: String, name: String },
+    #[serde(rename_all = "camelCase")]
+    MoveFolder {
+        folder_id: String,
+        parent_id: Option<String>,
+        index: usize,
+    },
+    /// Takes a folder out of the tree and leaves what it held where a reader
+    /// can still reach it: its folders and its canvases move up into the folder
+    /// that held it, at the place it held among its own siblings.
+    #[serde(rename_all = "camelCase")]
+    RemoveFolder { folder_id: String },
+    #[serde(rename_all = "camelCase")]
+    MoveCanvas {
+        canvas_id: CanvasId,
+        folder_id: Option<String>,
+        index: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

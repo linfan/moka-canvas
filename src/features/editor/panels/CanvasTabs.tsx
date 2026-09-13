@@ -1,108 +1,69 @@
-import { useState } from "react";
+import { useEffect } from "react";
+import { useOpenCanvases } from "../stores/openCanvases";
+import { useProjectStore } from "../stores/projectStore";
 import {
-  emptyCanvas,
-  MAX_CANVAS_NAME_LENGTH,
-  newId,
-} from "../../../shared/domain";
-import { execute, historyBoundary } from "../commands/execute";
-import { nextCanvasName, useProjectStore } from "../stores/projectStore";
-import { runsInFlight } from "../stores/runStore";
-import { useAppStore } from "../stores/appStore";
+  closeCanvas,
+  openCanvas,
+  reconcileTabs,
+} from "../interactions/canvasTree";
 
+/**
+ * The boards being looked at.
+ *
+ * The strip across the top used to be every canvas the project has, which made
+ * it a second copy of the tree beside the canvas and a long one for a project
+ * with a dozen boards in it. It is now the boards that are open: a board is
+ * opened from the tree and put down here, and putting it down touches nothing —
+ * a tab is a way of looking at a board and not the board itself, so closing one
+ * is never a question about unsaved work.
+ *
+ * What a board is called and where it is filed is the tree's business, not this
+ * strip's: one place renames and one place opens, so neither has to guess what
+ * the other meant.
+ */
 export function CanvasTabs() {
   const moka = useProjectStore((state) => state.moka);
   const activeCanvasId = useProjectStore((state) => state.activeCanvasId);
-  const maxCanvases = useAppStore(
-    (state) => state.config?.limits.maxCanvasesPerProject ?? Infinity,
-  );
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  const openIds = useOpenCanvases((state) => state.ids);
+
+  // A board taken out of the document — deleted from the tree, or an undo of the
+  // add that made it — takes its tab with it, wherever the deletion came from.
+  const held = moka ? moka.canvas.map((canvas) => canvas.id).join(" ") : "";
+  useEffect(() => {
+    reconcileTabs();
+  }, [held]);
 
   if (!moka) return null;
 
-  const switchTo = (canvasId: string, name: string) => {
-    if (canvasId === activeCanvasId) return;
-    // A run belongs to the project rather than to the canvas on screen, so
-    // switching does not stop one; but its result lands somewhere the reader has
-    // just stopped looking, which is worth a word.
-    const going = activeCanvasId ? runsInFlight(activeCanvasId) : 0;
-    const left = moka.canvas.find((canvas) => canvas.id === activeCanvasId);
-    useProjectStore.getState().switchCanvas(canvasId);
-    historyBoundary(`Switch to ${name}`);
-    if (going > 0 && left) {
-      useAppStore
-        .getState()
-        .pushToast(
-          "info",
-          `${going} ${going === 1 ? "generation is" : "generations are"} still running on ${left.name}`,
-        );
-    }
-  };
-
-  const addCanvas = () => {
-    const canvas = emptyCanvas(newId(), nextCanvasName(moka));
-    const applied = execute("Add canvas", [{ type: "addCanvas", canvas }]);
-    if (applied) switchTo(canvas.id, canvas.name);
-  };
-
-  const commitRename = (canvasId: string) => {
-    const name = draft.trim().slice(0, MAX_CANVAS_NAME_LENGTH);
-    setRenamingId(null);
-    if (!name || name === moka.canvas.find((c) => c.id === canvasId)?.name)
-      return;
-    execute("Rename canvas", [{ type: "renameCanvas", canvasId, name }]);
-  };
-
-  const removeCanvas = (canvasId: string, name: string, nodes: number) => {
-    if (moka.canvas.length <= 1) return;
-    if (
-      nodes > 0 &&
-      !window.confirm(`Delete “${name}” and its ${nodes} nodes?`)
-    )
-      return;
-    execute("Delete canvas", [{ type: "removeCanvas", canvasId }]);
-  };
+  // In the order the project holds them rather than the order they were opened,
+  // so the strip reads the same way the tree does and does not rearrange itself
+  // under the pointer as boards are opened and put down.
+  const open = moka.canvas.filter((canvas) => openIds.includes(canvas.id));
 
   return (
-    <nav aria-label="Canvases" className="canvas-tabs">
-      {moka.canvas.map((canvas) => (
+    <nav aria-label="Open canvases" className="canvas-tabs">
+      {open.map((canvas) => (
         <span
-          className={`canvas-tab${canvas.id === activeCanvasId ? " is-active" : ""}`}
+          className={`canvas-tab${
+            canvas.id === activeCanvasId ? " is-active" : ""
+          }`}
           key={canvas.id}
         >
-          {renamingId === canvas.id ? (
-            <input
-              aria-label="Canvas name"
-              autoFocus
-              maxLength={MAX_CANVAS_NAME_LENGTH}
-              onBlur={() => commitRename(canvas.id)}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") commitRename(canvas.id);
-                if (event.key === "Escape") setRenamingId(null);
-              }}
-              value={draft}
-            />
-          ) : (
+          <button
+            data-testid={`canvas-tab-${canvas.name}`}
+            onClick={() => openCanvas(canvas.id)}
+            title={`${canvas.nodes.length} nodes · ${canvas.edges.length} edges`}
+            type="button"
+          >
+            {canvas.name}
+          </button>
+          {open.length > 1 && (
             <button
-              onClick={() => switchTo(canvas.id, canvas.name)}
-              onDoubleClick={() => {
-                setDraft(canvas.name);
-                setRenamingId(canvas.id);
-              }}
-              title={`${canvas.nodes.length} nodes · ${canvas.edges.length} edges`}
-              type="button"
-            >
-              {canvas.name}
-            </button>
-          )}
-          {moka.canvas.length > 1 && (
-            <button
-              aria-label={`Delete ${canvas.name}`}
+              aria-label={`Close ${canvas.name}`}
               className="canvas-tab-close"
-              onClick={() =>
-                removeCanvas(canvas.id, canvas.name, canvas.nodes.length)
-              }
+              data-testid={`canvas-tab-close-${canvas.name}`}
+              onClick={() => closeCanvas(canvas.id)}
+              title="Close this canvas — it stays in the project"
               type="button"
             >
               ×
@@ -110,15 +71,12 @@ export function CanvasTabs() {
           )}
         </span>
       ))}
-      <button
-        aria-label="Add canvas"
-        className="canvas-tab-add"
-        disabled={moka.canvas.length >= maxCanvases}
-        onClick={addCanvas}
-        type="button"
+      <span
+        className="canvas-tabs-hint"
+        title="Open a canvas from the project tree"
       >
-        +
-      </button>
+        {moka.canvas.length} in project
+      </span>
     </nav>
   );
 }

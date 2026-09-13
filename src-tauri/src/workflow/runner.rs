@@ -1534,6 +1534,7 @@ mod tests {
                 updated_at: now,
             },
             resources: ResourceRegistry::default(),
+            folders: None,
             canvas: vec![canvas],
         }
     }

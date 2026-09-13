@@ -861,6 +861,30 @@ export function assetReferencingNodeIds(assetId: string): NodeId[] {
 }
 
 /**
+ * Selects nodes by id, switching to the board that holds them when they are not
+ * on the one being looked at.
+ *
+ * Both panels that read the project's material ask for this: what a reader
+ * follows from a list is the cards themselves, and a card on another board is
+ * still the card that was asked for. Framed rather than merely selected, since
+ * a selection somewhere off-screen is a selection nobody can see.
+ */
+export function focusNodes(nodeIds: NodeId[]): void {
+  const project = useProjectStore.getState();
+  const active = project.moka?.canvas.find(
+    (canvas) => canvas.id === project.activeCanvasId,
+  );
+  if (!active?.nodes.some((node) => nodeIds.includes(node.id))) {
+    const holder = project.moka?.canvas.find((canvas) =>
+      canvas.nodes.some((node) => nodeIds.includes(node.id)),
+    );
+    if (holder) project.switchCanvas(holder.id);
+  }
+  useEditorStore.getState().setSelection({ nodeIds, edgeIds: [] });
+  fitSelectionAction();
+}
+
+/**
  * Writes down whether this file is kept to hand. The registry entry is all it
  * touches, so marking a video a keeper costs nothing of the video's.
  */

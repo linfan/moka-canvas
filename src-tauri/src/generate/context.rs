@@ -574,6 +574,7 @@ mod tests {
             groups: Vec::new(),
             settings: DocumentSettings::default(),
             sessions: None,
+            folder_id: None,
         }
     }
 

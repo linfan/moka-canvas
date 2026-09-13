@@ -167,7 +167,7 @@ async function announceFiling(run: RunRecord, adopted: Promise<void> | null) {
     .join(", ");
   app.pushToast("success", `Filed under ${named}`, {
     label: "Show assets",
-    go: () => useEditorStore.getState().openResourcesPanel(),
+    go: () => useEditorStore.getState().setLeftPanelTab("assets"),
   });
 }
 

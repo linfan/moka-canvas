@@ -7,6 +7,7 @@ import type {
 
 export type ProjectId = string;
 export type CanvasId = string;
+export type FolderId = string;
 export type NodeId = string;
 export type EdgeId = string;
 export type AssetId = string;
@@ -103,6 +104,23 @@ export type ResourceRegistry = Record<AssetCategory, ResourceEntry[]>;
 
 export type BackgroundMode = "dots" | "lines" | "blank";
 
+/**
+ * A directory in the project's canvas tree.
+ *
+ * Folders hold canvases and other folders, and hold nothing else: they are a
+ * way of arranging the boards a project has rather than a container of its
+ * own, so a folder carries no nodes and no assets. The parent is left off
+ * rather than named for a folder at the project root, which is what a document
+ * written before folders existed says about every canvas in it.
+ */
+export interface CanvasFolder {
+  id: FolderId;
+  name: string;
+  /** The folder holding this one; absent means the project root. */
+  parentId?: FolderId;
+  createdAt: IsoTimestamp;
+}
+
 export interface DocumentSettings {
   background: BackgroundMode;
   showMinimap: boolean;
@@ -127,6 +145,15 @@ export interface CanvasDocument {
    * reason: nothing stored had to change to make room for it.
    */
   sessions?: AssistantSession[];
+  /**
+   * The folder this canvas sits in, when it sits in one.
+   *
+   * Left off rather than named for a canvas at the project root, so a document
+   * written before folders existed is read and written back as the bytes it
+   * arrived with. It came in without a schema version of its own for the same
+   * reason as the conversations beside it.
+   */
+  folderId?: FolderId;
 }
 
 export interface GroupMembership {
@@ -319,6 +346,14 @@ export interface MokaFile {
   version: "v1";
   metadata: ProjectMetadata;
   resources: ResourceRegistry;
+  /**
+   * The directories of the canvas tree, in the order the tree reads them.
+   *
+   * Left off rather than left empty on a document that has no folders, which is
+   * every document written before they existed: a project with a flat list of
+   * canvases says so by carrying nothing here.
+   */
+  folders?: CanvasFolder[];
   canvas: CanvasDocument[];
 }
 
@@ -401,7 +436,38 @@ export type DocumentCommand =
   | { type: "addCanvas"; canvas: CanvasDocument; index?: number }
   | { type: "renameCanvas"; canvasId: CanvasId; name: string }
   | { type: "reorderCanvas"; canvasId: CanvasId; index: number }
-  | { type: "removeCanvas"; canvasId: CanvasId };
+  | { type: "removeCanvas"; canvasId: CanvasId }
+  /**
+   * The canvas tree.
+   *
+   * A folder is added whole, its parent named on it rather than beside it, and
+   * `index` is the place it takes among that parent's folders. What a canvas
+   * sits in is moved by `moveCanvas`, whose `index` is the place it takes among
+   * the canvases of the folder it lands in — both are read within their own
+   * siblings, since the tree holds folders and canvases as two lists.
+   */
+  | { type: "addFolder"; folder: CanvasFolder; index?: number }
+  | { type: "renameFolder"; folderId: FolderId; name: string }
+  | {
+      type: "moveFolder";
+      folderId: FolderId;
+      parentId: FolderId | null;
+      index: number;
+    }
+  /**
+   * Takes a folder out of the tree and leaves what it held where a reader can
+   * still reach it: its folders and its canvases move up into the folder that
+   * held it, at the place it held among its own siblings. Nothing on a canvas
+   * is deleted by tidying the tree, so a folder let go of by mistake is one
+   * undo from being as it was, boards and all.
+   */
+  | { type: "removeFolder"; folderId: FolderId }
+  | {
+      type: "moveCanvas";
+      canvasId: CanvasId;
+      folderId: FolderId | null;
+      index: number;
+    };
 
 export interface SelfCheckIssue {
   assetId: AssetId;

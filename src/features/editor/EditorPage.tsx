@@ -70,9 +70,8 @@ export function EditorPage() {
   );
   const theme = useAppearance((state) => state.theme);
   const tool = useEffectiveTool();
-  const resourcesPanelOpen = useEditorStore(
-    (state) => state.resourcesPanelOpen,
-  );
+  const leftPanelOpen = useEditorStore((state) => state.leftPanelOpen);
+  const leftPanelTab = useEditorStore((state) => state.leftPanelTab);
   const sidePanelOpen = useEditorStore((state) => state.sidePanelOpen);
   const sidePanelTab = useEditorStore((state) => state.sidePanelTab);
   const promptPanelOnSelect = useEditorStore(
@@ -217,7 +216,7 @@ export function EditorPage() {
       <TopBar onBack={requestClose} onExport={() => askAboutExport(false)} />
 
       <div className="editor-body">
-        {resourcesPanelOpen && <SidePanel />}
+        {leftPanelOpen && <SidePanel />}
         <main
           className="editor-canvas"
           data-testid="canvas-host"
@@ -383,11 +382,20 @@ export function EditorPage() {
         </div>
         <div aria-label="Panels" className="tool-group" role="group">
           <button
-            aria-pressed={resourcesPanelOpen}
-            onClick={() => useEditorStore.getState().toggleResourcesPanel()}
+            aria-pressed={leftPanelOpen && leftPanelTab === "project"}
+            onClick={() => useEditorStore.getState().toggleLeftPanel("project")}
+            title="The project's canvases and the folders they are filed in"
             type="button"
           >
-            Resources
+            Project
+          </button>
+          <button
+            aria-pressed={leftPanelOpen && leftPanelTab === "assets"}
+            onClick={() => useEditorStore.getState().toggleLeftPanel("assets")}
+            title="The files this project holds, by kind"
+            type="button"
+          >
+            Assets
           </button>
           <button
             aria-pressed={sidePanelOpen && sidePanelTab === "inspector"}

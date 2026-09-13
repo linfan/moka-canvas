@@ -263,7 +263,7 @@ async function openEditor() {
     await useProjectStore.getState().open("/tmp/golden");
     useAppStore.getState().setPhase("editing");
   });
-  await screen.findByRole("button", { name: "Canvas 1" });
+  await screen.findByTestId("canvas-tab-Canvas 1");
 }
 
 beforeEach(() => {
@@ -301,6 +301,9 @@ beforeEach(() => {
     announcement: "",
     sidePanelOpen: true,
     sidePanelTab: "inspector",
+    leftPanelOpen: true,
+    leftPanelTab: "project",
+    focusedAssetId: null,
   });
 });
 
@@ -413,11 +416,11 @@ describe("runStore", () => {
 
     // A toast is read and gone in a few seconds, so the place it named is one
     // choice away rather than something to remember and find.
-    useEditorStore.setState({ resourcesPanelOpen: false });
+    useEditorStore.setState({ leftPanelTab: "project" });
     act(() => {
       said?.choice?.go();
     });
-    expect(useEditorStore.getState().resourcesPanelOpen).toBe(true);
+    expect(useEditorStore.getState().leftPanelTab).toBe("assets");
   });
 
   it("says a run that filed nothing finished, and nothing more", async () => {
@@ -1303,6 +1306,8 @@ describe("generation UI", () => {
   it("shows which node made an asset and selects it", async () => {
     api.moka = () => buildGeneratedMokaFile();
     await openEditor();
+    // The shelf is behind the assets face of the left column.
+    useEditorStore.setState({ leftPanelTab: "assets" });
 
     const badge = await screen.findByRole("button", {
       name: "Go to Poster, which made poster.png",

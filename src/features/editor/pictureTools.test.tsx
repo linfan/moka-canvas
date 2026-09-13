@@ -170,7 +170,7 @@ async function openGolden(
       screen.getByRole("button", { name: "Open with missing assets" }),
     );
   }
-  await screen.findByRole("button", { name: "Canvas 1" });
+  await screen.findByTestId("canvas-tab-Canvas 1");
 }
 
 async function selectPicture() {

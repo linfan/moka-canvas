@@ -1,12 +1,50 @@
 import type {
   AssetCategory,
+  Capability,
   ResourceEntry,
   ResourceRegistry,
 } from "../../../shared/domain";
 import {
   ASSET_ORIGIN_LABELS,
+  MODEL_CAPABILITIES,
   PROJECT_ASSET_CATEGORIES,
 } from "../../../shared/domain";
+
+/**
+ * The shelves each kind of asset is filed on.
+ *
+ * Four kinds and five shelves, because what a reader asks for and what a project
+ * files are not the same cut of the same things: a sound is asked for as audio
+ * and filed as either music or a voice, so the audio tab is two shelves and the
+ * other three are one each. Every shelf is under exactly one kind, which is what
+ * makes the four tabs a way of reading the whole shelf rather than a way of
+ * losing part of it.
+ */
+export const KIND_SHELVES: Record<Capability, readonly AssetCategory[]> = {
+  text: ["texts"],
+  image: ["images"],
+  audio: ["music", "voice"],
+  video: ["videos"],
+};
+
+/** The kinds, in the order the tabs read them. */
+export const SHELF_KINDS: readonly Capability[] = MODEL_CAPABILITIES;
+
+/** What a row shows when there is no picture of the file to show. */
+export const SHELF_GLYPHS: Record<AssetCategory, string> = {
+  images: "\u25a3",
+  music: "\u266b",
+  voice: "\u266a",
+  texts: "\u00b6",
+  videos: "\u25b6",
+};
+
+/** Which kind a shelf is read under. */
+export function kindOfShelf(shelf: AssetCategory): Capability {
+  return (
+    SHELF_KINDS.find((kind) => KIND_SHELVES[kind].includes(shelf)) ?? "image"
+  );
+}
 
 /** How many rows the shelf shows before asking a reader to carry on. */
 export const SHELF_PAGE = 60;

@@ -501,6 +501,7 @@ impl ProjectStore for FsProjectStore {
                 updated_at: now,
             },
             resources: ResourceRegistry::default(),
+            folders: None,
             canvas: vec![CanvasDocument::empty(new_id(), "Canvas 1".to_string())],
         };
         self.atomic_write(root, &moka)?;

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   AssetId,
+  Capability,
   EdgeId,
   NodeId,
   Point,
@@ -18,6 +19,17 @@ export type EditorTool = "select" | "pan";
  * very little of itself left to look at.
  */
 export type SidePanelTab = "inspector" | "assistant" | "history";
+
+/**
+ * What the column on the other side of the canvas is showing.
+ *
+ * Two faces of one column rather than two columns: what a project holds — its
+ * boards and the folders they are filed in — and what it is made of, the assets
+ * a board can be given. They are read together often enough to sit beside each
+ * other, and a canvas narrow enough to need one of them folded away needs the
+ * other folded away too.
+ */
+export type LeftPanelTab = "project" | "assets";
 
 export interface Selection {
   nodeIds: NodeId[];
@@ -127,7 +139,20 @@ interface EditorState {
   gesture: ActiveGesture;
   /** Last known pointer position in world coordinates (paste-at-pointer). */
   pointerWorld: Point | null;
-  resourcesPanelOpen: boolean;
+  /** Whether the column holding the project and its assets is showing. */
+  leftPanelOpen: boolean;
+  /** Which of its two faces that column is showing. */
+  leftPanelTab: LeftPanelTab;
+  /** Which kind of asset the assets column is listing. */
+  assetKind: Capability;
+  /**
+   * The asset a reader was taken to, when one was asked for by name.
+   *
+   * Following an asset from the tree lands on the shelf with that one row marked
+   * and in view, since a list of a hundred files scrolled to somewhere in the
+   * middle is a list nobody can find their place in.
+   */
+  focusedAssetId: AssetId | null;
   /** Whether the column beside the canvas is showing at all. */
   sidePanelOpen: boolean;
   sidePanelTab: SidePanelTab;
@@ -182,8 +207,21 @@ interface EditorState {
   setHoveredPort: (port: PortRef | null) => void;
   setGesture: (gesture: ActiveGesture) => void;
   setPointerWorld: (point: Point | null) => void;
-  toggleResourcesPanel: () => void;
-  openResourcesPanel: () => void;
+  /**
+   * Brings the column up on one of its faces, or folds it away where it is up on
+   * that one already — the same offer the column beside it makes, so the two
+   * sides of the canvas are worked the same way.
+   */
+  toggleLeftPanel: (tab: LeftPanelTab) => void;
+  setLeftPanelTab: (tab: LeftPanelTab) => void;
+  setAssetKind: (kind: Capability) => void;
+  /**
+   * Opens the assets column on the kind an asset is filed under, with that one
+   * marked. The kind travels with the ask rather than being worked out here,
+   * since what asked is a row of the tree that was already grouping by it.
+   */
+  showAssetOnShelf: (assetId: AssetId, kind: Capability) => void;
+  clearAssetFocus: () => void;
   /**
    * Brings the column up on one of its faces, or folds it away where it is
    * up on that one already.
@@ -230,7 +268,10 @@ export const useEditorStore = create<EditorState>()((set) => ({
   hoveredPort: null,
   gesture: { kind: "idle" },
   pointerWorld: null,
-  resourcesPanelOpen: true,
+  leftPanelOpen: true,
+  leftPanelTab: "project",
+  assetKind: "image",
+  focusedAssetId: null,
   sidePanelOpen: true,
   sidePanelTab: "inspector",
   contextMenu: null,
@@ -265,9 +306,22 @@ export const useEditorStore = create<EditorState>()((set) => ({
   setHoveredPort: (port) => set({ hoveredPort: port }),
   setGesture: (gesture) => set({ gesture }),
   setPointerWorld: (point) => set({ pointerWorld: point }),
-  toggleResourcesPanel: () =>
-    set((state) => ({ resourcesPanelOpen: !state.resourcesPanelOpen })),
-  openResourcesPanel: () => set({ resourcesPanelOpen: true }),
+  toggleLeftPanel: (tab) =>
+    set((state) =>
+      state.leftPanelOpen && state.leftPanelTab === tab
+        ? { leftPanelOpen: false }
+        : { leftPanelOpen: true, leftPanelTab: tab },
+    ),
+  setLeftPanelTab: (tab) => set({ leftPanelOpen: true, leftPanelTab: tab }),
+  setAssetKind: (kind) => set({ assetKind: kind }),
+  showAssetOnShelf: (assetId, kind) =>
+    set({
+      leftPanelOpen: true,
+      leftPanelTab: "assets",
+      assetKind: kind,
+      focusedAssetId: assetId,
+    }),
+  clearAssetFocus: () => set({ focusedAssetId: null }),
   toggleSidePanel: (tab) =>
     set((state) =>
       state.sidePanelOpen && state.sidePanelTab === tab

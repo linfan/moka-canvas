@@ -256,7 +256,9 @@ describe("missing-asset recovery", () => {
       within(dialog).getByRole("button", { name: "Open project" }),
     );
     expect(useAppStore.getState().phase).toBe("editing");
-    // The restored asset is no longer flagged broken in the resource panel.
+    // The restored asset is no longer flagged broken on the shelf, which is
+    // behind the assets face of the left column.
+    fireEvent.click(screen.getByTestId("left-tab-assets"));
     const row = screen.getByText("lake.png").closest(".resource-row");
     expect(row?.textContent).not.toContain("broken");
   });
@@ -301,7 +303,7 @@ describe("missing-asset recovery", () => {
 describe("export package", () => {
   it("says what is going into the package before one is written", async () => {
     await openGolden({ moka: goldenWithShelfAsset(3145728) });
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     const asked = await askToExport();
 
     // What is never in a project package at all is said here rather than left
@@ -328,7 +330,7 @@ describe("export package", () => {
 
   it("offers nothing to leave out when every asset is placed", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     const asked = await askToExport();
 
     expect(asked.textContent).toContain(
@@ -344,7 +346,7 @@ describe("export package", () => {
 
   it("carries both choices in the request that makes the package", async () => {
     await openGolden({ moka: goldenWithShelfAsset(3145728) });
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     await askToExport();
     fireEvent.click(
       screen.getByRole("checkbox", { name: /Include my run history/ }),
@@ -367,7 +369,7 @@ describe("export package", () => {
 
   it("backing out of the question writes nothing", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     await askToExport();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -384,7 +386,7 @@ describe("export package", () => {
         status: 404,
       },
     });
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     await askToExport();
     fireEvent.click(
       screen.getByRole("checkbox", { name: /Include my run history/ }),
@@ -425,7 +427,7 @@ describe("export package", () => {
         status: 404,
       },
     });
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     await askToExport();
     fireEvent.click(screen.getByRole("button", { name: "Export package" }));
     await screen.findByRole("alertdialog");
@@ -447,7 +449,7 @@ describe("unsaved-work guard", () => {
 
   it("asks before leaving and discard drops the changes", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     makeUnsavedEdit();
 
     fireEvent.click(screen.getByRole("button", { name: "Back to launcher" }));
@@ -473,7 +475,7 @@ describe("unsaved-work guard", () => {
 
   it("save and close flushes the pending changes first", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     makeUnsavedEdit();
 
     fireEvent.click(screen.getByRole("button", { name: "Back to launcher" }));
@@ -494,7 +496,7 @@ describe("unsaved-work guard", () => {
 
   it("keeps every way out where the work saved itself while it was open", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     makeUnsavedEdit();
 
     fireEvent.click(screen.getByRole("button", { name: "Back to launcher" }));
@@ -519,7 +521,7 @@ describe("unsaved-work guard", () => {
 
   it("conflicted state blocks saving but keeps the export escape hatch", async () => {
     await openGolden();
-    await screen.findByRole("button", { name: "Canvas 1" });
+    await screen.findByTestId("canvas-tab-Canvas 1");
     makeUnsavedEdit();
     act(() => {
       useProjectStore.setState({ saveStatus: "conflicted" });

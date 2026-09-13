@@ -493,3 +493,41 @@ fn a_mention_reports_the_span_it_occupies() {
     assert!(mention_spans("Paint @[node:a").is_empty());
     assert_eq!(mention_spans("@[node:a] then @[node:b").len(), 1);
 }
+
+/// The canvas tree as the other language wrote it to disk.
+fn tree_from_json() -> MokaFile {
+    let raw = std::fs::read_to_string(fixture_path("tree.moka.json")).unwrap();
+    serde_json::from_str(&raw).unwrap()
+}
+
+#[test]
+fn tree_binary_decodes_to_tree_json_model() {
+    let bytes = std::fs::read(fixture_path("tree.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(decoded, tree_from_json());
+}
+
+#[test]
+fn tree_re_encode_is_byte_canonical() {
+    let bytes = std::fs::read(fixture_path("tree.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(
+        bytes,
+        encode_moka_file(&decoded, None).unwrap(),
+        "where a board sits in the tree is written the same bytes whichever language writes it"
+    );
+}
+
+#[test]
+fn a_document_with_no_folders_carries_no_folder_field() {
+    // The golden document predates folders: it must read as carrying none and
+    // write back the bytes it arrived with, rather than an empty list of them.
+    let golden = golden_from_json();
+    assert!(golden.folders.is_none());
+    assert!(golden
+        .canvas
+        .iter()
+        .all(|canvas| canvas.folder_id.is_none()));
+    let bytes = std::fs::read(fixture_path("minimal.canvas.moka")).unwrap();
+    assert_eq!(encode_moka_file(&golden, None).unwrap(), bytes);
+}
