@@ -929,7 +929,6 @@ export function ProjectTree() {
   return (
     <section className="side-tree">
       <div className="side-tree-head">
-        <h2>Project</h2>
         <span className="side-tree-new">
           <button
             aria-label="New canvas at the top level"

@@ -725,11 +725,7 @@ h2 {
   align-items: center;
   display: flex;
   flex: none;
-  justify-content: space-between;
-}
-
-.side-tree-head h2 {
-  margin: 0;
+  justify-content: flex-end;
 }
 
 .side-tree-new {
@@ -897,31 +893,47 @@ h2 {
 }
 
 /* The four kinds of thing a board can be given, as the tabs the shelf is read
-   through. */
+   through. Classic in shape: the tabs stand on a hairline and the one chosen
+   hangs its indicator on the line, so the shelf below reads as its own. */
 .side-asset-kinds {
+  border-bottom: 1px solid var(--stroke);
   display: flex;
   flex: none;
-  gap: 4px;
+  gap: 2px;
 }
 
 .side-asset-kinds button {
   align-items: center;
   background: transparent;
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--muted);
   display: flex;
   flex: 1;
   font-size: 12px;
   gap: 4px;
   justify-content: center;
-  padding: 5px 2px;
+  margin-bottom: -1px;
+  padding: 7px 2px;
+}
+
+.side-asset-kinds button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  border-color: transparent;
+  color: var(--ink);
 }
 
 .side-asset-kinds button.is-active {
-  background: var(--surface-raised);
-  border-color: var(--muted);
+  background: transparent;
+  border-bottom-color: var(--primary);
   color: var(--ink);
+  font-weight: 600;
+}
+
+.side-asset-kinds button.is-active:hover:not(:disabled) {
+  border-color: transparent;
+  border-bottom-color: var(--primary);
 }
 
 .side-asset-kinds button span {
@@ -969,19 +981,23 @@ h2 {
 .side-resources-head {
   align-items: center;
   display: flex;
-  justify-content: space-between;
-}
-
-.side-resources-head h2 {
-  margin: 0;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .side-add-nodes {
   align-items: center;
   color: var(--muted);
+  cursor: pointer;
   display: flex;
+  flex: none;
   font-size: 12px;
   gap: 6px;
+}
+
+.side-add-nodes input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: auto;
 }
 
 .side-resource-group {

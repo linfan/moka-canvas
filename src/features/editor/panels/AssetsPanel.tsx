@@ -537,7 +537,14 @@ export function AssetsPanel() {
   return (
     <section className="side-resources">
       <div className="side-resources-head">
-        <h2>Assets</h2>
+        <label className="side-add-nodes">
+          <input
+            checked={addNodes}
+            onChange={(event) => setAddNodes(event.target.checked)}
+            type="checkbox"
+          />
+          Add to canvas
+        </label>
         <button
           disabled={busy}
           onClick={() => fileInput.current?.click()}
@@ -546,7 +553,7 @@ export function AssetsPanel() {
           Import…
         </button>
       </div>
-      <div aria-label="Add to" className="side-asset-kinds" role="tablist">
+      <div aria-label="Asset kind" className="side-asset-kinds" role="tablist">
         {SHELF_KINDS.map((each) => (
           <button
             aria-selected={each === kind}
@@ -563,14 +570,6 @@ export function AssetsPanel() {
           </button>
         ))}
       </div>
-      <label className="side-add-nodes">
-        <input
-          checked={addNodes}
-          onChange={(event) => setAddNodes(event.target.checked)}
-          type="checkbox"
-        />
-        Add nodes after import
-      </label>
       <input
         aria-label="Import files"
         hidden
