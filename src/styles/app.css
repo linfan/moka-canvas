@@ -337,13 +337,47 @@ h2 {
   color: var(--ink);
 }
 
+/* Settings tabs, classic in shape and modern in dress: the tabs stand on a
+   hairline, the chosen one hangs its indicator on the line, and the panel
+   below is carded so it reads as the chosen tab's own. */
 .settings-tabs {
+  border-bottom: 1px solid var(--stroke);
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 2px;
 }
 
-/* The Model section stacks its own tabs under the top-level ones. */
+.settings-tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+}
+
+.settings-tabs button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.settings-tabs button.is-active {
+  background: transparent;
+  border-bottom-color: var(--primary);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.settings-tabs button.is-active:hover:not(:disabled) {
+  border-color: transparent;
+  border-bottom-color: var(--primary);
+}
+
+/* The Model section stacks its own tabs under the top-level ones, a size
+   down so the two levels of tab tell apart at a glance. */
 .settings-panel {
   display: grid;
   gap: 12px;
@@ -351,6 +385,7 @@ h2 {
 
 .settings-subtabs button {
   font-size: 12px;
+  padding: 6px 10px;
 }
 
 /* The stored-key list: what is disclosable about each credential, and the
@@ -385,15 +420,19 @@ h2 {
 }
 
 .settings-body {
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
   display: grid;
   gap: 14px;
   max-height: min(58vh, 520px);
   overflow-y: auto;
+  padding: 16px;
 }
 
 /* A form taller than the panel must not push its own Save out of reach. */
 .settings-body .dialog-actions {
-  background: var(--surface);
+  background: var(--canvas);
   bottom: 0;
   padding-top: 10px;
   position: sticky;
@@ -688,29 +727,44 @@ h2 {
   overflow-y: auto;
 }
 
-/* The left column's two faces, and the canvas tree that is one of them. */
+/* The left column's two faces, and the canvas tree that is one of them. The
+   tabs stand on a hairline with the chosen one marked by an indicator on the
+   line, the same dress the settings and the shelf tabs wear. */
 .side-panel-tabs {
   border-bottom: 1px solid var(--stroke);
   display: flex;
   flex: none;
-  gap: 4px;
-  padding-bottom: 8px;
+  gap: 2px;
 }
 
 .side-panel-tabs button {
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--muted);
   flex: 1;
   font-size: 13px;
-  padding: 6px 8px;
+  margin-bottom: -1px;
+  padding: 7px 8px;
+}
+
+.side-panel-tabs button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  border-color: transparent;
+  color: var(--ink);
 }
 
 .side-panel-tabs button.is-active {
-  background: var(--surface-raised);
-  border-color: var(--stroke);
+  background: transparent;
+  border-bottom-color: var(--primary);
   color: var(--ink);
+  font-weight: 600;
+}
+
+.side-panel-tabs button.is-active:hover:not(:disabled) {
+  border-color: transparent;
+  border-bottom-color: var(--primary);
 }
 
 .side-tree {
@@ -1904,19 +1958,44 @@ button.danger:hover:not(:disabled) {
 }
 
 /* The three tabs and the button that sends the ask, in one row: what the panel
-   is showing is a choice of page rather than a stack of disclosures. */
+   is showing is a choice of page rather than a stack of disclosures. The tabs
+   wear the same hairline-and-indicator dress as the tabs elsewhere. */
 .prompt-panel-tabs {
+  border-bottom: 1px solid var(--stroke);
   display: flex;
   flex: 1;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
 .prompt-panel-tabs button {
-  border-radius: 6px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--muted);
   flex: 1;
   font-size: 11px;
-  padding: 4px 7px;
+  margin-bottom: -1px;
+  padding: 5px 7px;
+}
+
+.prompt-panel-tabs button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.prompt-panel-tabs button.is-active {
+  background: transparent;
+  border-bottom-color: var(--primary);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.prompt-panel-tabs button.is-active:hover:not(:disabled) {
+  border-color: transparent;
+  border-bottom-color: var(--primary);
 }
 
 .prompt-panel-head button.primary {
