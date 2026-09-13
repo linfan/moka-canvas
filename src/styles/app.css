@@ -2352,13 +2352,9 @@ button.danger:hover:not(:disabled) {
   white-space: nowrap;
 }
 
-.reference-port,
-.reference-summary {
+.reference-port {
   color: var(--muted);
   font-size: 10px;
-}
-
-.reference-port {
   flex: none;
 }
 
@@ -2375,45 +2371,6 @@ button.danger:hover:not(:disabled) {
   font-size: 11px;
   justify-self: start;
   padding: 3px 7px;
-}
-
-/* Hung under the bar rather than laid out in it, for the reason the mention
-   offer is: a list that pushed the prompt down would move the caret. */
-.reference-pick {
-  background: var(--surface-raised);
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  display: grid;
-  gap: 1px;
-  left: 0;
-  max-height: 180px;
-  overflow: auto;
-  padding: 4px;
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 40;
-}
-
-.reference-pick-label {
-  color: var(--muted);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  margin: 4px 2px 2px;
-  text-transform: uppercase;
-}
-
-.reference-pick button {
-  align-items: center;
-  background: none;
-  border: 0;
-  border-radius: 6px;
-  display: flex;
-  gap: 6px;
-  padding: 4px 6px;
-  text-align: left;
-  width: 100%;
 }
 
 /* Why an ask did not finish, held beside the card that says so. It takes no

@@ -829,7 +829,6 @@ export function PromptPanel() {
               onCut={(edge) => disconnectEdge(edge.id)}
               onFind={locate}
               onMove={(edge, portId) => moveInput(edge.id, portId)}
-              onPicking={() => {}}
               onPoint={(nodeIds) => commit({ referenceNodeIds: nodeIds })}
               onTakeAsset={(assetId) => void takeAsset(assetId)}
               onTakeFiles={takeFiles}

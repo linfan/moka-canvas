@@ -15,7 +15,6 @@ import {
   type MediaCardInfo,
   type MediaState,
 } from "../canvas/mediaCards";
-import { mentionChoices } from "../canvas/mentions";
 import { ASSET_DRAG_MIME } from "../interactions/actions";
 import { useEditorStore } from "../stores/editorStore";
 
@@ -113,8 +112,6 @@ export interface ReferenceBarProps {
    * will want to undo in one step rather than one per chip that moved.
    */
   onPoint: (nodeIds: NodeId[]) => void;
-  /** Says whether the picker is open, which is when the panel needs the room. */
-  onPicking: (picking: boolean) => void;
   /** Takes an asset dropped here from the resource panel. */
   onTakeAsset: (assetId: AssetId) => void;
   /** Takes files dropped here from this machine, filed then listed. */
@@ -138,29 +135,14 @@ export function ReferenceBar({
   onFind,
   onMove,
   onPoint,
-  onPicking,
   onTakeAsset,
   onTakeFiles,
 }: ReferenceBarProps) {
-  const [picking, setPicking] = useState(false);
   const [dragged, setDragged] = useState<number | null>(null);
   const [hovered, setHovered] = useState(false);
 
   const arrivals = arrivalsAt(canvas, node, resources, issues);
   const pointed = spec.referenceNodeIds;
-  const available = mentionChoices(canvas, node, resources, issues)
-    .map((group) => ({
-      ...group,
-      choices: group.choices.filter(
-        (choice) => !pointed.includes(choice.node.id),
-      ),
-    }))
-    .filter((group) => group.choices.length > 0);
-
-  const pick = (open: boolean) => {
-    setPicking(open);
-    onPicking(open);
-  };
 
   // Where the prompt's own pointing decides, a dropped asset would be wired in
   // to no effect: the ask reads the tokens and nothing else. Better to say so
@@ -364,65 +346,6 @@ export function ReferenceBar({
         >
           From assets…
         </button>
-      )}
-
-      {spec.inputMode === "manual" && (
-        <>
-          <button
-            aria-expanded={picking}
-            className="reference-add"
-            onClick={() => pick(!picking)}
-            type="button"
-          >
-            Point at…
-          </button>
-          {picking && (
-            <div
-              aria-label="What this node may point at"
-              className="reference-pick"
-              role="group"
-            >
-              {available.length === 0 && (
-                <p className="prompt-panel-note">
-                  Nothing else on this canvas holds anything.
-                </p>
-              )}
-              {available.map((group) => (
-                <div key={group.label}>
-                  <p className="reference-pick-label">{group.label}</p>
-                  {group.choices.map((choice) => (
-                    <button
-                      key={choice.node.id}
-                      onClick={() => onPoint([...pointed, choice.node.id])}
-                      type="button"
-                    >
-                      {choice.media?.url && (
-                        <img
-                          alt=""
-                          className="reference-thumb"
-                          src={choice.media.url}
-                        />
-                      )}
-                      <span className="reference-name">
-                        {choice.node.title}
-                      </span>
-                      <span className="reference-summary">
-                        {choice.summary}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ))}
-              <button
-                className="reference-add"
-                onClick={() => pick(false)}
-                type="button"
-              >
-                Done
-              </button>
-            </div>
-          )}
-        </>
       )}
     </div>
   );

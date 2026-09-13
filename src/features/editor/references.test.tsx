@@ -118,7 +118,6 @@ const cut = vi.fn();
 const find = vi.fn();
 const move = vi.fn();
 const point = vi.fn();
-const picking = vi.fn();
 const tookAsset = vi.fn();
 const tookFiles = vi.fn();
 
@@ -143,7 +142,6 @@ function Bar({
       onCut={cut}
       onFind={find}
       onMove={move}
-      onPicking={picking}
       onPoint={point}
       onTakeAsset={tookAsset}
       onTakeFiles={tookFiles}
@@ -186,7 +184,7 @@ function carryingFiles(files: File[]) {
 const FILE = new File(["x"], "lantern.png", { type: "image/png" });
 
 beforeEach(() => {
-  for (const spy of [cut, find, move, point, picking, tookAsset, tookFiles]) {
+  for (const spy of [cut, find, move, point, tookAsset, tookFiles]) {
     spy.mockClear();
   }
 });
@@ -339,30 +337,6 @@ describe("what is pointed at by hand", () => {
       screen.getByRole("button", { name: "List what is wired in" }),
     );
     expect(point).toHaveBeenCalledWith(["n-brief", "n-plate"]);
-  });
-
-  it("points at something else on the canvas from the picker", () => {
-    render(<Bar inputMode="manual" referenceNodeIds={["n-brief"]} />);
-    expect(
-      screen.queryByRole("group", { name: "What this node may point at" }),
-    ).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Point at…" }));
-    expect(picking).toHaveBeenCalledWith(true);
-    const offered = screen.getByRole("group", {
-      name: "What this node may point at",
-    });
-    // Already listed, so not offered a second time; and never this node itself.
-    expect(within(offered).queryByRole("button", { name: /Brief/ })).toBeNull();
-    expect(
-      within(offered).queryByRole("button", { name: /Target/ }),
-    ).toBeNull();
-
-    fireEvent.click(within(offered).getByRole("button", { name: /Plate/ }));
-    expect(point).toHaveBeenCalledWith(["n-brief", "n-plate"]);
-
-    fireEvent.click(within(offered).getByRole("button", { name: "Done" }));
-    expect(picking).toHaveBeenCalledWith(false);
   });
 });
 

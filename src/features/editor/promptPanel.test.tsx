@@ -17,6 +17,7 @@ import {
   MAX_IMAGES_PER_RUN,
   MAX_PROMPT_LENGTH,
   createNode,
+  defaultGenerationSpec,
 } from "../../shared/domain";
 import type { GenerationSpec, MokaFile, RunRecord } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
@@ -1323,25 +1324,38 @@ describe("what a node is given", () => {
     return useHistoryStore.getState().undoStack.length;
   }
 
-  it("lists by hand what the wiring does not, in one step of history", async () => {
+  it("takes a listed node out by hand, in one step of history", async () => {
+    // A list kept by hand, holding one node: what the bar shows when the fold
+    // beside the prompt says the ask takes its context from the list.
+    const moka = buildGoldenMokaFile();
+    const target = moka.canvas[0].nodes.find((node) => node.id === ids.image);
+    if (!target) throw new Error("the golden file holds the image node");
+    const spec = defaultGenerationSpec("image");
+    if (!spec) throw new Error("an image node can be asked");
+    target.data = {
+      ...target.data,
+      generation: {
+        ...spec,
+        inputMode: "manual",
+        referenceNodeIds: [ids.text],
+      },
+    };
+    api.moka = () => moka;
     await openEditor();
     selectNode(ids.image);
     await settle();
-    // Nothing is wired into this node, so what it is given starts as a list
-    // kept by hand, with no place to choose to be reached first.
-    expect(given().textContent).toContain("Nothing is listed yet.");
+    const [chip] = within(given()).getAllByRole("listitem");
+    expect(chip.textContent).toContain("Brief");
 
     const before = steps();
-    fireEvent.click(within(given()).getByRole("button", { name: "Point at…" }));
-    await settle();
     fireEvent.click(
-      within(
-        screen.getByRole("group", { name: "What this node may point at" }),
-      ).getByRole("button", { name: /Brief/ }),
+      within(chip).getByRole("button", {
+        name: "Take Brief out of the list",
+      }),
     );
     await settle();
     expect(specOf(ids.image)?.inputMode).toBe("manual");
-    expect(specOf(ids.image)?.referenceNodeIds).toEqual([ids.text]);
+    expect(specOf(ids.image)?.referenceNodeIds).toEqual([]);
     // One step, so one undo takes the list back whole rather than halfway.
     expect(steps()).toBe(before + 1);
   });
