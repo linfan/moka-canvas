@@ -15,6 +15,7 @@ use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::Engine;
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 
 use super::{MetadataError, SecretStorage};
 use crate::config::RuntimeMode;
@@ -32,6 +33,10 @@ pub const KEYRING_ACCOUNT: &str = "metadata-master-key";
 
 /// Fallback location when the OS keychain is unavailable.
 pub const MASTER_KEY_FILE: &str = "master.key";
+
+/// Records the tier new master keys are created in. Switching tiers is an
+/// explicit act; nothing migrates on its own.
+pub const STORAGE_PREF_FILE: &str = "keystore.json";
 
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
@@ -153,7 +158,9 @@ impl KeyProvider {
         Ok(())
     }
 
-    /// Returns the master key, creating and persisting one on first use.
+    /// Returns the master key, creating and persisting one on first use in
+    /// the preferred tier — the file tier unless an explicit switch asked for
+    /// the OS keychain.
     ///
     /// Blocking: consults the OS keychain. Call it through
     /// `tokio::task::spawn_blocking`.
@@ -166,7 +173,7 @@ impl KeyProvider {
             return Ok(existing);
         }
         let generated = generate();
-        if self.mode == RuntimeMode::Native {
+        if self.preference() == SecretStorage::Keyring {
             match self.store_in_keyring(&generated) {
                 Ok(()) => {
                     return self.cache(MasterKey {
@@ -180,12 +187,12 @@ impl KeyProvider {
                     "OS keychain unavailable; falling back to a file-held master key"
                 ),
             }
-        } else {
+        } else if self.mode != RuntimeMode::Native {
             // Refusing here instead would leave a server started without an
             // exported key unable to store a credential at all, and the refusal
             // would surface only when someone typed an API key in. The file tier
-            // is the one desktop falls back to; it is weaker, so say so rather
-            // than letting it look equivalent to an exported key.
+            // is the default everywhere; it is weaker than an exported key, so
+            // say so rather than letting it look equivalent.
             tracing::warn!(
                 target: "moka::metadata",
                 path = %self.master_key_path().display(),
@@ -214,6 +221,127 @@ impl KeyProvider {
             .unwrap_or(SecretStorage::Unset)
     }
 
+    /// Whether the OS keychain is a tier this runtime can offer. macOS and
+    /// Windows desktop builds have a trustworthy native store; everywhere
+    /// else the file tier is the only choice.
+    pub fn keyring_supported(&self) -> bool {
+        self.mode == RuntimeMode::Native
+            && (cfg!(target_os = "macos") || cfg!(target_os = "windows"))
+    }
+
+    /// The tiers this runtime can offer: the file tier always, and the OS
+    /// keychain where a trustworthy native store exists.
+    pub fn storage_options(&self) -> Vec<SecretStorage> {
+        let mut options = vec![SecretStorage::File];
+        if self.keyring_supported() {
+            options.push(SecretStorage::Keyring);
+        }
+        options
+    }
+
+    /// The tier new master keys are created in: the persisted choice when it
+    /// names a tier this runtime can offer, and the file tier otherwise.
+    pub fn preference(&self) -> SecretStorage {
+        let Ok(raw) = std::fs::read_to_string(self.root.join(STORAGE_PREF_FILE)) else {
+            return SecretStorage::File;
+        };
+        match serde_json::from_str::<StoragePref>(&raw) {
+            Ok(pref) if pref.storage == SecretStorage::Keyring && self.keyring_supported() => {
+                SecretStorage::Keyring
+            }
+            _ => SecretStorage::File,
+        }
+    }
+
+    /// Moves the master key protecting the stored credentials between the
+    /// file tier and the OS keychain. The key itself does not change, so
+    /// existing ciphertext keeps opening; only its home moves. This is the
+    /// only migration there is: startup resolves whichever tier holds the
+    /// key and moves nothing.
+    ///
+    /// Blocking: consults the OS keychain. Call it through
+    /// `tokio::task::spawn_blocking`.
+    pub fn switch_storage(&self, target: SecretStorage) -> Result<SecretStorage, MetadataError> {
+        if target != SecretStorage::File && target != SecretStorage::Keyring {
+            return Err(MetadataError::invalid(
+                "secret storage can only be switched to file or keyring",
+            ));
+        }
+        if self.env_key()?.is_some() {
+            return Err(MetadataError::invalid(format!(
+                "{KEY_ENV} is set; the exported key takes precedence and cannot be moved"
+            )));
+        }
+        if target == SecretStorage::Keyring && !self.keyring_supported() {
+            return Err(MetadataError::unavailable(
+                "the OS keychain is not available in this runtime",
+            ));
+        }
+        let Some(current) = self.find_existing()? else {
+            // Nothing is stored yet: record the choice so the first
+            // credential creates its key there.
+            self.write_pref(target)?;
+            return Ok(self.storage());
+        };
+        if current.storage() != target {
+            match target {
+                SecretStorage::Keyring => {
+                    self.store_in_keyring(current.bytes()).map_err(|error| {
+                        MetadataError::unavailable(format!(
+                            "the OS keychain refused the master key: {error}"
+                        ))
+                    })?;
+                    if let Err(error) = std::fs::remove_file(self.master_key_path()) {
+                        if error.kind() != std::io::ErrorKind::NotFound {
+                            return Err(MetadataError::write_failed(format!(
+                                "{} could not be removed: {error}",
+                                self.master_key_path().display()
+                            )));
+                        }
+                    }
+                }
+                _ => {
+                    self.write_master_key_file(current.bytes())?;
+                    self.clear_keyring();
+                }
+            }
+        }
+        self.write_pref(target)?;
+        self.cache(MasterKey {
+            bytes: *current.bytes(),
+            storage: target,
+        })?;
+        Ok(target)
+    }
+
+    fn clear_keyring(&self) {
+        if let Ok(entry) = keyring::Entry::new(APP_ID, KEYRING_ACCOUNT) {
+            if let Err(error) = entry.delete_credential() {
+                tracing::warn!(
+                    target: "moka::metadata",
+                    error = %error,
+                    "the keychain entry could not be removed"
+                );
+            }
+        }
+    }
+
+    fn write_pref(&self, storage: SecretStorage) -> Result<(), MetadataError> {
+        let bytes = serde_json::to_vec_pretty(&StoragePref { storage })
+            .map_err(|error| MetadataError::write_failed(error.to_string()))?;
+        fs::atomic_write(
+            &self.root,
+            &self.root.join(STORAGE_PREF_FILE),
+            &bytes,
+            fs::DOCUMENT_MODE,
+        )
+        .map_err(|error| {
+            MetadataError::write_failed(format!(
+                "the storage preference could not be stored: {error}"
+            ))
+        })
+    }
+
     fn cache(&self, key: MasterKey) -> Result<MasterKey, MetadataError> {
         if let Ok(mut guard) = self.cached.lock() {
             *guard = Some(key.clone());
@@ -230,12 +358,23 @@ impl KeyProvider {
         if let Some(key) = self.env_key()? {
             return Ok(Some(key));
         }
-        if self.mode == RuntimeMode::Native {
+        // The preferred tier leads and the other one remains a fallback: a
+        // key held in the OS keychain from before the file tier became the
+        // default still has to open, but nothing migrates until an explicit
+        // switch asks for it.
+        if self.preference() == SecretStorage::Keyring {
             if let Some(key) = self.keyring_key() {
                 return Ok(Some(key));
             }
+            return self.file_key();
         }
-        self.file_key()
+        if let Some(key) = self.file_key()? {
+            return Ok(Some(key));
+        }
+        if self.mode == RuntimeMode::Native {
+            return Ok(self.keyring_key());
+        }
+        Ok(None)
     }
 
     fn env_key(&self) -> Result<Option<MasterKey>, MetadataError> {
@@ -325,6 +464,13 @@ fn generate() -> [u8; KEY_LEN] {
     let mut bytes = [0u8; KEY_LEN];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     bytes
+}
+
+/// The persisted choice of where the master key lives: `"file"` or
+/// `"keyring"`. Anything else reads as the default.
+#[derive(Serialize, Deserialize)]
+struct StoragePref {
+    storage: SecretStorage,
 }
 
 #[cfg(test)]
@@ -461,5 +607,68 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn the_storage_preference_defaults_to_the_file_tier() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = KeyProvider::new(root.path(), RuntimeMode::Web);
+        assert_eq!(provider.preference(), SecretStorage::File);
+        assert_eq!(provider.storage_options(), vec![SecretStorage::File]);
+    }
+
+    #[test]
+    fn only_file_and_keyring_are_switchable_targets() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = KeyProvider::new(root.path(), RuntimeMode::Web);
+        assert!(matches!(
+            provider.switch_storage(SecretStorage::Env),
+            Err(MetadataError::Invalid(_))
+        ));
+        assert!(matches!(
+            provider.switch_storage(SecretStorage::Unset),
+            Err(MetadataError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn switching_to_the_keyring_needs_a_runtime_that_has_one() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = KeyProvider::new(root.path(), RuntimeMode::Web);
+        let error = provider.switch_storage(SecretStorage::Keyring).unwrap_err();
+        assert!(matches!(error, MetadataError::Unavailable(_)));
+    }
+
+    #[test]
+    fn a_switch_without_any_key_yet_only_records_the_choice() {
+        if std::env::var(KEY_ENV).is_ok() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let provider = KeyProvider::new(root.path(), RuntimeMode::Web);
+        let storage = provider.switch_storage(SecretStorage::File).unwrap();
+        // No credential has ever been stored, so no master key exists yet;
+        // the choice is recorded for the one that will.
+        assert_eq!(storage, SecretStorage::Unset);
+        assert!(root.path().join(STORAGE_PREF_FILE).exists());
+        assert!(!root.path().join(MASTER_KEY_FILE).exists());
+    }
+
+    #[test]
+    fn a_file_tier_switch_keeps_an_existing_key_where_it_can_be_found() {
+        if std::env::var(KEY_ENV).is_ok() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let provider = KeyProvider::new(root.path(), RuntimeMode::Web);
+        let created = provider.acquire().unwrap();
+        assert_eq!(created.storage(), SecretStorage::File);
+
+        // Switching to the tier the key already lives in changes nothing but
+        // the recorded preference, and the key survives for the next process.
+        let storage = provider.switch_storage(SecretStorage::File).unwrap();
+        assert_eq!(storage, SecretStorage::File);
+        let reloaded = KeyProvider::new(root.path(), RuntimeMode::Web);
+        assert_eq!(reloaded.acquire().unwrap().bytes(), created.bytes());
     }
 }

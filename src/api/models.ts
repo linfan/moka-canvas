@@ -8,6 +8,8 @@ import { http } from "./client";
 export interface ApiKeyView {
   set: boolean;
   masked: string | null;
+  /** When the credential was last replaced; null when none is stored. */
+  rotatedAt?: string | null;
 }
 
 /**
@@ -78,6 +80,9 @@ export interface GenerationPreferences {
  */
 export type SecretStorageTier = "keyring" | "file" | "env" | "unset";
 
+/** The tiers a deployment can switch between: file always, keyring where the runtime has one. */
+export type SecretStorageChoice = "keyring" | "file";
+
 export interface ModelsView {
   version: number;
   revision: number;
@@ -85,6 +90,10 @@ export interface ModelsView {
   defaults: ModelDefaults;
   preferences: GenerationPreferences;
   secretStorage: SecretStorageTier;
+  /** The tiers this runtime can offer for the master key. */
+  secretStorageOptions?: SecretStorageChoice[];
+  /** The tier a new master key would be created in. */
+  secretStoragePref?: SecretStorageChoice;
 }
 
 export interface ProbeReport {
@@ -200,6 +209,17 @@ export const modelsApi = {
     return http.request<ModelsView>("/api/v1/models/preferences", {
       method: "PATCH",
       body: patch,
+    });
+  },
+
+  /**
+   * Moves the master key protecting every stored credential to another
+   * tier. The key itself does not change, so stored keys keep working.
+   */
+  setSecretStorage(storage: SecretStorageChoice): Promise<ModelsView> {
+    return http.request<ModelsView>("/api/v1/system/secret-storage", {
+      method: "PUT",
+      body: { storage },
     });
   },
 

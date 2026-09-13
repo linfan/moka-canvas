@@ -197,6 +197,15 @@ pub trait MetadataStore: Send + Sync {
     /// it was last rotated.
     async fn secret_state(&self, model_id: &str) -> Result<Option<SecretInfo>, MetadataError>;
 
+    /// Moves the master key protecting the stored credentials between the
+    /// file tier and the OS keychain, and reports where it ended up. The
+    /// credentials themselves are untouched: the key that opens them is the
+    /// same key in either home.
+    async fn set_secret_storage(
+        &self,
+        target: SecretStorage,
+    ) -> Result<SecretStorage, MetadataError>;
+
     async fn list_prompt_sources(&self) -> Result<Vec<PromptSource>, MetadataError>;
 
     async fn upsert_prompt_source(&self, source: &PromptSource) -> Result<(), MetadataError>;

@@ -4,7 +4,7 @@ use super::dto::{
     GenerateResponse, GenerationPreviewRequest, GenerationPreviewResponse, ImportProjectRequest,
     ModelKeyRequest, OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch,
     PreviewInput, PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse,
-    StartRunRequest, UpsertModelRequest,
+    SecretStorageRequest, StartRunRequest, UpsertModelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
@@ -982,6 +982,19 @@ pub async fn set_model_key(
         .set_key(&id, request.api_key.as_deref())
         .await?;
     models_view(&state).await
+}
+
+/// Moves the master key protecting every stored credential between the file
+/// tier and the OS keychain. The credentials keep opening either way: the key
+/// is the same, only its home changes.
+pub async fn set_secret_storage(
+    State(state): State<ApiState>,
+    json: Result<Json<SecretStorageRequest>, JsonRejection>,
+) -> Result<Json<ModelsView>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    Ok(Json(
+        state.models.set_secret_storage(request.storage).await?,
+    ))
 }
 
 /// Answers inside a successful response even when the model is unreachable,

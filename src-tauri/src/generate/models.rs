@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::Capability;
+use crate::domain::{Capability, IsoTimestamp};
 use crate::metadata::{
     protocols_for, Defaults, MetadataStore, ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot,
     Preferences, Protocol, SecretInfo, SecretStorage,
@@ -49,6 +49,9 @@ const MAX_VIDEO_SECONDS: u32 = 600;
 pub struct ApiKeyView {
     pub set: bool,
     pub masked: Option<String>,
+    /// When the credential was last replaced. Disclosable: it says nothing
+    /// about the value itself.
+    pub rotated_at: Option<IsoTimestamp>,
 }
 
 impl ApiKeyView {
@@ -57,10 +60,12 @@ impl ApiKeyView {
             Some(secret) => Self {
                 set: true,
                 masked: secret.masked,
+                rotated_at: secret.rotated_at,
             },
             None => Self {
                 set: false,
                 masked: None,
+                rotated_at: None,
             },
         }
     }
@@ -69,6 +74,7 @@ impl ApiKeyView {
         Self {
             set: false,
             masked: None,
+            rotated_at: None,
         }
     }
 }
@@ -103,6 +109,11 @@ pub struct ModelsView {
     /// Reported with every view so the settings page can say how strong the
     /// current protection is, and warn when it is the file tier.
     pub secret_storage: SecretStorage,
+    /// The tiers this runtime can offer: the file tier always, and the OS
+    /// keychain where a trustworthy native store exists.
+    pub secret_storage_options: Vec<SecretStorage>,
+    /// The tier a new master key would be created in.
+    pub secret_storage_pref: SecretStorage,
 }
 
 /// Everything needed to place one provider call, minus the credential.
@@ -185,6 +196,7 @@ impl ModelRepo {
 
     pub async fn view(&self) -> Result<ModelsView, ProviderError> {
         let snapshot = self.metadata.models_snapshot().await?;
+        let info = self.metadata.info().await;
         let mut models = Vec::with_capacity(snapshot.models.len());
         for model in snapshot.models {
             let secret = self.metadata.secret_state(&model.id).await?;
@@ -205,7 +217,9 @@ impl ModelRepo {
             models,
             defaults: snapshot.defaults,
             preferences: snapshot.preferences,
-            secret_storage: self.metadata.info().await.secret_storage,
+            secret_storage: info.secret_storage,
+            secret_storage_options: info.secret_storage_options,
+            secret_storage_pref: info.secret_storage_pref,
         })
     }
 
@@ -333,6 +347,16 @@ impl ModelRepo {
         };
         let secret = self.metadata.put_secret(id, key).await?;
         Ok(ApiKeyView::disclosed(Some(secret)))
+    }
+
+    /// Moves the master key protecting every stored credential to another
+    /// tier and answers with the whole view, so one call resyncs a client.
+    pub async fn set_secret_storage(
+        &self,
+        target: SecretStorage,
+    ) -> Result<ModelsView, ProviderError> {
+        self.metadata.set_secret_storage(target).await?;
+        self.view().await
     }
 
     pub async fn set_defaults(

@@ -198,7 +198,7 @@ fn generate_router() -> axum::Router<ApiState> {
 /// one the server router sets rather than adding to it.
 fn model_router() -> axum::Router<ApiState> {
     use axum::extract::DefaultBodyLimit;
-    use axum::routing::{delete, get, patch, post};
+    use axum::routing::{delete, get, patch, post, put};
 
     const MAX_PROVIDER_BODY_BYTES: usize = 1024 * 1024;
 
@@ -214,6 +214,10 @@ fn model_router() -> axum::Router<ApiState> {
         .route(
             "/api/v1/models/preferences",
             patch(routes::patch_preferences),
+        )
+        .route(
+            "/api/v1/system/secret-storage",
+            put(routes::set_secret_storage),
         )
         .route_layer(DefaultBodyLimit::max(MAX_PROVIDER_BODY_BYTES))
 }

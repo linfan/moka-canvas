@@ -124,7 +124,7 @@ function model(
     displayName,
     enabled: true,
     apiKey: keyed
-      ? { set: true, masked: MASKED }
+      ? { set: true, masked: MASKED, rotatedAt: "2025-01-02T03:04:05Z" }
       : { set: false, masked: null },
   };
 }
@@ -163,6 +163,8 @@ function fixture(): ModelsView {
       },
     },
     secretStorage: "file",
+    secretStorageOptions: ["file", "keyring"],
+    secretStoragePref: "file",
   };
 }
 
@@ -250,6 +252,17 @@ function route(url: string, method: string, body: unknown): Response {
       ...view,
       revision: view.revision + 1,
       preferences: { ...view.preferences, ...patch },
+    };
+    return json(view);
+  }
+
+  if (path === "/api/v1/system/secret-storage" && method === "PUT") {
+    const { storage } = body as { storage: "file" | "keyring" };
+    view = {
+      ...view,
+      revision: view.revision + 1,
+      secretStorage: storage,
+      secretStoragePref: storage,
     };
     return json(view);
   }
@@ -778,6 +791,56 @@ describe("model settings", () => {
     const note = screen.getByTestId("secret-storage-note");
     expect(note.textContent).toContain("master.key");
     expect(note.textContent).toContain("MOKA_METADATA_KEY");
+  });
+
+  it("moves the master key to another tier only when explicitly asked", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "System" }));
+
+    const keyring = (await screen.findByRole("radio", {
+      name: /Keyring/,
+    })) as HTMLInputElement;
+    expect(keyring.checked).toBe(false);
+    fireEvent.click(keyring);
+
+    await waitFor(() =>
+      expect(writesTo("/api/v1/system/secret-storage")).toHaveLength(1),
+    );
+    expect(writesTo("/api/v1/system/secret-storage")[0].body).toEqual({
+      storage: "keyring",
+    });
+    await waitFor(() => expect(keyring.checked).toBe(true));
+    confirm.mockRestore();
+  });
+
+  it("lists the stored keys masked, and deletes one on request", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "System" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Manage keys (2)" }),
+    );
+
+    // Both stored credentials are named, masked, and dated; the plaintext
+    // a test typed elsewhere never appears.
+    const writer = cardOf("Writer");
+    expect(writer.textContent).toContain(MASKED);
+    expect(writer.textContent).toContain("rotated 2025-01-02");
+    expect(cardOf("Painter").textContent).toContain("image");
+    expect(screen.queryByText(KEY)).toBeNull();
+
+    fireEvent.click(within(writer).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(writesTo("/api/v1/models/writer/key")).toHaveLength(1),
+    );
+    expect(writesTo("/api/v1/models/writer/key")[0].body).toEqual({
+      apiKey: null,
+    });
+    // The list follows the store: the cleared key is gone, the other stays.
+    await waitFor(() => expect(screen.queryByText("Writer")).toBeNull());
+    expect(screen.getByText("Painter")).toBeTruthy();
+    confirm.mockRestore();
   });
 
   it("explains a missing master key instead of only reporting it", async () => {

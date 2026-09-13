@@ -1,7 +1,9 @@
 use crate::config::LimitsConfig;
 use crate::domain::{Capability, DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
 use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, InputRole, Usage};
-use crate::metadata::{AudioPreferences, ImagePreferences, ModelDraft, VideoPreferences};
+use crate::metadata::{
+    AudioPreferences, ImagePreferences, ModelDraft, SecretStorage, VideoPreferences,
+};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
@@ -216,6 +218,13 @@ pub struct UpsertModelRequest {
     /// has — and a source with no key simply copies nothing.
     #[serde(default)]
     pub copy_key_from: Option<String>,
+}
+
+/// Where the master key protecting the stored credentials should live.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretStorageRequest {
+    pub storage: SecretStorage,
 }
 
 /// Sets or clears one model configuration's credential on its own.

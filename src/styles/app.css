@@ -343,6 +343,47 @@ h2 {
   gap: 8px;
 }
 
+/* The Model section stacks its own tabs under the top-level ones. */
+.settings-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-subtabs button {
+  font-size: 12px;
+}
+
+/* The stored-key list: what is disclosable about each credential, and the
+   one action that belongs to it alone. */
+.key-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.key-list li {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.key-list-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.key-list-name {
+  font-weight: 600;
+}
+
 .settings-body {
   display: grid;
   gap: 14px;

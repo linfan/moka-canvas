@@ -5,9 +5,22 @@ import {
   type Capability,
 } from "../../shared/domain";
 import { ModelsTab } from "./ModelsTab";
-import { guidanceFor, useModelStore, type SettingsTab } from "./modelStore";
+import {
+  guidanceFor,
+  useModelStore,
+  type SettingsTab,
+  type SettingsTopTab,
+} from "./modelStore";
 import { PreferencesTab } from "./PreferencesTab";
+import { SystemTab } from "./SystemTab";
 
+/** The two top-level sections: model configuration, and the system. */
+const TOP_TABS: { id: SettingsTopTab; label: string }[] = [
+  { id: "model", label: "Model" },
+  { id: "system", label: "System" },
+];
+
+/** The Model section's own tabs: one per category, plus the preferences. */
 const TABS: { id: SettingsTab; label: string }[] = [
   ...MODEL_CAPABILITIES.map((capability: Capability) => ({
     id: capability as SettingsTab,
@@ -17,15 +30,18 @@ const TABS: { id: SettingsTab; label: string }[] = [
 ];
 
 /**
- * Model configuration.
+ * Model configuration and system settings.
  *
  * Reachable from the launcher as well as the editor, because a model has to
- * be set up before any project exists for it to be used from. Each category
- * gets its own tab: the models that serve one kind of node are listed, added,
- * copied, tested, and defaulted together, and nothing else is mixed in.
+ * be set up before any project exists for it to be used from. The Model
+ * section keeps a tab per category — the models that serve one kind of node
+ * are listed, added, copied, tested, and defaulted together — and the System
+ * section holds what is global: where the master key lives, and which
+ * credentials it protects.
  */
 export function SettingsDialog() {
   const open = useModelStore((state) => state.open);
+  const topTab = useModelStore((state) => state.topTab);
   const tab = useModelStore((state) => state.tab);
   const editing = useModelStore((state) => state.editing);
   const view = useModelStore((state) => state.view);
@@ -53,6 +69,7 @@ export function SettingsDialog() {
   // behind. The footer belongs to the list, so it stays away while the
   // editor is what the tab shows — the same condition ModelsTab renders on.
   const editorOpen =
+    topTab === "model" &&
     tab !== "preferences" &&
     editing !== null &&
     (editing === "new" ||
@@ -84,14 +101,14 @@ export function SettingsDialog() {
           className="settings-tabs"
           role="tablist"
         >
-          {TABS.map((entry) => (
+          {TOP_TABS.map((entry) => (
             <button
               aria-controls={`settings-panel-${entry.id}`}
-              aria-selected={tab === entry.id}
-              className={tab === entry.id ? "is-active" : ""}
-              id={`settings-tab-${entry.id}`}
+              aria-selected={topTab === entry.id}
+              className={topTab === entry.id ? "is-active" : ""}
+              id={`settings-toptab-${entry.id}`}
               key={entry.id}
-              onClick={() => useModelStore.getState().setTab(entry.id)}
+              onClick={() => useModelStore.getState().setTopTab(entry.id)}
               role="tab"
               type="button"
             >
@@ -100,20 +117,63 @@ export function SettingsDialog() {
           ))}
         </div>
 
-        <div
-          aria-labelledby={`settings-tab-${tab}`}
-          className="settings-body"
-          id={`settings-panel-${tab}`}
-          role="tabpanel"
-        >
-          {loading && !loaded ? (
-            <p className="settings-hint">Loading configuration…</p>
-          ) : tab === "preferences" ? (
-            <PreferencesTab />
-          ) : (
-            <ModelsTab category={tab} />
-          )}
-        </div>
+        {topTab === "model" ? (
+          <div
+            aria-labelledby="settings-toptab-model"
+            className="settings-panel"
+            id="settings-panel-model"
+            role="tabpanel"
+          >
+            <div
+              aria-label="Model sections"
+              className="settings-tabs settings-subtabs"
+              role="tablist"
+            >
+              {TABS.map((entry) => (
+                <button
+                  aria-controls={`settings-panel-${entry.id}`}
+                  aria-selected={tab === entry.id}
+                  className={tab === entry.id ? "is-active" : ""}
+                  id={`settings-tab-${entry.id}`}
+                  key={entry.id}
+                  onClick={() => useModelStore.getState().setTab(entry.id)}
+                  role="tab"
+                  type="button"
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </div>
+
+            <div
+              aria-labelledby={`settings-tab-${tab}`}
+              className="settings-body"
+              id={`settings-panel-${tab}`}
+              role="tabpanel"
+            >
+              {loading && !loaded ? (
+                <p className="settings-hint">Loading configuration…</p>
+              ) : tab === "preferences" ? (
+                <PreferencesTab />
+              ) : (
+                <ModelsTab category={tab} />
+              )}
+            </div>
+          </div>
+        ) : (
+          <div
+            aria-labelledby="settings-toptab-system"
+            className="settings-body"
+            id="settings-panel-system"
+            role="tabpanel"
+          >
+            {loading && !loaded ? (
+              <p className="settings-hint">Loading configuration…</p>
+            ) : (
+              <SystemTab />
+            )}
+          </div>
+        )}
 
         {error && (
           <p className="dialog-error" role="alert">

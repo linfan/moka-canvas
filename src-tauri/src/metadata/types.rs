@@ -460,6 +460,13 @@ pub struct MetadataInfo {
     pub root: PathBuf,
     pub schema_version: u32,
     pub secret_storage: SecretStorage,
+    /// The tiers this runtime can offer for the master key. The file tier is
+    /// always one of them; the OS keychain joins it only in desktop builds
+    /// with a trustworthy native store.
+    pub secret_storage_options: Vec<SecretStorage>,
+    /// The tier new master keys are created in: the persisted choice when it
+    /// names a tier this runtime can offer, and the file tier otherwise.
+    pub secret_storage_pref: SecretStorage,
     pub documents: Vec<DocumentInfo>,
 }
 

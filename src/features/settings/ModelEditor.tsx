@@ -348,12 +348,12 @@ export function ModelEditor({
 
       <label className="settings-check">
         <input
-          aria-label="Model is available"
+          aria-label="Enabled"
           checked={form.enabled}
           onChange={(event) => edit({ enabled: event.target.checked })}
           type="checkbox"
         />
-        <span>Available to nodes</span>
+        <span>Enabled</span>
       </label>
 
       <div className="dialog-actions">

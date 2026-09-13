@@ -8,6 +8,7 @@ import {
   type PreferencesPatch,
   type ProbeReport,
   type ProtocolGroups,
+  type SecretStorageChoice,
 } from "../../api";
 import {
   PROTOCOLS_BY_CATEGORY,
@@ -19,6 +20,9 @@ import {
 
 /** The settings tabs: one per model category, plus the global preferences. */
 export type SettingsTab = Capability | "preferences";
+
+/** The two top-level settings sections: model configuration, and the system. */
+export type SettingsTopTab = "model" | "system";
 
 export interface ModelOption {
   /** The model configuration's own id, which is what a node stores. */
@@ -180,6 +184,8 @@ function describe(error: unknown, fallback: string): Failure {
  */
 interface ModelState {
   open: boolean;
+  /** Which top-level section the dialog shows. */
+  topTab: SettingsTopTab;
   tab: SettingsTab;
   /** Which model the editor is open on: an id, "new", or null for the list. */
   editing: string | "new" | null;
@@ -207,6 +213,7 @@ interface ModelState {
   activity: Record<string, ModelActivity>;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
+  setTopTab: (topTab: SettingsTopTab) => void;
   setTab: (tab: SettingsTab) => void;
   editModel: (id: string) => void;
   newModel: (category: Capability) => void;
@@ -227,6 +234,8 @@ interface ModelState {
   /** Opens a new-model editor pre-filled as a copy of one configuration. */
   duplicateModel: (id: string) => void;
   setKey: (id: string, apiKey: string | null) => Promise<boolean>;
+  /** Moves the master key protecting every stored credential to another tier. */
+  setSecretStorage: (storage: SecretStorageChoice) => Promise<boolean>;
   /** Makes one model its category's default, or clears the default. */
   setDefault: (capability: Capability, id: string | null) => Promise<boolean>;
   savePreferences: (patch: PreferencesPatch) => Promise<boolean>;
@@ -275,6 +284,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
 
   return {
     open: false,
+    topTab: "model",
     tab: "text",
     editing: null,
     newCategory: "text",
@@ -288,13 +298,19 @@ export const useModelStore = create<ModelState>()((set, get) => {
     activity: {},
 
     openSettings(tab = "text") {
-      set({ open: true, tab });
+      set({ open: true, topTab: "model", tab });
     },
 
     closeSettings() {
       // Back to the list on the next open: an editor left open on a model is
       // a surprise to whoever opens settings for something else.
       set({ open: false, editing: null, copyOf: null });
+    },
+
+    setTopTab(topTab) {
+      // The model editor belongs to the Model section; leaving it behind
+      // closes it, the same way switching a category tab does.
+      set({ topTab, editing: null, copyOf: null });
     },
 
     setTab(tab) {
@@ -307,6 +323,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
         view?.models.find((model) => model.id === id)?.category ?? get().tab;
       set({
         open: true,
+        topTab: "model",
         tab: category === "preferences" ? "text" : category,
         editing: id,
         copyOf: null,
@@ -316,6 +333,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
     newModel(category) {
       set({
         open: true,
+        topTab: "model",
         tab: category,
         newCategory: category,
         editing: "new",
@@ -336,6 +354,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
       // that would serve the node is the thing the editor opens on.
       set({
         open: true,
+        topTab: "model",
         tab: capability,
         editing: known ? reference : null,
         copyOf: null,
@@ -403,6 +422,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
       // nothing behind.
       set({
         open: true,
+        topTab: "model",
         tab: source.category,
         newCategory: source.category,
         editing: "new",
@@ -413,6 +433,12 @@ export const useModelStore = create<ModelState>()((set, get) => {
     setKey(id, apiKey) {
       return write("Failed to update the credential", () =>
         modelsApi.setKey(id, apiKey),
+      );
+    },
+
+    setSecretStorage(storage) {
+      return write("Failed to switch the secret storage", () =>
+        modelsApi.setSecretStorage(storage),
       );
     },
 
@@ -447,6 +473,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
     reset() {
       set({
         open: false,
+        topTab: "model",
         tab: "text",
         editing: null,
         newCategory: "text",

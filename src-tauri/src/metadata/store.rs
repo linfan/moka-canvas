@@ -525,6 +525,20 @@ impl MetadataStore for FileMetadataStore {
             }))
     }
 
+    async fn set_secret_storage(
+        &self,
+        target: SecretStorage,
+    ) -> Result<SecretStorage, MetadataError> {
+        let keys = Arc::clone(&self.keys);
+        let storage = tokio::task::spawn_blocking(move || keys.switch_storage(target))
+            .await
+            .map_err(|error| {
+                MetadataError::unavailable(format!("key lookup was cancelled: {error}"))
+            })??;
+        self.inner.write().await.secret_storage = storage;
+        Ok(storage)
+    }
+
     async fn list_prompt_sources(&self) -> Result<Vec<PromptSource>, MetadataError> {
         Ok(self.inner.read().await.prompt_sources.items.clone())
     }
@@ -717,6 +731,8 @@ impl MetadataStore for FileMetadataStore {
             root: redact_root(&self.root),
             schema_version: snapshot.meta.schema_version,
             secret_storage: snapshot.secret_storage,
+            secret_storage_options: self.keys.storage_options(),
+            secret_storage_pref: self.keys.preference(),
             documents,
         }
     }
