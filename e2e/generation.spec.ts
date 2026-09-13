@@ -391,7 +391,7 @@ test("a node is asked from the panel under it, and one of several answers shown"
   await expect(panel).toBeVisible({ timeout: 10_000 });
   await panel.getByLabel("Prompt for Image").fill("Three lanterns on a lake.");
 
-  await panel.getByRole("button", { name: "Parameters" }).click();
+  await panel.getByRole("tab", { name: "Parameter" }).click();
   const asked = panel.getByLabel("Images");
   await asked.fill("3");
   // A number is a choice when focus leaves the field, not while it is typed.
@@ -533,7 +533,7 @@ test("what the preview shows is what the provider is handed", async ({
     "a choice from a menu spends nothing",
   ).toBe(0);
 
-  await panel.getByRole("button", { name: "Preview" }).click();
+  await panel.getByRole("tab", { name: "Preview" }).click();
   const shown = panel.getByTestId("input-preview");
   await expect(shown).toContainText("[Text 1]", { timeout: 10_000 });
   await expect(shown).toContainText(BRIEF);

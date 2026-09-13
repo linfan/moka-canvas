@@ -452,12 +452,14 @@ describe("the generation panel", () => {
     ).toBeNull();
 
     // An ask written while folded takes what arrives on the wiring.
-    fireEvent.click(within(panel()).getByRole("button", { name: "Preview" }));
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Preview" }));
     await settle();
     expect(specOf(fed)?.inputMode).toBe("upstream");
 
     // Unfolding the words by hand turns the ask to what the prompt points at.
-    fireEvent.click(fold);
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Prompt" }));
+    await settle();
+    fireEvent.click(within(panel()).getByRole("button", { name: "Prompt" }));
     await settle();
     expect(specOf(fed)?.inputMode).toBe("mentions");
   });
@@ -467,7 +469,7 @@ describe("the generation panel", () => {
     await openEditor();
     selectNode(fed);
     await settle();
-    fireEvent.click(within(panel()).getByRole("button", { name: "Preview" }));
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Preview" }));
     await settle();
     // A picture among the inputs, so the ask is to change it rather than to
     // start over; and nothing is offered as a choice anywhere.
@@ -651,7 +653,7 @@ function withEmptyNodes() {
 }
 
 function openParams() {
-  fireEvent.click(within(panel()).getByRole("button", { name: "Parameters" }));
+  fireEvent.click(within(panel()).getByRole("tab", { name: "Parameter" }));
 }
 
 describe("the parameters a node carries", () => {
@@ -1128,7 +1130,7 @@ describe("what a node will send", () => {
   }
 
   function unfold() {
-    return within(panel()).getByRole("button", { name: "Preview" });
+    return within(panel()).getByRole("tab", { name: "Preview" });
   }
 
   /** Opens the panel on the image node and unfolds the disclosure. */
@@ -1145,11 +1147,11 @@ describe("what a node will send", () => {
     selectNode(ids.image);
     await settle();
     expect(screen.queryByTestId("input-preview")).toBeNull();
-    // Nothing is asked of the server on behalf of a disclosure nobody opened.
+    // Nothing is asked of the server on behalf of a page nobody opened.
     expect(
       api.calls.some((call) => call.url.endsWith("/generate/preview")),
     ).toBe(false);
-    expect(unfold()).toHaveProperty("ariaExpanded", "false");
+    expect(unfold()).toHaveProperty("ariaSelected", "false");
   });
 
   it("shows the words and the references the server folded together", async () => {
@@ -1166,7 +1168,7 @@ describe("what a node will send", () => {
     expect(shown.textContent).toContain("20.0 KB");
     // Named by the card it came from, which is the way back to the canvas.
     expect(shown.textContent).toContain("from Brief");
-    expect(unfold()).toHaveProperty("ariaExpanded", "true");
+    expect(unfold()).toHaveProperty("ariaSelected", "true");
 
     const asked = api.calls.find((call) =>
       call.url.endsWith("/generate/preview"),
@@ -1229,12 +1231,12 @@ describe("what a node will send", () => {
     expect(shown.textContent).toContain("No references will be sent");
   });
 
-  it("folds away again", async () => {
+  it("goes away again when another page is asked for", async () => {
     await opened();
-    fireEvent.click(unfold());
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Prompt" }));
     await settle();
     expect(screen.queryByTestId("input-preview")).toBeNull();
-    expect(unfold()).toHaveProperty("ariaExpanded", "false");
+    expect(unfold()).toHaveProperty("ariaSelected", "false");
   });
 
   it("shows a refusal from the server as words rather than as nothing", async () => {

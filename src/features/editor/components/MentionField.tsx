@@ -177,9 +177,8 @@ export function MentionField({
   /**
    * The candidate list opened or closed.
    *
-   * Said because the panel is kept inside the canvas by clamping against a
-   * height it works out in advance: a list hanging off the field that nobody
-   * told it about would hang off the canvas instead.
+   * Said for whoever owns the field and needs to know that a list is hanging
+   * off it; a panel anchored to its node has no use for it and says nothing.
    */
   onOffer: (open: boolean) => void;
 }) {

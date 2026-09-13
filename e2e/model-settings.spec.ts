@@ -71,8 +71,10 @@ test("a model written from the form is stored, tested, and kept", async ({
   await expect(dialog.getByLabel("Display name")).toHaveValue(
     "Typed Model (copy)",
   );
+  // A copy's identifier is a suggestion from the copy's own display name, the
+  // way a plain new model's is, rather than a fixed "-copy" of the source's.
   await expect(dialog.getByLabel("Model identifier")).toHaveValue(
-    "typed-model-copy",
+    /^typed_model_copy_[a-z0-9]{6}$/,
   );
   await dialog.getByRole("button", { name: "Cancel" }).click();
 

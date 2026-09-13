@@ -8,7 +8,6 @@ import {
   findNode,
   generationCapabilityFor,
   mentionNodeIds,
-  mentionSpans,
   nowIso,
   type AssetId,
   type Capability,
@@ -51,31 +50,15 @@ import { InputPreview } from "./InputPreview";
 import { MentionField } from "./MentionField";
 import { ReferenceBar } from "./ReferenceBar";
 
-/** What the panel's own chrome takes: head, model, actions, and the gaps. */
-const PANEL_HEIGHT = 160;
-/** The same, with every parameter it has showing. */
-const PANEL_HEIGHT_PARAMS = 300;
-/** What the panel grows by once it is counting a prompt out loud. */
-const PANEL_HEIGHT_COUNT = 22;
-/** What the panel grows by once it is showing what a node will send. */
-const PANEL_HEIGHT_PREVIEW = 200;
-/** What the panel grows by while the prompt field is offering candidates. */
-const PANEL_HEIGHT_OFFER = 180;
-/** What the panel grows by for the row that says where its inputs come from. */
-const PANEL_HEIGHT_REFERENCES = 34;
-/** What the panel grows by for each row the prompt's mentions are drawn in. */
-const PANEL_HEIGHT_CHIPS = 28;
-/** Gap left between the panel and the node, and between it and a canvas edge. */
-const GAP = 8;
-/** The height the prompt field has before the reader drags it. */
-const FIELD_HEIGHT = 120;
 /** The narrowest and widest the panel gets from the size of its node. */
 const PANEL_MIN_WIDTH = 300;
 const PANEL_MAX_WIDTH = 720;
-/** What the panel's padding and border take off the field's own width. */
-const PANEL_CHROME = 22;
 /** How much wider than its node the panel comes up, so words have room. */
 const PANEL_WIDTH_FACTOR = 1.3;
+/** How tall the panel comes up before the reader drags its corner. */
+const PANEL_DEFAULT_HEIGHT = 320;
+/** The shortest the panel may be dragged to and still be a panel. */
+const PANEL_MIN_HEIGHT = 140;
 
 /**
  * The parameter that states the shape of what a node makes, and so the shape the
@@ -120,6 +103,9 @@ function holdsAnImage(
  * them; what matters is that the limit is not reached in silence.
  */
 const COUNTED_FROM = Math.round(MAX_PROMPT_LENGTH * 0.9);
+
+/** The three things the panel can be showing, one at a time. */
+type PanelTab = "prompt" | "parameter" | "preview";
 
 /**
  * Why this node cannot be asked yet, or null when it can.
@@ -171,9 +157,12 @@ function refusalFor(asked: {
  * A DOM panel under the node rather than part of its card, because a card drawn
  * on a canvas has no room for a form and a child element in it would break the
  * canvas's own hit testing. Anchored in world coordinates so it travels with the
- * node, and kept inside the canvas by clamping in CSS rather than by measuring:
- * on the first render there is nothing to measure yet, so a measured clamp would
- * show the panel in the wrong place until something else happened to redraw it.
+ * node — and deliberately not kept inside the view: its top-left corner sits on
+ * its node's bottom-left corner wherever that is, so a node dragged to the edge
+ * of the canvas takes the panel off screen with it rather than leaving it behind
+ * floating over the middle of the view like a dialog that belongs to nothing.
+ * The corner it is dragged by is its bottom-right one, so growing it never moves
+ * the corner its node put it at.
  *
  * What is typed is held here until it is asked for, so a keystroke is not an
  * undo entry and a save; the discrete controls write straight through, because
@@ -198,20 +187,22 @@ export function PromptPanel() {
   const shownFor = useRef<NodeId | null>(null);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [paramsOpen, setParamsOpen] = useState(false);
+  /** Which of the panel's three tabs is being read. */
+  const [tab, setTab] = useState<PanelTab>("prompt");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [preview, setPreview] = useState<GenerationPreview | null>(null);
   const [reading, setReading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [offering, setOffering] = useState(false);
-  const [picking, setPicking] = useState(false);
   /** Whether the words are out, which is now where the inputs come from. */
   const [promptShown, setPromptShown] = useState(true);
-  /** The size the reader dragged the field to, or null for the node's own. */
-  const [fieldSize, setFieldSize] = useState<{
+  /** The size the reader dragged the panel to, or null for its node's own. */
+  const [size, setSize] = useState<{
     width: number;
     height: number;
   } | null>(null);
+  /** Sizes taken by hand, kept per node for as long as the editor is open. */
+  const sizesFor = useRef(new Map<NodeId, { width: number; height: number }>());
+  const panelRef = useRef<HTMLDivElement>(null);
   const foldedFor = useRef<NodeId | null>(null);
 
   // Built once per document rather than once per keystroke: a project may hold
@@ -221,7 +212,6 @@ export function PromptPanel() {
     [moka],
   );
   const issues = useMemo(() => buildIssueIndex(selfCheck), [selfCheck]);
-  const chips = mentionSpans(prompt).length;
 
   const canvas =
     moka?.canvas.find((entry) => entry.id === activeCanvasId) ??
@@ -236,7 +226,7 @@ export function PromptPanel() {
     setPromptShown(
       !canvas.edges.some((edge) => edge.target.nodeId === node.id),
     );
-    setFieldSize(null);
+    setSize(sizesFor.current.get(node.id) ?? null);
   }
   // What the field may mention, worked out here rather than in it: the field
   // narrows this list on every keystroke, and walking the canvas each time it
@@ -512,30 +502,71 @@ export function PromptPanel() {
   };
 
   /**
-   * Opens or folds away the disclosure of what this node will send.
+   * Moves between the panel's tabs.
    *
-   * Opening saves what the panel holds first and waits for it to land. The
-   * preview is read off the document on disk, so asking for it straight after a
-   * keystroke would answer for the ask before this one — and then answer again,
-   * differently, once the save caught up.
+   * Opening the preview saves what the panel holds first and waits for it to
+   * land. The preview is read off the document on disk, so asking for it
+   * straight after a keystroke would answer for the ask before this one — and
+   * then answer again, differently, once the save caught up.
    *
    * Saved whole, since a node the panel has just come up on holds no ask at all
    * and may still have one to show: its words can be arriving on a wire rather
    * than typed here. Where nothing could be asked for yet, nothing is written
-   * for it — a spec gained by opening a disclosure would make a node look asked
-   * when the panel itself is still saying why it cannot be. An ask already in
-   * the document is left alone by the command layer, so this costs a step of
+   * for it — a spec gained by opening a tab would make a node look asked when
+   * the panel itself is still saying why it cannot be. An ask already in the
+   * document is left alone by the command layer, so this costs a step of
    * history only the first time.
    */
-  const togglePreview = async () => {
-    if (previewOpen) {
+  const selectTab = (next: PanelTab) => {
+    if (next === tab) return;
+    if (next !== "preview") {
       setPreviewOpen(false);
+      setTab(next);
       return;
     }
-    setPreviewError(null);
-    if (refusal === null) commit();
-    await useProjectStore.getState().flush();
-    setPreviewOpen(true);
+    void (async () => {
+      setPreviewError(null);
+      if (refusal === null) commit();
+      await useProjectStore.getState().flush();
+      setTab("preview");
+      setPreviewOpen(true);
+    })();
+  };
+
+  /**
+   * Takes the panel's bottom-right corner and drags it.
+   *
+   * Only the far edges move: the corner the node put the panel at stays where
+   * its node left it, however wide or tall the reader makes it. The size is
+   * remembered per node for as long as the editor is open.
+   */
+  const resize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    event.preventDefault();
+    const start = {
+      x: event.clientX,
+      y: event.clientY,
+      width: panel.offsetWidth,
+      height: panel.offsetHeight,
+    };
+    const move = (moved: PointerEvent) => {
+      const next = {
+        width: Math.max(PANEL_MIN_WIDTH, start.width + moved.clientX - start.x),
+        height: Math.max(
+          PANEL_MIN_HEIGHT,
+          start.height + moved.clientY - start.y,
+        ),
+      };
+      setSize(next);
+      sizesFor.current.set(node.id, next);
+    };
+    const letGo = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", letGo);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", letGo);
   };
 
   /**
@@ -599,51 +630,31 @@ export function PromptPanel() {
   // re-renders the panel as the view moves, since worldToClient answers from the
   // live camera without telling anyone it changed.
   const zoom = camera?.zoom ?? canvas.viewport.zoom ?? 1;
+  // The node's bottom-left corner, which is where the panel's top-left corner
+  // sits — in the world rather than in the view, so the two stay together
+  // through a pan, a zoom, and a node dragged to the edge of the canvas.
   const origin = worldToClient({
     x: node.bounds.x,
     y: node.bounds.y + node.bounds.height,
   });
-  // Counted here for the clamp alone: the bar reads the graph for itself, and
-  // a second reading of it that only ever decides how much room to leave is
-  // not one that can disagree with what is drawn.
-  const references =
-    inputMode === "upstream"
-      ? wired.length
-      : inputMode === "manual"
-        ? spec.referenceNodeIds.length
-        : 0;
-  const fieldHeight = fieldSize?.height ?? FIELD_HEIGHT;
-  const tall =
-    (paramsOpen ? PANEL_HEIGHT_PARAMS : PANEL_HEIGHT) +
-    (promptShown ? fieldHeight : 0) +
-    PANEL_HEIGHT_REFERENCES +
-    (references === 0 ? PANEL_HEIGHT_COUNT : 0) +
-    (picking ? PANEL_HEIGHT_OFFER : 0) +
-    (previewOpen ? PANEL_HEIGHT_PREVIEW : 0) +
-    (counted ? PANEL_HEIGHT_COUNT : 0) +
-    (dangling ? PANEL_HEIGHT_COUNT : 0) +
-    (offering ? PANEL_HEIGHT_OFFER : 0) +
-    Math.ceil(((promptShown ? chips : 0) + references) / 2) *
-      PANEL_HEIGHT_CHIPS;
   // As wide as the node it belongs to asks for, times a little for the words:
   // a panel narrower than its own node reads as belonging to something else.
-  // A field the reader dragged decides instead, since a size taken by hand is
-  // a size to keep.
-  const width = fieldSize
-    ? Math.max(PANEL_MIN_WIDTH, fieldSize.width + PANEL_CHROME)
-    : Math.min(
-        PANEL_MAX_WIDTH,
-        Math.max(
-          PANEL_MIN_WIDTH,
-          Math.round(node.bounds.width * PANEL_WIDTH_FACTOR * zoom),
-        ),
-      );
+  // A corner dragged by hand decides instead, since a size taken by hand is a
+  // size to keep.
+  const width =
+    size?.width ??
+    Math.min(
+      PANEL_MAX_WIDTH,
+      Math.max(
+        PANEL_MIN_WIDTH,
+        Math.round(node.bounds.width * PANEL_WIDTH_FACTOR * zoom),
+      ),
+    );
   const style: React.CSSProperties = {
-    left: `clamp(${GAP}px, ${origin?.x ?? 0}px, calc(100% - ${width + GAP}px))`,
-    top: `clamp(${GAP}px, ${(origin?.y ?? 0) + GAP * zoom}px, calc(100% - ${
-      tall + GAP
-    }px))`,
+    left: origin?.x ?? 0,
+    top: origin?.y ?? 0,
     width,
+    height: size?.height ?? PANEL_DEFAULT_HEIGHT,
   };
 
   return (
@@ -651,153 +662,40 @@ export function PromptPanel() {
       aria-label={`Generation panel for ${node.title}`}
       className="prompt-panel"
       data-testid="prompt-panel"
+      ref={panelRef}
       role="group"
       style={style}
     >
       <div className="prompt-panel-head">
-        <button
-          aria-expanded={promptShown}
-          aria-label="Prompt"
-          className="prompt-panel-fold"
-          onClick={fold}
-          title={
-            promptShown
-              ? "Fold the prompt away and take what is given from the wiring"
-              : "Unfold the prompt and say in words what is given"
-          }
-          type="button"
+        <div
+          aria-label="Panel sections"
+          className="prompt-panel-tabs"
+          role="tablist"
         >
-          {promptShown ? "▾" : "▸"} Prompt
-        </button>
-        <button
-          aria-label="Close the generation panel"
-          className="prompt-panel-close"
-          onClick={dismiss}
-          type="button"
-        >
-          ✕
-        </button>
-      </div>
-
-      {noModel ? (
-        <div className="prompt-panel-models">
-          <p className="prompt-panel-note">
-            No {CAPABILITY_LABELS[capability].toLowerCase()} model is configured
-            yet.
-          </p>
           <button
-            onClick={() =>
-              // Straight to the category that would serve this node, on the
-              // model it named when that still exists, rather than to a list
-              // to be searched.
-              useModelStore
-                .getState()
-                .openModelForCapability(capability, spec.model || null)
-            }
+            aria-selected={tab === "prompt"}
+            className={tab === "prompt" ? "is-active" : ""}
+            onClick={() => selectTab("prompt")}
+            role="tab"
             type="button"
           >
-            Configure models
+            Prompt
           </button>
-        </div>
-      ) : (
-        <ModelPicker
-          capability={capability}
-          noneLabel="Provider default"
-          onChange={(reference) => commit({ model: reference ?? "" })}
-          value={spec.model || null}
-        />
-      )}
-
-      <ReferenceBar
-        canvas={canvas}
-        issues={issues}
-        key={`refs-${node.id}`}
-        node={node}
-        onCut={(edge) => disconnectEdge(edge.id)}
-        onFind={locate}
-        onMove={(edge, portId) => moveInput(edge.id, portId)}
-        onPicking={setPicking}
-        onPoint={(nodeIds) => commit({ referenceNodeIds: nodeIds })}
-        onTakeAsset={(assetId) => void takeAsset(assetId)}
-        onTakeFiles={takeFiles}
-        resources={resources}
-        // The panel's own reading of where the ask takes its inputs from,
-        // rather than the document's: the fold has just moved and the document
-        // catches up when something is written.
-        spec={{ ...spec, inputMode }}
-      />
-
-      {promptShown && (
-        <MentionField
-          canvas={canvas}
-          choices={choices}
-          fieldSize={fieldSize}
-          inputRef={areaRef}
-          issues={issues}
-          key={`prompt-${node.id}`}
-          label={`Prompt for ${node.title}`}
-          offerAtCaret
-          onChange={changePrompt}
-          onCommit={commitPrompt}
-          onDismiss={dismiss}
-          onFieldResize={setFieldSize}
-          onOffer={setOffering}
-          onSubmit={() => void ask()}
-          placeholder="What should this node make?"
-          resources={resources}
-          value={prompt}
-        />
-      )}
-
-      {dangling && (
-        <p className="prompt-panel-warn" role="alert">
-          A mention names a node that is not on this canvas.
-        </p>
-      )}
-
-      {counted && (
-        <p
-          className={
-            over > 0 ? "prompt-panel-count is-over" : "prompt-panel-count"
-          }
-        >
-          {prompt.length.toLocaleString()} of{" "}
-          {MAX_PROMPT_LENGTH.toLocaleString()} characters
-        </p>
-      )}
-
-      {paramsOpen && (
-        <GenerationParams
-          capability={capability}
-          defaults={view?.preferences ?? null}
-          key={node.id}
-          onChange={setParam}
-          params={spec.params}
-        />
-      )}
-
-      {previewOpen && (
-        <InputPreview
-          error={previewError}
-          preview={preview}
-          reading={reading}
-          titleOf={(id) => findNode(canvas, id)?.title ?? id}
-        />
-      )}
-
-      <div className="prompt-panel-actions">
-        <div className="prompt-panel-toggles">
           <button
-            aria-expanded={paramsOpen}
-            onClick={() => setParamsOpen((shown) => !shown)}
+            aria-selected={tab === "parameter"}
+            className={tab === "parameter" ? "is-active" : ""}
+            onClick={() => selectTab("parameter")}
+            role="tab"
             title="What this node's own ask carries, over the defaults set in settings"
             type="button"
           >
-            Parameters
+            Parameter
           </button>
           <button
-            aria-expanded={previewOpen}
-            onClick={() => void togglePreview()}
+            aria-selected={tab === "preview"}
+            className={tab === "preview" ? "is-active" : ""}
+            onClick={() => selectTab("preview")}
+            role="tab"
             title="What a run of this node would actually hand over"
             type="button"
           >
@@ -829,7 +727,147 @@ export function PromptPanel() {
             {busy ? "Starting…" : "Run"}
           </button>
         )}
+        <button
+          aria-label="Close the generation panel"
+          className="prompt-panel-close"
+          onClick={dismiss}
+          type="button"
+        >
+          ✕
+        </button>
       </div>
+
+      <div className="prompt-panel-body">
+        {tab === "prompt" && (
+          <div className="prompt-panel-prompt">
+            <button
+              aria-expanded={promptShown}
+              aria-label="Prompt"
+              className="prompt-panel-fold"
+              onClick={fold}
+              title={
+                promptShown
+                  ? "Fold the prompt away and take what is given from the wiring"
+                  : "Unfold the prompt and say in words what is given"
+              }
+              type="button"
+            >
+              {promptShown ? "▾" : "▸"} Prompt
+            </button>
+
+            {promptShown && (
+              <MentionField
+                canvas={canvas}
+                choices={choices}
+                inputRef={areaRef}
+                issues={issues}
+                key={`prompt-${node.id}`}
+                label={`Prompt for ${node.title}`}
+                offerAtCaret
+                onChange={changePrompt}
+                onCommit={commitPrompt}
+                onDismiss={dismiss}
+                onOffer={() => {}}
+                onSubmit={() => void ask()}
+                placeholder="What should this node make?"
+                resources={resources}
+                value={prompt}
+              />
+            )}
+
+            {dangling && (
+              <p className="prompt-panel-warn" role="alert">
+                A mention names a node that is not on this canvas.
+              </p>
+            )}
+
+            {counted && (
+              <p
+                className={
+                  over > 0 ? "prompt-panel-count is-over" : "prompt-panel-count"
+                }
+              >
+                {prompt.length.toLocaleString()} of{" "}
+                {MAX_PROMPT_LENGTH.toLocaleString()} characters
+              </p>
+            )}
+
+            {noModel ? (
+              <div className="prompt-panel-models">
+                <p className="prompt-panel-note">
+                  No {CAPABILITY_LABELS[capability].toLowerCase()} model is
+                  configured yet.
+                </p>
+                <button
+                  onClick={() =>
+                    // Straight to the category that would serve this node, on
+                    // the model it named when that still exists, rather than
+                    // to a list to be searched.
+                    useModelStore
+                      .getState()
+                      .openModelForCapability(capability, spec.model || null)
+                  }
+                  type="button"
+                >
+                  Configure models
+                </button>
+              </div>
+            ) : (
+              <ModelPicker
+                capability={capability}
+                noneLabel="Provider default"
+                onChange={(reference) => commit({ model: reference ?? "" })}
+                value={spec.model || null}
+              />
+            )}
+
+            <ReferenceBar
+              canvas={canvas}
+              issues={issues}
+              key={`refs-${node.id}`}
+              node={node}
+              onCut={(edge) => disconnectEdge(edge.id)}
+              onFind={locate}
+              onMove={(edge, portId) => moveInput(edge.id, portId)}
+              onPicking={() => {}}
+              onPoint={(nodeIds) => commit({ referenceNodeIds: nodeIds })}
+              onTakeAsset={(assetId) => void takeAsset(assetId)}
+              onTakeFiles={takeFiles}
+              resources={resources}
+              // The panel's own reading of where the ask takes its inputs
+              // from, rather than the document's: the fold has just moved and
+              // the document catches up when something is written.
+              spec={{ ...spec, inputMode }}
+            />
+          </div>
+        )}
+
+        {tab === "parameter" && (
+          <GenerationParams
+            capability={capability}
+            defaults={view?.preferences ?? null}
+            key={node.id}
+            onChange={setParam}
+            params={spec.params}
+          />
+        )}
+
+        {tab === "preview" && previewOpen && (
+          <InputPreview
+            error={previewError}
+            preview={preview}
+            reading={reading}
+            titleOf={(id) => findNode(canvas, id)?.title ?? id}
+          />
+        )}
+      </div>
+
+      <div
+        aria-hidden="true"
+        className="prompt-panel-grip"
+        onPointerDown={resize}
+        title="Drag to make the panel wider or taller"
+      />
     </div>
   );
 }

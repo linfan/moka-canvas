@@ -944,6 +944,10 @@ h2 {
   background: var(--canvas);
   flex: 1;
   min-width: 0;
+  /* The panels anchored to nodes are part of the canvas: one that follows its
+     node past the edge of the view is clipped here rather than floating over
+     the furniture around it. */
+  overflow: hidden;
   position: relative;
 }
 
@@ -1588,7 +1592,9 @@ button.danger:hover:not(:disabled) {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow);
-  display: grid;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 10px;
   position: absolute;
@@ -1598,7 +1604,74 @@ button.danger:hover:not(:disabled) {
 .prompt-panel-head {
   align-items: center;
   display: flex;
+  flex: none;
   gap: 6px;
+}
+
+/* The three tabs and the button that sends the ask, in one row: what the panel
+   is showing is a choice of page rather than a stack of disclosures. */
+.prompt-panel-tabs {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.prompt-panel-tabs button {
+  border-radius: 6px;
+  flex: 1;
+  font-size: 11px;
+  padding: 4px 7px;
+}
+
+.prompt-panel-head button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  border-radius: 6px;
+  color: var(--on-primary);
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+}
+
+/* The page itself, which takes the room the panel has and scrolls inside it
+   rather than growing the panel past the canvas. */
+.prompt-panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.prompt-panel-prompt {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* The corner the panel is dragged by, which moves its far edges and leaves the
+   corner its node put it at alone. */
+.prompt-panel-grip {
+  border-bottom: 9px solid var(--muted);
+  border-left: 9px solid transparent;
+  border-radius: 0 0 4px;
+  bottom: 1px;
+  cursor: nwse-resize;
+  flex: none;
+  height: 0;
+  opacity: 0.5;
+  position: absolute;
+  right: 1px;
+  width: 0;
+}
+
+.prompt-panel-grip:hover {
+  opacity: 1;
 }
 
 .prompt-panel-modes {
@@ -1619,11 +1692,11 @@ button.danger:hover:not(:disabled) {
   flex: 1;
 }
 
-/* The one control left in the head: the words behind it are either out or
-   folded away, and where the ask takes what it is given from follows. */
+/* The one control left in the prompt page: the words behind it are either out
+   or folded away, and where the ask takes what it is given from follows. */
 .prompt-panel-fold {
   color: var(--muted);
-  flex: 1;
+  flex: none;
   text-align: left;
 }
 
@@ -1654,6 +1727,23 @@ button.danger:hover:not(:disabled) {
   padding: 8px 10px;
   resize: none;
   width: 100%;
+}
+
+/* In the panel the field takes the room that is left and the words scroll
+   inside it, rather than the field deciding how tall the panel is. */
+.prompt-panel-prompt .mention-field {
+  flex: 1;
+  grid-template-rows: minmax(60px, 1fr) auto;
+  min-height: 0;
+}
+
+.prompt-panel-prompt .mention-field-area {
+  min-height: 0;
+}
+
+.prompt-panel-prompt .prompt-panel-input {
+  height: 100%;
+  min-height: 60px;
 }
 
 /* The field and the corner it is dragged by, which is the panel's own width
@@ -1716,24 +1806,6 @@ button.danger:hover:not(:disabled) {
 /* A field carrying a sentence needs the width of the panel, not half of it. */
 .prompt-panel-wide {
   grid-column: span 2;
-}
-
-.prompt-panel-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: space-between;
-}
-
-.prompt-panel-actions button.primary {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--on-primary);
-  font-weight: 600;
-}
-
-.prompt-panel-toggles {
-  display: flex;
-  gap: 6px;
 }
 
 /* Something that will not travel with the ask, said where the ask is made. */

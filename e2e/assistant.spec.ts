@@ -412,10 +412,19 @@ test("a canvas holds several conversations, and reads the one it was pointed at"
     { timeout: 15_000 },
   );
 
+  // The answer is read as it arrives, so it is on the page while the turn is
+  // still going. A conversation a turn opens becomes the one on show when that
+  // turn lands, so the switch below waits for this one to be kept rather than
+  // being undone by it a moment later.
+  await expect.poll(servedSessions, { timeout: 10_000 }).toHaveLength(1);
+
   // A conversation kept is something to go back to rather than only to carry on,
   // so another can be opened beside it over the same cards.
   const listing = page.getByLabel("Conversation", { exact: true });
   await listing.selectOption({ label: "New conversation" });
+  await expect(listing.locator("option:checked")).toHaveText(
+    "New conversation",
+  );
   await expect(
     column(page).getByText("A new conversation, nothing said in it yet."),
   ).toBeVisible();
