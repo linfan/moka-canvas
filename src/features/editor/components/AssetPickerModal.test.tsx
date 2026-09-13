@@ -102,7 +102,8 @@ describe("the asset picker", () => {
     const madeIds = useEditorStore.getState().selection.nodeIds;
     const added = nodesOnMain().filter((node) => madeIds.includes(node.id));
     expect(added.length).toBe(2);
-    // Laid out where the ask was made, each one below and right of the last.
+    // Laid out where the ask was made, and the second clear of the first:
+    // nothing in a batch lands on top of what arrived with it.
     expect(
       added.map((node) => ({
         x: node.bounds.x,
@@ -111,7 +112,7 @@ describe("the asset picker", () => {
       })),
     ).toEqual([
       { x: 360, y: 260, title: "lake.png" },
-      { x: 400, y: 300, title: "lantern.png" },
+      { x: 360, y: 500, title: "lantern.png" },
     ]);
     expect(useEditorStore.getState().announcement).toBe("Added 2 nodes");
     // One action, so one undo takes the whole insertion back.

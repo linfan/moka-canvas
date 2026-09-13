@@ -96,31 +96,71 @@ function rectsOverlap(a: Rect, b: Rect, clearance: number): boolean {
 }
 
 /**
- * Where a new default-sized card can sit at `desired` without covering any
- * node already on the canvas: the spot asked for when it is clear, and one
- * card-height below at a time until it is when it is not. A connection
- * released close to the node it was dragged from — the usual case, since the
- * wire only reaches so far — would otherwise bury the new card under the one
- * it is wired to.
+ * How far each step of the search for a clear spot moves a card, and how many
+ * steps it takes before giving up. Bounded because a canvas tiled wall to wall
+ * with cards has no clear spot on it, and a card that cannot land clear is
+ * better arriving where it was let go than not arriving at all.
  */
-function unoccupiedPosition(canvas: CanvasDocument, desired: Point): Point {
-  const spot = { x: desired.x, y: desired.y };
-  const occupied = () =>
-    canvas.nodes.some((node) =>
-      rectsOverlap(
-        {
-          x: spot.x,
-          y: spot.y,
-          width: DEFAULT_NODE_WIDTH,
-          height: DEFAULT_NODE_HEIGHT,
-        },
-        node.bounds,
-        NODE_CLEARANCE_PX,
-      ),
+const PLACEMENT_STEP_PX = CASCADE_DROP_OFFSET;
+const PLACEMENT_REACH = 16;
+
+/**
+ * The steps to the right of and below a spot that a card is tried at, nearest
+ * first. Ordered once here rather than on each drop, so that every drop walks
+ * the same way and the card lands as close as it can to where it was let go.
+ */
+const PLACEMENT_STEPS: readonly Point[] = (() => {
+  const steps: { at: Point; near: number }[] = [];
+  for (let right = 0; right <= PLACEMENT_REACH; right += 1) {
+    for (let down = 0; down <= PLACEMENT_REACH; down += 1) {
+      if (right === 0 && down === 0) continue;
+      steps.push({
+        at: { x: right * PLACEMENT_STEP_PX, y: down * PLACEMENT_STEP_PX },
+        near: right * right + down * down,
+      });
+    }
+  }
+  return steps.sort((one, two) => one.near - two.near).map((step) => step.at);
+})();
+
+/**
+ * Where a new default-sized card can sit at `desired` without covering any
+ * node already on the canvas: the spot asked for when it is clear, and
+ * otherwise the nearest clear spot to the right of and below it.
+ *
+ * The spot asked for, because a card dragged in is expected where it was let
+ * go. Right and down when that spot is taken, rather than straight down as
+ * before and rather than anywhere clear: a card that cannot have the spot it
+ * was dropped on moves out of the way of what is already there, and does so
+ * the shortest way it can in the direction the board is read.
+ *
+ * `taken` is what is being laid down beside it in the same action and is not
+ * on the canvas yet, which is how several cards arriving together keep off
+ * each other as well as off what was already there.
+ */
+function unoccupiedPosition(
+  canvas: CanvasDocument,
+  desired: Point,
+  taken: readonly Rect[] = [],
+): Point {
+  const covered = (at: Point) => {
+    const bounds: Rect = {
+      x: at.x,
+      y: at.y,
+      width: DEFAULT_NODE_WIDTH,
+      height: DEFAULT_NODE_HEIGHT,
+    };
+    const clashes = (rect: Rect) =>
+      rectsOverlap(bounds, rect, NODE_CLEARANCE_PX);
+    return (
+      canvas.nodes.some((node) => clashes(node.bounds)) || taken.some(clashes)
     );
-  // Bounded so a canvas tiled wall-to-wall with nodes cannot spin here.
-  for (let step = 0; occupied() && step < 64; step += 1) {
-    spot.y += DEFAULT_NODE_HEIGHT + NODE_CLEARANCE_PX;
+  };
+  const spot = { x: desired.x, y: desired.y };
+  if (!covered(spot)) return spot;
+  for (const step of PLACEMENT_STEPS) {
+    const tried = { x: spot.x + step.x, y: spot.y + step.y };
+    if (!covered(tried)) return tried;
   }
   return spot;
 }
@@ -1023,15 +1063,22 @@ async function makeAssetNode(
   return node;
 }
 
-/** Creates a source node for a registered asset at a world position. */
+/**
+ * Creates a source node for a registered asset at a world position, which is
+ * where the drag that carried it was let go: under the pointer, and stepped
+ * clear to the right and below when something is already sitting there.
+ */
 export async function addAssetNode(assetId: AssetId, at?: Point) {
   const canvas = activeCanvas();
   if (!canvas) return;
   const anchor = at ?? viewCenterWorld() ?? { x: 0, y: 0 };
-  const node = await makeAssetNode(assetId, {
-    x: anchor.x - NODE_DROP_OFFSET.x,
-    y: anchor.y - NODE_DROP_OFFSET.y,
-  });
+  const node = await makeAssetNode(
+    assetId,
+    unoccupiedPosition(canvas, {
+      x: anchor.x - NODE_DROP_OFFSET.x,
+      y: anchor.y - NODE_DROP_OFFSET.y,
+    }),
+  );
   if (!node) return;
   if (
     execute("Add asset node", [{ type: "addNode", canvasId: canvas.id, node }])
@@ -1096,12 +1143,23 @@ export async function addAssetNodes(
   const anchor = at ?? viewCenterWorld() ?? { x: 0, y: 0 };
   const commands: DocumentCommand[] = [];
   const made: NodeId[] = [];
-  for (const [index, assetId] of assetIds.entries()) {
-    const node = await makeAssetNode(assetId, {
-      x: anchor.x - NODE_DROP_OFFSET.x + index * CASCADE_DROP_OFFSET,
-      y: anchor.y - NODE_DROP_OFFSET.y + index * CASCADE_DROP_OFFSET,
-    });
+  // Nothing in this batch is on the canvas until the whole of it lands in one
+  // undo step, so each card is told about the ones laid down before it.
+  const laid: Rect[] = [];
+  for (const assetId of assetIds) {
+    const node = await makeAssetNode(
+      assetId,
+      unoccupiedPosition(
+        canvas,
+        {
+          x: anchor.x - NODE_DROP_OFFSET.x,
+          y: anchor.y - NODE_DROP_OFFSET.y,
+        },
+        laid,
+      ),
+    );
     if (!node) continue;
+    laid.push(node.bounds);
     commands.push({ type: "addNode", canvasId: canvas.id, node });
     made.push(node.id);
   }
@@ -1548,13 +1606,7 @@ export async function importFiles(
       });
       imported.push(change.entry.id);
       if (options.addNodes) {
-        const at = options.at
-          ? {
-              x: options.at.x + index * CASCADE_DROP_OFFSET,
-              y: options.at.y + index * CASCADE_DROP_OFFSET,
-            }
-          : undefined;
-        await addAssetNode(change.entry.id, at);
+        await addAssetNode(change.entry.id, options.at);
       }
       options.onFileDone?.(index);
     } catch (error) {

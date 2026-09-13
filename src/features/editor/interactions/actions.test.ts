@@ -471,8 +471,18 @@ describe("pasteClipboard", () => {
       node.title.endsWith(".png"),
     );
     expect(made.map((node) => node.title)).toEqual(["one.png", "two.png"]);
-    // Laid out apart: a paste of several does not pile them on one spot.
-    expect(made[0].bounds.x).not.toBe(made[1].bounds.x);
+    // Laid out apart: a paste of several does not pile them on one spot, and
+    // the second keeps off the first rather than covering it.
+    const [one, two] = made.map((node) => node.bounds);
+    const apart =
+      two.x >= one.x + one.width ||
+      one.x >= two.x + two.width ||
+      two.y >= one.y + one.height ||
+      one.y >= two.y + two.height;
+    expect(apart).toBe(true);
+    // Out of the way to the right and below, never back over the drop.
+    expect(two.x).toBeGreaterThanOrEqual(one.x);
+    expect(two.y).toBeGreaterThanOrEqual(one.y);
   });
 
   it("reads a fragment under the app's own MIME and inside plain text", async () => {

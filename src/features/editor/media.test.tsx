@@ -329,8 +329,41 @@ describe("addAssetNode", () => {
     const node = canvas.nodes.find((n) => n.title === "lake.png");
     expect(node?.kind).toBe("image");
     expect((node?.data as { assetId?: string }).assetId).toBe(ids.assetImage);
-    expect(node?.bounds).toMatchObject({ x: -40, y: 10 });
     expect(useEditorStore.getState().selection.nodeIds).toEqual([node!.id]);
+  });
+
+  it("lands where the drag was let go when nothing is sitting there", async () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    // The pointer is at the middle-ish of the card, which is where a card
+    // dropped on an empty stretch of the board is expected to appear.
+    await addAssetNode(ids.assetImage, { x: 900, y: 500 });
+    const node = activeCanvasOf(useProjectStore.getState().moka!).nodes.find(
+      (n) => n.title === "lake.png",
+    )!;
+    expect(node.bounds).toMatchObject({ x: 900 - 140, y: 500 - 40 });
+  });
+
+  it("steps right and down clear of a card already under the drop", async () => {
+    const ids = goldenNodeIds();
+    const before = activeCanvasOf(hydrate()).nodes.map((n) => n.bounds);
+    // Straight onto the fixture's first two cards.
+    await addAssetNode(ids.assetImage, { x: 100, y: 50 });
+    const node = activeCanvasOf(useProjectStore.getState().moka!).nodes.find(
+      (n) => n.title === "lake.png",
+    )!;
+    // Not under the drop, which is covered, and not left of or above it: the
+    // search only ever moves a card out of the way to the right and below.
+    expect(node.bounds.x).toBeGreaterThanOrEqual(100 - 140);
+    expect(node.bounds.y).toBeGreaterThanOrEqual(50 - 40);
+    for (const rect of before) {
+      const clear =
+        node.bounds.x >= rect.x + rect.width ||
+        rect.x >= node.bounds.x + node.bounds.width ||
+        node.bounds.y >= rect.y + rect.height ||
+        rect.y >= node.bounds.y + node.bounds.height;
+      expect(clear).toBe(true);
+    }
   });
 
   it("maps voice category assets to voice audio nodes", async () => {
@@ -599,6 +632,62 @@ describe("editor shell integration", () => {
     const canvas = useProjectStore.getState().moka!.canvas[0];
     expect(canvas.nodes).toHaveLength(5);
     expect(canvas.nodes.some((n) => n.title === "lake.png")).toBe(true);
+  });
+
+  /** Points the camera stand-in at a world point, for a drop. */
+  function aimAtPoint(world: { x: number; y: number }) {
+    registerController({
+      clientToWorld: () => world,
+      viewCenterWorld: () => world,
+      worldToClient: () => ({ x: 0, y: 0 }),
+    } as unknown as LeaferEditorController);
+    return world;
+  }
+
+  /** Drops a panel asset on the canvas at a point the camera reports. */
+  async function dropAsset(assetId: string, world: { x: number; y: number }) {
+    aimAtPoint(world);
+    const host = await screen.findByTestId("canvas-host");
+    fireEvent.drop(host, {
+      clientX: 10,
+      clientY: 10,
+      dataTransfer: {
+        getData: (type: string) =>
+          type === "application/x-moka-asset" ? assetId : "",
+        files: [],
+      },
+    });
+    await act(() => Promise.resolve());
+    return useProjectStore
+      .getState()
+      .moka!.canvas[0].nodes.find((n) => n.title === "lake.png")!;
+  }
+
+  it("creates a dragged asset where the drag was let go", async () => {
+    const ids = goldenNodeIds();
+    await openGolden();
+    // An empty stretch of the board: the card arrives under the pointer.
+    const node = await dropAsset(ids.assetImage, { x: 900, y: 500 });
+    expect(node.bounds).toMatchObject({ x: 900 - 140, y: 500 - 40 });
+  });
+
+  it("moves a dropped asset clear of the card under the pointer", async () => {
+    const ids = goldenNodeIds();
+    await openGolden();
+    await screen.findByTestId("canvas-host");
+    const canvas = useProjectStore.getState().moka!.canvas[0];
+    const under = canvas.nodes.find((entry) => entry.id === ids.text)!;
+    const node = await dropAsset(ids.assetImage, {
+      x: under.bounds.x + under.bounds.width / 2,
+      y: under.bounds.y + under.bounds.height / 2,
+    });
+    // Out of the way to the right and below, and off the card it landed on.
+    expect(node.bounds.x).toBeGreaterThanOrEqual(under.bounds.x);
+    expect(node.bounds.y).toBeGreaterThanOrEqual(under.bounds.y);
+    const clear =
+      node.bounds.x >= under.bounds.x + under.bounds.width ||
+      node.bounds.y >= under.bounds.y + under.bounds.height;
+    expect(clear).toBe(true);
   });
 
   it("imports dropped files and creates nodes", async () => {
