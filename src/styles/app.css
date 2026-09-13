@@ -1729,6 +1729,34 @@ button.danger:hover:not(:disabled) {
   width: 100%;
 }
 
+/* The prompt field itself: the box a textarea would have had, holding words
+   and chips alike, with the chips keeping their places among the words. */
+.mention-input {
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: text;
+  font: inherit;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mention-input:focus-visible {
+  border-color: var(--primary);
+  outline: none;
+}
+
+/* What the field says when it holds nothing, drawn where the words would be. */
+.mention-input.is-empty::before {
+  color: var(--muted);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
 /* In the panel the field takes the room that is left and the words scroll
    inside it, rather than the field deciding how tall the panel is. */
 .prompt-panel-prompt .mention-field {
@@ -1962,25 +1990,20 @@ button.danger:hover:not(:disabled) {
   white-space: nowrap;
 }
 
-.mention-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
+/* A mention among the words: one mark, wearing the kind of thing it points
+   at, that the caret walks over and the backspace takes out whole. */
 .mention-chip {
   align-items: center;
   background: var(--surface-raised);
   border: 1px solid var(--stroke);
-  border-radius: 999px;
-  display: flex;
-  gap: 4px;
-  max-width: 100%;
-  padding: 2px 4px 2px 2px;
-  position: relative;
+  border-radius: 6px;
+  cursor: default;
+  display: inline-flex;
+  line-height: 1;
+  margin: 0 1px;
+  padding: 2px 4px;
+  user-select: none;
+  vertical-align: baseline;
 }
 
 /* A mention of a card that is gone still has to be readable as one, and still
@@ -1990,35 +2013,16 @@ button.danger:hover:not(:disabled) {
   color: var(--danger);
 }
 
-.mention-chip-thumb {
-  border-radius: 999px;
-  flex: none;
-  height: 18px;
-  object-fit: cover;
-  width: 18px;
-}
-
-.mention-chip-name {
+.mention-chip-glyph {
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.mention-chip-drop {
-  border-radius: 999px;
-  color: var(--muted);
-  flex: none;
-  font-size: 10px;
-  padding: 1px 4px;
-}
-
-/* What a chip summons when it is hovered, or held by the keyboard. */
+/* What a chip summons when it is hovered: hung under the chip, at the point
+   the field was told the pointer found it. */
 .mention-look {
   background: var(--surface-raised);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
-  bottom: calc(100% + 6px);
   box-shadow: var(--shadow);
   display: grid;
   gap: 4px;
@@ -2026,6 +2030,7 @@ button.danger:hover:not(:disabled) {
   max-width: 240px;
   padding: 6px;
   position: absolute;
+  top: 0;
   z-index: 41;
 }
 
@@ -2043,6 +2048,11 @@ button.danger:hover:not(:disabled) {
   margin: 0;
   max-height: 96px;
   overflow: auto;
+}
+
+.mention-look-name {
+  font-size: 11px;
+  margin: 0;
 }
 
 .mention-look-label {

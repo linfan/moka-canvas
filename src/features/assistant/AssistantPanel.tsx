@@ -368,7 +368,7 @@ export function AssistantPanel() {
   // A card is asked of a run built from the canvas, which reads the wires rather
   // than a message, so only a turn answered by words has anywhere to put memory.
   const wordsWanted = capabilityFor(intent) === "text";
-  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const canvasId = canvas?.id ?? null;
   const shownFor = useRef<CanvasId | null>(canvasId);

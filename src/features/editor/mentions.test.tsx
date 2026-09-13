@@ -113,13 +113,19 @@ const committed = vi.fn();
 const asked = vi.fn();
 
 /** The field, holding its own words the way the panel holds them. */
-function Field({ initial = "" }: { initial?: string }) {
+function Field({
+  initial = "",
+  on = SHEET,
+}: {
+  initial?: string;
+  on?: CanvasDocument;
+}) {
   const [value, setValue] = useState(initial);
-  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
   return (
     <MentionField
-      canvas={SHEET}
-      choices={choicesOf()}
+      canvas={on}
+      choices={mentionChoices(on, TARGET, RESOURCES, ISSUES)}
       inputRef={areaRef}
       issues={ISSUES}
       label="Prompt"
@@ -139,7 +145,7 @@ function Field({ initial = "" }: { initial?: string }) {
 }
 
 function field() {
-  return screen.getByLabelText<HTMLTextAreaElement>("Prompt");
+  return screen.getByLabelText("Prompt");
 }
 
 function offer() {
@@ -148,10 +154,6 @@ function offer() {
 
 function options() {
   return within(offer()).getAllByRole("option");
-}
-
-function chips() {
-  return screen.getByRole("list", { name: "What this prompt mentions" });
 }
 
 beforeEach(() => {
@@ -309,14 +311,37 @@ describe("what may be mentioned", () => {
 });
 
 describe("the prompt field", () => {
+  /** Puts words into the field the way typing would: laid in, then told. */
+  function typeText(words: string) {
+    const area = field();
+    area.textContent = words;
+    fireEvent.input(area);
+  }
+
+  /** Stands the caret at the end of the field's words. */
+  function caretToEnd() {
+    const area = field();
+    const range = document.createRange();
+    range.selectNodeContents(area);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  /** The chip the field is drawing, when it is drawing one. */
+  function chip() {
+    return field().querySelector(".mention-chip") as HTMLElement | null;
+  }
+
   it("offers what may be mentioned from an @", async () => {
     render(<Field />);
     expect(screen.queryByRole("listbox")).toBeNull();
 
     await act(async () => {
-      fireEvent.change(field(), { target: { value: "@" } });
+      typeText("@");
     });
-    expect(field()).toHaveProperty("ariaExpanded", "true");
+    expect(field().getAttribute("aria-expanded")).toBe("true");
     expect(within(offer()).getByText("Text")).toBeTruthy();
     expect(options().map((option) => option.textContent)).toEqual([
       expect.stringContaining("Brief"),
@@ -333,7 +358,7 @@ describe("the prompt field", () => {
   it("says when nothing on the canvas answers to what was typed", async () => {
     render(<Field />);
     await act(async () => {
-      fireEvent.change(field(), { target: { value: "@zzz" } });
+      typeText("@zzz");
     });
     expect(offer().textContent).toContain(
       "Nothing on this canvas answers to that.",
@@ -343,7 +368,7 @@ describe("the prompt field", () => {
   it("writes the token, not the title, when a candidate is taken", async () => {
     render(<Field initial="paint " />);
     await act(async () => {
-      fireEvent.change(field(), { target: { value: "paint @pla" } });
+      typeText("paint @pla");
     });
     const [plate] = options();
     await act(async () => {
@@ -356,7 +381,7 @@ describe("the prompt field", () => {
   it("walks the offer with the arrow keys and takes one with Enter", async () => {
     render(<Field />);
     await act(async () => {
-      fireEvent.change(field(), { target: { value: "@" } });
+      typeText("@");
     });
     expect(options()[0]).toHaveProperty("ariaSelected", "true");
 
@@ -376,7 +401,7 @@ describe("the prompt field", () => {
   it("closes the offer on Escape before it closes the panel", async () => {
     render(<Field />);
     await act(async () => {
-      fireEvent.change(field(), { target: { value: "@" } });
+      typeText("@");
     });
     await act(async () => {
       fireEvent.keyDown(field(), { key: "Escape" });
@@ -390,57 +415,74 @@ describe("the prompt field", () => {
     expect(dismissed).toHaveBeenCalledTimes(1);
   });
 
-  it("draws what the prompt points at as a chip carrying the picture", () => {
+  it("draws a mention among the words as a chip wearing its kind", () => {
     render(<Field initial={`over ${mentionToken("n-plate")} again`} />);
-    const chip = within(chips()).getByText("Plate").parentElement;
-    if (!chip) throw new Error("a chip is an element");
-    expect(chip.querySelector("img")).toHaveProperty(
-      "src",
-      expect.stringContaining(PICTURE.id),
-    );
+    const shown = chip();
+    expect(shown).toBeTruthy();
+    expect(shown?.title).toBe("Plate");
+    expect(shown?.dataset.kind).toBe("image");
+    expect(shown?.textContent).toBe("▣");
+    // The words around it stay the words around it.
+    expect(field().textContent).toBe("over ▣ again");
+  });
+
+  it("draws a token that arrived as words as the chip it is", async () => {
+    render(<Field />);
+    await act(async () => {
+      typeText(`over ${mentionToken("n-plate")}`);
+    });
+    expect(chip()?.title).toBe("Plate");
+    expect(changed.at(-1)).toBe(`over ${mentionToken("n-plate")}`);
   });
 
   it("reads as broken when the prompt points at a card that is gone", () => {
     render(<Field initial={mentionToken("n-deleted")} />);
-    expect(chips().textContent).toContain("a node that is gone");
-    expect(chips().querySelector(".is-gone")).toBeTruthy();
+    expect(chip()?.className).toContain("is-gone");
+    expect(chip()?.title).toBe("A node that is gone");
   });
 
-  it("takes a mention out whole from its chip", async () => {
-    const token = mentionToken("n-plate");
-    render(<Field initial={`over ${token} again`} />);
-    await act(async () => {
-      fireEvent.click(
-        within(chips()).getByRole("button", {
-          name: "Take Plate out of the prompt",
-        }),
-      );
-    });
-    expect(changed.at(-1)).toBe("over  again");
-    expect(screen.queryByRole("list")).toBeNull();
-  });
-
-  it("takes a mention out whole with the keyboard too", async () => {
-    const token = mentionToken("n-plate");
-    render(<Field initial={`over ${token}`} />);
+  it("takes a mention out whole with the keyboard", async () => {
+    render(<Field initial={`over ${mentionToken("n-plate")}`} />);
     const area = field();
     await act(async () => {
-      area.setSelectionRange(area.value.length, area.value.length);
+      caretToEnd();
       fireEvent.keyDown(area, { key: "Backspace" });
     });
     // One character at a time would leave a bracket and half an id among the
     // words, which reads as prose and resolves as nothing.
     expect(changed.at(-1)).toBe("over ");
+    expect(chip()).toBeNull();
   });
 
   it("summons what a chip points at when it is hovered", async () => {
     render(<Field initial={mentionToken("n-brief")} />);
     expect(screen.queryByTestId("mention-look")).toBeNull();
     await act(async () => {
-      fireEvent.mouseEnter(chips().querySelector(".mention-chip")!);
+      fireEvent.mouseOver(chip()!);
     });
     const look = screen.getByTestId("mention-look");
     expect(look.textContent).toContain("A lantern floats");
+    expect(look.textContent).toContain("Brief");
+  });
+
+  it("shows an audio's ask when its chip is hovered, having no picture", async () => {
+    const voice = card("audio", "n-voice", "Voice");
+    const spec = defaultGenerationSpec("audio");
+    if (!spec) throw new Error("an audio node has a spec");
+    spec.prompt = "A calm voice reading beside a lake at dusk.";
+    voice.data = { ...voice.data, generation: spec };
+    render(
+      <Field
+        initial={mentionToken("n-voice")}
+        on={sheet([...SHEET.nodes, voice])}
+      />,
+    );
+    await act(async () => {
+      fireEvent.mouseOver(chip()!);
+    });
+    const look = screen.getByTestId("mention-look");
+    expect(look.textContent).toContain("A calm voice reading");
+    expect(look.querySelector("img")).toBeNull();
   });
 
   it("commits on losing focus and asks on a command Enter", async () => {

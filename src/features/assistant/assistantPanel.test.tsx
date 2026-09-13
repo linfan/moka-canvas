@@ -146,13 +146,13 @@ function choose(...nodeIds: string[]) {
 }
 
 function type(words: string) {
-  fireEvent.change(screen.getByLabelText("Ask about this canvas"), {
-    target: { value: words },
-  });
+  const area = field();
+  area.textContent = words;
+  fireEvent.input(area);
 }
 
-function field(): HTMLTextAreaElement {
-  return screen.getByLabelText("Ask about this canvas") as HTMLTextAreaElement;
+function field(): HTMLElement {
+  return screen.getByLabelText("Ask about this canvas");
 }
 
 /** The lines the panel is holding, oldest first, and nothing nested inside them. */
@@ -325,7 +325,7 @@ describe("what a kept line can be done with", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Ask again" }));
 
-    expect(field().value).toBe("What is over the lake?");
+    expect(field().textContent).toBe("What is over the lake?");
     expect(useAssistantStore.getState().busy).toBe(false);
     expect(useAssistantStore.getState().draft).toBe("What is over the lake?");
   });
@@ -344,7 +344,7 @@ describe("what a kept line can be done with", () => {
     const trouble = shown()[1];
     expect(trouble.className).toContain("is-error");
     fireEvent.click(within(trouble).getByRole("button", { name: "Ask again" }));
-    expect(field().value).toBe("What is over the lake?");
+    expect(field().textContent).toBe("What is over the lake?");
   });
 });
 

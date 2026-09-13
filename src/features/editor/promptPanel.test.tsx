@@ -486,7 +486,7 @@ describe("the generation panel", () => {
     });
     expect(specOf(ids.image)).toBeUndefined();
 
-    fireEvent.change(prompt, { target: { value: "A poster of the lake" } });
+    write(prompt, "A poster of the lake");
     fireEvent.blur(prompt);
     await settle();
     const spec = specOf(ids.image);
@@ -570,7 +570,7 @@ describe("the generation panel", () => {
     const prompt = within(panel()).getByRole("textbox", {
       name: "Prompt for Reference image",
     });
-    fireEvent.change(prompt, { target: { value: "A poster of the lake" } });
+    write(prompt, "A poster of the lake");
     fireEvent.click(within(panel()).getByRole("button", { name: "Run" }));
     await settle();
 
@@ -953,10 +953,18 @@ async function openWithRun(run: RunRecord) {
   await settle();
 }
 
+/**
+ * Puts words into the prompt field the way typing would: the field is a rich
+ * one, so the words are laid into it and the field is told, rather than a
+ * value being set on it.
+ */
+function write(area: HTMLElement, value: string) {
+  area.textContent = value;
+  fireEvent.input(area);
+}
+
 function type(value: string) {
-  fireEvent.change(within(panel()).getByRole("textbox"), {
-    target: { value },
-  });
+  write(within(panel()).getByRole("textbox"), value);
 }
 
 /** The control that sends an ask, whatever it reads as at the moment. */

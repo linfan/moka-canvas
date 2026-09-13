@@ -1,8 +1,15 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   AssetId,
   CanvasDocument,
-  MentionSpan,
+  GenerationSpec,
   ResourceEntry,
   WorkflowNode,
 } from "../../../shared/domain";
@@ -21,7 +28,231 @@ import {
   type MentionGroup,
 } from "../canvas/mentions";
 
-/** What a chip summons when it is hovered: the picture, or the start of a text. */
+/** What a chip is found by, and what carries the node it points at. */
+const CHIP_SELECTOR = "[data-node-id]";
+
+/** The mark each kind of node wears when it is mentioned in a sentence. */
+const MENTION_GLYPHS: Record<string, string> = {
+  text: "¶",
+  image: "▣",
+  video: "▶",
+  audio: "♪",
+  group: "▢",
+};
+
+/**
+ * The words of a field as one string.
+ *
+ * A chip stands for the whole of its token, a `<br>` for the line it breaks,
+ * and a block that holds nothing for the line it is without counting the
+ * `<br>` the field drew inside it to keep the line visible — a newline and
+ * its placeholder are one newline, not two.
+ */
+function serialize(root: Node): string {
+  let out = "";
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.nodeValue ?? "";
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    const nodeId = el.dataset?.nodeId;
+    if (nodeId !== undefined) {
+      out += mentionToken(nodeId);
+      return;
+    }
+    if (el.tagName === "BR") {
+      out += "\n";
+      return;
+    }
+    if (el.tagName === "DIV" || el.tagName === "P") {
+      if (out !== "" && !out.endsWith("\n")) out += "\n";
+      if (el.textContent === "" && !el.querySelector(CHIP_SELECTOR)) return;
+    }
+    for (const child of Array.from(el.childNodes)) walk(child);
+  };
+  for (const child of Array.from(root.childNodes)) walk(child);
+  return out;
+}
+
+/**
+ * Where the caret sits in the field's words, counting a chip as the token it
+ * stands for — or null when the caret is not in this field to be counted.
+ *
+ * Taken by cloning what lies before the caret and reading it, so one walk of
+ * the field means the same thing here as it does when the words are taken out.
+ */
+function caretOffset(area: HTMLElement): number | null {
+  const selection = area.ownerDocument.getSelection?.();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (range.startContainer !== area && !area.contains(range.startContainer)) {
+    return null;
+  }
+  try {
+    const before = range.cloneRange();
+    before.selectNodeContents(area);
+    before.setEnd(range.startContainer, range.startOffset);
+    return serialize(before.cloneContents()).length;
+  } catch {
+    return null;
+  }
+}
+
+/** Stands the caret at a place in the words, counting chips as their tokens. */
+function placeCaret(area: HTMLElement, target: number): void {
+  const selection = area.ownerDocument.getSelection?.();
+  if (!selection) return;
+  let seen = 0;
+  let lastChar = "";
+  let hit: { node: Node; offset: number } | null = null;
+  const walkChildren = (parent: Node) => {
+    const kids = Array.from(parent.childNodes);
+    for (let index = 0; index < kids.length; index += 1) {
+      if (hit) return;
+      const node = kids[index];
+      if (node.nodeType === Node.TEXT_NODE) {
+        const words = node.nodeValue ?? "";
+        if (target <= seen + words.length) {
+          hit = { node, offset: Math.max(0, target - seen) };
+          return;
+        }
+        seen += words.length;
+        lastChar = words.slice(-1) || lastChar;
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        const nodeId = el.dataset?.nodeId;
+        if (nodeId !== undefined) {
+          const length = mentionToken(nodeId).length;
+          if (target <= seen) {
+            hit = { node: parent, offset: index };
+            return;
+          }
+          if (target <= seen + length) {
+            hit = { node: parent, offset: index + 1 };
+            return;
+          }
+          seen += length;
+          lastChar = "]";
+        } else if (el.tagName === "BR") {
+          if (target <= seen) {
+            hit = { node: parent, offset: index };
+            return;
+          }
+          seen += 1;
+          lastChar = "\n";
+          if (target <= seen) {
+            hit = { node: parent, offset: index + 1 };
+            return;
+          }
+        } else {
+          if (
+            (el.tagName === "DIV" || el.tagName === "P") &&
+            seen > 0 &&
+            lastChar !== "\n"
+          ) {
+            seen += 1;
+            lastChar = "\n";
+            if (target <= seen) {
+              hit = { node: el, offset: 0 };
+              return;
+            }
+          }
+          walkChildren(el);
+        }
+      }
+    }
+  };
+  walkChildren(area);
+  if (!hit) hit = { node: area, offset: area.childNodes.length };
+  const range = area.ownerDocument.createRange();
+  range.setStart(hit.node, hit.offset);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+/** Puts the keyboard in the field and the caret at the end of its words. */
+export function focusEnd(area: HTMLElement): void {
+  area.focus();
+  placeCaret(area, serialize(area).length);
+}
+
+/** A mention drawn: the mark of the kind of node it points at. */
+function chipFor(
+  document: Document,
+  canvas: CanvasDocument,
+  nodeId: string,
+): HTMLElement {
+  const mentioned = findNode(canvas, nodeId);
+  const chip = document.createElement("span");
+  chip.className = mentioned ? "mention-chip" : "mention-chip is-gone";
+  chip.contentEditable = "false";
+  chip.dataset.nodeId = nodeId;
+  chip.dataset.kind = mentioned?.kind ?? "gone";
+  chip.title = mentioned?.title ?? "A node that is gone";
+  const glyph = document.createElement("span");
+  glyph.className = "mention-chip-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.textContent = MENTION_GLYPHS[mentioned?.kind ?? ""] ?? "?";
+  chip.appendChild(glyph);
+  return chip;
+}
+
+/**
+ * Draws the words into the field: prose as prose, and every mention as the
+ * chip that stands for it. The field is taken apart and put back together
+ * rather than patched, since a patch that missed would leave a token among
+ * the words where a chip belongs.
+ */
+function renderValue(
+  area: HTMLElement,
+  value: string,
+  canvas: CanvasDocument,
+): void {
+  const document = area.ownerDocument;
+  const kids: Node[] = [];
+  let cursor = 0;
+  for (const span of mentionSpans(value)) {
+    if (span.start > cursor) {
+      kids.push(document.createTextNode(value.slice(cursor, span.start)));
+    }
+    kids.push(chipFor(document, canvas, span.nodeId));
+    cursor = span.end;
+  }
+  if (cursor < value.length) {
+    kids.push(document.createTextNode(value.slice(cursor)));
+  }
+  area.replaceChildren(...kids);
+}
+
+/**
+ * Where the offer hangs from, in the wrapper's own coordinates: the point the
+ * caret is drawn at, or null when the caret keeps no point to be found.
+ */
+function caretPoint(wrap: HTMLElement): { left: number; top: number } | null {
+  const selection = wrap.ownerDocument.getSelection?.();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  let rect: DOMRect | null = null;
+  if (typeof range.getBoundingClientRect === "function") {
+    const found = range.getBoundingClientRect();
+    if (found && (found.height > 0 || found.top > 0)) rect = found;
+  }
+  if (!rect && typeof range.getClientRects === "function") {
+    const rects = range.getClientRects();
+    if (rects.length > 0) rect = rects[0];
+  }
+  if (!rect) return null;
+  const wrapRect = wrap.getBoundingClientRect();
+  return {
+    left: rect.left - wrapRect.left,
+    top: rect.bottom - wrapRect.top + 2,
+  };
+}
+
+/** What a chip summons when it is hovered: the picture, or the start of words. */
 function MentionLook({
   node,
   media,
@@ -29,77 +260,38 @@ function MentionLook({
   node: WorkflowNode;
   media: MediaCardInfo | null;
 }) {
-  const words = (node.data as { content?: string }).content ?? "";
+  const data = node.data as { content?: string; generation?: GenerationSpec };
+  // A picture of what the node holds: the plate itself, or a shot's first
+  // frame. An audio has nothing to be seen, so what it was asked for is shown
+  // instead, the way a text shows its own words.
+  const picture =
+    (node.kind === "image" || node.kind === "video") && media?.url
+      ? media.url
+      : null;
+  const words =
+    node.kind === "text"
+      ? (data.content ?? "")
+      : node.kind === "audio"
+        ? (data.generation?.prompt ?? "")
+        : "";
+  const shown = words.replace(/\s+/g, " ").trim();
   return (
-    <div className="mention-look" data-testid="mention-look">
-      {media?.url && (
-        <img alt="" className="mention-look-picture" src={media.url} />
-      )}
-      {node.kind === "text" && (
+    <>
+      {picture && <img alt="" className="mention-look-picture" src={picture} />}
+      {shown !== "" && (
         <p className="mention-look-words">
-          {words.replace(/\s+/g, " ").trim().slice(0, MENTION_HOVER_CHARS)}
+          {shown.slice(0, MENTION_HOVER_CHARS)}
         </p>
       )}
-      <p className="mention-look-label">{media?.label ?? node.title}</p>
-    </div>
+      <p className="mention-look-name">{node.title}</p>
+      {media?.label && <p className="mention-look-label">{media.label}</p>}
+    </>
   );
 }
 
 /** The size a dragged field is held within, so it stays a field. */
 const FIELD_MIN_WIDTH = 220;
 const FIELD_MIN_HEIGHT = 60;
-
-/**
- * Where the caret sits inside a field, in the field's own coordinates.
- *
- * A textarea keeps no map of its own lines, so the words up to the caret are
- * laid out a second time in a mirror of the field — same font, same width,
- * same wrapping — and the point the mirror puts them down at is the point the
- * field has put the caret at. The mirror never shows; it exists to be measured
- * and to be taken away again.
- */
-function caretPoint(
-  area: HTMLTextAreaElement,
-  at: number,
-): { left: number; top: number } | null {
-  const style = window.getComputedStyle(area);
-  const mirror = document.createElement("div");
-  for (const prop of [
-    "borderWidth",
-    "boxSizing",
-    "fontFamily",
-    "fontSize",
-    "fontStyle",
-    "fontWeight",
-    "letterSpacing",
-    "lineHeight",
-    "paddingBottom",
-    "paddingLeft",
-    "paddingRight",
-    "paddingTop",
-    "textIndent",
-    "textTransform",
-    "wordSpacing",
-  ] as const) {
-    mirror.style[prop] = style[prop];
-  }
-  mirror.style.overflowWrap = "break-word";
-  mirror.style.position = "absolute";
-  mirror.style.visibility = "hidden";
-  mirror.style.whiteSpace = "pre-wrap";
-  mirror.style.width = `${area.clientWidth}px`;
-  mirror.textContent = area.value.slice(0, at);
-  const mark = document.createElement("span");
-  mark.textContent = "\u200b";
-  mirror.appendChild(mark);
-  document.body.appendChild(mirror);
-  const point = {
-    left: mark.offsetLeft - area.scrollLeft,
-    top: mark.offsetTop + mark.offsetHeight - area.scrollTop,
-  };
-  mirror.remove();
-  return point;
-}
 
 /** A candidate row, carrying the place it holds in the keyboard's own list. */
 interface OfferRow {
@@ -109,21 +301,18 @@ interface OfferRow {
 }
 
 /**
- * The prompt field, which knows that `@[node:<id>]` points at another card
- * rather than being prose.
+ * The prompt field, which knows that a mention points at another card rather
+ * than being prose, and draws one as a chip wearing the mark of its kind.
  *
- * A textarea with the mentions offered at the caret and listed under it, rather
- * than a rich field with the tokens hidden inside. A token is forty-four characters
- * across and a chip is not, so a chip laid over the words would put every
- * character behind it somewhere the caret is not — and an input method
- * composing under a transparent caret composes where nobody can read it. So the
- * words stay in a field where the caret, the selection and the input method all
- * already work, and what the field points at is drawn as chips carrying the
- * pictures.
+ * A rich field rather than a textarea with the tokens shown among the words:
+ * a token is forty-four characters across and a chip is not, so the words
+ * themselves would spend more room naming a card than the card ever would.
+ * The chip is one thing the caret walks over and the backspace takes out
+ * whole, and hovering it summons what it points at — the picture, a shot's
+ * first frame, or the start of the words.
  *
- * The token is still what reaches the document, which is what the resolver
- * reads; the chips are a way of seeing one and of taking one out, and taking one
- * out with the keyboard removes the whole of it rather than a bracket at a time.
+ * What reaches the document is still the token, which is what the resolver
+ * reads; the chips are only how the field shows one.
  */
 export function MentionField({
   canvas,
@@ -157,7 +346,7 @@ export function MentionField({
   value: string;
   label: string;
   placeholder: string;
-  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  inputRef: React.RefObject<HTMLDivElement | null>;
   /** The size the reader dragged the field to, or null for its own default. */
   fieldSize?: { width: number; height: number } | null;
   /**
@@ -183,15 +372,23 @@ export function MentionField({
   onOffer: (open: boolean) => void;
 }) {
   const listId = useId();
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [typed, setTyped] = useState<{ start: number; query: string } | null>(
     null,
   );
   const [active, setActive] = useState(0);
-  const [looked, setLooked] = useState<number | null>(null);
+  /** The chip the pointer is resting on, and where to summon its card. */
+  const [hovered, setHovered] = useState<{
+    nodeId: string;
+    left: number;
+    top: number;
+  } | null>(null);
   /** Where the @ being typed sits, which is where the offer hangs from. */
   const [caret, setCaret] = useState<{ left: number; top: number } | null>(
     null,
   );
+  /** What the field was last given or said, so its own edits are not redrawn. */
+  const drawn = useRef<{ value: string; canvas: CanvasDocument } | null>(null);
 
   const groups = useMemo(
     () => narrowMentions(choices, typed?.query ?? ""),
@@ -208,11 +405,28 @@ export function MentionField({
   }, [groups]);
   const offered = typed !== null;
   const chosen = rows.length === 0 ? 0 : active % rows.length;
-  const spans = useMemo(() => mentionSpans(value), [value]);
 
   useEffect(() => {
     onOffer(typed !== null);
   }, [typed, onOffer]);
+
+  /**
+   * Draws the field to match what it was given, when what it was given is not
+   * what it last drew. Its own edits are left alone: redrawing a field that is
+   * being typed in would take the caret away from where the words put it.
+   */
+  useLayoutEffect(() => {
+    const area = inputRef.current;
+    if (!area) return;
+    const last = drawn.current;
+    if (last && last.value === value && last.canvas === canvas) return;
+    drawn.current = { value, canvas };
+    const at = area.contains(area.ownerDocument.activeElement)
+      ? caretOffset(area)
+      : null;
+    renderValue(area, value, canvas);
+    if (at !== null) placeCaret(area, Math.min(at, value.length));
+  }, [value, canvas, inputRef]);
 
   /**
    * Takes up the offer again after the caret moved.
@@ -228,35 +442,58 @@ export function MentionField({
     // Hung from the @ itself rather than from the foot of the field: an offer
     // that appears where the point of the sentence is cannot be missed, and
     // one at the other end of a tall field can.
+    const wrap = wrapRef.current;
+    setCaret(next && offerAtCaret && wrap ? caretPoint(wrap) : null);
+  };
+
+  /** Reads the field after an edit of its own and says what changed. */
+  const sync = () => {
     const area = inputRef.current;
-    setCaret(
-      next && offerAtCaret && area
-        ? caretPoint(area, Math.min(next.start, area.value.length))
-        : null,
-    );
+    if (!area) return;
+    const next = serialize(area);
+    if (next !== drawn.current?.value) {
+      drawn.current = { value: next, canvas };
+      onChange(next);
+    }
+    retake(next, caretOffset(area) ?? next.length);
+  };
+
+  /**
+   * Reads the field after the reader edited it.
+   *
+   * A token that arrived as words — pasted, say — is drawn as the chip it is,
+   * so the field never shows a bracket where a card is meant.
+   */
+  const emit = () => {
+    const area = inputRef.current;
+    if (!area) return;
+    const next = serialize(area);
+    const chips = area.querySelectorAll(CHIP_SELECTOR).length;
+    if (mentionSpans(next).length !== chips) {
+      const at = caretOffset(area) ?? next.length;
+      renderValue(area, next, canvas);
+      placeCaret(area, at);
+    }
+    sync();
   };
 
   const insert = (choice: MentionChoice) => {
     if (!typed) return;
     const area = inputRef.current;
-    const caret = area?.selectionStart ?? value.length;
+    const at = area ? (caretOffset(area) ?? value.length) : value.length;
     const token = mentionToken(choice.node.id);
-    // A space follows, so the next word is not written into the closing bracket.
-    onChange(`${value.slice(0, typed.start)}${token} ${value.slice(caret)}`);
-    const rest = typed.start + token.length + 1;
+    // A space follows, so the next word is not written into the chip.
+    const next = `${value.slice(0, typed.start)}${token} ${value.slice(at)}`;
     setTyped(null);
     setActive(0);
-    requestAnimationFrame(() => {
-      if (!area) return;
+    setCaret(null);
+    drawn.current = { value: next, canvas };
+    onChange(next);
+    if (area) {
+      renderValue(area, next, canvas);
       area.focus();
-      area.setSelectionRange(rest, rest);
-    });
-  };
-
-  /** Takes a mention out of the words, whole, however it was asked to. */
-  const remove = (span: MentionSpan) => {
-    onChange(value.slice(0, span.start) + value.slice(span.end));
-    setLooked(null);
+      placeCaret(area, typed.start + token.length + 1);
+    }
   };
 
   /**
@@ -292,8 +529,9 @@ export function MentionField({
     window.addEventListener("pointerup", letGo);
   };
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const area = event.currentTarget;
+    const composing = event.nativeEvent.isComposing;
     const step = (move: number) => {
       event.preventDefault();
       const count = Math.max(1, rows.length);
@@ -302,7 +540,7 @@ export function MentionField({
     if (offered) {
       if (event.key === "ArrowDown") return step(1);
       if (event.key === "ArrowUp") return step(-1);
-      if (event.key === "Enter" || event.key === "Tab") {
+      if ((event.key === "Enter" || event.key === "Tab") && !composing) {
         const row = rows[chosen];
         if (row) {
           event.preventDefault();
@@ -316,10 +554,15 @@ export function MentionField({
       if (event.key === "Escape") {
         event.preventDefault();
         setTyped(null);
+        setCaret(null);
         return;
       }
     }
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey) &&
+      !composing
+    ) {
       event.preventDefault();
       onSubmit();
       return;
@@ -329,64 +572,119 @@ export function MentionField({
       onDismiss();
       return;
     }
-    // Backspace behind a mention takes the whole of it. One character at a time
-    // would leave a bracket and half an id among the words, which reads as prose
-    // and resolves as nothing.
-    if (
-      event.key === "Backspace" &&
-      area.selectionStart === area.selectionEnd
-    ) {
-      const behind = mentionSpans(value).find(
-        (span) => span.end === area.selectionStart,
-      );
-      if (behind) {
-        event.preventDefault();
-        remove(behind);
-        requestAnimationFrame(() => {
-          area.focus();
-          area.setSelectionRange(behind.start, behind.start);
-        });
-      }
+    // Backspace behind a chip takes the whole of it. One character at a time
+    // is not a thing a chip can lose, but a field left to the browser could
+    // ask for the key twice, and a reader should not have to press twice for
+    // one thing undone.
+    if (event.key === "Backspace") {
+      const at = caretOffset(area);
+      if (at === null) return;
+      const spans = mentionSpans(value);
+      const index = spans.findIndex((span) => span.end === at);
+      if (index < 0) return;
+      event.preventDefault();
+      const chip = area.querySelectorAll(CHIP_SELECTOR)[index];
+      if (chip) chip.remove();
+      placeCaret(area, spans[index].start);
+      sync();
     }
   };
 
+  /** Words are taken in as words: a paste never brings another field's shapes. */
+  const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const area = event.currentTarget;
+    const text = event.clipboardData.getData("text/plain");
+    if (!text) return;
+    const document = area.ownerDocument;
+    const selection = document.getSelection?.();
+    const range =
+      selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    if (range && area.contains(range.startContainer)) {
+      range.deleteContents();
+      const node = document.createTextNode(text);
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    } else {
+      area.appendChild(document.createTextNode(text));
+      placeCaret(area, serialize(area).length);
+    }
+    emit();
+  };
+
+  /** The pointer came onto something: a chip summons its card, prose takes it away. */
+  const onHover = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const chip = target.closest?.(CHIP_SELECTOR) as HTMLElement | null;
+    if (!chip) {
+      setHovered(null);
+      return;
+    }
+    const nodeId = chip.dataset.nodeId ?? "";
+    if (nodeId === hovered?.nodeId) return;
+    const wrap = wrapRef.current;
+    const chipRect = chip.getBoundingClientRect();
+    const wrapRect = wrap?.getBoundingClientRect();
+    const left = chipRect.left - (wrapRect?.left ?? 0);
+    const room = wrap?.clientWidth ?? 0;
+    setHovered({
+      nodeId,
+      left:
+        room > 0 ? Math.max(0, Math.min(left, room - 248)) : Math.max(0, left),
+      top: chipRect.bottom - (wrapRect?.top ?? 0) + 6,
+    });
+  };
+
+  const looked = hovered ? findNode(canvas, hovered.nodeId) : null;
+  const lookedMedia = looked
+    ? mediaInfoForNode(looked, resources, issues)
+    : null;
+
   return (
-    <div className="mention-field">
+    <div
+      className="mention-field"
+      onMouseLeave={() => setHovered(null)}
+      ref={wrapRef}
+    >
       <div className="mention-field-area">
-        <textarea
+        <div
           aria-activedescendant={
             offered && rows[chosen] ? `${listId}-${chosen}` : undefined
           }
           aria-controls={listId}
           aria-expanded={offered}
           aria-label={label}
-          className="prompt-panel-input"
+          aria-multiline="true"
+          className={
+            value === ""
+              ? "prompt-panel-input mention-input is-empty"
+              : "prompt-panel-input mention-input"
+          }
+          contentEditable
+          data-placeholder={placeholder}
           onBlur={() => {
             setTyped(null);
             setCaret(null);
+            setHovered(null);
             onCommit();
           }}
-          onChange={(event) => {
-            const { value: next, selectionStart } = event.target;
-            onChange(next);
-            retake(next, selectionStart ?? next.length);
+          onClick={(event) => {
+            const words = serialize(event.currentTarget);
+            retake(words, caretOffset(event.currentTarget) ?? words.length);
           }}
-          onClick={(event) =>
-            retake(
-              event.currentTarget.value,
-              event.currentTarget.selectionStart,
-            )
-          }
+          onInput={emit}
           onKeyDown={onKeyDown}
-          onKeyUp={(event) =>
-            retake(
-              event.currentTarget.value,
-              event.currentTarget.selectionStart,
-            )
-          }
-          placeholder={placeholder}
+          onKeyUp={(event) => {
+            const words = serialize(event.currentTarget);
+            retake(words, caretOffset(event.currentTarget) ?? words.length);
+          }}
+          onMouseOver={onHover}
+          onPaste={onPaste}
           ref={inputRef}
-          rows={5}
+          role="textbox"
           style={
             fieldSize
               ? {
@@ -395,7 +693,7 @@ export function MentionField({
                 }
               : undefined
           }
-          value={value}
+          suppressContentEditableWarning
         />
         {onFieldResize && (
           <div
@@ -406,6 +704,20 @@ export function MentionField({
           />
         )}
       </div>
+
+      {hovered && (
+        <div
+          className="mention-look"
+          data-testid="mention-look"
+          style={{ left: `${hovered.left}px`, top: `${hovered.top}px` }}
+        >
+          {looked ? (
+            <MentionLook media={lookedMedia} node={looked} />
+          ) : (
+            <p className="mention-look-label">A node that is gone</p>
+          )}
+        </div>
+      )}
 
       {offered && (
         <div
@@ -425,7 +737,7 @@ export function MentionField({
                       caret.left,
                       Math.max(
                         0,
-                        (inputRef.current?.clientWidth ?? caret.left + 180) -
+                        (wrapRef.current?.clientWidth ?? caret.left + 180) -
                           180,
                       ),
                     ),
@@ -474,44 +786,6 @@ export function MentionField({
             </div>
           ))}
         </div>
-      )}
-
-      {spans.length > 0 && (
-        <ul aria-label="What this prompt mentions" className="mention-chips">
-          {spans.map((span, index) => {
-            const mentioned = findNode(canvas, span.nodeId);
-            const media = mentioned
-              ? mediaInfoForNode(mentioned, resources, issues)
-              : null;
-            const name = mentioned?.title ?? "a node that is gone";
-            return (
-              <li
-                className={mentioned ? "mention-chip" : "mention-chip is-gone"}
-                key={`${span.start}:${span.nodeId}`}
-                onBlur={() => setLooked(null)}
-                onFocus={() => setLooked(index)}
-                onMouseEnter={() => setLooked(index)}
-                onMouseLeave={() => setLooked(null)}
-              >
-                {media?.url && (
-                  <img alt="" className="mention-chip-thumb" src={media.url} />
-                )}
-                <span className="mention-chip-name">{name}</span>
-                <button
-                  aria-label={`Take ${name} out of the prompt`}
-                  className="mention-chip-drop"
-                  onClick={() => remove(span)}
-                  type="button"
-                >
-                  ✕
-                </button>
-                {looked === index && mentioned && (
-                  <MentionLook media={media} node={mentioned} />
-                )}
-              </li>
-            );
-          })}
-        </ul>
       )}
     </div>
   );
