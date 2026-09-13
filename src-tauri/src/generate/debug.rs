@@ -54,8 +54,6 @@ pub enum Kind {
     TaskCreate,
     /// One look at a job started earlier.
     TaskPoll,
-    /// Asking a provider what it currently offers.
-    Models,
     /// Fetching bytes a provider left at an address of its own.
     Media,
 }
@@ -67,7 +65,6 @@ impl Kind {
             Self::Stream => "stream",
             Self::TaskCreate => "task-create",
             Self::TaskPoll => "task-poll",
-            Self::Models => "models",
             Self::Media => "media",
         }
     }

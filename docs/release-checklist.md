@@ -100,10 +100,9 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
    written once and comes back only masked, that leaving the key field
    blank on an edit keeps the stored key, and that clearing it is its own
    explicit action. Duplicate a model and confirm the copy carries the
-   fields and the key and opens ready to be changed. Run a connectivity
-   test from a card, choose the category's default with the radio on its
-   cards, and adjust generation preferences; save, reload, and confirm
-   everything persisted. Editing the same configuration in two windows at
+   fields and the key and opens ready to be changed. Choose the category's
+   default with the radio on its cards, and adjust generation preferences;
+   save, reload, and confirm everything persisted. Editing the same configuration in two windows at
    once surfaces a conflict notice in the loser instead of silently
    overwriting.
 9. Generate against a model you really configured. The text route

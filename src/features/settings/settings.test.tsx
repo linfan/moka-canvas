@@ -101,8 +101,6 @@ let view: ModelsView;
 let calls: Call[];
 /** Lets a test make the next write fail the way the server would. */
 let refuseNextWrite: { status: number; code: string; message: string } | null;
-/** Lets a test make the next probe fail the way a provider would. */
-let probeRefusal: string | null;
 
 function model(
   id: string,
@@ -300,15 +298,6 @@ function route(url: string, method: string, body: unknown): Response {
       };
       return json(view);
     }
-    if (suffix === "/probe" && method === "POST") {
-      return probeRefusal === null
-        ? json({ ok: true, latencyMs: 42 })
-        : json({
-            ok: false,
-            latencyMs: 8,
-            error: { code: "PROVIDER_AUTH", message: probeRefusal },
-          });
-    }
   }
 
   return problem(404, "NOT_FOUND", url);
@@ -345,7 +334,6 @@ beforeEach(() => {
   view = fixture();
   calls = [];
   refuseNextWrite = null;
-  probeRefusal = null;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
@@ -864,29 +852,6 @@ describe("model settings", () => {
     const guidance = await screen.findByTestId("error-guidance");
     expect(guidance.textContent).toContain("--generate-key");
     expect(guidance.textContent).toContain("MOKA_METADATA_KEY");
-  });
-
-  it("reports a model that refuses the probe inside the dialog", async () => {
-    await openSettings();
-    fireEvent.click(
-      within(cardOf("Writer")).getByRole("button", {
-        name: "Test the connection to Writer",
-      }),
-    );
-    expect(await screen.findByText("Reached in 42 ms")).toBeTruthy();
-  });
-
-  it("reports a probe a provider refused beside the model it is about", async () => {
-    probeRefusal = "the provider rejected the stored credential";
-    await openSettings();
-    fireEvent.click(
-      within(cardOf("Writer")).getByRole("button", {
-        name: "Test the connection to Writer",
-      }),
-    );
-    const report = await screen.findByRole("status");
-    expect(report.textContent).toContain("PROVIDER_AUTH");
-    expect(report.textContent).toContain("the provider rejected");
   });
 
   it("closes on escape", async () => {

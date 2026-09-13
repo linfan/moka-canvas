@@ -14,9 +14,7 @@ function ModelCard({
   isDefault: boolean;
 }) {
   const saving = useModelStore((state) => state.saving);
-  const activity = useModelStore((state) => state.activity[model.id]);
   const protocols = useModelStore((state) => state.protocols);
-  const probe = activity?.probe ?? null;
   const lower = CAPABILITY_LABELS[category].toLowerCase();
 
   const remove = () => {
@@ -62,18 +60,6 @@ function ModelCard({
           ? `Key ${model.apiKey.masked ?? "stored"}`
           : "No key stored"}
       </p>
-      {probe && (
-        <p
-          className={
-            probe.ok ? "model-card-probe" : "model-card-probe is-failed"
-          }
-          role="status"
-        >
-          {probe.ok
-            ? `Reached in ${probe.latencyMs} ms`
-            : `${probe.error?.code ?? "UNREACHABLE"}: ${probe.error?.message ?? "no answer"}`}
-        </p>
-      )}
       <div className="settings-row">
         <button
           disabled={saving}
@@ -92,14 +78,6 @@ function ModelCard({
           Duplicate
         </button>
         <button
-          aria-label={`Test the connection to ${model.displayName}`}
-          disabled={saving || activity?.probing === true || !model.apiKey.set}
-          onClick={() => void useModelStore.getState().probe(model.id)}
-          type="button"
-        >
-          {activity?.probing ? "Testing…" : "Test"}
-        </button>
-        <button
           className="danger"
           disabled={saving}
           onClick={remove}
@@ -114,7 +92,7 @@ function ModelCard({
 
 /**
  * One category's models: what serves this kind of node, which of them is the
- * default, and the way to add, copy, test, or remove one.
+ * default, and the way to add, copy, or remove one.
  *
  * The default lives here rather than on a page of its own: it is a property of
  * the list beside it, and a picker far from the models it picks is how a

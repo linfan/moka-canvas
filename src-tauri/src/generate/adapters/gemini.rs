@@ -8,13 +8,11 @@
 use std::time::Duration;
 
 use base64::Engine;
-use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use super::{
     answer, exchange, image_item, media_item, open_stream, provider_error, read_stream, succeeded,
-    usage_of, ModelCall, Opened, ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES,
-    MODEL_LIST_TIMEOUT,
+    usage_of, ModelCall, Opened, ProviderAdapter, StreamEvent,
 };
 use crate::domain::{new_id, now_iso, Capability};
 use crate::generate::debug::Kind;
@@ -24,12 +22,6 @@ use crate::generate::models::{gemini_root, gemini_stream_url};
 use crate::generate::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
 };
-
-/// Enough for everything a provider lists today to arrive in one page.
-const PAGE_SIZE: &str = "1000";
-
-/// Identifiers arrive qualified, as in `models/gemini-2.5-flash`.
-const NAME_PREFIX: &str = "models/";
 
 /// How long a caller should wait before looking at a job again. The provider
 /// does not say, and asking more often than this only adds refusals.
@@ -189,52 +181,6 @@ impl ProviderAdapter for GeminiAdapter {
         }
         collect(call, &payload).await
     }
-}
-
-/// Asks a provider what it currently offers.
-pub(super) async fn list_models(call: &ModelCall) -> Result<Vec<String>, ProviderError> {
-    // The credential is already in a header rather than in the query parameter
-    // this provider also accepts: a URL is logged and quoted back in error
-    // messages, and a header is neither.
-    let reply = exchange(
-        Kind::Models,
-        call,
-        call.get(call.endpoint()).query(&[("pageSize", PAGE_SIZE)]),
-        MODEL_LIST_TIMEOUT,
-        MAX_MODEL_LIST_BYTES,
-    )
-    .await?;
-    if !succeeded(reply.status) {
-        return Err(provider_error(&reply, &call.api_key));
-    }
-    identifiers(&reply)
-}
-
-#[derive(Deserialize)]
-struct ModelPage {
-    #[serde(default)]
-    models: Vec<ListedModel>,
-}
-
-#[derive(Deserialize)]
-struct ListedModel {
-    name: Option<String>,
-}
-
-/// An entry with no usable name is dropped rather than reported: one
-/// placeholder should not hide the rest of the list.
-fn identifiers(reply: &Reply) -> Result<Vec<String>, ProviderError> {
-    let payload: ModelPage = reply.decoded("model list")?;
-    Ok(payload
-        .models
-        .into_iter()
-        .filter_map(|model| model.name)
-        .map(|name| {
-            let name = name.trim();
-            name.strip_prefix(NAME_PREFIX).unwrap_or(name).to_string()
-        })
-        .filter(|name| !name.is_empty())
-        .collect())
 }
 
 /// One generation, waited out or read as it arrives.

@@ -500,16 +500,6 @@ h2 {
   white-space: nowrap;
 }
 
-.model-card-probe {
-  color: var(--success);
-  font-size: 12px;
-  margin-bottom: 0;
-}
-
-.model-card-probe.is-failed {
-  color: var(--coral);
-}
-
 .missing-asset-list {
   display: grid;
   gap: 10px;

@@ -14,13 +14,11 @@ use std::time::Duration;
 
 use base64::Engine;
 use reqwest::header::CONTENT_TYPE;
-use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use super::{
     answer, exchange, image_item, media_item, open_stream, provider_error, read_stream, succeeded,
-    usage_of, ModelCall, Opened, ProviderAdapter, Reply, StreamEvent, MAX_MODEL_LIST_BYTES,
-    MODEL_LIST_TIMEOUT,
+    usage_of, ModelCall, Opened, ProviderAdapter, Reply, StreamEvent,
 };
 use crate::domain::{new_id, now_iso, Capability};
 use crate::generate::debug::Kind;
@@ -173,46 +171,6 @@ impl ProviderAdapter for OpenAiAdapter {
             _ => Ok(TaskState::pending(POLL_INTERVAL)),
         }
     }
-}
-
-/// Asks the channel what it currently offers.
-pub(super) async fn list_models(call: &ModelCall) -> Result<Vec<String>, ProviderError> {
-    let reply = exchange(
-        Kind::Models,
-        call,
-        call.get(call.endpoint()),
-        MODEL_LIST_TIMEOUT,
-        MAX_MODEL_LIST_BYTES,
-    )
-    .await?;
-    if !succeeded(reply.status) {
-        return Err(provider_error(&reply, &call.api_key));
-    }
-    identifiers(&reply)
-}
-
-#[derive(Deserialize)]
-struct ModelList {
-    #[serde(default)]
-    data: Vec<ListedModel>,
-}
-
-#[derive(Deserialize)]
-struct ListedModel {
-    id: Option<String>,
-}
-
-/// An entry with no usable identifier is dropped rather than reported: one
-/// placeholder from a gateway should not hide the rest of the list.
-fn identifiers(reply: &Reply) -> Result<Vec<String>, ProviderError> {
-    let payload: ModelList = reply.decoded("model list")?;
-    Ok(payload
-        .data
-        .into_iter()
-        .filter_map(|model| model.id)
-        .map(|identifier| identifier.trim().to_string())
-        .filter(|identifier| !identifier.is_empty())
-        .collect())
 }
 
 /// One text endpoint shape: what to send it, and how to read it back.

@@ -10,7 +10,6 @@
 //! category, and a default that points at a model which exists.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +19,6 @@ use crate::metadata::{
     Preferences, Protocol, SecretInfo, SecretStorage,
 };
 
-use super::adapters;
 use super::error::ProviderError;
 
 /// The model created on a first run, so Settings opens on a filled-in form
@@ -133,46 +131,6 @@ pub struct ResolvedModel {
     pub protocol: Protocol,
     /// The complete endpoint address requests are sent to.
     pub url: String,
-}
-
-/// The outcome of a connectivity check.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProbeReport {
-    pub ok: bool,
-    pub latency_ms: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<ProbeFailure>,
-}
-
-/// Why a probe failed, shaped like a problem body so the client renders it
-/// through the same path as everything else.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProbeFailure {
-    pub code: String,
-    pub message: String,
-}
-
-impl ProbeReport {
-    fn reachable(latency_ms: u64) -> Self {
-        Self {
-            ok: true,
-            latency_ms,
-            error: None,
-        }
-    }
-
-    fn failed(latency_ms: u64, error: &ProviderError) -> Self {
-        Self {
-            ok: false,
-            latency_ms,
-            error: Some(ProbeFailure {
-                code: error.code().to_string(),
-                message: error.to_string(),
-            }),
-        }
-    }
 }
 
 /// Reads and writes model configuration through the metadata store.
@@ -420,35 +378,6 @@ impl ModelRepo {
             })
     }
 
-    /// Answers "can this model be used at all", without writing anything.
-    ///
-    /// A provider that says no is reported inside the body rather than as a
-    /// failed request: the point of a probe is to show which configuration is
-    /// broken, and an error status would leave the client with nothing to
-    /// display next to it. Only an unknown configuration fails the request.
-    pub async fn probe(&self, id: &str) -> Result<ProbeReport, ProviderError> {
-        let config = self.model(id).await?;
-        let started = Instant::now();
-        let outcome = match list_url(config.protocol.clone(), &config.url) {
-            None => Err(ProviderError::invalid(format!(
-                "no model-list address can be derived from {:?}; \
-                 check that the URL is the endpoint of a known API shape",
-                config.url
-            ))),
-            Some(list_url) => match self.credential(id).await {
-                Ok(api_key) => adapters::list_models(config.protocol.clone(), &list_url, &api_key)
-                    .await
-                    .map(|_| ()),
-                Err(error) => Err(error),
-            },
-        };
-        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-        Ok(match outcome {
-            Ok(()) => ProbeReport::reachable(latency_ms),
-            Err(error) => ProbeReport::failed(latency_ms, &error),
-        })
-    }
-
     /// Creates the starter model on a first run.
     ///
     /// Guarded by the document still being untouched: a configuration the user
@@ -471,42 +400,6 @@ impl ModelRepo {
         self.metadata.upsert_model(&draft).await?;
         Ok(true)
     }
-}
-
-/// The address a probe asks for the model list, derived from the full endpoint
-/// address a configuration carries.
-///
-/// Derivation rather than a second stored field: the list endpoint is a
-/// property of the API shape the protocol names, and a field the user could
-/// get wrong is one more way to be broken. `None` when the address does not
-/// end in a suffix this build recognises, which a probe reports rather than
-/// guessing at a path.
-pub fn list_url(protocol: Protocol, url: &str) -> Option<String> {
-    let base = url.trim().trim_end_matches('/');
-    if protocol.is_gemini() {
-        // `{root}/models/{name}:{action}` → `{root}/models`
-        let cut = base.rfind("/models/")?;
-        return Some(format!("{}/models", &base[..cut]));
-    }
-    if !protocol.is_openai() {
-        return None;
-    }
-    const ENDPOINTS: &[&str] = &[
-        "/chat/completions",
-        "/responses",
-        "/images/generations",
-        "/images/edits",
-        "/audio/speech",
-        "/audio/transcriptions",
-        "/videos",
-        "/embeddings",
-    ];
-    for suffix in ENDPOINTS {
-        if let Some(prefix) = base.strip_suffix(suffix) {
-            return Some(format!("{prefix}/models"));
-        }
-    }
-    None
 }
 
 /// The images endpoint that accepts an edit, derived from the generation
@@ -856,51 +749,6 @@ mod tests {
         assert!(clear_references(&mut defaults, "painter"));
         assert_eq!(defaults.image, None);
         assert_eq!(defaults.text.as_deref(), Some("backup"));
-    }
-
-    #[test]
-    fn a_list_address_is_derived_from_a_known_endpoint_shape() {
-        assert_eq!(
-            list_url(Protocol::OpenaiChat, "https://api.test/v1/chat/completions").as_deref(),
-            Some("https://api.test/v1/models")
-        );
-        assert_eq!(
-            list_url(
-                Protocol::OpenaiImages,
-                "https://api.test/v1/images/generations"
-            )
-            .as_deref(),
-            Some("https://api.test/v1/models")
-        );
-        assert_eq!(
-            list_url(Protocol::OpenaiVideos, "https://api.test/v1/videos/").as_deref(),
-            Some("https://api.test/v1/models")
-        );
-        assert_eq!(
-            list_url(
-                Protocol::Gemini,
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-            )
-            .as_deref(),
-            Some("https://generativelanguage.googleapis.com/v1beta/models")
-        );
-        assert_eq!(
-            list_url(
-                Protocol::GeminiVideo,
-                "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning"
-            )
-            .as_deref(),
-            Some("https://generativelanguage.googleapis.com/v1beta/models")
-        );
-        // An address of an unknown shape is reported rather than guessed at.
-        assert_eq!(
-            list_url(Protocol::OpenaiChat, "https://api.test/mystery"),
-            None
-        );
-        assert_eq!(
-            list_url(Protocol::Custom, "https://api.test/v1/chat/completions"),
-            None
-        );
     }
 
     #[test]

@@ -1,23 +1,18 @@
 //! Model configuration over the real file store: what the client is shown,
 //! what a write refuses, and what survives a restart.
 //!
-//! The rules that need no storage — URL derivation, identifier shape — are
-//! covered next to the code they belong to, and the wire protocols are
-//! covered against a provider standing on localhost.
+//! The rules that need no storage — identifier shape — are covered next to
+//! the code they belong to.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::http::StatusCode;
-use axum::routing::get;
-use axum::{Json, Router};
 use base64::Engine;
 use moka_canvas::config::{MetadataConfig, RuntimeMode};
 use moka_canvas::domain::Capability;
 use moka_canvas::generate::models::{ModelRepo, SEED_MODEL_ID};
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
 use moka_canvas::metadata::{self, Defaults, MetadataStore, ModelDraft, Protocol};
-use serde_json::json;
 
 /// Long enough that masking keeps a recognisable head and tail.
 const API_KEY: &str = "sk-test-1234567890abcd";
@@ -314,105 +309,4 @@ async fn a_write_against_a_stale_revision_is_refused() {
         ..draft("third", Capability::Text)
     };
     repo.upsert(current).await.unwrap();
-}
-
-/// Stands up a provider that answers a model list, so a probe has something
-/// real to ask. Returns the base address the configured endpoint is built on.
-async fn provider(status: StatusCode, body: serde_json::Value) -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("an ephemeral port is available");
-    let address = listener.local_addr().expect("the socket has an address");
-    tokio::spawn(async move {
-        let app = Router::new().route(
-            "/v1/models",
-            get(move || async move { (status, Json(body)) }),
-        );
-        let _ = axum::serve(listener, app).await;
-    });
-    format!("http://{address}")
-}
-
-/// Stores a text model whose endpoint sits on the throwaway provider, with a
-/// key, the way a working configuration looks.
-async fn connected(repo: &ModelRepo, id: &str, base_url: &str) {
-    repo.upsert(ModelDraft {
-        id: id.to_string(),
-        url: format!("{base_url}/v1/chat/completions"),
-        model: id.to_string(),
-        display_name: format!("Model {id}"),
-        category: Capability::Text,
-        protocol: Protocol::OpenaiChat,
-        enabled: true,
-        expected_revision: None,
-    })
-    .await
-    .expect("the model is stored");
-    repo.set_key(id, Some(API_KEY))
-        .await
-        .expect("the key is stored");
-}
-
-#[tokio::test]
-async fn a_probe_reports_a_broken_model_without_failing_the_request() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo(root.path());
-    let base_url = provider(
-        StatusCode::UNAUTHORIZED,
-        json!({ "error": { "message": "incorrect API key" } }),
-    )
-    .await;
-    connected(&repo, "main", &base_url).await;
-
-    // The refusal is the answer, not a failed request: the settings list has
-    // to render it beside the model it is about.
-    let report = repo.probe("main").await.expect("the probe itself succeeds");
-    assert!(!report.ok);
-    let error = report.error.expect("a broken probe explains itself");
-    assert_eq!(error.code, "PROVIDER_AUTH");
-}
-
-#[tokio::test]
-async fn a_reachable_provider_probes_ok() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo(root.path());
-    let base_url = provider(StatusCode::OK, json!({ "data": [] })).await;
-    connected(&repo, "main", &base_url).await;
-
-    let report = repo.probe("main").await.unwrap();
-    assert!(report.ok, "{report:?}");
-}
-
-#[tokio::test]
-async fn a_model_with_no_key_reports_the_gap_instead_of_dialling_out() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo(root.path());
-    let base_url = provider(StatusCode::OK, json!({ "data": [] })).await;
-    repo.upsert(ModelDraft {
-        id: "keyless".to_string(),
-        url: format!("{base_url}/v1/chat/completions"),
-        model: "keyless".to_string(),
-        display_name: "Keyless".to_string(),
-        category: Capability::Text,
-        protocol: Protocol::OpenaiChat,
-        enabled: true,
-        expected_revision: None,
-    })
-    .await
-    .unwrap();
-
-    let report = repo.probe("keyless").await.unwrap();
-    assert!(!report.ok);
-    assert_eq!(
-        report.error.expect("explained").code,
-        "PROVIDER_NOT_CONFIGURED"
-    );
-}
-
-#[tokio::test]
-async fn a_probe_of_an_unknown_model_fails_the_request() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo(root.path());
-    let error = repo.probe("ghost").await.unwrap_err();
-    assert_eq!(error.code(), "NOT_FOUND");
 }

@@ -9,7 +9,7 @@ use super::dto::{
 use super::problem::{json_or_problem, Problem};
 use super::ApiState;
 use crate::domain::{now_iso, DocumentCommand, ResourceRegistry, RunRecord, RunStatus};
-use crate::generate::models::{ModelsView, ProbeReport};
+use crate::generate::models::ModelsView;
 use crate::generate::{
     collect_generation_inputs, Cancel, DeltaSink, GenerateInput, GenerateRequest, GenerateResult,
     ProviderError, TaskState,
@@ -995,15 +995,6 @@ pub async fn set_secret_storage(
     Ok(Json(
         state.models.set_secret_storage(request.storage).await?,
     ))
-}
-
-/// Answers inside a successful response even when the model is unreachable,
-/// because the point of a probe is to show which one failed and why.
-pub async fn probe_model(
-    State(state): State<ApiState>,
-    Path(id): Path<String>,
-) -> Result<Json<ProbeReport>, Problem> {
-    Ok(Json(state.models.probe(&id).await?))
 }
 
 pub async fn patch_defaults(
