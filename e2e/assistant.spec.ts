@@ -378,7 +378,7 @@ test("a question already asked can be had back without asking it twice", async (
     .locator(".assistant-line.is-user")
     .getByRole("button", { name: "Ask again" })
     .click();
-  await expect(field).toHaveValue(asked);
+  await expect(field).toHaveText(asked);
   // Having the words back is not an ask: nothing was sent and nothing was kept,
   // so the conversation is still the one turn it was.
   expect(await providerCalls()).toHaveLength(1);

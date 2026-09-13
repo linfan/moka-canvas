@@ -47,7 +47,7 @@ import {
 } from "../stores/runStore";
 import { GenerationParams, type ParamValue } from "./GenerationParams";
 import { InputPreview } from "./InputPreview";
-import { MentionField } from "./MentionField";
+import { MentionField, focusEnd } from "./MentionField";
 import { ReferenceBar } from "./ReferenceBar";
 
 /** The narrowest and widest the panel gets from the size of its node. */
@@ -183,7 +183,7 @@ export function PromptPanel() {
   // stays going after one of them has landed, and this panel is about the one
   // node it is open on.
   const stepStatus = useNodeRunStatus(open?.nodeId ?? null);
-  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
   const shownFor = useRef<NodeId | null>(null);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -289,8 +289,7 @@ export function PromptPanel() {
     requestAnimationFrame(() => {
       const area = areaRef.current;
       if (!area) return;
-      area.focus();
-      area.setSelectionRange(area.value.length, area.value.length);
+      focusEnd(area);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
