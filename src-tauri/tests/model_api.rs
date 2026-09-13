@@ -10,9 +10,7 @@ use std::path::{Path, PathBuf};
 
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
-use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::Router;
 use base64::Engine;
 use moka_canvas::api::ApiState;
 use moka_canvas::config::{parse_test_config, RuntimeMode};
@@ -82,7 +80,7 @@ async fn send(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
 }
 
 /// One text model configuration, which is the smallest thing that can be
-/// stored, probed, defaulted, and copied.
+/// stored, defaulted, and copied.
 fn model_body(id: &str, api_key: Option<&str>) -> Value {
     let mut body = json!({
         "id": id,
@@ -102,46 +100,6 @@ fn model_body(id: &str, api_key: Option<&str>) -> Value {
 async fn put_model(app: &Router, body: Value) -> Value {
     let (status, view) = send(app, json_request("PUT", "/api/v1/models", body)).await;
     assert_eq!(status, StatusCode::OK, "{view}");
-    view
-}
-
-/// Starts a throwaway provider that answers a model list, and returns the
-/// address a model's endpoint URL is built on.
-async fn serve_models(status: StatusCode, body: Value) -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("an ephemeral port is available");
-    let address = listener.local_addr().expect("the socket has an address");
-    let routes = Router::new().route(
-        "/v1/models",
-        get(move || {
-            let body = body.clone();
-            async move { (status, Json(body)).into_response() }
-        }),
-    );
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, routes).await;
-    });
-    format!("http://{address}")
-}
-
-/// A text model pointing at a throwaway provider, already holding a key.
-async fn connected(harness: &Harness, address: &str) -> Value {
-    let view = put_model(
-        &harness.app,
-        json!({
-            "id": "main",
-            "category": "text",
-            "protocol": "openaiChat",
-            "url": format!("{address}/v1/chat/completions"),
-            "model": "gpt-test",
-            "displayName": "Main",
-            "enabled": true,
-            "apiKey": API_KEY
-        }),
-    )
-    .await;
-    assert_eq!(view["models"][0]["apiKey"]["set"], true, "{view}");
     view
 }
 
@@ -430,10 +388,7 @@ async fn the_model_routes_refuse_an_identifier_that_is_not_there() {
     let root = tempfile::tempdir().unwrap();
     let harness = harness(root.path());
 
-    for (method, uri) in [
-        ("DELETE", "/api/v1/models/nope"),
-        ("POST", "/api/v1/models/nope/probe"),
-    ] {
+    for (method, uri) in [("DELETE", "/api/v1/models/nope")] {
         let (status, problem) = send(&harness.app, plain_request(method, uri)).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}");
         assert_eq!(problem["code"], "NOT_FOUND", "{method} {uri}");
@@ -450,47 +405,6 @@ async fn the_model_routes_refuse_an_identifier_that_is_not_there() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(problem["code"], "NOT_FOUND");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_probe_reports_a_refusing_model_inside_a_successful_response() {
-    let root = tempfile::tempdir().unwrap();
-    let harness = harness(root.path());
-    let address = serve_models(
-        StatusCode::UNAUTHORIZED,
-        json!({ "error": { "message": "incorrect API key" } }),
-    )
-    .await;
-    connected(&harness, &address).await;
-
-    // 200 with the refusal inside: the settings list renders the report
-    // beside the model it is about, which an error status could not do.
-    let (status, report) = send(
-        &harness.app,
-        plain_request("POST", "/api/v1/models/main/probe"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(report["ok"], false);
-    assert_eq!(report["error"]["code"], "PROVIDER_AUTH");
-    assert!(!report.to_string().contains(API_KEY), "{report}");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_reachable_model_probes_ok() {
-    let root = tempfile::tempdir().unwrap();
-    let harness = harness(root.path());
-    let address = serve_models(StatusCode::OK, json!({ "data": [{ "id": "gpt-test" }] })).await;
-    connected(&harness, &address).await;
-
-    let (status, report) = send(
-        &harness.app,
-        plain_request("POST", "/api/v1/models/main/probe"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(report["ok"], true, "{report}");
-    assert!(report["latencyMs"].as_u64().is_some());
 }
 
 #[tokio::test]

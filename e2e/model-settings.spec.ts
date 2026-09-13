@@ -9,12 +9,9 @@ const CHAT_URL = `${PROVIDER_ORIGIN}/v1/chat/completions`;
  * Configuring a model against the real metadata store and the real stand-in.
  *
  * What a component test cannot show is that a configuration written from the
- * dialog is still there after the page is thrown away. The stand-in answers
- * `/v1/models`, so the test button drives the path a real provider answers.
+ * dialog is still there after the page is thrown away.
  */
-test("a model written from the form is stored, tested, and kept", async ({
-  page,
-}) => {
+test("a model written from the form is stored and kept", async ({ page }) => {
   await page.goto("/");
 
   await page.getByRole("button", { name: "Settings" }).click();
@@ -46,13 +43,6 @@ test("a model written from the form is stored, tested, and kept", async ({
   // The credential is disclosed as a masked form, and never whole.
   await expect(card.getByText(/^Key /)).toBeVisible();
   await expect(card).not.toContainText(CHANNEL_KEY);
-
-  // The test button reaches the stand-in's model list through the address the
-  // configuration itself derives it from.
-  await card
-    .getByRole("button", { name: "Test the connection to Typed Model" })
-    .click();
-  await expect(card.getByText(/Reached in \d+ ms/)).toBeVisible();
 
   // The default is chosen on the card, in the category's own tab. The radio
   // is controlled by the stored view, so it becomes checked once the write

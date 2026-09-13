@@ -27,16 +27,9 @@ use super::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
 };
 
-/// A model list is a small request, and a provider that cannot answer one in
-/// this long is not about to finish a generation.
-const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(30);
+/// A provider that cannot answer in this long is not about to finish a
+/// generation.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// A model's address is supplied by the user, so whatever answers at it is
-/// untrusted input rather than a provider's well-formed document. A model list
-/// gets its own, tighter ceiling than a generation answer, which can carry an
-/// image.
-const MAX_MODEL_LIST_BYTES: u64 = 8 * 1024 * 1024;
 
 /// How much of a provider's complaint reaches a problem body and a log line.
 const MAX_DETAIL_CHARS: usize = 300;
@@ -100,22 +93,6 @@ impl ModelCall {
             url: resolved.url.clone(),
             api_key,
             budgets,
-            client: build_client()?,
-        })
-    }
-
-    /// A call addressed to a derived model-list endpoint rather than to a
-    /// configured one. The budgets are the defaults because a listing applies
-    /// its own tighter deadline and ceiling.
-    fn listing(protocol: Protocol, url: &str, api_key: &str) -> Result<Self, ProviderError> {
-        Ok(Self {
-            config_id: String::new(),
-            model: String::new(),
-            display_name: String::new(),
-            protocol,
-            url: url.to_string(),
-            api_key: api_key.to_string(),
-            budgets: GenerateConfig::default(),
             client: build_client()?,
         })
     }
@@ -252,27 +229,6 @@ pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
         Protocol::Custom => &custom::ADAPTER,
         Protocol::LuaScript(_) => converter::LuaAdapter::get(),
     }
-}
-
-/// Asks a derived model-list address what the provider offers, sorted and
-/// without duplicates. The address is derived by [`super::models::list_url`]
-/// from a configuration's own endpoint before this is called.
-pub async fn list_models(
-    protocol: Protocol,
-    url: &str,
-    api_key: &str,
-) -> Result<Vec<String>, ProviderError> {
-    let call = ModelCall::listing(protocol.clone(), url, api_key)?;
-    let mut ids = if protocol.is_openai() {
-        openai::list_models(&call).await?
-    } else if protocol.is_gemini() {
-        gemini::list_models(&call).await?
-    } else {
-        return Err(ProviderError::invalid(CUSTOM_RESERVED));
-    };
-    ids.sort();
-    ids.dedup();
-    Ok(ids)
 }
 
 /// A provider's answer, reduced to what an adapter acts on.

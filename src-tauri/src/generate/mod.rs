@@ -52,7 +52,7 @@ pub use error::ProviderError;
 pub use gateway::Gateway;
 pub use ingest::ingest_generated;
 pub use jobs::TaskRegistry;
-pub use models::{ModelRepo, ProbeReport, ResolvedModel};
+pub use models::{ModelRepo, ResolvedModel};
 
 /// One generation, in the project's words.
 ///

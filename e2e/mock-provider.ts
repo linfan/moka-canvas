@@ -138,9 +138,6 @@ export async function startMockProvider(): Promise<MockProvider> {
       calls.length = 0;
       return send(200, { ok: true });
     }
-    if (path === "/v1/models" && request.method === "GET") {
-      return send(200, { data: [{ id: PAINTER }, { id: STORYTELLER }] });
-    }
     if (request.method !== "POST") return missing();
 
     const raw = await bodyOf(request);

@@ -15,11 +15,11 @@ use std::time::Duration;
 use axum::body::Bytes;
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use moka_canvas::config::GenerateConfig;
 use moka_canvas::domain::Capability;
-use moka_canvas::generate::adapters::{for_protocol, list_models, ModelCall};
+use moka_canvas::generate::adapters::{for_protocol, ModelCall};
 use moka_canvas::generate::models::ResolvedModel;
 use moka_canvas::generate::{Cancel, DeltaSink, GenerateRequest};
 use moka_canvas::metadata::Protocol;
@@ -147,13 +147,6 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
     let base_url = serve(
         Router::new()
             .route(
-                "/v1/models",
-                get(|headers: HeaderMap| async move {
-                    assert!(headers.get("authorization").is_some());
-                    Json(json!({ "data": [{ "id": "gpt-5.5" }] }))
-                }),
-            )
-            .route(
                 "/v1/responses",
                 post(|headers: HeaderMap, body: Bytes| async move {
                     assert!(headers.get("authorization").is_some());
@@ -188,15 +181,6 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
 
     let call = channel(&base_url);
     let adapter = for_protocol(Protocol::OpenaiResponses);
-
-    let models = list_models(
-        Protocol::OpenaiResponses,
-        &format!("{base_url}/v1/models"),
-        API_KEY,
-    )
-    .await
-    .expect("a listing");
-    assert_eq!(models, ["gpt-5.5".to_string()]);
 
     let asked = generation("describe a lantern", json!({}));
     let answered = adapter
@@ -247,24 +231,13 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
     // Whatever the answer is worth, the call it came from is on the disk.
     let _ = spoken;
 
-    // Four kinds of call, one recording each: a listing, a generation, a
-    // stream, and the sound the provider answered with, each accounted for.
-    let lines = recordings(&root, 4).await;
+    // Three kinds of call, one recording each: a generation, a stream, and
+    // the sound the provider answered with, each accounted for.
+    let lines = recordings(&root, 3).await;
     assert_eq!(
         lines.len(),
-        4,
-        "one recording each for the listing, the generation, the stream and the speech"
-    );
-
-    // The listing: addressed, answered, and named for what it asked for.
-    let listing = find(&lines, "models");
-    assert_eq!(listing["status"], 200);
-    assert!(
-        listing["url"]
-            .as_str()
-            .expect("an address")
-            .ends_with("/v1/models"),
-        "the address says where the call went"
+        3,
+        "one recording each for the generation, the stream and the speech"
     );
 
     // The generation: the prompt somebody typed is the whole reason a recording

@@ -6,7 +6,6 @@ import {
   type ModelDraft,
   type ModelsView,
   type PreferencesPatch,
-  type ProbeReport,
   type ProtocolGroups,
 } from "../../api";
 import {
@@ -131,14 +130,6 @@ function findProtocol(protocols: ProtocolGroups | null, id: string) {
   return undefined;
 }
 
-/** What a per-model test is doing, and what it last produced. */
-export interface ModelActivity {
-  probing: boolean;
-  probe: ProbeReport | null;
-}
-
-const IDLE: ModelActivity = { probing: false, probe: null };
-
 /**
  * Codes whose fix is not in this dialog. The server's message says what is
  * wrong; this says what to do about it, because the remedy is a shell command
@@ -204,7 +195,6 @@ interface ModelState {
   error: string | null;
   /** The problem code behind `error`, so the dialog can explain the fix. */
   errorCode: string | null;
-  activity: Record<string, ModelActivity>;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
   setTab: (tab: SettingsTab) => void;
@@ -230,25 +220,10 @@ interface ModelState {
   /** Makes one model its category's default, or clears the default. */
   setDefault: (capability: Capability, id: string | null) => Promise<boolean>;
   savePreferences: (patch: PreferencesPatch) => Promise<boolean>;
-  probe: (id: string) => Promise<void>;
   reset: () => void;
 }
 
 export const useModelStore = create<ModelState>()((set, get) => {
-  const withActivity = (
-    id: string,
-    patch: Partial<ModelActivity>,
-    extra: Partial<ModelState> = {},
-  ) => {
-    set((state) => ({
-      ...extra,
-      activity: {
-        ...state.activity,
-        [id]: { ...(state.activity[id] ?? IDLE), ...patch },
-      },
-    }));
-  };
-
   /**
    * Runs a write, adopting the view it returns.
    *
@@ -285,7 +260,6 @@ export const useModelStore = create<ModelState>()((set, get) => {
     saving: false,
     error: null,
     errorCode: null,
-    activity: {},
 
     openSettings(tab = "text") {
       set({ open: true, tab });
@@ -380,16 +354,7 @@ export const useModelStore = create<ModelState>()((set, get) => {
     removeModel(id) {
       return write("Failed to remove the model", (revision) =>
         modelsApi.remove(id, revision ?? undefined),
-      ).then((saved) => {
-        if (saved) {
-          set((state) => {
-            const activity = { ...state.activity };
-            delete activity[id];
-            return { activity };
-          });
-        }
-        return saved;
-      });
+      );
     },
 
     duplicateModel(id) {
@@ -429,21 +394,6 @@ export const useModelStore = create<ModelState>()((set, get) => {
       );
     },
 
-    async probe(id) {
-      withActivity(id, { probing: true });
-      try {
-        const probe = await modelsApi.probe(id);
-        withActivity(
-          id,
-          { probing: false, probe },
-          { error: null, errorCode: null },
-        );
-      } catch (error) {
-        withActivity(id, { probing: false });
-        set(describe(error, "Failed to test the model"));
-      }
-    },
-
     reset() {
       set({
         open: false,
@@ -456,7 +406,6 @@ export const useModelStore = create<ModelState>()((set, get) => {
         saving: false,
         error: null,
         errorCode: null,
-        activity: {},
       });
     },
   };

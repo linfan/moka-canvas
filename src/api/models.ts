@@ -87,12 +87,6 @@ export interface ModelsView {
   secretStorage: SecretStorageTier;
 }
 
-export interface ProbeReport {
-  ok: boolean;
-  latencyMs: number;
-  error?: { code: string; message: string };
-}
-
 export interface ModelDraft {
   id: string;
   category: Capability;
@@ -179,13 +173,6 @@ export const modelsApi = {
     return http.request<ModelsView>(modelPath(id, "/key"), {
       method: "POST",
       body: { apiKey },
-    });
-  },
-
-  /** Reports a broken model inside a successful response. */
-  probe(id: string): Promise<ProbeReport> {
-    return http.request<ProbeReport>(modelPath(id, "/probe"), {
-      method: "POST",
     });
   },
 

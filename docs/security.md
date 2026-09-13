@@ -112,11 +112,7 @@ recover a superseded key.
 A key leaves this process only towards the host it belongs to, and the rules
 around that are deliberately narrow:
 
-- It goes out on a generation request and on a connectivity probe, which asks
-  the model-list address derived from the model's own endpoint. Nothing else
-  carries one.
-- A probe reports the provider's own complaint, never the key that provoked it,
-  and the request log carries the method, the path, and the status only.
+- It goes out on a generation request. Nothing else carries one.
 - The plaintext is decrypted at send time and lives only inside that one
   in-flight request. Configuration holds ciphertext, the gateway decrypts once
   per call, and the task registry holds no credential at all — polling a video
