@@ -1002,3 +1002,126 @@ async fn a_picture_tool_that_cannot_be_done_is_refused_as_a_problem() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// A listing of one directory: what the web runtime's own file dialog is made
+/// of, and the only thing about the filesystem this API says out loud.
+#[tokio::test]
+async fn the_filesystem_route_lists_the_folders_and_the_files_asked_for() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let somewhere = tempfile::tempdir().unwrap();
+    std::fs::create_dir(somewhere.path().join("Pictures")).unwrap();
+    std::fs::create_dir(somewhere.path().join(".config")).unwrap();
+    std::fs::write(somewhere.path().join("launch.moka"), b"").unwrap();
+    std::fs::write(somewhere.path().join("picture.png"), b"").unwrap();
+
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("path", &somewhere.path().display().to_string())
+        .append_pair("extensions", "moka, zip")
+        .finish();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/filesystem?{query}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+
+    // The folders, and the one file of a kind that was asked for. A dot
+    // directory and a file nobody asked about are not part of the answer.
+    let entries = body["entries"]
+        .as_array()
+        .expect("a listing carries entries");
+    let names: Vec<&str> = entries
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["Pictures", "launch.moka"]);
+    assert_eq!(entries[0]["kind"], "directory");
+    assert_eq!(entries[1]["kind"], "file");
+    assert_eq!(body["truncated"], false);
+    // Both the directory listed and the way up out of it, so a dialog can say
+    // where it is rather than keeping track of where it has been. Resolved,
+    // which on a Mac is not the path a temporary directory was handed out as.
+    assert!(body["parent"].as_str().is_some());
+    let listed = std::fs::canonicalize(somewhere.path()).unwrap();
+    assert_eq!(body["path"].as_str().unwrap(), listed.to_string_lossy());
+    assert_eq!(
+        entries[1]["path"].as_str().unwrap(),
+        listed.join("launch.moka").to_string_lossy()
+    );
+}
+
+/// What a listing refuses, in the shape a caller reads a refusal from.
+#[tokio::test]
+async fn a_path_that_is_not_a_directory_is_refused_as_a_problem() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let file = temp.path().join("a-file");
+    std::fs::write(&file, b"").unwrap();
+
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("path", &file.display().to_string())
+        .finish();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/filesystem?{query}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(response).await["code"], "VALIDATION_FAILED");
+}
+
+/// A router labelled as the desktop runtime. The metadata store is opened the
+/// way the web runtime opens it, because what a listing is refused over is the
+/// label and nothing about the store behind it.
+fn desktop_test_app(root: &Path) -> axum::Router {
+    let config = parse_test_config(root);
+    let dir = config
+        .metadata
+        .dir
+        .clone()
+        .expect("the test configuration sets a metadata directory");
+    let metadata = moka_canvas::metadata::open(&dir, &config.metadata, RuntimeMode::Web)
+        .expect("the metadata store opens");
+    let state = ApiState::with_metadata(
+        config,
+        RuntimeMode::Native,
+        metadata,
+        root.join("converter"),
+    );
+    moka_canvas::server::router(state)
+}
+
+/// The desktop runtime is not served a listing: it has the operating system's
+/// own dialog, and a route nothing there calls would be a way of reading this
+/// machine's directories that otherwise does not exist.
+#[tokio::test]
+async fn the_desktop_runtime_is_not_served_a_directory_listing() {
+    let temp = tempfile::tempdir().unwrap();
+    let somewhere = tempfile::tempdir().unwrap();
+    std::fs::create_dir(somewhere.path().join("Pictures")).unwrap();
+
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("path", &somewhere.path().display().to_string())
+        .finish();
+    let response = desktop_test_app(temp.path())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/filesystem?{query}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(body_json(response).await["code"], "NOT_FOUND");
+}

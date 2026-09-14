@@ -186,6 +186,41 @@ Enable it three ways, in descending order of precedence: `moka-server
 (`generate.debug.enabled`). All three say whether to record; none of them says
 where.
 
+## Directory listings
+
+A browser has no file dialog to ask which folder is meant, so the web runtime
+serves one listing at a time instead: `GET /api/v1/filesystem?path=<dir>`
+answers with the names in a directory and where each leads, which is what the
+launcher's own **Browse…** dialog draws itself from.
+
+What narrows it:
+
+- **Names, never contents.** No route reads a file's bytes here; the answer is a
+  name, an absolute path, and whether it is a folder. Opening a project still
+  goes through `POST /api/v1/projects/open`, which reads only what a project
+  document is.
+- **Web runtime only.** In the desktop runtime the route answers 404: the
+  operating system's dialog is there, and a loopback server answering a question
+  nothing on it asks would be a wider surface for the same price.
+- **Folders, and only the files asked for.** A listing with no `extensions` is a
+  listing of folders alone. Entries whose name begins with a dot are left out, so
+  the dot-directories a home holds are not offered and a listing is not a way of
+  reading what configuration a machine has. A listing stops at 1000 entries and
+  says it stopped.
+- **A path is resolved, not trusted.** Symlinks are followed to answer what a
+  row is, one that points at nothing is left out, a relative path is refused
+  rather than resolved against the server's working directory, and a directory
+  that will not open answers 404 rather than saying whether it exists.
+
+What it does cost is worth stating plainly, because it is the one part of this
+API that describes the machine rather than the work: a caller who can reach the
+port can enumerate directory names across the filesystem the process can read.
+That is the same trust the rest of the API already asks for — there is no
+authentication layer, and whoever reaches the port can open any project the
+process can open (see [deployment.md](deployment.md)) — but it is a wider answer
+than any other route gives, which is why it is the one route the desktop runtime
+refuses. Keep the server on loopback, or put identity in front of it.
+
 ## Exported packages
 
 A project package (`.moka`, a ZIP) can never contain application metadata:

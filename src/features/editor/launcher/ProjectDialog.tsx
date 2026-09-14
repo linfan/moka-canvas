@@ -1,9 +1,16 @@
 import { useState, type FormEvent } from "react";
 import type { SelfCheckReport } from "../../../shared/domain";
 import { useProjectStore } from "../stores/projectStore";
+import { PathBrowserDialog } from "./PathBrowserDialog";
 import { pickDirectory, pickFile } from "./pickPath";
 
 export type DialogMode = "create" | "open" | "import";
+
+/**
+ * Which of the two paths a dialog is being asked about: the folder a project
+ * goes in, or the project itself.
+ */
+type Field = "folder" | "project";
 
 interface Props {
   mode: DialogMode;
@@ -26,6 +33,8 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
   const [archive, setArchive] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Which field the application's own file dialog is choosing for, if one is. */
+  const [browsing, setBrowsing] = useState<Field | null>(null);
 
   /** Run a native picker and surface its failure instead of dropping it. */
   const pick = async (
@@ -43,6 +52,27 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
           : "The file dialog could not open",
       );
     }
+  };
+
+  /**
+   * Asks which folder is meant.
+   *
+   * The operating system answers on a desktop, where it has a dialog of its own
+   * to answer with. In a browser nothing can be asked, so the application draws
+   * one out of the server's own listings rather than leaving a reader to type a
+   * path they would have to know already.
+   */
+  const browse = (field: Field) => {
+    if (!nativePickers) {
+      setBrowsing(field);
+      return;
+    }
+    void pick(
+      field === "folder"
+        ? () => pickDirectory("Choose project folder")
+        : () => pickFile("Open project", ["moka"]),
+      field === "folder" ? setDirectory : setPath,
+    );
   };
 
   const submit = async (event: FormEvent) => {
@@ -96,29 +126,24 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
         <h2>{TITLES[mode]}</h2>
 
         {mode !== "open" && (
-          <label className="dialog-field">
-            <span>Folder</span>
+          <div className="dialog-field">
+            <span id="project-folder-label">Folder</span>
             <div className="dialog-path">
               <input
+                aria-labelledby="project-folder-label"
                 onChange={(event) => setDirectory(event.target.value)}
                 placeholder="/Users/you/Movies/My project"
                 value={directory}
               />
-              {nativePickers && (
-                <button
-                  onClick={() =>
-                    void pick(
-                      () => pickDirectory("Choose project folder"),
-                      setDirectory,
-                    )
-                  }
-                  type="button"
-                >
-                  Browse…
-                </button>
-              )}
+              <button
+                data-testid="browse-folder"
+                onClick={() => browse("folder")}
+                type="button"
+              >
+                Browse…
+              </button>
             </div>
-          </label>
+          </div>
         )}
 
         {mode !== "open" && (
@@ -137,34 +162,33 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
         )}
 
         {mode === "open" && (
-          <label className="dialog-field">
-            <span>Project folder or .moka file</span>
+          <div className="dialog-field">
+            <span id="project-path-label">Project folder or .moka file</span>
             <div className="dialog-path">
               <input
+                aria-labelledby="project-path-label"
                 onChange={(event) => setPath(event.target.value)}
                 placeholder="/Users/you/Movies/My project"
                 value={path}
               />
-              {nativePickers && (
-                <button
-                  onClick={() =>
-                    void pick(() => pickFile("Open project", ["moka"]), setPath)
-                  }
-                  type="button"
-                >
-                  Browse…
-                </button>
-              )}
+              <button
+                data-testid="browse-project"
+                onClick={() => browse("project")}
+                type="button"
+              >
+                Browse…
+              </button>
             </div>
-          </label>
+          </div>
         )}
 
         {mode === "import" &&
           (nativePickers ? (
-            <label className="dialog-field">
-              <span>Package file</span>
+            <div className="dialog-field">
+              <span id="package-path-label">Package file</span>
               <div className="dialog-path">
                 <input
+                  aria-labelledby="package-path-label"
                   onChange={(event) => setPath(event.target.value)}
                   placeholder="/Users/you/Downloads/launch-teaser.mokapkg.zip"
                   value={path}
@@ -182,7 +206,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
                   Browse…
                 </button>
               </div>
-            </label>
+            </div>
           ) : (
             <label className="dialog-field">
               <span>Package file</span>
@@ -211,6 +235,27 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
           </button>
         </div>
       </form>
+
+      {/* Beside the form rather than inside it: a form within a form is not
+          HTML, and the listing's own path bar submits. */}
+      {browsing !== null && (
+        <PathBrowserDialog
+          chooseLabel={browsing === "folder" ? "Choose folder" : "Open"}
+          extensions={browsing === "folder" ? undefined : ["moka"]}
+          onClose={() => setBrowsing(null)}
+          onChoose={(chosen) => {
+            if (browsing === "folder") setDirectory(chosen);
+            else setPath(chosen);
+            setBrowsing(null);
+          }}
+          start={browsing === "folder" ? directory : path}
+          title={
+            browsing === "folder"
+              ? "Choose a folder for the project"
+              : "Open a project"
+          }
+        />
+      )}
     </div>
   );
 }

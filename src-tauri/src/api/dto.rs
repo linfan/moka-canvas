@@ -288,6 +288,45 @@ pub struct RevisionQuery {
     pub revision: Option<u64>,
 }
 
+/// What a directory listing is asked for, in a query string.
+///
+/// `path` left out opens the listing at the reader's own home directory, and
+/// `extensions` left out asks for the folders alone — see
+/// [`super::filesystem`], which is where both rules are kept.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemQuery {
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Comma separated, and compared without regard to case.
+    #[serde(default)]
+    pub extensions: Option<String>,
+}
+
+/// What one directory holds, for the file dialog a browser has to draw itself.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemListing {
+    /// The directory listed, resolved — which is not necessarily the one that
+    /// was asked for, and is why the answer carries it.
+    pub path: String,
+    /// Where up leads, and `None` at the top of a filesystem.
+    pub parent: Option<String>,
+    pub entries: Vec<FilesystemEntry>,
+    /// Whether the listing stopped before the directory was exhausted.
+    pub truncated: bool,
+}
+
+/// One row of a listing: a name, where it leads, and which of the two it is.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemEntry {
+    pub name: String,
+    pub path: String,
+    /// `directory` or `file`; a dialog opens the one and chooses the other.
+    pub kind: &'static str,
+}
+
 /// Which run a stream follows. One, because a listener is watching one.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

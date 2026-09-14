@@ -1,13 +1,15 @@
 use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, AssetShelfRequest, CapabilitiesResponse,
     CreateProjectRequest, DefaultsPatch, ExportRequest, FileNodeRequest, FileNodeResponse,
-    GenerateResponse, GenerationPreviewRequest, GenerationPreviewResponse, ImportProjectRequest,
-    ModelKeyRequest, OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch,
-    PreviewInput, PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse,
-    SecretStorageRequest, StartRunRequest, UpsertModelRequest,
+    FilesystemListing, FilesystemQuery, GenerateResponse, GenerationPreviewRequest,
+    GenerationPreviewResponse, ImportProjectRequest, ModelKeyRequest, OpenProjectRequest,
+    OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput, PublicConfigResponse,
+    RevisionQuery, RunStreamQuery, SaveResponse, SecretStorageRequest, StartRunRequest,
+    UpsertModelRequest,
 };
 use super::problem::{json_or_problem, Problem};
-use super::ApiState;
+use super::{filesystem, ApiState};
+use crate::config::RuntimeMode;
 use crate::domain::{now_iso, DocumentCommand, ResourceRegistry, RunRecord, RunStatus};
 use crate::generate::models::ModelsView;
 use crate::generate::{
@@ -125,6 +127,29 @@ pub async fn remove_recent(
 ) -> Result<StatusCode, Problem> {
     state.metadata.remove_recent(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// What one directory holds, for the file dialog a browser has to draw itself.
+///
+/// The desktop runtime is refused rather than served: it has the operating
+/// system's own dialog, and a listing nobody there needs is a way of reading
+/// this machine's directories that would otherwise not exist.
+pub async fn browse_filesystem(
+    State(state): State<ApiState>,
+    Query(query): Query<FilesystemQuery>,
+) -> Result<Json<FilesystemListing>, Problem> {
+    if !matches!(state.mode, RuntimeMode::Web) {
+        return Err(Problem::new(
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND",
+            "The desktop runtime asks the operating system which folder is meant",
+        ));
+    }
+    Ok(Json(
+        filesystem::list(query.path.as_deref(), query.extensions.as_deref())
+            .await
+            .map_err(Problem::from)?,
+    ))
 }
 
 pub async fn create_project(

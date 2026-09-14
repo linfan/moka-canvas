@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub mod dto;
+pub mod filesystem;
 pub mod problem;
 pub mod routes;
 
@@ -97,6 +98,10 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/recent-projects/{id}",
             delete(routes::remove_recent),
         )
+        // Beside the project routes rather than under them: a listing answers
+        // where a project could be, and does so before one exists. Only the web
+        // runtime is served — see `api::filesystem`.
+        .route("/api/v1/filesystem", get(routes::browse_filesystem))
         .route("/api/v1/projects", post(routes::create_project))
         .route("/api/v1/projects/open", post(routes::open_project))
         .route("/api/v1/projects/import", post(routes::import_project))

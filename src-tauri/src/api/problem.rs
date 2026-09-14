@@ -135,6 +135,16 @@ impl From<crate::generate::ProviderError> for Problem {
     }
 }
 
+impl From<super::filesystem::BrowseError> for Problem {
+    fn from(error: super::filesystem::BrowseError) -> Self {
+        Problem::new(
+            status_for_code(error.code()),
+            error.code(),
+            error.to_string(),
+        )
+    }
+}
+
 impl From<std::io::Error> for Problem {
     fn from(error: std::io::Error) -> Self {
         Problem::new(
