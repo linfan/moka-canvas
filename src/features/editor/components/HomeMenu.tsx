@@ -114,6 +114,13 @@ interface HomeMenuProps {
  * room beside it are places the reader goes between without putting the
  * project down. The page being stood on is marked, so the menu says where
  * "here" is as well as where "there" would be.
+ *
+ * The menu stands on a ring of nothing that takes the pointer. This corner of
+ * the window is also where the column beside the canvas keeps its tabs, so a
+ * reader sliding along the edge of an open menu would otherwise be sliding
+ * over things that answer to a click: the ring takes those clicks instead,
+ * and taking one is a way of putting the menu down rather than a way of
+ * turning a tab over by mistake.
  */
 export function HomeMenu({ current, onHome }: HomeMenuProps) {
   const [open, setOpen] = useState(false);
@@ -159,46 +166,57 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
         <CoffeeIcon />
       </button>
       {open && (
-        <div className="home-menu-pop" data-testid="home-menu" role="menu">
-          <div className="home-menu-group">
-            <button
-              className="home-menu-item"
-              onClick={() => {
-                setOpen(false);
-                onHome();
-              }}
-              role="menuitem"
-              type="button"
-            >
-              <HomeIcon />
-              <span>Home</span>
-            </button>
-          </div>
-          <div className="home-menu-group">
-            <button
-              aria-current={current === "canvas" ? "page" : undefined}
-              className={`home-menu-item${
-                current === "canvas" ? " is-current" : ""
-              }`}
-              onClick={() => go("canvas")}
-              role="menuitem"
-              type="button"
-            >
-              <CanvasIcon />
-              <span>Canvas</span>
-            </button>
-            <button
-              aria-current={current === "clip" ? "page" : undefined}
-              className={`home-menu-item${
-                current === "clip" ? " is-current" : ""
-              }`}
-              onClick={() => go("clip")}
-              role="menuitem"
-              type="button"
-            >
-              <ClipIcon />
-              <span>Clip</span>
-            </button>
+        <div
+          className="home-menu-guard"
+          data-testid="home-menu-guard"
+          onMouseDown={(event) => {
+            // Only the ring itself puts the menu down. A press that lands on a
+            // row of the menu bubbles here too, and closing on the way to a
+            // choice would take the choice away before it was made.
+            if (event.target === event.currentTarget) setOpen(false);
+          }}
+        >
+          <div className="home-menu-pop" data-testid="home-menu" role="menu">
+            <div className="home-menu-group">
+              <button
+                className="home-menu-item"
+                onClick={() => {
+                  setOpen(false);
+                  onHome();
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <HomeIcon />
+                <span>Home</span>
+              </button>
+            </div>
+            <div className="home-menu-group">
+              <button
+                aria-current={current === "canvas" ? "page" : undefined}
+                className={`home-menu-item${
+                  current === "canvas" ? " is-current" : ""
+                }`}
+                onClick={() => go("canvas")}
+                role="menuitem"
+                type="button"
+              >
+                <CanvasIcon />
+                <span>Canvas</span>
+              </button>
+              <button
+                aria-current={current === "clip" ? "page" : undefined}
+                className={`home-menu-item${
+                  current === "clip" ? " is-current" : ""
+                }`}
+                onClick={() => go("clip")}
+                role="menuitem"
+                type="button"
+              >
+                <ClipIcon />
+                <span>Clip</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

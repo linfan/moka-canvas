@@ -623,7 +623,8 @@ h2 {
   transform-origin: top right;
 }
 
-/* The app's corner: a cup that opens the menu of pages. */
+/* The app's corner: a cup that opens the menu of pages, and the ring of
+   nothing the menu stands on. */
 .home-menu {
   flex: none;
   position: relative;
@@ -647,6 +648,25 @@ h2 {
   border-color: var(--stroke);
 }
 
+/* The ring around the menu: transparent to the eye and solid to the pointer.
+
+   The columns beside the canvas reach up under this corner, so without
+   something standing here a reader aiming at the edge of a row of the menu
+   would be aiming at a tab of the column behind it. A click taken by the ring
+   puts the menu down, which is what a click beside a menu means anywhere else
+   in the app, and is better than a tab turned over by accident. */
+.home-menu-guard {
+  background: transparent;
+  left: -12px;
+  padding: 8px 12px 12px;
+  position: absolute;
+  top: 100%;
+  z-index: 70;
+}
+
+/* Painted on a surface of its own rather than on a wash: what the menu says is
+   read against the menu, and never against the shelf or the tabs showing
+   through between the lines. */
 .home-menu-pop {
   animation: home-menu-slide 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
   background: var(--surface-raised);
@@ -655,22 +675,19 @@ h2 {
   box-shadow: var(--shadow);
   display: grid;
   gap: 6px;
-  left: 0;
   min-width: 172px;
   padding: 6px;
-  position: absolute;
-  top: calc(100% + 8px);
+  position: relative;
   transform-origin: top left;
-  z-index: 70;
 }
 
+/* Slides in without thinning out on the way: a menu that fades up is a menu
+   the page shows through for the moment it is arriving. */
 @keyframes home-menu-slide {
   from {
-    opacity: 0;
     transform: translateX(-10px) scale(0.96);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
