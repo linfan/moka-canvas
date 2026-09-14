@@ -23,6 +23,7 @@ import { isBoundary, useHistoryStore } from "../stores/historyStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
 import { useRunStore, useRunsInFlight } from "../stores/runStore";
 import { CanvasTabs } from "./CanvasTabs";
+import { HomeMenu } from "../components/HomeMenu";
 
 const SAVE_LABEL: Record<string, string> = {
   saved: "Saved",
@@ -39,6 +40,7 @@ function useCanUndo(): boolean {
 }
 
 interface TopBarProps {
+  /** The guarded close the menu's Home row asks for. */
   onBack: () => void;
   /** Opens the export question; the dialog itself belongs to the page. */
   onExport: () => void;
@@ -125,14 +127,7 @@ export function TopBar({ onBack, onExport }: TopBarProps) {
 
   return (
     <header className="editor-topbar">
-      <button
-        aria-label="Back to launcher"
-        className="editor-back"
-        onClick={onBack}
-        type="button"
-      >
-        ←
-      </button>
+      <HomeMenu current="canvas" onHome={onBack} />
       <strong className="editor-project-name">{projectName}</strong>
       <CanvasTabs />
       <span

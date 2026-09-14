@@ -6,7 +6,13 @@ import {
 } from "../../../api";
 import { PROVIDER_EXECUTOR_KEY } from "../../../shared/domain";
 
-export type AppPhase = "booting" | "launcher" | "opening" | "editing" | "error";
+export type AppPhase =
+  | "booting"
+  | "launcher"
+  | "opening"
+  | "editing"
+  | "clip"
+  | "error";
 
 export interface Toast {
   id: number;

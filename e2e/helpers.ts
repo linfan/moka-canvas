@@ -122,7 +122,8 @@ export async function exportWorkPackage(page: Page) {
  * the unsaved-work guard appears — resolve it by saving, like a user would.
  */
 export async function backToLauncher(page: Page) {
-  await page.getByRole("button", { name: "Back to launcher" }).click();
+  await page.getByRole("button", { name: "Home menu" }).click();
+  await page.getByRole("menuitem", { name: "Home" }).click();
   const guard = page.getByRole("alertdialog", { name: "Unsaved changes" });
   const guarded = await guard
     .waitFor({ state: "visible", timeout: 2500 })

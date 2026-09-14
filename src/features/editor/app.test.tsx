@@ -111,6 +111,48 @@ describe("app boot", () => {
     expect(screen.getByTestId("canvas-tab-Canvas 2")).toBeTruthy();
   });
 
+  it("walks between the board and the cutting room from the corner menu", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByText("Golden Fixture"));
+    await screen.findByTestId("canvas-host");
+
+    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
+    const menu = screen.getByRole("menu");
+    expect(
+      within(menu)
+        .getByRole("menuitem", { name: "Canvas" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Clip" }));
+    expect(useAppStore.getState().phase).toBe("clip");
+    expect(screen.getByTestId("clip-page")).toBeTruthy();
+    expect(screen.getByText("Comming soon")).toBeTruthy();
+    // Stepping over to the cutting room is not a close: the project stands.
+    expect(useProjectStore.getState().moka).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
+    const clipMenu = screen.getByRole("menu");
+    expect(
+      within(clipMenu)
+        .getByRole("menuitem", { name: "Clip" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    fireEvent.click(within(clipMenu).getByRole("menuitem", { name: "Canvas" }));
+    expect(useAppStore.getState().phase).toBe("editing");
+    expect(screen.getByTestId("canvas-host")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
+    fireEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Home" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Moka Canvas" }),
+    ).toBeTruthy();
+    expect(useAppStore.getState().phase).toBe("launcher");
+    expect(useProjectStore.getState().moka).toBeNull();
+  });
+
   it("never lets the native context menu appear over its own", async () => {
     render(<App />);
     await screen.findByRole("heading", { name: "Moka Canvas" });

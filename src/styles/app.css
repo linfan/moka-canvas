@@ -607,8 +607,127 @@ h2 {
   padding: 8px 12px;
 }
 
-.editor-back {
+/* The app's corner: a cup that opens the menu of pages. */
+.home-menu {
   flex: none;
+  position: relative;
+}
+
+.home-menu-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  width: 34px;
+}
+
+.home-menu-button:hover {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+}
+
+.home-menu-pop {
+  animation: home-menu-slide 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 6px;
+  left: 0;
+  min-width: 172px;
+  padding: 6px;
+  position: absolute;
+  top: calc(100% + 8px);
+  transform-origin: top left;
+  z-index: 70;
+}
+
+@keyframes home-menu-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Each grouping stands on a faint wash of its own, so the row that is alone
+   reads as alone and the two that belong together read as a pair. */
+.home-menu-group {
+  background: rgb(255 255 255 / 5%);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+}
+
+.home-menu-item {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--ink);
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.home-menu-item:hover {
+  background: rgb(255 255 255 / 9%);
+}
+
+.home-menu-item.is-current {
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+
+.home-menu-item.is-current:hover {
+  background: var(--primary);
+}
+
+.home-menu-item svg {
+  flex: none;
+}
+
+/* The cutting room while it is being built. */
+.clip-page {
+  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.clip-head {
+  align-items: center;
+  backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--surface-glass);
+  border-bottom: 1px solid var(--stroke);
+  display: flex;
+  flex: none;
+  padding: 8px 12px;
+}
+
+.clip-coming {
+  align-self: center;
+  color: var(--muted);
+  display: grid;
+  flex: 1;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  margin: 0;
+  place-content: center;
 }
 
 .run-button {

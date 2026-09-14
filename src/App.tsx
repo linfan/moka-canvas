@@ -5,6 +5,7 @@ import {
   BootScreen,
 } from "./features/editor/components/BootScreen";
 import { Toasts } from "./features/editor/components/Toasts";
+import { ClipPage } from "./features/clip/ClipPage";
 import { EditorPage } from "./features/editor/EditorPage";
 import { LauncherPage } from "./features/editor/launcher/LauncherPage";
 import { useAppStore } from "./features/editor/stores/appStore";
@@ -38,6 +39,7 @@ export default function App() {
       {phase === "error" && <BootErrorScreen />}
       {(phase === "launcher" || phase === "opening") && <LauncherPage />}
       {phase === "editing" && <EditorPage />}
+      {phase === "clip" && <ClipPage />}
       <SettingsDialog />
       <Toasts />
     </ErrorBoundary>
