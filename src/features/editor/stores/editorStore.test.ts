@@ -5,7 +5,6 @@ describe("promptPanel", () => {
   beforeEach(() => {
     useEditorStore.getState().clearSelection();
     useEditorStore.getState().closePromptPanel();
-    useEditorStore.setState({ promptPanelOnSelect: true });
   });
 
   it("holds the one node the generation panel is open under", () => {
@@ -28,14 +27,6 @@ describe("promptPanel", () => {
 
     useEditorStore.getState().closePromptPanel();
     expect(useEditorStore.getState().promptPanel).toBeNull();
-  });
-
-  it("remembers whether the panel comes up with a selection", () => {
-    expect(useEditorStore.getState().promptPanelOnSelect).toBe(true);
-    useEditorStore.getState().togglePromptPanelOnSelect();
-    expect(useEditorStore.getState().promptPanelOnSelect).toBe(false);
-    useEditorStore.getState().togglePromptPanelOnSelect();
-    expect(useEditorStore.getState().promptPanelOnSelect).toBe(true);
   });
 
   it("keeps the node selected when the panel goes away", () => {

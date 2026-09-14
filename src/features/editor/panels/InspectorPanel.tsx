@@ -47,6 +47,8 @@ import {
   formatDuration,
   mediaInfoForNode,
 } from "../canvas/mediaCards";
+import { CANVAS_THEME_LABELS, CANVAS_THEME_NAMES } from "../canvas/theme";
+import { useAppearance } from "../stores/appearance";
 import {
   chooseResult,
   choosableResults,
@@ -911,12 +913,15 @@ const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
  * The canvas's own settings, shown when nothing on it is selected.
  *
  * With no node to describe, the panel says what the surface behind the nodes
- * is drawn with. Both choices are the document's, so they are written into it
- * and undo like any other edit rather than being a way this machine happens to
- * be looking at it.
+ * is drawn with, and what colors the whole board is painted in. The
+ * background is the document's own, so it is written into the document and
+ * undoes like any other edit; the palette is this machine's, kept beside the
+ * project rather than inside it, and offered here because where the canvas is
+ * looked at is where a way of looking at it belongs.
  */
 function CanvasViewSection({ canvas }: { canvas: CanvasDocument }) {
   const { background, showMinimap } = canvas.settings;
+  const theme = useAppearance((state) => state.theme);
   return (
     <section className="inspector-section">
       <h3>Canvas view</h3>
@@ -932,6 +937,23 @@ function CanvasViewSection({ canvas }: { canvas: CanvasDocument }) {
               type="button"
             >
               {BACKGROUND_LABELS[mode]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="inspector-row">
+        <span>Palette</span>
+        <div aria-label="Theme" className="tool-group" role="group">
+          {CANVAS_THEME_NAMES.map((name) => (
+            <button
+              aria-pressed={theme === name}
+              className={theme === name ? "is-active" : ""}
+              key={name}
+              onClick={() => useAppearance.getState().setTheme(name)}
+              title="The colors this machine draws the canvas in"
+              type="button"
+            >
+              {CANVAS_THEME_LABELS[name]}
             </button>
           ))}
         </div>

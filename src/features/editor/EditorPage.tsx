@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import { isApiError, projectsApi } from "../../api";
 import { unreferencedAssets, type MokaFile } from "../../shared/domain";
-import { AssistantPanel } from "../assistant/AssistantPanel";
 import { CanvasSurface } from "./canvas/CanvasSurface";
 import { clientToWorld, zoomReset, zoomTo } from "./canvas/canvasControl";
-import { CANVAS_THEME_LABELS, CANVAS_THEME_NAMES } from "./canvas/theme";
 import {
   ASSET_DRAG_MIME,
   addAssetNode,
@@ -15,16 +13,14 @@ import {
   importFiles,
 } from "./interactions/actions";
 import { useEditorKeyboard } from "./interactions/keyboard";
-import { useAppearance } from "./stores/appearance";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { usePanelWidths } from "./stores/panelWidths";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
 import { useRunStore, useRunsInFlight } from "./stores/runStore";
 import { ContextMenu } from "./panels/ContextMenu";
-import { HistoryPanel } from "./panels/HistoryPanel";
-import { InspectorPanel } from "./panels/InspectorPanel";
 import { NodeMenu } from "./panels/NodeMenu";
+import { RightPanel } from "./panels/RightPanel";
 import { SidePanel } from "./panels/SidePanel";
 import { TopBar } from "./panels/TopBar";
 import { AssetDeleteDialog } from "./components/AssetDeleteDialog";
@@ -45,6 +41,12 @@ import { PanelResizer } from "./components/PanelResizer";
 import { panelWidthStyle } from "./components/panelWidthVars";
 import { RenameOverlay } from "./components/RenameOverlay";
 import { TextEditOverlay } from "./components/TextEditOverlay";
+import {
+  ArrowIcon,
+  FitIcon,
+  HandIcon,
+  SelectionIcon,
+} from "./components/ToolIcons";
 import { PromptPanel } from "./components/PromptPanel";
 import { RunHint } from "./components/RunHint";
 import { NodeActionBar } from "./components/NodeActionBar";
@@ -71,17 +73,9 @@ export function EditorPage() {
   const selectedCount = useEditorStore(
     (state) => state.selection.nodeIds.length,
   );
-  const theme = useAppearance((state) => state.theme);
   const tool = useEffectiveTool();
-  const leftPanelOpen = useEditorStore((state) => state.leftPanelOpen);
-  const leftPanelTab = useEditorStore((state) => state.leftPanelTab);
-  const sidePanelOpen = useEditorStore((state) => state.sidePanelOpen);
-  const sidePanelTab = useEditorStore((state) => state.sidePanelTab);
   const leftWidth = usePanelWidths((state) => state.left);
   const rightWidth = usePanelWidths((state) => state.right);
-  const promptPanelOnSelect = useEditorStore(
-    (state) => state.promptPanelOnSelect,
-  );
   const announcement = useEditorStore((state) => state.announcement);
   const inFlight = useRunsInFlight();
   useEditorKeyboard();
@@ -224,8 +218,8 @@ export function EditorPage() {
         className="editor-body"
         style={panelWidthStyle(leftWidth, rightWidth)}
       >
-        {leftPanelOpen && <SidePanel />}
-        {leftPanelOpen && <PanelResizer side="left" />}
+        <SidePanel />
+        <PanelResizer side="left" />
         <main
           className="editor-canvas"
           data-testid="canvas-host"
@@ -275,15 +269,8 @@ export function EditorPage() {
               : "No canvas"}
           </p>
         </main>
-        {sidePanelOpen && <PanelResizer side="right" />}
-        {sidePanelOpen &&
-          (sidePanelTab === "assistant" ? (
-            <AssistantPanel />
-          ) : sidePanelTab === "history" ? (
-            <HistoryPanel />
-          ) : (
-            <InspectorPanel />
-          ))}
+        <PanelResizer side="right" />
+        <RightPanel />
       </div>
 
       <ContextMenu />
@@ -324,39 +311,57 @@ export function EditorPage() {
       )}
 
       <footer className="editor-toolstrip">
-        <div aria-label="Tool" className="tool-group" role="group">
+        {/* One switch with two ends rather than two buttons to press: the
+            thumb slides to the tool being held, and each end says what it is
+            with the mark of the thing it does. */}
+        <div aria-label="Tool" className="tool-switch" role="group">
+          <span
+            aria-hidden="true"
+            className="tool-switch-thumb"
+            data-tool={tool}
+          />
           <button
+            aria-label="Select tool"
             aria-pressed={tool === "select"}
             className={tool === "select" ? "is-active" : ""}
+            data-testid="tool-select"
             onClick={() => useEditorStore.getState().setTool("select")}
+            title="Select (V) — drag on empty canvas to choose"
             type="button"
           >
-            Select
+            <ArrowIcon />
           </button>
           <button
+            aria-label="Pan tool"
             aria-pressed={tool === "pan"}
             className={tool === "pan" ? "is-active" : ""}
+            data-testid="tool-pan"
             onClick={() => useEditorStore.getState().setTool("pan")}
+            title="Pan (H) — drag to move the canvas"
             type="button"
           >
-            Pan
+            <HandIcon />
           </button>
         </div>
         <div aria-label="Zoom" className="tool-group" role="group">
           <button
             aria-label="Fit view"
+            data-testid="zoom-fit"
             onClick={() => fitViewAction()}
+            title="Fit everything in the view"
             type="button"
           >
-            Fit
+            <FitIcon />
           </button>
           <button
             aria-label="Zoom to selection"
+            data-testid="zoom-selection"
             disabled={selectedCount === 0}
             onClick={() => fitSelectionAction()}
+            title="Fit the selection in the view"
             type="button"
           >
-            Selection
+            <SelectionIcon />
           </button>
           <button
             aria-label="Zoom to 100 percent"
@@ -376,74 +381,6 @@ export function EditorPage() {
             value={Math.round(zoom * 100)}
           />
           <span className="zoom-readout">{Math.round(zoom * 100)}%</span>
-        </div>
-        <div aria-label="Theme" className="tool-group" role="group">
-          {CANVAS_THEME_NAMES.map((name) => (
-            <button
-              aria-pressed={theme === name}
-              className={theme === name ? "is-active" : ""}
-              key={name}
-              onClick={() => useAppearance.getState().setTheme(name)}
-              type="button"
-            >
-              {CANVAS_THEME_LABELS[name]}
-            </button>
-          ))}
-        </div>
-        <div aria-label="Panels" className="tool-group" role="group">
-          <button
-            aria-pressed={leftPanelOpen && leftPanelTab === "project"}
-            onClick={() => useEditorStore.getState().toggleLeftPanel("project")}
-            title="The project's canvases and the folders they are filed in"
-            type="button"
-          >
-            Project
-          </button>
-          <button
-            aria-pressed={leftPanelOpen && leftPanelTab === "assets"}
-            onClick={() => useEditorStore.getState().toggleLeftPanel("assets")}
-            title="The files this project holds, by kind"
-            type="button"
-          >
-            Assets
-          </button>
-          <button
-            aria-pressed={sidePanelOpen && sidePanelTab === "inspector"}
-            onClick={() =>
-              useEditorStore.getState().toggleSidePanel("inspector")
-            }
-            type="button"
-          >
-            Inspector
-          </button>
-          <button
-            aria-pressed={sidePanelOpen && sidePanelTab === "assistant"}
-            onClick={() =>
-              useEditorStore.getState().toggleSidePanel("assistant")
-            }
-            title="Ask about the cards on this canvas"
-            type="button"
-          >
-            Assistant
-          </button>
-          <button
-            aria-pressed={sidePanelOpen && sidePanelTab === "history"}
-            onClick={() => useEditorStore.getState().toggleSidePanel("history")}
-            title="What has been asked of this project, and the way to ask again"
-            type="button"
-          >
-            History
-          </button>
-          <button
-            aria-pressed={promptPanelOnSelect}
-            onClick={() =>
-              useEditorStore.getState().togglePromptPanelOnSelect()
-            }
-            title="Bring the generation panel up when a node is selected"
-            type="button"
-          >
-            Prompt
-          </button>
         </div>
       </footer>
     </div>

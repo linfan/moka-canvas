@@ -299,9 +299,7 @@ beforeEach(() => {
     selection: { nodeIds: [], edgeIds: [] },
     inputPick: null,
     announcement: "",
-    sidePanelOpen: true,
     sidePanelTab: "inspector",
-    leftPanelOpen: true,
     leftPanelTab: "project",
     focusedAssetId: null,
   });
@@ -938,7 +936,7 @@ describe("run UI", () => {
 describe("history panel", () => {
   async function openHistory() {
     await openEditor();
-    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
     return screen.findByTestId("history-panel");
   }
 

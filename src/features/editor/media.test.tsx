@@ -800,10 +800,11 @@ describe("editor shell integration", () => {
     await openGolden();
     await screen.findByTestId("canvas-tab-Canvas 1");
     act(() => {
-      useEditorStore.setState({ promptPanel: null, promptPanelOnSelect: true });
       useEditorStore
         .getState()
         .setSelection({ nodeIds: [ids.image], edgeIds: [] });
+      // The panel comes up from an entry chosen, not from the selection.
+      useEditorStore.getState().openPromptPanel(ids.image);
     });
     const bar = await screen.findByTestId("reference-bar");
 

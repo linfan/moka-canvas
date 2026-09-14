@@ -139,9 +139,7 @@ interface EditorState {
   gesture: ActiveGesture;
   /** Last known pointer position in world coordinates (paste-at-pointer). */
   pointerWorld: Point | null;
-  /** Whether the column holding the project and its assets is showing. */
-  leftPanelOpen: boolean;
-  /** Which of its two faces that column is showing. */
+  /** Which of its two faces the left column is showing. */
   leftPanelTab: LeftPanelTab;
   /** Which kind of asset the assets column is listing. */
   assetKind: Capability;
@@ -153,8 +151,7 @@ interface EditorState {
    * middle is a list nobody can find their place in.
    */
   focusedAssetId: AssetId | null;
-  /** Whether the column beside the canvas is showing at all. */
-  sidePanelOpen: boolean;
+  /** Which of its three faces the column beside the canvas is showing. */
   sidePanelTab: SidePanelTab;
   contextMenu: ContextMenuState | null;
   nodeMenu: NodeMenuState | null;
@@ -164,13 +161,11 @@ interface EditorState {
   /**
    * The generation panel open under a node, and whether it takes the keyboard.
    *
-   * Asked for by an entry the user chose (Enter, the right-click menu) it does;
-   * brought up because a node was selected it must not, or typing would land in
-   * the prompt and Delete would stop deleting the node.
+   * Asked for by an entry the user chose (Enter, the right-click menu), it may
+   * take the keyboard; nothing brings it up on its own, so a selection is
+   * never more than a selection.
    */
   promptPanel: { nodeId: NodeId; focus: boolean } | null;
-  /** Whether selecting one node brings its generation panel up on its own. */
-  promptPanelOnSelect: boolean;
   /** Inspector "replace input" pick mode: choosing a new source node. */
   inputPick: { nodeId: NodeId; portId: string } | null;
   /** Confirmation for deleting an asset still referenced by nodes. */
@@ -207,12 +202,6 @@ interface EditorState {
   setHoveredPort: (port: PortRef | null) => void;
   setGesture: (gesture: ActiveGesture) => void;
   setPointerWorld: (point: Point | null) => void;
-  /**
-   * Brings the column up on one of its faces, or folds it away where it is up on
-   * that one already — the same offer the column beside it makes, so the two
-   * sides of the canvas are worked the same way.
-   */
-  toggleLeftPanel: (tab: LeftPanelTab) => void;
   setLeftPanelTab: (tab: LeftPanelTab) => void;
   setAssetKind: (kind: Capability) => void;
   /**
@@ -222,11 +211,6 @@ interface EditorState {
    */
   showAssetOnShelf: (assetId: AssetId, kind: Capability) => void;
   clearAssetFocus: () => void;
-  /**
-   * Brings the column up on one of its faces, or folds it away where it is
-   * up on that one already.
-   */
-  toggleSidePanel: (tab: SidePanelTab) => void;
   setSidePanelTab: (tab: SidePanelTab) => void;
   openContextMenu: (menu: ContextMenuState) => void;
   closeContextMenu: () => void;
@@ -238,7 +222,6 @@ interface EditorState {
   stopEditingText: () => void;
   openPromptPanel: (nodeId: NodeId, focus?: boolean) => void;
   closePromptPanel: () => void;
-  togglePromptPanelOnSelect: () => void;
   startInputPick: (target: { nodeId: NodeId; portId: string }) => void;
   stopInputPick: () => void;
   openAssetDeletePrompt: (prompt: {
@@ -268,18 +251,15 @@ export const useEditorStore = create<EditorState>()((set) => ({
   hoveredPort: null,
   gesture: { kind: "idle" },
   pointerWorld: null,
-  leftPanelOpen: true,
   leftPanelTab: "project",
   assetKind: "image",
   focusedAssetId: null,
-  sidePanelOpen: true,
   sidePanelTab: "inspector",
   contextMenu: null,
   nodeMenu: null,
   renaming: null,
   textEditing: null,
   promptPanel: null,
-  promptPanelOnSelect: true,
   inputPick: null,
   assetDeletePrompt: null,
   previewAssetId: null,
@@ -306,29 +286,16 @@ export const useEditorStore = create<EditorState>()((set) => ({
   setHoveredPort: (port) => set({ hoveredPort: port }),
   setGesture: (gesture) => set({ gesture }),
   setPointerWorld: (point) => set({ pointerWorld: point }),
-  toggleLeftPanel: (tab) =>
-    set((state) =>
-      state.leftPanelOpen && state.leftPanelTab === tab
-        ? { leftPanelOpen: false }
-        : { leftPanelOpen: true, leftPanelTab: tab },
-    ),
-  setLeftPanelTab: (tab) => set({ leftPanelOpen: true, leftPanelTab: tab }),
+  setLeftPanelTab: (tab) => set({ leftPanelTab: tab }),
   setAssetKind: (kind) => set({ assetKind: kind }),
   showAssetOnShelf: (assetId, kind) =>
     set({
-      leftPanelOpen: true,
       leftPanelTab: "assets",
       assetKind: kind,
       focusedAssetId: assetId,
     }),
   clearAssetFocus: () => set({ focusedAssetId: null }),
-  toggleSidePanel: (tab) =>
-    set((state) =>
-      state.sidePanelOpen && state.sidePanelTab === tab
-        ? { sidePanelOpen: false }
-        : { sidePanelOpen: true, sidePanelTab: tab },
-    ),
-  setSidePanelTab: (tab) => set({ sidePanelOpen: true, sidePanelTab: tab }),
+  setSidePanelTab: (tab) => set({ sidePanelTab: tab }),
   openContextMenu: (menu) => set({ contextMenu: menu }),
   closeContextMenu: () => set({ contextMenu: null }),
   openNodeMenu: (menu) => set({ nodeMenu: menu }),
@@ -340,8 +307,6 @@ export const useEditorStore = create<EditorState>()((set) => ({
   openPromptPanel: (nodeId, focus = false) =>
     set({ promptPanel: { nodeId, focus } }),
   closePromptPanel: () => set({ promptPanel: null }),
-  togglePromptPanelOnSelect: () =>
-    set((state) => ({ promptPanelOnSelect: !state.promptPanelOnSelect })),
   startInputPick: (target) => set({ inputPick: target }),
   stopInputPick: () => set({ inputPick: null }),
   openAssetDeletePrompt: (prompt) => set({ assetDeletePrompt: prompt }),

@@ -30,6 +30,7 @@ import { useRunStore } from "./stores/runStore";
 import { useModelStore } from "../settings/modelStore";
 import { undo } from "./commands/execute";
 import { enterIntent } from "./interactions/keyboard";
+import { generationCapabilityFor } from "../../shared/domain";
 
 const ids = goldenNodeIds();
 
@@ -262,6 +263,22 @@ async function openEditor() {
 function selectNode(nodeId: string) {
   act(() => {
     useEditorStore.getState().setSelection({ nodeIds: [nodeId], edgeIds: [] });
+    // The panel no longer comes up on a selection by itself; these tests ask
+    // for it the way a chosen entry does, so the node a test points at is the
+    // node the panel is open under.
+    const moka = useProjectStore.getState().moka;
+    const canvas = moka?.canvas.find((entry) => entry.id === ids.canvasMain);
+    const node = canvas?.nodes.find((entry) => entry.id === nodeId);
+    if (node && generationCapabilityFor(node.kind) !== null) {
+      useEditorStore.getState().openPromptPanel(nodeId);
+    }
+  });
+}
+
+/** A plain selection, which never brings the panel up on its own. */
+function selectOnly(nodeId: string) {
+  act(() => {
+    useEditorStore.getState().setSelection({ nodeIds: [nodeId], edgeIds: [] });
   });
 }
 
@@ -311,7 +328,6 @@ beforeEach(() => {
   useEditorStore.setState({
     selection: { nodeIds: [], edgeIds: [] },
     promptPanel: null,
-    promptPanelOnSelect: true,
     contextMenu: null,
     renaming: null,
     textEditing: null,
@@ -355,22 +371,19 @@ describe("what Enter asks for", () => {
 });
 
 describe("the generation panel", () => {
-  it("comes up under a selected node, and stops when told to", async () => {
+  it("comes up when asked for, and a selection alone is just a selection", async () => {
     await openEditor();
     expect(screen.queryByTestId("prompt-panel")).toBeNull();
 
+    // Nothing brings the panel up on its own any more.
+    selectOnly(ids.image);
+    await settle();
+    expect(screen.queryByTestId("prompt-panel")).toBeNull();
+
+    // An entry the reader chose is what opens it.
     selectNode(ids.image);
     await settle();
     expect(panel()).toBeTruthy();
-
-    // Turning the behaviour off lets a selection be just a selection.
-    act(() => {
-      useEditorStore.getState().closePromptPanel();
-      useEditorStore.getState().togglePromptPanelOnSelect();
-    });
-    selectNode(ids.text);
-    await settle();
-    expect(screen.queryByTestId("prompt-panel")).toBeNull();
   });
 
   it("does not come up for a node nothing can generate", async () => {
@@ -382,11 +395,7 @@ describe("the generation panel", () => {
 
   it("opens from Enter with the keyboard in the prompt", async () => {
     await openEditor();
-    act(() => {
-      useEditorStore.getState().closePromptPanel();
-      useEditorStore.getState().togglePromptPanelOnSelect();
-    });
-    selectNode(ids.image);
+    selectOnly(ids.image);
     await settle();
     expect(screen.queryByTestId("prompt-panel")).toBeNull();
 

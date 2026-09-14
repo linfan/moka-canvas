@@ -85,7 +85,6 @@ beforeEach(() => {
   useHistoryStore.getState().clear();
   useAppStore.setState({ toasts: [], config: null });
   useEditorStore.setState({
-    leftPanelOpen: true,
     leftPanelTab: "project",
     focusedAssetId: null,
     announcement: "",

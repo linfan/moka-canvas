@@ -216,32 +216,38 @@ function column(page: Page) {
   return page.getByTestId("assistant-panel");
 }
 
-test("the column beside the canvas comes up on either of its two faces", async ({
+test("the column beside the canvas turns over between its three faces", async ({
   page,
 }) => {
   await page.goto("/");
   await createProject(
     page,
     join(projectHome("assistant-column"), "project"),
-    "Two Faced Column",
+    "Three Faced Column",
   );
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
+  const history = page.getByTestId("history-panel");
   await expect(inspector).toBeVisible();
 
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await expect(column(page)).toBeVisible();
-  // One column rather than two: a canvas with both beside it has very little of
-  // itself left to look at.
+  // One column rather than three: a canvas with all of them beside it has very
+  // little of itself left to look at.
   await expect(inspector).not.toBeVisible();
 
-  await page.getByRole("button", { name: "Inspector", exact: true }).click();
-  await expect(inspector).toBeVisible();
+  await page.getByRole("tab", { name: "History" }).click();
+  await expect(history).toBeVisible();
   await expect(column(page)).not.toBeVisible();
 
-  // Pressing the face already up folds the column away rather than leaving it.
-  await page.getByRole("button", { name: "Inspector", exact: true }).click();
-  await expect(inspector).not.toBeVisible();
+  await page.getByRole("tab", { name: "Inspector" }).click();
+  await expect(inspector).toBeVisible();
+  await expect(history).not.toBeVisible();
+
+  // The face already up stays up: the column is always beside the canvas, and
+  // its tabs choose what it shows rather than whether it is there.
+  await page.getByRole("tab", { name: "Inspector" }).click();
+  await expect(inspector).toBeVisible();
 });
 
 test("a question asked over a card is answered and kept in the document", async ({
@@ -258,7 +264,7 @@ test("a question asked over a card is answered and kept in the document", async 
     "A lantern floats over a quiet lake at dusk.",
   );
 
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await expect(column(page)).toBeVisible();
   await expect(page.getByTestId("assistant-about")).toHaveText("About 1 text");
 
@@ -295,7 +301,7 @@ test("a question asked over a card is answered and kept in the document", async 
   // Carried by the document rather than by the panel that showed it.
   await page.reload();
   await openRecent(page, name);
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await expect(page.locator(".assistant-line.is-user")).toContainText(asked);
   await expect(page.locator(".assistant-line.is-assistant")).toContainText(
     SENTENCE,
@@ -314,7 +320,7 @@ test("an answer goes back onto the canvas, over a card or as one of its own", as
     join(projectHome("assistant-file"), "project"),
     "A lantern floats over a quiet lake at dusk.",
   );
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await page
     .getByLabel("Ask about this canvas")
     .fill("What does the brief say?");
@@ -363,7 +369,7 @@ test("a question already asked can be had back without asking it twice", async (
     join(projectHome("assistant-again"), "project"),
     "A lantern floats over a quiet lake at dusk.",
   );
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
 
   const asked = "What does the brief say?";
   const field = page.getByLabel("Ask about this canvas");
@@ -402,7 +408,7 @@ test("a canvas holds several conversations, and reads the one it was pointed at"
     join(projectHome("assistant-sessions"), "project"),
     "A lantern floats over a quiet lake at dusk.",
   );
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
 
   const first = "What does the brief say?";
   await page.getByLabel("Ask about this canvas").fill(first);
@@ -473,7 +479,7 @@ test("a canvas holds several conversations, and reads the one it was pointed at"
 
   await page.reload();
   await openRecent(page, name);
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await expect
     .poll(() => listing.inputValue(), { timeout: 10_000 })
     .toBe(newest.id);
@@ -504,7 +510,7 @@ test("a conversation asked for a picture puts one on the canvas and files it", a
     seed,
   );
 
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await column(page)
     .getByRole("button", { name: "Image", exact: true })
     .click();
@@ -576,7 +582,7 @@ test("a card whose making came back empty is asked again without a second one", 
     "A lantern floats over a quiet lake at dusk.",
   );
 
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await column(page)
     .getByRole("button", { name: "Image", exact: true })
     .click();
@@ -608,7 +614,7 @@ test("a card whose making came back empty is asked again without a second one", 
   await reaskTheCard(picture.id, "A poster of it, at dawn.");
   await page.reload();
   await openRecent(page, name);
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await page.getByRole("tab", { name: "Assistant" }).click();
   await expect(again).toBeVisible({ timeout: 10_000 });
 
   await page.on("dialog", (dialog) => dialog.accept());

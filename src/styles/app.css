@@ -856,31 +856,51 @@ h2 {
 /* The two columns beside the canvas, and the widths they are dragged to.
 
    Each reads its width from a property the drag sets on the row they sit in,
-   falling back to the width that suits what it shows: a conversation is read in
-   sentences and wants more of the window than a list of fields does. A column
-   nobody has dragged is a column still at that fallback. */
+   falling back to a width that suits what they show. A column nobody has
+   dragged is a column still at that fallback. Both columns turn over between
+   the faces their tabs offer rather than scrolling as one, so the choice of
+   face stays put and the face chosen scrolls on its own. */
 .editor-side,
-.editor-inspector,
-.assistant-panel {
+.editor-right {
   background: var(--surface);
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 20px;
-  overflow-y: auto;
+  gap: 12px;
+  overflow: hidden;
   padding: 16px;
 }
 
 .editor-side {
+  border-right: 1px solid var(--stroke);
   width: var(--panel-left-width, 240px);
 }
 
-.editor-inspector {
-  width: var(--panel-right-width, 240px);
+.editor-right {
+  border-left: 1px solid var(--stroke);
+  width: var(--panel-right-width, 300px);
 }
 
-.assistant-panel {
-  width: var(--panel-right-width, 320px);
+/* The face a column is showing fills what is left under its tabs, and keeps
+   its own reading of that room: a conversation scrolls its lines inside
+   itself, while a list of fields scrolls as one. */
+.editor-right > .editor-inspector,
+.editor-right > .history-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.editor-right > .assistant-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* The edge a column is dragged by: a hairline that lights up under the pointer
@@ -930,15 +950,6 @@ h2 {
 body.is-dragging-panel {
   cursor: col-resize;
   user-select: none;
-}
-
-.editor-side {
-  border-right: 1px solid var(--stroke);
-
-  /* The column turns over between two faces rather than scrolling as one, so
-     the choice of face stays put and the face chosen scrolls on its own. */
-  gap: 12px;
-  overflow: hidden;
 }
 
 .editor-side > .side-resources {
@@ -1221,11 +1232,6 @@ body.is-dragging-panel {
   background: var(--surface-raised);
   border-radius: var(--radius-sm);
   box-shadow: inset 0 0 0 1px var(--muted);
-}
-
-.editor-inspector,
-.assistant-panel {
-  border-left: 1px solid var(--stroke);
 }
 
 .side-resource-list,
@@ -1833,10 +1839,6 @@ body.is-dragging-panel {
 }
 
 /* The history column: each run a card of its own, with its steps read inside. */
-.history-panel {
-  width: var(--panel-right-width, 300px);
-}
-
 .history-filter {
   align-items: center;
   display: flex;
@@ -2218,8 +2220,65 @@ button.danger:hover:not(:disabled) {
 }
 
 .tool-group {
+  align-items: center;
   display: flex;
   gap: 6px;
+}
+
+/* The two tools as one switch: a thumb that slides to the tool being held,
+   with the mark of each tool at the end it belongs to. */
+.tool-switch {
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  display: grid;
+  flex: none;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+  position: relative;
+}
+
+.tool-switch-thumb {
+  background: var(--primary);
+  border-radius: 999px;
+  height: 26px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  width: 38px;
+}
+
+.tool-switch-thumb[data-tool="pan"] {
+  transform: translateX(38px);
+}
+
+.tool-switch button {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  width: 38px;
+  z-index: 1;
+}
+
+.tool-switch button:hover {
+  color: var(--ink);
+}
+
+.tool-switch button.is-active {
+  color: var(--on-primary);
+}
+
+/* The view controls that stay marks rather than words. */
+.editor-toolstrip .tool-group button svg {
+  display: block;
 }
 
 .zoom-readout {
@@ -2790,13 +2849,6 @@ button.danger:hover:not(:disabled) {
   margin: 0;
 }
 
-/* Read in sentences rather than in the short rows an inspector holds, so it
-   takes more of the window than the column beside it does. */
-.assistant-panel {
-  gap: 10px;
-  overflow: hidden;
-}
-
 .assistant-panel > h2 {
   flex: none;
 }
@@ -3317,8 +3369,7 @@ button.danger:hover:not(:disabled) {
 
 @media (max-width: 900px) {
   .editor-side,
-  .editor-inspector,
-  .assistant-panel,
+  .editor-right,
   .panel-resizer {
     display: none;
   }
