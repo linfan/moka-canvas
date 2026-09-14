@@ -1098,6 +1098,10 @@ body.is-dragging-panel {
   display: grid;
   gap: 6px;
   list-style: none;
+  /* The gap between rows is the list's own to give; a margin carried over from
+     the browser's default sheet would add a second, wider one under the last
+     row and read as a gap nobody asked for. */
+  margin: 0;
   padding: 0;
 }
 
@@ -1113,6 +1117,12 @@ body.is-dragging-panel {
 }
 
 .side-resources {
+  /* The column hands this face all the room below the tabs, and a grid left
+     to itself shares leftover room out between its rows rather than leaving it
+     blank below them — which read as a shelf where every row was padded out to
+     twice its height. The rows are as tall as what they hold, and the room
+     below the last of them is left empty. */
+  align-content: start;
   display: grid;
   gap: 10px;
 }
@@ -1358,6 +1368,7 @@ body.is-dragging-panel {
   display: grid;
   gap: 6px;
   list-style: none;
+  margin: 0;
   padding: 0;
 }
 
@@ -1414,9 +1425,8 @@ body.is-dragging-panel {
 .inspector-note {
   color: var(--muted);
   font-size: 13px;
-}
-
-.inspector-note {
+  /* Said once, in the column's own gap: the default sheet's margin under a
+     paragraph would put twice the room below this line as above it. */
   margin: 0;
 }
 
