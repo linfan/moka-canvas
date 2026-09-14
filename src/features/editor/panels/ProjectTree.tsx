@@ -180,7 +180,7 @@ function RenameField({
 /** The mark a row carries while something is being dragged over it. */
 function dropClass(api: TreeApi, key: string): string {
   const drop = api.drop;
-  return drop && drop.anchor === key ? ` is-drop-${drop.edge}` : "";
+  return drop && drop.anchor === key ? `is-drop-${drop.edge}` : "";
 }
 
 /** What a row is dragged by, and what it lets go of where. */
@@ -237,6 +237,9 @@ function Row({
 }) {
   const key = keyOf(target);
   const renaming = api.renaming !== null && keyOf(api.renaming) === key;
+  // Words between the names, since a row dressed in "tree-rowis-active" wears
+  // neither: it loses the shape every other row has and with it the place its
+  // words start, which is the one thing a tree is read by.
   const classes = [
     "tree-row",
     active ? "is-active" : "",
@@ -244,7 +247,7 @@ function Row({
     dropClass(api, key),
   ]
     .filter(Boolean)
-    .join("");
+    .join(" ");
   return (
     <div className={classes} {...dragProps(api, target, drag)}>
       {caret ? (

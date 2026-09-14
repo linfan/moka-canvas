@@ -1149,6 +1149,9 @@ body.is-dragging-panel {
   background: var(--surface-raised);
 }
 
+/* The board being looked at is marked by its own words rather than by being
+   stood somewhere else: every row starts at the same place, so a column of
+   names can be read down as a column. */
 .tree-row.is-active {
   background: var(--surface-raised);
   box-shadow: inset 0 0 0 1px var(--stroke);
@@ -1156,6 +1159,7 @@ body.is-dragging-panel {
 
 .tree-row.is-active .tree-label {
   color: var(--ink);
+  font-weight: 600;
 }
 
 .tree-caret {

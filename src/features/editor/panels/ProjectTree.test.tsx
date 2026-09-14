@@ -146,6 +146,26 @@ describe("the canvas tree", () => {
     expect(useOpenCanvases.getState().ids).toContain(drafts?.id);
   });
 
+  it("marks the board being looked at in its words rather than in its place", () => {
+    const moka = openTree(buildTree());
+    const kept = moka.canvas.find((canvas) => canvas.name === "Canvas 2");
+    const drafts = moka.canvas.find((canvas) => canvas.name === "Canvas 1");
+    const rowOf = (canvas: typeof kept) =>
+      document.querySelector(`[data-row="canvas:${canvas?.id}"]`);
+
+    // Both names on the row and a space between them: a row dressed in
+    // "tree-rowis-active" wears neither name, so it loses the shape every
+    // other row has, and with it the place its words start.
+    expect(rowOf(kept)?.className).toBe("tree-row is-active");
+    expect(rowOf(kept)?.classList.contains("tree-row")).toBe(true);
+
+    // Opening another board moves the mark to it, and takes it off the first.
+    fireEvent.click(screen.getByRole("button", { name: "Open Drafts" }));
+    fireEvent.click(rowNamed("Canvas 1"));
+    expect(rowOf(drafts)?.className).toBe("tree-row is-active");
+    expect(rowOf(kept)?.className).toBe("tree-row");
+  });
+
   it("makes a board and a folder where the row asked for them", () => {
     const moka = openTree(buildTree());
     const drafts = (moka.folders ?? []).find((f) => f.name === "Drafts");
