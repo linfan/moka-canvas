@@ -85,6 +85,60 @@ test("a model written from the form is stored and kept", async ({ page }) => {
   ).toBeChecked();
 });
 
+/**
+ * The window keeps its place while its tabs are turned over.
+ *
+ * A dialog that grows to whatever the tab holds moves under the pointer with
+ * every click, so the room a tab is read in is the dialog's own and never the
+ * tab's: what a tab holds too much of scrolls inside its panel, and what it
+ * holds too little of leaves the bottom of that panel blank.
+ */
+test("the settings dialog keeps one box across its tabs", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+
+  const boxOf = async () => {
+    const box = await dialog.boundingBox();
+    return [box!.x, box!.y, box!.width, box!.height].map(Math.round);
+  };
+
+  await dialog.getByRole("tab", { name: "System" }).click();
+  const held = await boxOf();
+
+  // Every face of both sections, the short ones and the one long enough to
+  // need a scroll of its own.
+  for (const [top, sub] of [
+    ["Model", "Text"],
+    ["Model", "Image"],
+    ["Model", "Video"],
+    ["Model", "Preferences"],
+    ["System", null],
+  ] as [string, string | null][]) {
+    await dialog.getByRole("tab", { name: top }).click();
+    if (sub) await dialog.getByRole("tab", { name: sub }).click();
+    expect(await boxOf(), `${top}/${sub}`).toEqual(held);
+  }
+
+  // The preferences are longer than the panel, and are read by scrolling the
+  // panel rather than by the dialog giving way to them.
+  await dialog.getByRole("tab", { name: "Model" }).click();
+  await dialog.getByRole("tab", { name: "Preferences" }).click();
+  const overflow = await dialog
+    .locator(".settings-body")
+    .first()
+    // The suite is compiled without the DOM's own types, so the measurements
+    // are read off a shape rather than off an element.
+    .evaluate((body) => {
+      const sized = body as unknown as {
+        scrollHeight: number;
+        clientHeight: number;
+      };
+      return sized.scrollHeight > sized.clientHeight;
+    });
+  expect(overflow).toBe(true);
+});
+
 test("a category offers only the protocols that serve it", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings" }).click();
