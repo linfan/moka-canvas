@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -9,10 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import App from "../../App";
-import {
-  buildGoldenMokaFile,
-  goldenNodeIds,
-} from "../../shared/domain/fixtures";
+import { buildGoldenMokaFile } from "../../shared/domain/fixtures";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
@@ -122,100 +118,44 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-
 describe("top bar", () => {
-  it("adds a node of the chosen kind from the bar", async () => {
+  it("offers the two exports under one button", async () => {
     await openGolden();
-    const before = useProjectStore.getState().moka!.canvas[0].nodes.length;
 
-    fireEvent.click(screen.getByRole("button", { name: "Add node" }));
-    const menu = await screen.findByRole("menu", { name: "Add node" });
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Text" }));
-
-    const canvas = useProjectStore.getState().moka!.canvas[0];
-    expect(canvas.nodes).toHaveLength(before + 1);
-    const added = canvas.nodes[canvas.nodes.length - 1];
-    expect(added.kind).toBe("text");
-    // The choice moves the document, so the question it was asked through goes
-    // away rather than staying up over the new node.
-    expect(screen.queryByRole("menu", { name: "Add node" })).toBeNull();
-  });
-
-  it("groups what is selected and takes the group apart again", async () => {
-    const ids = goldenNodeIds();
-    await openGolden();
-    const groupButton = screen.getByRole("button", { name: "Group" });
-    expect(groupButton).toHaveProperty("disabled", true);
-
-    act(() => {
-      useEditorStore
-        .getState()
-        .setSelection({ nodeIds: [ids.text, ids.image], edgeIds: [] });
-    });
-    expect(groupButton).toHaveProperty("disabled", false);
-    fireEvent.click(groupButton);
-
-    let canvas = useProjectStore.getState().moka!.canvas[0];
-    expect(canvas.groups).toHaveLength(1);
-    expect(canvas.groups[0].childNodeIds).toEqual([ids.text, ids.image]);
-    const groupId = canvas.groups[0].groupId;
-    expect(
-      canvas.nodes.some((node) => node.id === groupId && node.kind === "group"),
-    ).toBe(true);
-
-    // Grouping leaves the group selected with its members, which is what
-    // Ungroup is for.
-    fireEvent.click(screen.getByRole("button", { name: "Ungroup" }));
-    canvas = useProjectStore.getState().moka!.canvas[0];
-    expect(canvas.groups).toHaveLength(0);
-    expect(canvas.nodes.some((node) => node.id === groupId)).toBe(false);
-    expect(canvas.nodes.some((node) => node.id === ids.text)).toBe(true);
-  });
-
-  it("leaves Ungroup alone until a group is selected", async () => {
-    const ids = goldenNodeIds();
-    await openGolden();
-    act(() => {
-      useEditorStore
-        .getState()
-        .setSelection({ nodeIds: [ids.text], edgeIds: [] });
-    });
-    expect(screen.getByRole("button", { name: "Ungroup" })).toHaveProperty(
-      "disabled",
-      true,
-    );
-  });
-
-  it("imports files chosen from the bar as assets and nodes", async () => {
-    await openGolden();
-    // The resource panel offers its own Import…, so the bar's is asked for by
-    // region rather than by name alone.
+    // The bar carries the things that act on the whole document and none of
+    // the things that act on a node: those live on the node and its menus.
     const topbar = screen.getByRole("banner");
-    fireEvent.click(within(topbar).getByRole("button", { name: "Import…" }));
-    const input = screen.getByLabelText(
-      "Import files into the project",
-    ) as HTMLInputElement;
-    fireEvent.change(input, {
-      target: {
-        files: [
-          new File(["x"], "drop.png", { type: "image/png" }),
-          new File(["y"], "second.png", { type: "image/png" }),
-        ],
-      },
-    });
+    for (const gone of ["Add node", "Group", "Ungroup", "Import…"]) {
+      expect(within(topbar).queryByRole("button", { name: gone })).toBeNull();
+    }
 
-    await vi.waitFor(() => {
-      expect(
-        useProjectStore
-          .getState()
-          .moka!.resources.images.some((entry) => entry.id === "dropped-asset"),
-      ).toBe(true);
-    });
-    await vi.waitFor(() => {
-      const titles = useProjectStore
-        .getState()
-        .moka!.canvas[0].nodes.map((node) => node.title);
-      expect(titles.filter((title) => title === "drop.png")).toHaveLength(2);
-    });
+    fireEvent.click(within(topbar).getByRole("button", { name: "Export" }));
+    const menu = await screen.findByRole("menu", { name: "Export" });
+    expect(
+      within(menu).getByRole("menuitem", { name: "Export project" }),
+    ).toBeTruthy();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Export as image" }),
+    ).toHaveProperty("disabled", false);
+
+    // Choosing the project export asks what should travel with it.
+    fireEvent.click(
+      within(menu).getByRole("menuitem", { name: "Export project" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Export package" }),
+    ).toBeTruthy();
+  });
+
+  it("leaves the image export alone on a canvas with nothing on it", async () => {
+    await openGolden();
+    fireEvent.click(screen.getByRole("button", { name: "Canvas 2" }));
+    await screen.findByTestId("canvas-tab-Canvas 2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    const menu = await screen.findByRole("menu", { name: "Export" });
+    expect(
+      within(menu).getByRole("menuitem", { name: "Export as image" }),
+    ).toHaveProperty("disabled", true);
   });
 });

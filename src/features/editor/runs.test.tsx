@@ -816,18 +816,20 @@ describe("reading one node's run", () => {
 });
 
 describe("run UI", () => {
-  it("runs the selected operation node from the topbar", async () => {
+  it("runs the selected operation node from the inspector", async () => {
     await openEditor();
-    const button = screen.getByRole("button", { name: /run/i });
-    expect(button).toHaveProperty("disabled", true);
+    // Nothing is offered until the board is pointed at something runnable.
+    expect(
+      screen.queryByRole("button", { name: "▶ Run this node" }),
+    ).toBeNull();
 
     selectOperationNode();
-    await screen.findByRole("button", { name: "▶ Run" });
+    await screen.findByRole("button", { name: "▶ Run this node" });
     api.startResponse = () => ({
       body: withStepStatus(makeRun({ status: "succeeded" }), "succeeded"),
       status: 201,
     });
-    fireEvent.click(screen.getByRole("button", { name: "▶ Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "▶ Run this node" }));
 
     await act(async () => {
       await Promise.resolve();
@@ -898,14 +900,11 @@ describe("run UI", () => {
         },
       },
     });
-    fireEvent.click(screen.getByRole("button", { name: "▶ Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "▶ Run this node" }));
 
     const issues = await screen.findByRole("alert");
     expect(issues.textContent).toContain("PORT_UNRESOLVED");
     expect(issues.textContent).toContain("Required input text has no value");
-    expect(
-      useAppStore.getState().toasts.some((toast) => toast.kind === "error"),
-    ).toBe(true);
   });
 
   it("shows the latest run status with retry for the selected node", async () => {
@@ -1198,11 +1197,6 @@ describe("generation UI", () => {
     expect(inInspector).toHaveProperty("disabled", true);
     expect(inInspector).toHaveProperty("title", GENERATION_UNAVAILABLE);
     expect(screen.getByText(GENERATION_UNAVAILABLE)).toBeTruthy();
-
-    // The topbar says the same on its control rather than failing on the click.
-    const inTopbar = screen.getByRole("button", { name: "▶ Run" });
-    expect(inTopbar).toHaveProperty("disabled", true);
-    expect(inTopbar).toHaveProperty("title", GENERATION_UNAVAILABLE);
   });
 
   it("asks again under what an asset recorded, as a new run", async () => {

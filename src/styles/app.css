@@ -607,6 +607,22 @@ h2 {
   padding: 8px 12px;
 }
 
+/* The export question and its two answers: one button on the bar, and a
+   menu under it anchored to the corner the button stands in. */
+.export-menu {
+  flex: none;
+  position: relative;
+}
+
+.export-menu-pop {
+  animation: home-menu-slide 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  left: auto;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  transform-origin: top right;
+}
+
 /* The app's corner: a cup that opens the menu of pages. */
 .home-menu {
   flex: none;

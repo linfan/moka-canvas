@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import App from "../../App";
 import { buildGoldenMokaFile } from "../../shared/domain/fixtures";
@@ -137,7 +138,13 @@ describe("exporting the canvas as an image", () => {
       saved = { name: this.download, href: this.getAttribute("href") ?? "" };
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Export image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(
+      within(await screen.findByRole("menu", { name: "Export" })).getByRole(
+        "menuitem",
+        { name: "Export as image" },
+      ),
+    );
     await waitFor(() => expect(urls.create).toHaveBeenCalledWith(blob));
 
     expect(snapshot).toHaveBeenCalledTimes(1);
@@ -160,7 +167,13 @@ describe("exporting the canvas as an image", () => {
     stubCanvas(snapshot);
     const urls = stubObjectUrls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Export image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(
+      within(await screen.findByRole("menu", { name: "Export" })).getByRole(
+        "menuitem",
+        { name: "Export as image" },
+      ),
+    );
     await waitFor(() =>
       expect(useAppStore.getState().toasts).toMatchObject([
         { kind: "error", message: "There is nothing to export yet" },
@@ -174,7 +187,13 @@ describe("exporting the canvas as an image", () => {
     await openGolden();
     const urls = stubObjectUrls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Export image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(
+      within(await screen.findByRole("menu", { name: "Export" })).getByRole(
+        "menuitem",
+        { name: "Export as image" },
+      ),
+    );
     await waitFor(() =>
       expect(useAppStore.getState().toasts).toMatchObject([
         { kind: "error", message: "The canvas is not ready" },

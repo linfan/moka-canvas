@@ -194,6 +194,10 @@ function goldenWithShelfAsset(bytes: number): MokaFile {
 /** Ask to export, and return the question that answers back first. */
 async function askToExport(): Promise<HTMLElement> {
   fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  const menu = await screen.findByRole("menu", { name: "Export" });
+  fireEvent.click(
+    within(menu).getByRole("menuitem", { name: "Export project" }),
+  );
   return screen.findByRole("dialog");
 }
 

@@ -103,6 +103,7 @@ export async function showAssets(page: Page) {
 /** Open the question an export asks about what the package should carry. */
 export async function askToExport(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "Export", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Export project" }).click();
   const asked = page.getByRole("dialog", { name: "Export package" });
   await expect(asked).toBeVisible({ timeout: 10_000 });
   return asked;

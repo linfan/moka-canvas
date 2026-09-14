@@ -15,9 +15,10 @@ test("the canvas saves as a PNG of everything it holds", async ({ page }) => {
   await addNode(page, "Text");
   await page.keyboard.press("Escape");
 
+  await page.getByRole("button", { name: "Export", exact: true }).click();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "Export image" }).click(),
+    page.getByRole("menuitem", { name: "Export as image" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("Canvas 1.png");
 
