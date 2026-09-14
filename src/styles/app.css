@@ -700,16 +700,83 @@ h2 {
   min-height: 0;
 }
 
+/* The two columns beside the canvas, and the widths they are dragged to.
+
+   Each reads its width from a property the drag sets on the row they sit in,
+   falling back to the width that suits what it shows: a conversation is read in
+   sentences and wants more of the window than a list of fields does. A column
+   nobody has dragged is a column still at that fallback. */
 .editor-side,
 .editor-inspector,
 .assistant-panel {
   background: var(--surface);
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 20px;
   overflow-y: auto;
   padding: 16px;
-  width: 240px;
+}
+
+.editor-side {
+  width: var(--panel-left-width, 240px);
+}
+
+.editor-inspector {
+  width: var(--panel-right-width, 240px);
+}
+
+.assistant-panel {
+  width: var(--panel-right-width, 320px);
+}
+
+/* The edge a column is dragged by: a hairline that lights up under the pointer
+   and answers to the arrow keys, sitting over the column's own border rather
+   than taking room from the canvas beside it. */
+.panel-resizer {
+  background: transparent;
+  border: none;
+  cursor: col-resize;
+  flex: none;
+  margin: 0 -4px;
+  padding: 0;
+  position: relative;
+  touch-action: none;
+  width: 8px;
+  z-index: 2;
+}
+
+.panel-resizer::after {
+  background: transparent;
+  bottom: 0;
+  content: "";
+  left: 50%;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  transition: background 120ms ease;
+  width: 2px;
+}
+
+.panel-resizer:hover::after,
+.panel-resizer.is-dragging::after {
+  background: var(--primary);
+}
+
+.panel-resizer:focus-visible {
+  outline: none;
+}
+
+.panel-resizer:focus-visible::after {
+  background: var(--primary);
+  box-shadow: 0 0 0 1px var(--surface);
+}
+
+/* While a column is being dragged nothing under the pointer should be reading
+   the crossing as a choice of its own, or selecting words on the way past. */
+body.is-dragging-panel {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .editor-side {
@@ -1604,7 +1671,7 @@ h2 {
 
 /* The history column: each run a card of its own, with its steps read inside. */
 .history-panel {
-  width: 300px;
+  width: var(--panel-right-width, 300px);
 }
 
 .history-filter {
@@ -2450,7 +2517,6 @@ button.danger:hover:not(:disabled) {
 .assistant-panel {
   gap: 10px;
   overflow: hidden;
-  width: 320px;
 }
 
 .assistant-panel > h2 {
@@ -2974,7 +3040,8 @@ button.danger:hover:not(:disabled) {
 @media (max-width: 900px) {
   .editor-side,
   .editor-inspector,
-  .assistant-panel {
+  .assistant-panel,
+  .panel-resizer {
     display: none;
   }
 }

@@ -18,6 +18,7 @@ import { useEditorKeyboard } from "./interactions/keyboard";
 import { useAppearance } from "./stores/appearance";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
+import { usePanelWidths } from "./stores/panelWidths";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
 import { useRunStore, useRunsInFlight } from "./stores/runStore";
 import { ContextMenu } from "./panels/ContextMenu";
@@ -40,6 +41,8 @@ import {
   type ExportChoices,
   type LeftBehind,
 } from "./components/ExportDialog";
+import { PanelResizer } from "./components/PanelResizer";
+import { panelWidthStyle } from "./components/panelWidthVars";
 import { RenameOverlay } from "./components/RenameOverlay";
 import { TextEditOverlay } from "./components/TextEditOverlay";
 import { PromptPanel } from "./components/PromptPanel";
@@ -74,6 +77,8 @@ export function EditorPage() {
   const leftPanelTab = useEditorStore((state) => state.leftPanelTab);
   const sidePanelOpen = useEditorStore((state) => state.sidePanelOpen);
   const sidePanelTab = useEditorStore((state) => state.sidePanelTab);
+  const leftWidth = usePanelWidths((state) => state.left);
+  const rightWidth = usePanelWidths((state) => state.right);
   const promptPanelOnSelect = useEditorStore(
     (state) => state.promptPanelOnSelect,
   );
@@ -215,8 +220,12 @@ export function EditorPage() {
       </div>
       <TopBar onBack={requestClose} onExport={() => askAboutExport(false)} />
 
-      <div className="editor-body">
+      <div
+        className="editor-body"
+        style={panelWidthStyle(leftWidth, rightWidth)}
+      >
         {leftPanelOpen && <SidePanel />}
+        {leftPanelOpen && <PanelResizer side="left" />}
         <main
           className="editor-canvas"
           data-testid="canvas-host"
@@ -266,6 +275,7 @@ export function EditorPage() {
               : "No canvas"}
           </p>
         </main>
+        {sidePanelOpen && <PanelResizer side="right" />}
         {sidePanelOpen &&
           (sidePanelTab === "assistant" ? (
             <AssistantPanel />
