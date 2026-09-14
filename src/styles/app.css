@@ -969,7 +969,7 @@ h2 {
   gap: 4px;
   justify-content: center;
   margin-bottom: -1px;
-  padding: 7px 2px;
+  padding: 5px 2px;
 }
 
 .side-asset-kinds button:hover:not(:disabled) {
@@ -1039,6 +1039,14 @@ h2 {
   justify-content: flex-end;
 }
 
+/* The head sits in a narrow column: the Import button wears the column's
+   scale rather than the global one, so the row is no taller than it reads. */
+.side-resources-head button {
+  flex: none;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
 .side-add-nodes {
   align-items: center;
   color: var(--muted);
@@ -1051,7 +1059,9 @@ h2 {
 
 .side-add-nodes input[type="checkbox"] {
   accent-color: var(--primary);
-  width: auto;
+  height: 13px;
+  padding: 0;
+  width: 13px;
 }
 
 .side-resource-group {
