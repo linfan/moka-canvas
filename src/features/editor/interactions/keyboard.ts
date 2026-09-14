@@ -108,6 +108,10 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         label: "Pan while held",
         chords: [["Space"], ["Ctrl"]],
       },
+      {
+        label: "The second action: pan while choosing, choose while panning",
+        chords: [["Middle-drag"], ["Three-finger drag"]],
+      },
       { label: "Select tool", chords: [["V"]] },
       { label: "Pan tool", chords: [["H"]] },
     ],

@@ -72,6 +72,8 @@ const SNAP_INCREMENT = GRID_BASE_SPACING / 4;
 /** Two taps within this window and pixel distance count as a double-tap. */
 const DOUBLE_TAP_MS = 400;
 const DOUBLE_TAP_PX = 6;
+/** How many fingers on glass make the second action. */
+const SECOND_ACTION_FINGERS = 3;
 /** Snapshot density: twice the diagram's own pixels, so text stays crisp. */
 const SNAPSHOT_PIXEL_RATIO = 2;
 /** The most pixels one snapshot may hold, about 4096². */
@@ -237,6 +239,16 @@ export class LeaferEditorController {
   private selectionSignature = "";
   private gesture: Gesture = { kind: "idle" };
   private dragOriginView: Point | null = null;
+  /**
+   * The fingers down on glass, and the second action three of them own.
+   *
+   * A trackpad on a Mac has no middle button to press, and what it has
+   * instead is three fingers: the third one to land takes the canvas over
+   * from whatever the first two were doing, and the three of them together
+   * drag the second action until one of them lifts.
+   */
+  private touchPoints = new Map<number, Point>();
+  private secondary: { kind: "pan" | "marquee"; last: Point } | null = null;
   private lastTap: { time: number; view: Point; key: string } | null = null;
   private guides: Line[] = [];
   private animation: { frame: number } | null = null;
@@ -287,14 +299,30 @@ export class LeaferEditorController {
       this.handleDragEnd(event);
     const onPointerCancel = () => this.cancelGesture();
     const onWheel = (event: WheelEvent) => this.handleWheel(event);
+    // Fingers on glass are counted here, on the raw events, because the
+    // second action they make is one leafer knows nothing about.
+    const onTouchDown = (event: globalThis.PointerEvent) =>
+      this.handleTouchDown(event);
+    const onTouchMove = (event: globalThis.PointerEvent) =>
+      this.handleTouchMove(event);
+    const onTouchUp = (event: globalThis.PointerEvent) =>
+      this.handleTouchUp(event);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerCancel);
+    container.addEventListener("pointerdown", onTouchDown);
+    window.addEventListener("pointermove", onTouchMove);
+    window.addEventListener("pointerup", onTouchUp);
+    window.addEventListener("pointercancel", onTouchUp);
     container.addEventListener("wheel", onWheel, { passive: false });
     this.disposers.push(() => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerCancel);
+      container.removeEventListener("pointerdown", onTouchDown);
+      window.removeEventListener("pointermove", onTouchMove);
+      window.removeEventListener("pointerup", onTouchUp);
+      window.removeEventListener("pointercancel", onTouchUp);
       container.removeEventListener("wheel", onWheel);
     });
 
@@ -727,6 +755,9 @@ export class LeaferEditorController {
   private handleDown(event: IPointerEvent) {
     const callbacks = this.callbacks;
     if (!callbacks || this.gesture.kind !== "idle") return;
+    // The fingers owning the second action are the only hand on the canvas
+    // until one of them lifts.
+    if (this.secondary !== null) return;
     // Right button is handled by MENU (context menu), never starts a gesture.
     if (event.right) return;
     const view = { x: event.x, y: event.y };
@@ -741,8 +772,18 @@ export class LeaferEditorController {
     const target = this.hitTarget(event);
     const additive = Boolean(event.shiftKey || event.metaKey || event.ctrlKey);
 
+    // The middle button is the second action, and the second action is the
+    // opposite of the first: the select tool chooses with the primary drag and
+    // moves the canvas with the middle one, and the pan tool moves the canvas
+    // with the primary drag and chooses with the middle one. A three-finger
+    // drag on a Mac arrives here the same way, being what the trackpad makes
+    // of a middle button.
     if (event.middle) {
-      this.startPanning(view);
+      if (callbacks.wantPan()) {
+        this.startMarquee(view, additive);
+      } else {
+        this.startPanning(view);
+      }
       return;
     }
 
@@ -839,6 +880,8 @@ export class LeaferEditorController {
 
   private handleDragMove(event: globalThis.PointerEvent) {
     if (event.isPrimary === false) return;
+    // A finger is not the hand while three of them own the second action.
+    if (this.secondary !== null && event.pointerType === "touch") return;
     const callbacks = this.callbacks;
     if (!callbacks) return;
     const view = this.viewPointOf(event);
@@ -884,28 +927,10 @@ export class LeaferEditorController {
         if (gesture.panEligible) {
           this.startPanning(gesture.startView);
         } else {
-          const rect = new Rect({
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            fill: canvasTheme.marqueeFill,
-            stroke: canvasTheme.marquee,
-            strokeWidth: 1 / this.camera.zoom,
-            dashPattern: [5 / this.camera.zoom, 4 / this.camera.zoom],
-            hittable: false,
-          });
-          this.interactionLayer.add(rect);
-          this.setGesture({
-            kind: "marquee",
-            startWorld: screenToWorld(
-              this.camera,
-              this.size,
-              gesture.startView,
-            ),
-            additive: Boolean(event.shiftKey || event.metaKey || event.ctrlKey),
-            rect,
-          });
+          this.startMarquee(
+            gesture.startView,
+            Boolean(event.shiftKey || event.metaKey || event.ctrlKey),
+          );
         }
         this.handleDragMove(event);
         return;
@@ -923,15 +948,7 @@ export class LeaferEditorController {
         return;
       }
       case "marquee": {
-        const x = Math.min(gesture.startWorld.x, world.x);
-        const y = Math.min(gesture.startWorld.y, world.y);
-        gesture.rect.set({
-          x,
-          y,
-          width: Math.abs(world.x - gesture.startWorld.x),
-          height: Math.abs(world.y - gesture.startWorld.y),
-        });
-        this.mirrorGesture(gesture, world);
+        this.updateMarquee(gesture, world);
         return;
       }
       case "draggingNodes": {
@@ -952,6 +969,7 @@ export class LeaferEditorController {
 
   private handleDragEnd(event: globalThis.PointerEvent) {
     if (event.isPrimary === false) return;
+    if (this.secondary !== null && event.pointerType === "touch") return;
     const callbacks = this.callbacks;
     if (!callbacks) return;
     const gesture = this.gesture;
@@ -1147,6 +1165,133 @@ export class LeaferEditorController {
       lastView: view,
       startCamera: this.camera,
     });
+  }
+
+  /**
+   * The other half of the second action: a drag that chooses rather than
+   * moves. Started by a primary drag under the select tool, and by the
+   * middle button (or three-finger drag) under the pan tool.
+   */
+  private startMarquee(view: Point, additive: boolean) {
+    const rect = new Rect({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      fill: canvasTheme.marqueeFill,
+      stroke: canvasTheme.marquee,
+      strokeWidth: 1 / this.camera.zoom,
+      dashPattern: [5 / this.camera.zoom, 4 / this.camera.zoom],
+      hittable: false,
+    });
+    this.interactionLayer.add(rect);
+    this.setGesture({
+      kind: "marquee",
+      startWorld: screenToWorld(this.camera, this.size, view),
+      additive,
+      rect,
+    });
+  }
+
+  private updateMarquee(
+    gesture: Extract<Gesture, { kind: "marquee" }>,
+    world: Point,
+  ) {
+    const x = Math.min(gesture.startWorld.x, world.x);
+    const y = Math.min(gesture.startWorld.y, world.y);
+    gesture.rect.set({
+      x,
+      y,
+      width: Math.abs(world.x - gesture.startWorld.x),
+      height: Math.abs(world.y - gesture.startWorld.y),
+    });
+    this.mirrorGesture(gesture, world);
+  }
+
+  // --- the second action on glass -----------------------------------------
+
+  /** Where the fingers being tracked are, on average. */
+  private touchCentroid(): Point {
+    let x = 0;
+    let y = 0;
+    for (const point of this.touchPoints.values()) {
+      x += point.x;
+      y += point.y;
+    }
+    const count = Math.max(1, this.touchPoints.size);
+    return { x: x / count, y: y / count };
+  }
+
+  private handleTouchDown(event: globalThis.PointerEvent) {
+    if (event.pointerType !== "touch") return;
+    this.touchPoints.set(event.pointerId, this.viewPointOf(event));
+    if (
+      this.secondary !== null ||
+      this.touchPoints.size < SECOND_ACTION_FINGERS
+    ) {
+      return;
+    }
+    const callbacks = this.callbacks;
+    if (!callbacks) return;
+    const at = this.touchCentroid();
+    // Whatever the first two fingers started is not what was asked for: a
+    // third finger landing says the canvas, not the cards, is what is being
+    // held, and the gesture under them is taken down without committing.
+    this.cancelGesture();
+    if (callbacks.wantPan()) {
+      this.startMarquee(at, false);
+      this.secondary = { kind: "marquee", last: at };
+    } else {
+      this.startPanning(at);
+      this.secondary = { kind: "pan", last: at };
+    }
+  }
+
+  private handleTouchMove(event: globalThis.PointerEvent) {
+    if (event.pointerType !== "touch") return;
+    if (!this.touchPoints.has(event.pointerId)) return;
+    this.touchPoints.set(event.pointerId, this.viewPointOf(event));
+    if (this.secondary === null) return;
+    const at = this.touchCentroid();
+    if (this.secondary.kind === "pan") {
+      const dx = at.x - this.secondary.last.x;
+      const dy = at.y - this.secondary.last.y;
+      this.secondary.last = at;
+      this.emitCamera(panByPixels(this.camera, dx, dy), "move");
+      return;
+    }
+    const gesture = this.gesture;
+    if (gesture.kind === "marquee") {
+      this.secondary.last = at;
+      this.updateMarquee(gesture, screenToWorld(this.camera, this.size, at));
+    }
+  }
+
+  private handleTouchUp(event: globalThis.PointerEvent) {
+    if (event.pointerType !== "touch") return;
+    this.touchPoints.delete(event.pointerId);
+    if (this.secondary === null) return;
+    if (this.touchPoints.size >= SECOND_ACTION_FINGERS) return;
+    // A finger lifted is the second action over: what it was doing lands the
+    // way the same gesture from a mouse lands, and the fingers still down are
+    // let go of, since what they do from here is the first action's business.
+    const gesture = this.gesture;
+    if (gesture.kind === "panning") {
+      this.emitCamera(this.camera, "end");
+    } else if (gesture.kind === "marquee") {
+      const world = screenToWorld(this.camera, this.size, this.secondary.last);
+      const bounds: WorldRect = {
+        x: Math.min(gesture.startWorld.x, world.x),
+        y: Math.min(gesture.startWorld.y, world.y),
+        width: Math.abs(world.x - gesture.startWorld.x),
+        height: Math.abs(world.y - gesture.startWorld.y),
+      };
+      this.callbacks?.onMarqueeSelect(bounds, gesture.additive);
+    }
+    this.teardownGesture(gesture);
+    this.setGesture({ kind: "idle" });
+    this.secondary = null;
+    this.touchPoints.clear();
   }
 
   private handleWheel(event: WheelEvent) {
