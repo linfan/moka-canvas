@@ -605,6 +605,13 @@ h2 {
   display: flex;
   gap: 10px;
   padding: 8px 12px;
+  /* Above the row of columns and the canvas, since what opens from this bar
+     opens over them: a menu that slid under a column would be a menu that
+     could not be read, and the corner it opens from would answer to the
+     column instead. Below a dialog, which covers the whole window and is
+     answered before anything on the bar is. */
+  position: relative;
+  z-index: 20;
 }
 
 /* The export question and its two answers: one button on the bar, and a
@@ -849,6 +856,11 @@ h2 {
   display: flex;
   flex: 1;
   min-height: 0;
+  position: relative;
+  /* One layer under the bar, and a layer of its own: the corners that fold the
+     columns away stand above the canvas beside them, and what they stand above
+     is everything in this row rather than anything floating over the window. */
+  z-index: 0;
 }
 
 /* The two columns beside the canvas, and the widths they are dragged to.
@@ -867,6 +879,7 @@ h2 {
   gap: 12px;
   overflow: hidden;
   padding: 16px;
+  position: relative;
 }
 
 .editor-side {
@@ -948,6 +961,81 @@ h2 {
 body.is-dragging-panel {
   cursor: col-resize;
   user-select: none;
+}
+
+/* The corner a column is folded away by, and the corner it leaves behind.
+
+   A half triangle flush with the corner rather than a button hung on the head:
+   the head is already given over to the choice of what the column shows, and a
+   fold is about the column as a whole. The one left in the page corner is the
+   same triangle turned the other way round, so the way back is offered where
+   the column stood and points the way it would come back. */
+.panel-fold,
+.panel-unfold {
+  background: var(--stroke);
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  display: grid;
+  height: 24px;
+  padding: 1px 3px 0;
+  position: absolute;
+  top: 0;
+  width: 24px;
+  z-index: 30;
+}
+
+.panel-fold:hover:not(:disabled),
+.panel-unfold:hover:not(:disabled) {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.panel-fold:focus-visible,
+.panel-unfold:focus-visible {
+  background: var(--primary);
+  color: var(--on-primary);
+  outline: none;
+}
+
+.panel-fold span,
+.panel-unfold span {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Which corner each stands in, and which way its half is cut: the mark sits in
+   the corner that is filled, pointing the way the column goes. */
+.panel-fold-left,
+.panel-unfold-right {
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  justify-items: start;
+}
+
+.panel-fold-right,
+.panel-unfold-left {
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  justify-items: end;
+}
+
+.panel-fold-left,
+.panel-unfold-left {
+  left: 0;
+}
+
+.panel-fold-right,
+.panel-unfold-right {
+  right: 0;
+}
+
+/* The head of a column keeps clear of the triangle standing in its corner. */
+.editor-side > .side-panel-tabs {
+  padding-left: 10px;
+}
+
+.editor-right > .side-panel-tabs {
+  padding-right: 10px;
 }
 
 .editor-side > .side-resources {
@@ -3439,7 +3527,8 @@ button.danger:hover:not(:disabled) {
 @media (max-width: 900px) {
   .editor-side,
   .editor-right,
-  .panel-resizer {
+  .panel-resizer,
+  .panel-unfold {
     display: none;
   }
 }

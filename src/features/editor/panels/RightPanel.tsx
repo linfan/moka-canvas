@@ -1,4 +1,5 @@
 import { AssistantPanel } from "../../assistant/AssistantPanel";
+import { PanelFold } from "../components/PanelFold";
 import { useEditorStore } from "../stores/editorStore";
 import { HistoryPanel } from "./HistoryPanel";
 import { InspectorPanel } from "./InspectorPanel";
@@ -10,14 +11,16 @@ import { InspectorPanel } from "./InspectorPanel";
  * by buttons on a strip across the bottom of the window: what is chosen is
  * read here, so the choice is offered here. The column beside the canvas on
  * the other side works the same way, and the two sides of the canvas are
- * worked the same way because they are the same kind of thing.
+ * worked the same way because they are the same kind of thing — down to the
+ * corner that folds the column away.
  */
 export function RightPanel() {
   const tab = useEditorStore((state) => state.sidePanelTab);
   const setTab = useEditorStore((state) => state.setSidePanelTab);
 
   return (
-    <div className="editor-right" data-testid="right-panel">
+    <div className="editor-right" data-testid="right-panel" id="panel-right">
+      <PanelFold side="right" />
       <div
         aria-label="What the column shows"
         className="side-panel-tabs"

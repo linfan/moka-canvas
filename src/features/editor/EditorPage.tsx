@@ -15,6 +15,7 @@ import {
 import { useEditorKeyboard } from "./interactions/keyboard";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
+import { usePanelFolds } from "./stores/panelFolds";
 import { usePanelWidths } from "./stores/panelWidths";
 import { useActiveCanvas, useProjectStore } from "./stores/projectStore";
 import { useRunStore, useRunsInFlight } from "./stores/runStore";
@@ -37,6 +38,7 @@ import {
   type ExportChoices,
   type LeftBehind,
 } from "./components/ExportDialog";
+import { PanelUnfold } from "./components/PanelFold";
 import { PanelResizer } from "./components/PanelResizer";
 import { panelWidthStyle } from "./components/panelWidthVars";
 import { RenameOverlay } from "./components/RenameOverlay";
@@ -76,6 +78,10 @@ export function EditorPage() {
   const tool = useEffectiveTool();
   const leftWidth = usePanelWidths((state) => state.left);
   const rightWidth = usePanelWidths((state) => state.right);
+  // A column folded away is not rendered at all, and the corner it stood in
+  // keeps the triangle that brings it back: the canvas takes the whole row.
+  const leftFolded = usePanelFolds((state) => state.left);
+  const rightFolded = usePanelFolds((state) => state.right);
   const announcement = useEditorStore((state) => state.announcement);
   const inFlight = useRunsInFlight();
   useEditorKeyboard();
@@ -218,8 +224,8 @@ export function EditorPage() {
         className="editor-body"
         style={panelWidthStyle(leftWidth, rightWidth)}
       >
-        <SidePanel />
-        <PanelResizer side="left" />
+        {leftFolded ? <PanelUnfold side="left" /> : <SidePanel />}
+        {!leftFolded && <PanelResizer side="left" />}
         <main
           className="editor-canvas"
           data-testid="canvas-host"
@@ -269,8 +275,8 @@ export function EditorPage() {
               : "No canvas"}
           </p>
         </main>
-        <PanelResizer side="right" />
-        <RightPanel />
+        {!rightFolded && <PanelResizer side="right" />}
+        {rightFolded ? <PanelUnfold side="right" /> : <RightPanel />}
       </div>
 
       <ContextMenu />

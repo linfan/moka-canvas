@@ -1,3 +1,4 @@
+import { PanelFold } from "../components/PanelFold";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 import { AssetsPanel } from "./AssetsPanel";
@@ -15,6 +16,9 @@ import { ProjectTree } from "./ProjectTree";
  * Following a file from the tree to the shelf turns the column over rather than
  * opening anything, which is the point of two faces of one thing: what a reader
  * was looking at is still beside what they were looking at it in.
+ *
+ * The corner of the column folds the whole of it away, for a canvas that wants
+ * the room; what is left in that corner of the window brings it back.
  */
 export function SidePanel() {
   const moka = useProjectStore((state) => state.moka);
@@ -23,7 +27,8 @@ export function SidePanel() {
   if (!moka) return null;
 
   return (
-    <aside aria-label="Project" className="editor-side">
+    <aside aria-label="Project" className="editor-side" id="panel-left">
+      <PanelFold side="left" />
       <div
         aria-label="What the column shows"
         className="side-panel-tabs"
