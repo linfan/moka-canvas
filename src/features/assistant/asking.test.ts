@@ -216,6 +216,16 @@ describe("askOf", () => {
     expect(rewrote).not.toBe(asked);
   });
 
+  it("names the model picked for it, and none where none was picked", () => {
+    expect(askOf("answer", [], "hello", "", "kept-words").request.model).toBe(
+      "kept-words",
+    );
+    expect(
+      askOf("answer", [], "hello", "", null).request.model,
+    ).toBeUndefined();
+    expect(askOf("answer", [], "hello").request.model).toBeUndefined();
+  });
+
   it("leaves a card that does not fit behind and says how many", () => {
     const long = card("text", "n-long", "Long", {
       content: "x".repeat(ASSISTANT_CONTEXT_CHARS),

@@ -365,6 +365,7 @@ export function AssistantPanel() {
   const busy = useAssistantStore((state) => state.busy);
   const shown = useAssistantStore((state) => state.shown);
   const history = useAssistantStore((state) => state.history);
+  const model = useAssistantStore((state) => state.model);
   // A card is asked of a run built from the canvas, which reads the wires rather
   // than a message, so only a turn answered by words has anywhere to put memory.
   const wordsWanted = capabilityFor(intent) === "text";
@@ -468,6 +469,13 @@ export function AssistantPanel() {
   const capability = capabilityFor(intent);
   const noModel =
     view !== null && modelOptionsFor(view, capability).length === 0;
+  // Every text model the configuration holds, which is what the quick switch
+  // offers; a pick that has since left the configuration reads as no pick.
+  const textModels = useMemo(() => modelOptionsFor(view, "text"), [view]);
+  const pickedModel =
+    model !== null && textModels.some((entry) => entry.reference === model)
+      ? model
+      : "";
   // A configuration still being read is not one with nothing in it.
   const refusal = !generationOn
     ? GENERATION_UNAVAILABLE
@@ -596,6 +604,31 @@ export function AssistantPanel() {
               </button>
             ))}
           </div>
+
+          {wordsWanted && textModels.length > 0 && (
+            <div className="assistant-model">
+              <select
+                aria-label="Model"
+                data-testid="assistant-model"
+                onChange={(event) =>
+                  useAssistantStore
+                    .getState()
+                    .setModel(
+                      event.target.value === "" ? null : event.target.value,
+                    )
+                }
+                title="Which configured text model answers in words"
+                value={pickedModel}
+              >
+                <option value="">Default model</option>
+                {textModels.map((entry) => (
+                  <option key={entry.reference} value={entry.reference}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {wordsWanted && (
             <div className="assistant-history">

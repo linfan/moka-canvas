@@ -80,6 +80,12 @@ export interface ShelfFilter {
   keepersOnly: boolean;
   where: ShelfWhere | null;
   category: AssetCategory | null;
+  /**
+   * The kind of thing asked for, which is the cut a reader thinks in: a
+   * sound is one kind filed on two shelves, so narrowing to the kind leaves
+   * both of them standing.
+   */
+  kind: Capability | null;
 }
 
 export const OPEN_SHELF_FILTER: ShelfFilter = {
@@ -88,6 +94,7 @@ export const OPEN_SHELF_FILTER: ShelfFilter = {
   keepersOnly: false,
   where: null,
   category: null,
+  kind: null,
 };
 
 export function shelfFilterIsOpen(filter: ShelfFilter): boolean {
@@ -96,7 +103,8 @@ export function shelfFilterIsOpen(filter: ShelfFilter): boolean {
     filter.tags.length === 0 &&
     !filter.keepersOnly &&
     filter.where === null &&
-    filter.category === null
+    filter.category === null &&
+    filter.kind === null
   );
 }
 
@@ -125,6 +133,9 @@ export function filterShelf(
   const kept: ResourceEntry[] = [];
   for (const category of PROJECT_ASSET_CATEGORIES) {
     if (filter.category && filter.category !== category) continue;
+    if (filter.kind && !KIND_SHELVES[filter.kind]?.includes(category)) {
+      continue;
+    }
     for (const entry of resources[category] ?? []) {
       if (filter.keepersOnly && entry.favorite !== true) continue;
       if (filter.where && shelfWhere(entry) !== filter.where) continue;

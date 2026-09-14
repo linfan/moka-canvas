@@ -1,30 +1,54 @@
 import { useEffect, useMemo, useState } from "react";
 import { assetUrl } from "../../../api";
 import {
-  ASSET_CATEGORY_LABELS,
+  CAPABILITY_LABELS,
   PROJECT_ASSET_CATEGORIES,
-  type AssetCategory,
   type AssetId,
+  type Capability,
   type ResourceEntry,
 } from "../../../shared/domain";
 import { addAssetNodes, attachAssetsToNode } from "../interactions/actions";
 import {
   OPEN_SHELF_FILTER,
+  SHELF_GLYPHS,
+  SHELF_KINDS,
   filterShelf,
+  kindOfShelf,
   shelfTags,
   type ShelfFilter,
 } from "../panels/shelfFilter";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 
-/** Which shelf a file was filed under, read off the path it lives at. */
-function categoryOf(entry: ResourceEntry): AssetCategory | null {
-  const category = entry.path.split("/")[1];
-  return PROJECT_ASSET_CATEGORIES.find((shelf) => shelf === category) ?? null;
+/** Which kind of thing a file is, read off the shelf it is filed on. */
+function kindOf(entry: ResourceEntry): Capability {
+  const shelf = entry.path.split("/")[1];
+  const category = PROJECT_ASSET_CATEGORIES.find((name) => name === shelf);
+  return kindOfShelf(category ?? "texts");
 }
 
-function hasThumb(entry: ResourceEntry): boolean {
-  return (entry.mime ?? entry.probe?.mime ?? "").startsWith("image/");
+/**
+ * The picture a row leads with, when the file has one to show.
+ *
+ * A moving picture shows the still that was taken of it, since a row cannot
+ * play a shot; a file with nothing to show leads with the mark of its shelf.
+ */
+function thumbOf(entry: ResourceEntry): string | null {
+  const mime = entry.mime ?? entry.probe?.mime ?? "";
+  if (mime.startsWith("image/")) return assetUrl(entry.id);
+  const poster = entry.probe?.posterAssetId;
+  return mime.startsWith("video/") && poster ? assetUrl(poster) : null;
+}
+
+/**
+ * The words a row leads with, where there is no picture to show.
+ *
+ * What a file carries about itself — the summary of the text it holds or the
+ * ask it came from — is its thumbnail, cut short by the row rather than by
+ * the file.
+ */
+function excerptOf(entry: ResourceEntry): string {
+  return entry.keyword?.trim() || entry.note?.trim() || "";
 }
 
 /**
@@ -131,20 +155,20 @@ export function AssetPickerModal() {
             value={filter.asked}
           />
           <select
-            aria-label="Which shelf"
+            aria-label="Which kind"
             data-testid="asset-pick-category"
             onChange={(event) =>
               setFilter((seen) => ({
                 ...seen,
-                category: (event.target.value || null) as AssetCategory | null,
+                kind: (event.target.value || null) as Capability | null,
               }))
             }
-            value={filter.category ?? ""}
+            value={filter.kind ?? ""}
           >
-            <option value="">Every shelf</option>
-            {PROJECT_ASSET_CATEGORIES.map((category) => (
-              <option key={category} value={category}>
-                {ASSET_CATEGORY_LABELS[category]}
+            <option value="">Every kind</option>
+            {SHELF_KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {CAPABILITY_LABELS[kind]}
               </option>
             ))}
           </select>
@@ -186,27 +210,44 @@ export function AssetPickerModal() {
         ) : (
           <ul aria-label="Files on the shelf" className="asset-pick-list">
             {entries.map((entry) => {
-              const category = categoryOf(entry);
+              const kind = kindOf(entry);
+              const thumb = thumbOf(entry);
+              const excerpt = excerptOf(entry);
+              const shelf = PROJECT_ASSET_CATEGORIES.find(
+                (name) => name === entry.path.split("/")[1],
+              );
               return (
                 <li key={entry.id}>
+                  {/* One row, read in one direction: the tick that takes the
+                      file, the kind it is, a taste of it — the picture for
+                      what has one, the words for what does not — and its
+                      name. */}
                   <label className="asset-pick-row">
                     <input
                       checked={chosen.includes(entry.id)}
+                      className="asset-pick-tick"
                       data-testid={`asset-pick-${entry.id}`}
                       onChange={() => toggle(entry.id)}
                       type="checkbox"
                     />
-                    {hasThumb(entry) && (
-                      <img
-                        alt=""
-                        className="asset-pick-thumb"
-                        src={assetUrl(entry.id)}
-                      />
+                    <span
+                      className={`asset-pick-kind is-${kind}`}
+                      data-testid={`asset-pick-kind-${entry.id}`}
+                    >
+                      {CAPABILITY_LABELS[kind]}
+                    </span>
+                    {thumb ? (
+                      <img alt="" className="asset-pick-thumb" src={thumb} />
+                    ) : (
+                      <span className="asset-pick-excerpt" title={excerpt}>
+                        {excerpt || (
+                          <span aria-hidden="true">
+                            {shelf ? SHELF_GLYPHS[shelf] : "▪"}
+                          </span>
+                        )}
+                      </span>
                     )}
                     <span className="asset-pick-name">{entry.name}</span>
-                    <span className="asset-pick-where">
-                      {category ? ASSET_CATEGORY_LABELS[category] : ""}
-                    </span>
                   </label>
                 </li>
               );

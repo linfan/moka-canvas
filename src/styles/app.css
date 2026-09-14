@@ -2035,12 +2035,18 @@ body.is-dragging-panel {
   padding: 0;
 }
 
+/* One row, four columns, read in one direction: the tick that takes the
+   file stays in its place on the left whatever the name does, the kind wears
+   a label of its own, the taste of the file — a picture or a few words —
+   holds a box of its own so the names behind it line up, and the name takes
+   what is left. */
 .asset-pick-row {
   align-items: center;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  display: flex;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 16px 58px 52px minmax(0, 1fr);
   padding: 4px 6px;
 }
 
@@ -2048,27 +2054,68 @@ body.is-dragging-panel {
   background: var(--surface-raised);
 }
 
+.asset-pick-tick {
+  justify-self: start;
+  margin: 0;
+}
+
+.asset-pick-kind {
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  justify-self: start;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Each kind wears its own faint wash, so a column of labels reads as kinds
+   at a glance rather than as the same word repeated. */
+.asset-pick-kind.is-text {
+  border-color: rgb(159 193 232 / 40%);
+  color: #9fc1e8;
+}
+
+.asset-pick-kind.is-image {
+  border-color: rgb(165 180 240 / 40%);
+  color: #a5b4f0;
+}
+
+.asset-pick-kind.is-audio {
+  border-color: rgb(232 201 122 / 40%);
+  color: #e8c97a;
+}
+
+.asset-pick-kind.is-video {
+  border-color: rgb(232 167 156 / 40%);
+  color: #e8a79c;
+}
+
 .asset-pick-thumb {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
-  flex: none;
-  height: 26px;
+  height: 44px;
   object-fit: cover;
-  width: 26px;
+  width: 44px;
+}
+
+.asset-pick-excerpt {
+  color: var(--muted);
+  display: -webkit-box;
+  font-size: 10px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-height: 1.3;
+  overflow: hidden;
 }
 
 .asset-pick-name {
-  flex: 1;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.asset-pick-where {
-  color: var(--muted);
-  flex: none;
-  font-size: 11px;
 }
 
 .asset-pick-foot {
@@ -3001,6 +3048,30 @@ button.danger:hover:not(:disabled) {
   display: grid;
   flex: none;
   gap: 4px;
+}
+
+/* The model the words are answered by, offered as a quick switch above the
+   field: which of the configured text models speaks is a thing a reader
+   changes turn to turn, and reaching into settings for it every time is a
+   walk for something that belongs to hand. */
+.assistant-model {
+  display: grid;
+  flex: none;
+  gap: 4px;
+}
+
+.assistant-model select {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 6px;
+  width: 100%;
+}
+
+.assistant-model select:hover {
+  border-color: var(--primary);
 }
 
 .assistant-history > span {

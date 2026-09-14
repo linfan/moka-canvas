@@ -337,24 +337,28 @@ export function askOf(
   nodes: readonly WorkflowNode[],
   asked: string,
   earlier?: string,
+  model?: string | null,
 ): AssistantWordsAsk;
 export function askOf(
   intent: "image" | "video" | "audio",
   nodes: readonly WorkflowNode[],
   asked: string,
   earlier?: string,
+  model?: string | null,
 ): AssistantCardAsk;
 export function askOf(
   intent: AssistantIntent,
   nodes: readonly WorkflowNode[],
   asked: string,
   earlier?: string,
+  model?: string | null,
 ): AssistantAsk;
 export function askOf(
   intent: AssistantIntent,
   nodes: readonly WorkflowNode[],
   asked: string,
   earlier = "",
+  model: string | null = null,
 ): AssistantAsk {
   const kind = mediaKindFor(intent);
   const names = new Map<NodeId, string>(
@@ -411,6 +415,9 @@ export function askOf(
         kind: null,
         request: {
           capability: "text",
+          // The model the reader picked off the panel, or nothing at all:
+          // a request naming no model is served by the deployment's default.
+          ...(model ? { model } : {}),
           system: intent === "rewrite" ? REWRITE_SYSTEM : ANSWER_SYSTEM,
           prompt: askPrompt([context, earlier, words]),
           inputs,

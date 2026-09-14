@@ -141,6 +141,34 @@ function bare(): ModelsView {
   };
 }
 
+/** A configuration holding two text models the quick switch can offer. */
+function configured(): ModelsView {
+  const view = bare();
+  view.models = [
+    {
+      id: "kept-words",
+      category: "text",
+      protocol: "openaiChat",
+      url: "https://api.test/chat",
+      model: "kept-1",
+      displayName: "Kept Words",
+      enabled: true,
+      apiKey: { set: true, masked: "****" },
+    },
+    {
+      id: "plain-words",
+      category: "text",
+      protocol: "openaiChat",
+      url: "https://api.test/chat2",
+      model: "plain-1",
+      displayName: "Plain Words",
+      enabled: true,
+      apiKey: { set: true, masked: "****" },
+    },
+  ];
+  return view;
+}
+
 function choose(...nodeIds: string[]) {
   act(() => useEditorStore.getState().setSelection({ nodeIds, edgeIds: [] }));
 }
@@ -184,6 +212,7 @@ beforeEach(() => {
     busy: false,
     shown: "newest",
     history: null,
+    model: null,
   });
   useHistoryStore.getState().clear();
   useEditorStore.getState().clearSelection();
@@ -436,6 +465,45 @@ describe("sending what was said before", () => {
     expect(screen.getByText("Send earlier lines with this")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Image" }));
     expect(screen.queryByText("Send earlier lines with this")).toBeNull();
+  });
+});
+
+describe("the model answering in words", () => {
+  it("offers every configured text model, and keeps the one picked", () => {
+    hydrate(buildGoldenMokaFile());
+    useModelStore.setState({ view: configured() });
+    render(<AssistantPanel />);
+
+    const select = screen.getByTestId("assistant-model");
+    const names = Array.from((select as HTMLSelectElement).options).map(
+      (option) => option.text,
+    );
+    expect(names).toEqual(["Default model", "Kept Words", "Plain Words"]);
+    expect((select as HTMLSelectElement).value).toBe("");
+
+    fireEvent.change(select, { target: { value: "kept-words" } });
+    expect(useAssistantStore.getState().model).toBe("kept-words");
+    expect((select as HTMLSelectElement).value).toBe("kept-words");
+
+    // A card is asked through a run, which reads the model off the card's
+    // own spec: the quick switch belongs to the turns answered in words.
+    fireEvent.click(screen.getByRole("button", { name: "Image" }));
+    expect(screen.queryByTestId("assistant-model")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(
+      (screen.getByTestId("assistant-model") as HTMLSelectElement).value,
+    ).toBe("kept-words");
+  });
+
+  it("reads a pick the configuration no longer holds as no pick", () => {
+    hydrate(buildGoldenMokaFile());
+    useModelStore.setState({ view: configured() });
+    useAssistantStore.setState({ model: "a-model-taken-away" });
+    render(<AssistantPanel />);
+
+    expect(
+      (screen.getByTestId("assistant-model") as HTMLSelectElement).value,
+    ).toBe("");
   });
 });
 

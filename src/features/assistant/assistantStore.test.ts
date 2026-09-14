@@ -22,6 +22,8 @@ import { useEditorStore } from "../editor/stores/editorStore";
 import { useHistoryStore } from "../editor/stores/historyStore";
 import { useProjectStore } from "../editor/stores/projectStore";
 import { useRunStore } from "../editor/stores/runStore";
+import type { ModelsView } from "../../api";
+import { useModelStore } from "../settings/modelStore";
 import { useAssistantStore } from "./assistantStore";
 
 /** A stream that can be fed a frame at a time, the way one arrives. */
@@ -299,6 +301,61 @@ function askedToConfirm(answer: boolean) {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** A configuration holding two text models and nothing of any other kind. */
+function withTextModels(): ModelsView {
+  return {
+    version: 1,
+    revision: 1,
+    models: [
+      {
+        id: "kept-words",
+        category: "text",
+        protocol: "openaiChat",
+        url: "https://api.test/chat",
+        model: "kept-1",
+        displayName: "Kept Words",
+        enabled: true,
+        apiKey: { set: true, masked: "****" },
+      },
+      {
+        id: "plain-words",
+        category: "text",
+        protocol: "openaiChat",
+        url: "https://api.test/chat2",
+        model: "plain-1",
+        displayName: "Plain Words",
+        enabled: true,
+        apiKey: { set: true, masked: "****" },
+      },
+    ],
+    defaults: { text: null, image: null, audio: null, video: null },
+    preferences: {
+      systemPrompt: "",
+      reasoningEffort: "auto",
+      image: { size: "1:1", quality: "auto", background: "auto", count: 1 },
+      video: {
+        seconds: 8,
+        resolution: "1080",
+        generateAudio: true,
+        watermark: false,
+        mode: "auto",
+        ratio: "16:9",
+      },
+      audio: {
+        voice: "alloy",
+        format: "mp3",
+        speed: 1,
+        instructions: "",
+        sampleRate: 22050,
+        volume: 50,
+        rate: 1,
+        pitch: 1,
+      },
+    },
+    secretStorage: "unset",
+  };
+}
+
 beforeEach(() => {
   useProjectStore.getState().close();
   useHistoryStore.getState().clear();
@@ -311,7 +368,9 @@ beforeEach(() => {
     busy: false,
     shown: "newest",
     history: null,
+    model: null,
   });
+  useModelStore.setState({ view: null });
   useEditorStore.setState({ announcement: "" });
 });
 
@@ -559,6 +618,48 @@ describe("what is sent", () => {
       system: string;
     };
     expect(sent.system).toContain("Return only that text");
+  });
+
+  it("sends the model the panel picked, and no model when none is", async () => {
+    const moka = hydrate();
+    useModelStore.setState({ view: withTextModels() });
+    const stream = stubAnswer("So it does.");
+    useAssistantStore.getState().setModel("kept-words");
+    useAssistantStore.getState().setDraft("Is the brief about water?");
+
+    await useAssistantStore.getState().ask({ canvas: board(moka), chosen: [] });
+
+    const sent = JSON.parse(stream.calls.mock.calls[0][1]!.body as string) as {
+      model?: string;
+    };
+    expect(sent.model).toBe("kept-words");
+
+    // Nothing picked is nothing sent: the deployment's own default answers.
+    useAssistantStore.getState().setModel(null);
+    useAssistantStore.getState().setDraft("And again?");
+    await useAssistantStore.getState().ask({ canvas: board(moka), chosen: [] });
+    const bare = JSON.parse(stream.calls.mock.calls[1][1]!.body as string) as {
+      model?: string;
+    };
+    expect(bare.model).toBeUndefined();
+  });
+
+  it("falls back to the default where the model picked has gone", async () => {
+    const moka = hydrate();
+    useModelStore.setState({ view: withTextModels() });
+    const stream = stubAnswer("So it does.");
+    // A pick naming a model the configuration no longer holds is no pick at
+    // all: the ask falls back to the default rather than being refused for
+    // a model that went.
+    useAssistantStore.getState().setModel("a-model-taken-away");
+    useAssistantStore.getState().setDraft("Is the brief about water?");
+
+    await useAssistantStore.getState().ask({ canvas: board(moka), chosen: [] });
+
+    const sent = JSON.parse(stream.calls.mock.calls[0][1]!.body as string) as {
+      model?: string;
+    };
+    expect(sent.model).toBeUndefined();
   });
 
   it("carries the lines before the question only once they are asked for", async () => {

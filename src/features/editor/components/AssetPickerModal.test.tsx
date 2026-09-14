@@ -170,7 +170,7 @@ describe("the asset picker", () => {
     render(<AssetPickerModal />);
 
     fireEvent.change(screen.getByTestId("asset-pick-category"), {
-      target: { value: "texts" },
+      target: { value: "text" },
     });
     expect(screen.queryByText("lake.png")).toBeNull();
     expect(screen.getByText("opening-lines.md")).toBeTruthy();
