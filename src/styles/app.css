@@ -746,25 +746,6 @@ h2 {
   place-content: center;
 }
 
-.run-button {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--on-primary);
-  flex: none;
-  font-weight: 600;
-}
-
-.run-button:hover:not(:disabled) {
-  background: var(--ink);
-  border-color: var(--ink);
-}
-
-.run-button:disabled {
-  background: var(--surface-raised);
-  border-color: var(--stroke);
-  color: var(--muted);
-}
-
 .editor-project-name {
   font-size: 14px;
   overflow: hidden;
