@@ -89,6 +89,11 @@ describe("app boot", () => {
     expect(heading).toBeTruthy();
     expect(screen.getByText("Golden Fixture")).toBeTruthy();
     expect(screen.getByRole("button", { name: "New project" })).toBeTruthy();
+    // The ways in are named for what they bring rather than for the format the
+    // work happens to travel in, so a package arriving says "project".
+    expect(screen.getByRole("button", { name: "Open project" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import project" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Import package" })).toBeNull();
   });
 
   it("opens a project into the editor shell", async () => {

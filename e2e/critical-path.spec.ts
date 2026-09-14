@@ -89,7 +89,9 @@ test("launcher boots, project persists across reload, and export/import roundtri
 
   // Back to the launcher, then import the package into a fresh directory.
   await backToLauncher(page);
-  await page.getByRole("button", { name: "Import package" }).click();
+  await page
+    .getByRole("button", { name: "Import project", exact: true })
+    .click();
   const dialog = page.locator(".dialog");
   await dialog.getByLabel("Folder").fill(importedRoot);
   await dialog.locator("input[type=file]").setInputFiles(destination as string);

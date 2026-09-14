@@ -139,7 +139,7 @@ export function LauncherPage() {
           onClick={() => setDialog("import")}
           type="button"
         >
-          Import package
+          Import project
         </button>
         <button
           disabled={busy}
