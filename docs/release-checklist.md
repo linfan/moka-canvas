@@ -404,6 +404,23 @@ live in the platform application-data directory, never in the program tree. See
    degrades responsiveness.
 3. Autosave never blocks pointer input while a save is in flight.
 
+## Cutting room
+
+The manual script for the cutting room (timeline editing, transitions, text
+and subtitles, and a **real** video export) is package 13's §4 in
+`note/plan/13-quality-gates-and-acceptance.md`: it needs a browser with
+H.264 and an ffmpeg ≥ 5.0 with libass, which the automated suites do not
+assume. Run it on the reference machine before a release, together with:
+
+1. `make check && npm run test:e2e` — the full gate, including the eleven
+   cutting-room e2e specs beside every editor spec.
+2. A packaged-build smoke: install the DMG, open a project, drop one of
+   `fixtures/tiny.mp4`'s kind on a timeline, and export it — then
+   **detach the disk image in the same run and clear any leftover mount
+   points**, so no zombie volume is left behind.
+3. The acceptance record from that run (`note/acceptance-<date>.md`,
+   local) with its conclusion line quoted in the release commit.
+
 ## Known limitations
 
 Intended behaviour, recorded here so a tester does not file it as a defect.

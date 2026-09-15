@@ -249,6 +249,10 @@ somebody chose included. That is a choice the export dialog puts to the user, of
 default and saying what it keeps; it is not a leak, but it is a reason to think
 about where a full backup is sent.
 
+## Video export
+
+A timeline render hands the project's own file paths to the machine's ffmpeg as a filter graph, written into a temporary directory under the project's temp area (`export-<id>/`, relative file names only) and deleted on success, failure, cancellation, and timeout alike; nothing is uploaded anywhere and no new credential is involved. The program itself is named only by `clip.ffmpegPath`, `MOKA_FFMPEG`, or the server process's search path — never by a request body — and a finished render is filed into the project as an ordinary asset.
+
 ## Damaged documents
 
 A document that fails to parse is renamed `<name>.corrupt.<timestamp>.json` and

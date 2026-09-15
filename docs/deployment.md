@@ -221,6 +221,22 @@ backup taken before the upgrade or removed entirely.
 Changing the bundle identifier changes the resolved directory. Point
 `MOKA_METADATA_DIR` at the previous path to keep the existing configuration.
 
+## Video export
+
+Rendering a timeline to an MP4 runs on the machine the **server** runs on, through the ffmpeg that machine has. The program is found in three places, in order:
+
+1. `clip.ffmpegPath` in the configuration file;
+2. the `MOKA_FFMPEG` environment variable;
+3. `ffmpeg` on the server process's `PATH`.
+
+A level that names a path settles the question: if the file named there is not there, the search does not fall through to the next level, and the export reports itself unavailable rather than quietly using a different program than the one named. **On a server deployment, install ffmpeg on the server machine** — a client's ffmpeg is never used or looked for, and no request can name a program (the export body carries a timeline id and nothing else).
+
+No ffmpeg is not a failure to start: the server, the editor, the preview, and every edit work as they are, and only the export dialog says what is missing and where it looked. The capability answer — version, path, encoder, whether text burn-in is possible (`ass`) — is probed once per process and cached.
+
+One export runs at a time (`409 CONFLICT` for a second ask). Each render writes its filter graph and, when the timeline has text, a generated `subs.ass` into a temporary directory under the project's temp area (`export-<id>/`), which is removed on success, failure, cancellation, and timeout alike; a render outliving the request that started it is stopped by `DELETE /api/v1/clip/export/{id}`, and `clip.timeoutSeconds` (default 3600) stops one that runs too long. A finished render is filed into the project as an asset and appears in the media shelf like any other file.
+
+Reference numbers to set expectations (1080p30, two layers, one crossfade, burn-in subtitles, `libx264 -preset medium -crf 18`): roughly 2–4× realtime on a current desktop, about 5–15 MB per minute of output. A machine with `h264_videotoolbox` or `h264_nvenc` is asked for those by name and renders at a fixed 12 Mbit/s instead of a quality target.
+
 ## Probes
 
 | Endpoint          | Status     | Purpose                                                                                                                                                                                                                    |
