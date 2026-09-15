@@ -106,7 +106,12 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { label: "Fit the selection", chords: [["Shift", "Mod", "1"]] },
       {
         label: "Pan while held",
-        chords: [["Space"], ["Ctrl"]],
+        chords: [["Space"]],
+      },
+      {
+        label:
+          "The other tool while held: pan while choosing, choose while panning",
+        chords: [["Ctrl"]],
       },
       {
         label: "The second action: pan while choosing, choose while panning",
@@ -164,15 +169,17 @@ export function useEditorKeyboard() {
 
       const mod = event.metaKey || event.ctrlKey;
 
-      // Temporary tool inversion while held. Ctrl alone inverts select→pan;
-      // with Cmd held Ctrl keydowns are modifier noise, so gate on key.
+      // Temporary tool inversion while held. Space always borrows the pan
+      // tool; Ctrl holds the other of the two, whichever is not being held —
+      // the choosing hand pans and the panning hand chooses. With Cmd held,
+      // Ctrl keydowns are modifier noise, so gate on key.
       if (event.key === " " && !mod && !event.repeat) {
         editor.setTemporaryTool("pan");
         event.preventDefault();
         return;
       }
       if (event.key === "Control" && !event.metaKey && !event.repeat) {
-        editor.setTemporaryTool("pan");
+        editor.setTemporaryTool(editor.tool === "pan" ? "select" : "pan");
         return;
       }
 

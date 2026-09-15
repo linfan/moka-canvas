@@ -68,6 +68,49 @@ describe("pageTextSelected", () => {
   });
 });
 
+describe("useEditorKeyboard temporary tool", () => {
+  function press(key: string, type: "keydown" | "keyup" = "keydown") {
+    window.dispatchEvent(
+      new KeyboardEvent(type, { key, bubbles: true, cancelable: true }),
+    );
+  }
+
+  it("borrows the pan tool while Ctrl is held over the select tool", () => {
+    renderHook(() => useEditorKeyboard());
+    useEditorStore.getState().setTool("select");
+
+    press("Control");
+    expect(useEditorStore.getState().temporaryTool).toBe("pan");
+
+    press("Control", "keyup");
+    expect(useEditorStore.getState().temporaryTool).toBeNull();
+  });
+
+  it("borrows the select tool while Ctrl is held over the pan tool", () => {
+    renderHook(() => useEditorKeyboard());
+    useEditorStore.getState().setTool("pan");
+
+    press("Control");
+    expect(useEditorStore.getState().temporaryTool).toBe("select");
+
+    press("Control", "keyup");
+    expect(useEditorStore.getState().temporaryTool).toBeNull();
+    useEditorStore.getState().setTool("select");
+  });
+
+  it("borrows the pan tool while Space is held, whatever tool is in hand", () => {
+    renderHook(() => useEditorKeyboard());
+    useEditorStore.getState().setTool("pan");
+
+    press(" ");
+    expect(useEditorStore.getState().temporaryTool).toBe("pan");
+
+    press(" ", "keyup");
+    expect(useEditorStore.getState().temporaryTool).toBeNull();
+    useEditorStore.getState().setTool("select");
+  });
+});
+
 describe("useEditorKeyboard copy", () => {
   it("leaves selected words to the browser instead of a fragment", async () => {
     renderHook(() => useEditorKeyboard());

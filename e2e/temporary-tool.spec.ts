@@ -18,6 +18,42 @@ async function persistedViewport(
   });
 }
 
+/** The tool the switch says is in hand, which is the tool a pointer meets. */
+function heldTool(page: Page) {
+  return page.locator(".tool-switch-thumb").getAttribute("data-tool");
+}
+
+test("a held Ctrl borrows the other tool, whichever is in hand", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await createProject(
+    page,
+    join(projectHome("temporary-tool"), "borrow"),
+    "Borrowed Tool",
+  );
+
+  // The select tool is in hand, and Ctrl borrows the pan tool for as long as
+  // the key is down.
+  await expect(page.getByTestId("tool-select")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(await heldTool(page)).toBe("select");
+  await page.keyboard.down("Control");
+  expect(await heldTool(page)).toBe("pan");
+  await page.keyboard.up("Control");
+  expect(await heldTool(page)).toBe("select");
+
+  // And the other way round: the pan tool in hand borrows the select tool.
+  await page.getByTestId("tool-pan").click();
+  expect(await heldTool(page)).toBe("pan");
+  await page.keyboard.down("Control");
+  expect(await heldTool(page)).toBe("select");
+  await page.keyboard.up("Control");
+  expect(await heldTool(page)).toBe("pan");
+});
+
 test("a Ctrl-held click moves the canvas and does not ask for the menu", async ({
   page,
 }) => {
