@@ -25,16 +25,22 @@ import { useClipStore } from "../stores/clipStore";
 import { frameAligned } from "../timeline/timecode";
 import {
   addAssetAtPlayhead,
+  addTrackOfKind,
+  alignSelection,
   clickSelection,
   clipsCrossingPlayhead,
   deleteSelection,
   detachAudio,
   dropAssetOnTrack,
   duplicateSelection,
+  materialOf,
   nearestClipEdgeMs,
   rangeBetween,
+  removeTrack,
+  renameTrack,
   selectAll,
   selectedClips,
+  setTrackFlag,
   splitSelectionAtPlayhead,
 } from "./clipActions";
 
@@ -712,6 +718,148 @@ describe("the guard rails", () => {
     deleteSelection();
 
     expect(cut().clips.map((clip) => clip.id)).toContain(ids.clipC);
+    expect(messages()).toEqual(["That track is locked."]);
+    expect(entryCount()).toBe(0);
+  });
+});
+
+describe("what a clip's material allows", () => {
+  it("reads a measured file's end and the open bound of one nobody measured", () => {
+    const ids = timelineIds();
+    open(buildTimelineMokaFile(), { timelineId: ids.timeline });
+    expect(materialOf(cut().clips[0])).toEqual({
+      ownClock: false,
+      durationMs: 4_000,
+      unprobed: false,
+    });
+
+    const bare = buildTimelineMokaFile();
+    delete bare.resources.videos[0].probe;
+    open(bare, { timelineId: ids.timeline });
+    expect(materialOf(cut().clips[0])).toEqual({
+      ownClock: false,
+      durationMs: null,
+      unprobed: true,
+    });
+  });
+});
+
+describe("the rows themselves", () => {
+  it("turns one switch as one step of history", () => {
+    const ids = timelineIds();
+    const original = open(buildTimelineMokaFile(), {
+      timelineId: ids.timeline,
+    });
+    setTrackFlag(cut(), ids.videoTrack, "muted", true);
+    expect(cut().tracks.find((row) => row.id === ids.videoTrack)).toMatchObject(
+      {
+        muted: true,
+        locked: false,
+      },
+    );
+    expect(entryCount()).toBe(1);
+
+    undo();
+    expect(useProjectStore.getState().moka).toEqual(original);
+  });
+
+  it("adds a row of the kind asked for, named past the ones taken", () => {
+    const ids = timelineIds();
+    open(buildTimelineMokaFile(), { timelineId: ids.timeline });
+    addTrackOfKind(cut(), "audio");
+    const tracks = cut().tracks;
+    expect(tracks).toHaveLength(4);
+    expect(tracks[3]).toMatchObject({ kind: "audio", name: "Audio 2" });
+    expect(entryCount()).toBe(1);
+  });
+
+  it("refuses to take a row that still holds clips", () => {
+    const ids = timelineIds();
+    open(buildTimelineMokaFile(), { timelineId: ids.timeline });
+    removeTrack(cut(), ids.videoTrack);
+    expect(cut().tracks).toHaveLength(3);
+    expect(messages()).toEqual(["That track still holds clips"]);
+    expect(entryCount()).toBe(0);
+  });
+
+  it("renames a row, and does nothing at all for a name that is not one", () => {
+    const ids = timelineIds();
+    open(buildTimelineMokaFile(), { timelineId: ids.timeline });
+    renameTrack(cut(), ids.textTrack, "  Titles  ");
+    expect(cut().tracks.find((row) => row.id === ids.textTrack)?.name).toBe(
+      "Titles",
+    );
+    renameTrack(cut(), ids.textTrack, "   ");
+    expect(cut().tracks.find((row) => row.id === ids.textTrack)?.name).toBe(
+      "Titles",
+    );
+    expect(entryCount()).toBe(1);
+  });
+});
+
+describe("tidying a selection", () => {
+  /** The golden cut with a second video row, the two heads six seconds apart. */
+  function twoRows(): MokaFile {
+    const moka = buildTimelineMokaFile();
+    const timeline = moka.timelines![0];
+    timeline.tracks = [
+      ...timeline.tracks,
+      {
+        id: "track-video-2",
+        kind: "video",
+        name: "Video 2",
+        muted: false,
+        hidden: false,
+        locked: false,
+        createdAt: NOW,
+      },
+    ];
+    timeline.clips = [
+      ...timeline.clips,
+      {
+        ...timeline.clips[0],
+        id: "clip-two",
+        trackId: "track-video-2",
+        startMs: 6_000,
+      },
+    ];
+    return moka;
+  }
+
+  it("moves a chosen pair onto the earliest head as one step", () => {
+    const ids = timelineIds();
+    open(twoRows(), {
+      timelineId: ids.timeline,
+      clipIds: [ids.videoClip, "clip-two"],
+    });
+    alignSelection("left");
+    expect(cut().clips.map((clip) => clip.startMs)).toEqual([0, 0]);
+    expect(lastEntry().label).toBe("Align left");
+    expect(entryCount()).toBe(1);
+  });
+
+  it("sends nothing when the heads already stand together", () => {
+    const ids = timelineIds();
+    const moka = twoRows();
+    moka.timelines![0].clips = moka.timelines![0].clips.map((clip) => ({
+      ...clip,
+      startMs: 0,
+    }));
+    open(moka, {
+      timelineId: ids.timeline,
+      clipIds: [ids.videoClip, "clip-two"],
+    });
+    alignSelection("left");
+    expect(entryCount()).toBe(0);
+  });
+
+  it("says so when a chosen clip sits on a locked row", () => {
+    const ids = cutFixtureIds();
+    open(buildCutMokaFile(), {
+      timelineId: ids.timeline,
+      clipIds: [ids.clipA, ids.clipC],
+    });
+    alignSelection("left");
     expect(messages()).toEqual(["That track is locked."]);
     expect(entryCount()).toBe(0);
   });

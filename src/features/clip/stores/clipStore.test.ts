@@ -11,6 +11,7 @@ import {
   initialTimelineId,
   rememberedMasterVolume,
   rememberedQuality,
+  rememberedSnapEnabled,
   rememberTimelineId,
   rememberedTimelineId,
   rememberedView,
@@ -56,6 +57,7 @@ beforeEach(() => {
     playing: false,
     quality: "full",
     masterVolume: 1,
+    snapEnabled: true,
     loop: false,
     viewportPx: 0,
   });
@@ -395,6 +397,18 @@ describe("the clock the cut is played by", () => {
     expect(rememberedMasterVolume()).toBe(1);
     localStorage.setItem("moka-canvas:clip-volume", "4");
     expect(rememberedMasterVolume()).toBe(1);
+  });
+
+  it("remembers the magnet on this machine, on by default", () => {
+    expect(rememberedSnapEnabled()).toBe(true);
+    store().setSnapEnabled(false);
+    expect(localStorage.getItem("moka-canvas:clip-snap")).toBe("off");
+    expect(rememberedSnapEnabled()).toBe(false);
+    store().setSnapEnabled(true);
+    expect(rememberedSnapEnabled()).toBe(true);
+    // A store holding something else is read as the default, not as off.
+    localStorage.setItem("moka-canvas:clip-snap", "nonsense");
+    expect(rememberedSnapEnabled()).toBe(true);
   });
 
   it("keeps the repeat a session's own arrangement, never the machine's", () => {

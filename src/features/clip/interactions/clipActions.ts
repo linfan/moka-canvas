@@ -1,6 +1,7 @@
 import {
   MAX_CLIPS_PER_COMMAND,
   MIN_CLIP_DURATION_MS,
+  TIMELINE_NAME_MAX,
   createClipFromAsset,
   newId,
   nowIso,
@@ -16,6 +17,7 @@ import {
   type TimelineTrack,
   type TimelineTransition,
   type TrackId,
+  type TrackKind,
 } from "../../../shared/domain";
 import {
   followerOf,
@@ -30,6 +32,8 @@ import { useProjectStore } from "../../editor/stores/projectStore";
 import { useClipStore, type ClipSelection } from "../stores/clipStore";
 import type { TimelineHit } from "../timeline/geometry";
 import { frameAligned } from "../timeline/timecode";
+import { alignMoves, type AlignMode } from "./alignment";
+import { snapContext, snapMs } from "./snapping";
 
 /**
  * What the cutting room does to a cut, as commands.
@@ -302,7 +306,8 @@ function landOnTrack(
  * A drag that outlived the shelf it started on is ignored without a word: the
  * id names nothing, so there is nothing to say about it. Everything else the
  * row decides: its kind, its lock, and the place the pointer's moment falls on
- * the frame clock.
+ * the frame clock — with the magnet on, a place an existing edge already
+ * stands on when the pointer's moment came within a hand's width of it.
  */
 export function dropAssetOnTrack(
   timeline: TimelineDocument,
@@ -314,7 +319,14 @@ export function dropAssetOnTrack(
   if (!entry) return;
   const track = trackId === null ? null : trackOf(timeline, trackId);
   if (!track) return;
-  const clip = landOnTrack(timeline, entry, track, startMs);
+  const store = useClipStore.getState();
+  const caught = snapMs(
+    startMs,
+    snapContext(timeline, store.playheadMs),
+    store.view.pxPerSec,
+    store.snapEnabled,
+  );
+  const clip = landOnTrack(timeline, entry, track, caught ?? startMs);
   if (clip) {
     useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
   }
@@ -652,12 +664,14 @@ export function duplicateSelection(): void {
   execute("Duplicate clips", commands);
 }
 
-/** The name a row added for sound wears: the next number past the ones taken. */
-function nextAudioTrackName(timeline: TimelineDocument): string {
+/** The name a row wears: the next number past the ones already taken. */
+function nextTrackName(timeline: TimelineDocument, kind: ClipKind): string {
+  const label =
+    kind === "video" ? "Video" : kind === "audio" ? "Audio" : "Text";
   const used = new Set(timeline.tracks.map((track) => track.name));
-  let n = timeline.tracks.filter((track) => track.kind === "audio").length + 1;
-  while (used.has(`Audio ${n}`)) n += 1;
-  return `Audio ${n}`;
+  let n = timeline.tracks.filter((track) => track.kind === kind).length + 1;
+  while (used.has(`${label} ${n}`)) n += 1;
+  return `${label} ${n}`;
 }
 
 /**
@@ -685,7 +699,7 @@ export function detachAudio(): void {
   const target: TimelineTrack = held ?? {
     id: newId(),
     kind: "audio",
-    name: nextAudioTrackName(timeline),
+    name: nextTrackName(timeline, "audio"),
     muted: false,
     hidden: false,
     locked: false,
@@ -714,4 +728,157 @@ export function detachAudio(): void {
     });
   }
   execute("Detach audio", commands);
+}
+
+// ---------------------------------------------------------------------------
+// What a clip's material allows, and the rows themselves
+// ---------------------------------------------------------------------------
+
+/** What a clip's material says about how far its edges may be pulled. */
+export interface ClipMaterial {
+  /** An image or a cue reads its own clock: its window is its own duration. */
+  ownClock: boolean;
+  /** How long the file itself runs, when it was measured; null when nobody did. */
+  durationMs: number | null;
+  /** A material file whose length nobody measured, whose end is therefore unknown. */
+  unprobed: boolean;
+}
+
+/**
+ * The material bounds a trim reads, for the clip it is about to stretch.
+ *
+ * A picture or a cue has no file to run past; a video or a sound has whatever
+ * the probe measured, and one nobody measured is unbounded with a word said
+ * about it rather than a drag that stops for no visible reason.
+ */
+export function materialOf(clip: TimelineClip): ClipMaterial {
+  const moka = useProjectStore.getState().moka;
+  if (readsItsOwnClock(moka, clip)) {
+    return { ownClock: true, durationMs: null, unprobed: false };
+  }
+  const asset = clip.assetId ? findAsset(moka, clip.assetId) : null;
+  const durationMs = asset?.probe?.durationMs;
+  return {
+    ownClock: false,
+    durationMs: durationMs ?? null,
+    unprobed: durationMs === undefined,
+  };
+}
+
+/** One switch of a row's own state, as one step of history. */
+export type TrackFlag = "muted" | "hidden" | "locked";
+
+const FLAG_TITLES: Record<TrackFlag, [string, string]> = {
+  muted: ["Unmute track", "Mute track"],
+  hidden: ["Show track", "Hide track"],
+  locked: ["Unlock track", "Lock track"],
+};
+
+export function setTrackFlag(
+  timeline: TimelineDocument,
+  trackId: TrackId,
+  flag: TrackFlag,
+  value: boolean,
+): void {
+  const patch: Partial<Pick<TimelineTrack, TrackFlag>> =
+    flag === "muted"
+      ? { muted: value }
+      : flag === "hidden"
+        ? { hidden: value }
+        : { locked: value };
+  execute(FLAG_TITLES[flag][value ? 1 : 0], [
+    {
+      type: "updateTrack",
+      timelineId: timeline.id,
+      trackId,
+      patch,
+    },
+  ]);
+}
+
+/** A row's new name, or nothing done when it is not a name. */
+export function renameTrack(
+  timeline: TimelineDocument,
+  trackId: TrackId,
+  name: string,
+): void {
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > TIMELINE_NAME_MAX) return;
+  execute("Rename track", [
+    {
+      type: "updateTrack",
+      timelineId: timeline.id,
+      trackId,
+      patch: { name: trimmed },
+    },
+  ]);
+}
+
+/**
+ * A new empty row of the given kind, at the place named.
+ *
+ * The index is where the document puts it: the end of the list is the top of
+ * the stack, which is where a reader adding a row to look at it wants it. A
+ * place past the ends is pulled back to one, by the command itself.
+ */
+export function addTrackOfKind(
+  timeline: TimelineDocument,
+  kind: TrackKind,
+  index?: number,
+): void {
+  const track: TimelineTrack = {
+    id: newId(),
+    kind,
+    name: nextTrackName(timeline, kind),
+    muted: false,
+    hidden: false,
+    locked: false,
+    createdAt: nowIso(),
+  };
+  execute("Add track", [
+    {
+      type: "addTrack",
+      timelineId: timeline.id,
+      track,
+      index: index ?? timeline.tracks.length,
+    },
+  ]);
+}
+
+/** Takes an empty row out; the command layer refuses one that still holds clips. */
+export function removeTrack(
+  timeline: TimelineDocument,
+  trackId: TrackId,
+): void {
+  execute("Remove track", [
+    { type: "removeTrack", timelineId: timeline.id, trackId },
+  ]);
+}
+
+/**
+ * Tidies the chosen clips against each other, as one step of history.
+ *
+ * The moves are built from where the clips stand, so a set that is already
+ * tidy sends no command at all. A clip on a locked row keeps the whole
+ * action from being built — the document holds no rule about locks, which is
+ * exactly why the room says this one before any command could be refused.
+ */
+export function alignSelection(mode: AlignMode): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  const clips = selectedClips(timeline, useClipStore.getState().selection);
+  if (clips.some((clip) => isLocked(timeline, clip))) {
+    toast("error", "That track is locked.");
+    return;
+  }
+  const moves = alignMoves(clips, mode);
+  if (moves.length === 0) return;
+  const labels: Record<AlignMode, string> = {
+    left: "Align left",
+    distribute: "Distribute evenly",
+    butted: "Join butted",
+  };
+  execute(labels[mode], [
+    { type: "moveClips", timelineId: timeline.id, moves },
+  ]);
 }

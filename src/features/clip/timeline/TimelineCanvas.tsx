@@ -5,21 +5,52 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import type { TimelineDocument } from "../../../shared/domain";
+import type {
+  ClipPatch,
+  TimelineClip,
+  TimelineDocument,
+} from "../../../shared/domain";
+import { execute } from "../../editor/commands/execute";
 import { ASSET_DRAG_MIME } from "../../editor/interactions/actions";
-import { clickSelection, dropAssetOnTrack } from "../interactions/clipActions";
+import { useAppStore } from "../../editor/stores/appStore";
+import {
+  clickSelection,
+  dropAssetOnTrack,
+  materialOf,
+  selectedClips,
+} from "../interactions/clipActions";
+import {
+  CLICK_SLOP_PX,
+  clipsInRect,
+  marqueeRect,
+  moveDraft,
+  trimDraft,
+  type MoveDraft,
+  type TimelineDraft,
+  type TrimDraft,
+} from "../interactions/gestures";
+import { snapContext } from "../interactions/snapping";
 import { useClipStore } from "../stores/clipStore";
+import {
+  TimelineMenu,
+  type TimelineMenuTarget,
+} from "../components/TimelineMenu";
 import {
   RULER_H,
   contentHeight,
   contentMs,
   contentWidth,
+  edgeAt,
   hitTest,
   msAt,
+  trackRows,
+  type ClipEdge,
   type TimelineHit,
+  type TrackRow,
 } from "./geometry";
 import { renderTimeline } from "./render";
 import { frameAligned } from "./timecode";
@@ -31,14 +62,66 @@ interface TimelineCanvasProps {
   headersRef: RefObject<HTMLDivElement | null>;
 }
 
-interface Press {
+/**
+ * One pointer session: what went down, and what it has grown into.
+ *
+ * Everything here lives in a ref rather than in state: a drag moves with
+ * every pointer event, and a component that re-rendered once per event would
+ * re-render the whole room for each pixel of it. What a session draws is the
+ * draft the canvas hands the renderer, and what it commits on release is one
+ * command — the document never sees the middle of a gesture.
+ */
+type CandidateGesture = {
+  kind: "candidate";
   x: number;
   y: number;
   hit: TimelineHit;
-}
+  edge: ClipEdge | null;
+  locked: boolean;
+  additive: boolean;
+};
 
-/** How far a pointer may wander between down and up and still be a click. */
-const CLICK_SLOP_PX = 4;
+type Gesture =
+  | CandidateGesture
+  | {
+      kind: "move";
+      members: TimelineClip[];
+      pressedId: string;
+      downX: number;
+      downY: number;
+      draft: MoveDraft | null;
+    }
+  | {
+      kind: "trim";
+      clip: TimelineClip;
+      edge: ClipEdge;
+      downX: number;
+      draft: TrimDraft | null;
+    }
+  | {
+      kind: "marquee";
+      downX: number;
+      downY: number;
+      additive: boolean;
+      rect: { x: number; y: number; width: number; height: number } | null;
+    };
+
+/** How the canvas answers the pointer, as the class its edges wear. */
+type Cursor = "default" | "grab" | "grabbing" | "ew" | "crosshair" | "pointer";
+
+const CURSOR_CLASS: Record<Exclude<Cursor, "default">, string> = {
+  grab: "is-cursor-grab",
+  grabbing: "is-cursor-grabbing",
+  ew: "is-cursor-ew",
+  crosshair: "is-cursor-crosshair",
+  pointer: "is-cursor-pointer",
+};
+
+interface MenuState {
+  x: number;
+  y: number;
+  target: TimelineMenuTarget;
+}
 
 /**
  * The screen the cut is drawn on.
@@ -48,16 +131,26 @@ const CLICK_SLOP_PX = 4;
  * corner, and every scroll schedules a redraw with the new offset. Nothing is
  * drawn twice into the same frame, so a scroll is a frame's work and not a
  * scroll's.
+ *
+ * Pointers land in one of two sessions. The ruler's is the seek: the playhead
+ * follows the pointer for as long as it is down. Everything below is the
+ * cut's: a press records what it landed on, four pixels of wandering turn it
+ * into a drag of the block, a trim of its edge or a marquee over the rows,
+ * and the release commits exactly one step of history. Escape or a cancelled
+ * pointer drops the draft and leaves the document untouched.
  */
 export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
-  const pressRef = useRef<Press | null>(null);
+  const gestureRef = useRef<Gesture | null>(null);
+  const draftRef = useRef<TimelineDraft | null>(null);
   // The clip a Shift click reaches from, which is the last clip picked alone.
   const anchorRef = useRef<string | null>(null);
   const [dropping, setDropping] = useState(false);
+  const [cursor, setCursor] = useState<Cursor>("default");
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const pxPerSec = useClipStore((state) => state.view.pxPerSec);
   const playheadMs = useClipStore((state) => state.playheadMs);
   const decor = useTimelineDecor();
@@ -92,6 +185,9 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       playheadMs: state.playheadMs,
       selection: state.selection,
       decor,
+      // Read at the frame rather than handed in: a draft lives only as long
+      // as the pointer is down, and the drawing asks for it every frame.
+      draft: draftRef.current,
     });
     // What is drawn is pixels, which nothing can read back: what changed is
     // written onto the room instead, a moment behind the frame that drew it.
@@ -100,6 +196,18 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     const room = canvas.closest(".clip-timeline");
     if (room) {
       room.setAttribute("data-clip-count", String(timeline.clips.length));
+      room.setAttribute("data-track-count", String(timeline.tracks.length));
+      // The seam the e2e reads the whole cut through: where every block is,
+      // as the document holds it — never as a draft drew it.
+      room.setAttribute(
+        "data-clip-spans",
+        timeline.clips
+          .map(
+            (clip) =>
+              `${clip.id}@${clip.trackId}:${clip.startMs}:${clip.durationMs}`,
+          )
+          .join(";"),
+      );
       room.setAttribute(
         "data-selected-clip-ids",
         state.selection.clipIds.join(","),
@@ -213,6 +321,12 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
 
+  /** The view as the scroller holds it, which is what x and ms read through. */
+  const viewNow = () => ({
+    pxPerSec: useClipStore.getState().view.pxPerSec,
+    scrollLeftPx: viewportRef.current?.scrollLeft ?? 0,
+  });
+
   const seek = (localX: number) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -234,14 +348,47 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
   const hitAt = (x: number, y: number): TimelineHit | null => {
     const viewport = viewportRef.current;
     if (!viewport) return null;
-    return hitTest(
-      timeline,
-      {
-        pxPerSec: useClipStore.getState().view.pxPerSec,
-        scrollLeftPx: viewport.scrollLeft,
-      },
-      { x, y: y + viewport.scrollTop },
-    );
+    return hitTest(timeline, viewNow(), {
+      x,
+      y: y + viewport.scrollTop,
+    });
+  };
+
+  /** Drops the draft and the session: the clip stays where the document has it. */
+  const cancelGesture = useCallback(() => {
+    gestureRef.current = null;
+    draftRef.current = null;
+    setCursor("default");
+    schedule();
+  }, [schedule]);
+
+  // Escape during a session is the session's own key: the draft is let go of
+  // and the room's own Escape — which clears the selection — never hears it.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || gestureRef.current === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelGesture();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [cancelGesture]);
+
+  /** What a pointer over the cut is about to do, as the cursor says. */
+  const cursorFor = (local: { x: number; y: number }): Cursor => {
+    const viewport = viewportRef.current;
+    if (!viewport) return "default";
+    if (inRuler(local.y, viewport.scrollTop)) return "default";
+    const hit = hitAt(local.x, local.y);
+    if (!hit) return "default";
+    if (hit.kind === "transition") return "pointer";
+    if (hit.kind !== "clip") return "default";
+    const track = timeline.tracks.find((row) => row.id === hit.clip.trackId);
+    if (track?.locked) return "default";
+    const edge = edgeAt(hit.clip, trackRows(timeline), viewNow(), local.x);
+    if (edge) return "ew";
+    return "grab";
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -258,53 +405,356 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       return;
     }
     const hit = hitAt(local.x, local.y);
-    if (hit) pressRef.current = { x: local.x, y: local.y, hit };
+    if (!hit) return;
+    const edge =
+      hit.kind === "clip"
+        ? edgeAt(hit.clip, trackRows(timeline), viewNow(), local.x)
+        : null;
+    // A locked row takes the press — a click still picks its clips, which is
+    // how the room offers to say why an edit there is refused — but the drag
+    // that follows is a wish the room will not carry out.
+    const track =
+      hit.kind === "clip"
+        ? timeline.tracks.find((row) => row.id === hit.clip.trackId)
+        : undefined;
+    gestureRef.current = {
+      kind: "candidate",
+      x: local.x,
+      y: local.y,
+      hit,
+      edge,
+      locked: track?.locked === true,
+      additive: event.shiftKey || event.ctrlKey || event.metaKey,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  /** Turns a wandering press into the gesture it has become. */
+  const beginGesture = (candidate: CandidateGesture) => {
+    if (candidate.hit.kind === "clip" && candidate.edge) {
+      const clip = candidate.hit.clip;
+      const material = materialOf(clip);
+      if (candidate.edge === "end" && material.unprobed) {
+        // The end of an unmeasured file is unknown, so the drag is not
+        // bounded by it; the reader is told once rather than stopped.
+        useAppStore
+          .getState()
+          .pushToast(
+            "info",
+            "Duration unknown — the clip runs 4s; trim it to fit.",
+          );
+      }
+      gestureRef.current = {
+        kind: "trim",
+        clip,
+        edge: candidate.edge,
+        downX: candidate.x,
+        draft: null,
+      };
+      return;
+    }
+    if (candidate.hit.kind === "clip") {
+      const clip = candidate.hit.clip;
+      const store = useClipStore.getState();
+      const held = selectedClips(timeline, store.selection);
+      const already = held.some((member) => member.id === clip.id);
+      const members = already ? held : [clip];
+      if (!already) {
+        store.select({ clipIds: [clip.id], transitionId: null });
+        anchorRef.current = clip.id;
+      }
+      gestureRef.current = {
+        kind: "move",
+        members,
+        pressedId: clip.id,
+        downX: candidate.x,
+        downY: candidate.y,
+        draft: null,
+      };
+      return;
+    }
+    if (candidate.hit.kind === "empty") {
+      gestureRef.current = {
+        kind: "marquee",
+        downX: candidate.x,
+        downY: candidate.y,
+        additive: candidate.additive,
+        rect: null,
+      };
+      return;
+    }
+    // A seam badge is 10's to move; a drag that starts on one goes nowhere.
+    gestureRef.current = null;
+  };
+
+  /** What the gesture draws, recomputed at every pointer position. */
+  const updateGesture = (
+    event: ReactPointerEvent<HTMLCanvasElement>,
+    local: { x: number; y: number },
+  ) => {
+    const gesture = gestureRef.current;
+    const viewport = viewportRef.current;
+    if (!gesture || gesture.kind === "candidate" || !viewport) return;
+    const store = useClipStore.getState();
+    const view = viewNow();
+    if (gesture.kind === "marquee") {
+      const rect = marqueeRect(
+        { x: gesture.downX, y: gesture.downY + viewport.scrollTop },
+        { x: local.x, y: local.y + viewport.scrollTop },
+      );
+      gestureRef.current = { ...gesture, rect };
+      draftRef.current = { kind: "marquee", rect };
+      setCursor("crosshair");
+      schedule();
+      return;
+    }
+    // Shift suspends the magnet for as long as it is held, which is how a
+    // reader nudges a block onto something the edges would otherwise catch.
+    const snapEnabled = store.snapEnabled && !event.shiftKey;
+    const rows = trackRows(timeline);
+    const deltaMs = msAt(local.x, view) - msAt(gesture.downX, view);
+    if (gesture.kind === "move") {
+      const pressed =
+        gesture.members.find((member) => member.id === gesture.pressedId) ??
+        gesture.members[0];
+      const pressedRow = rows.findIndex(
+        (row) => row.track.id === pressed.trackId,
+      );
+      const overRow = rowAt(rows, local.y + viewport.scrollTop);
+      const rowDelta =
+        overRow === null || pressedRow < 0 ? 0 : overRow - pressedRow;
+      const draft = moveDraft({
+        clips: gesture.members,
+        pressedId: gesture.pressedId,
+        rows,
+        rowDelta,
+        deltaMs,
+        fps: timeline.settings.fps,
+        ctx: snapContext(
+          timeline,
+          store.playheadMs,
+          gesture.members.map((member) => member.id),
+        ),
+        pxPerSec: view.pxPerSec,
+        snapEnabled,
+      });
+      gestureRef.current = { ...gesture, draft };
+      draftRef.current = {
+        kind: "move",
+        clips: draft.clips,
+        guideMs: draft.guideMs,
+        rowTrackId: draft.rowTrackId,
+      };
+      setCursor("grabbing");
+      schedule();
+      return;
+    }
+    const draft = trimDraft({
+      clip: gesture.clip,
+      edge: gesture.edge,
+      deltaMs,
+      fps: timeline.settings.fps,
+      material: materialOf(gesture.clip),
+      ctx: snapContext(timeline, store.playheadMs, [gesture.clip.id]),
+      pxPerSec: view.pxPerSec,
+      snapEnabled,
+    });
+    gestureRef.current = { ...gesture, draft };
+    draftRef.current = {
+      kind: "trim",
+      clip: {
+        clipId: gesture.clip.id,
+        trackId: gesture.clip.trackId,
+        kind: gesture.clip.kind,
+        startMs: draft.startMs,
+        durationMs: draft.durationMs,
+      },
+      edge: gesture.edge,
+      guideMs: draft.guideMs,
+    };
+    setCursor("ew");
+    schedule();
+  };
+
+  /** The one command a session leaves behind, or nothing when nothing moved. */
+  const commitGesture = (gesture: Gesture) => {
+    const store = useClipStore.getState();
+    if (gesture.kind === "marquee") {
+      const rect = gesture.rect;
+      if (!rect) return;
+      const caught = clipsInRect(
+        timeline,
+        trackRows(timeline),
+        viewNow(),
+        rect,
+      );
+      store.select({
+        clipIds: gesture.additive
+          ? [...new Set([...store.selection.clipIds, ...caught])]
+          : caught,
+        transitionId: null,
+      });
+      anchorRef.current = null;
+      return;
+    }
+    if (gesture.kind === "move") {
+      const draft = gesture.draft;
+      if (!draft) return;
+      const moves = draft.clips
+        .filter((ghost) => {
+          const held = gesture.members.find(
+            (member) => member.id === ghost.clipId,
+          );
+          return (
+            held !== undefined &&
+            (ghost.startMs !== held.startMs || ghost.trackId !== held.trackId)
+          );
+        })
+        .map((ghost) => {
+          const held = gesture.members.find(
+            (member) => member.id === ghost.clipId,
+          );
+          return ghost.trackId === held?.trackId
+            ? { clipId: ghost.clipId, startMs: ghost.startMs }
+            : {
+                clipId: ghost.clipId,
+                startMs: ghost.startMs,
+                trackId: ghost.trackId,
+              };
+        });
+      if (moves.length === 0) return;
+      execute(moves.length > 1 ? "Move clips" : "Move clip", [
+        { type: "moveClips", timelineId: timeline.id, moves },
+      ]);
+      return;
+    }
+    if (gesture.kind !== "trim") return;
+    const draft = gesture.draft;
+    if (!draft) return;
+    const patch: ClipPatch = {};
+    if (draft.startMs !== gesture.clip.startMs) patch.startMs = draft.startMs;
+    if (draft.durationMs !== gesture.clip.durationMs)
+      patch.durationMs = draft.durationMs;
+    if (draft.inPointMs !== gesture.clip.inPointMs)
+      patch.inPointMs = draft.inPointMs;
+    if (draft.outPointMs !== gesture.clip.outPointMs)
+      patch.outPointMs = draft.outPointMs;
+    if (Object.keys(patch).length === 0) return;
+    execute("Trim clip", [
+      {
+        type: "updateClips",
+        timelineId: timeline.id,
+        patches: [{ clipId: gesture.clip.id, patch }],
+      },
+    ]);
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!draggingRef.current) return;
     const local = localPoint(event);
-    if (local) seek(local.x);
+    if (!local) return;
+    if (draggingRef.current) {
+      seek(local.x);
+      return;
+    }
+    const gesture = gestureRef.current;
+    if (!gesture) {
+      setCursor(cursorFor(local));
+      return;
+    }
+    if (gesture.kind === "candidate") {
+      const wandered =
+        Math.abs(local.x - gesture.x) >= CLICK_SLOP_PX ||
+        Math.abs(local.y - gesture.y) >= CLICK_SLOP_PX;
+      if (!wandered) return;
+      if (gesture.hit.kind === "clip" && gesture.locked) {
+        // The press is over: a drag on a locked row is refused where it
+        // starts, with the reason, and the clip never even becomes a draft.
+        useAppStore.getState().pushToast("error", "That track is locked.");
+        gestureRef.current = null;
+        setCursor("default");
+        return;
+      }
+      beginGesture(gesture);
+      // The gesture takes the first move's position as its own, so a drag
+      // begins where the pointer is rather than where it went down.
+      const started = gestureRef.current;
+      if (started && started.kind !== "candidate") updateGesture(event, local);
+      return;
+    }
+    updateGesture(event, local);
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (draggingRef.current) {
-      draggingRef.current = false;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
+    const gesture = gestureRef.current;
+    if (draggingRef.current) draggingRef.current = false;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    const press = pressRef.current;
-    pressRef.current = null;
+    gestureRef.current = null;
+    draftRef.current = null;
+    if (!gesture) return;
     const local = localPoint(event);
-    if (!press || !local) return;
-    // A pointer that wandered is a drag, and a drag belongs to 08: only a
-    // press that held still is a click, whichever row it landed on.
-    if (
-      Math.abs(local.x - press.x) >= CLICK_SLOP_PX ||
-      Math.abs(local.y - press.y) >= CLICK_SLOP_PX
-    ) {
+    if (!local) return;
+    if (gesture.kind === "candidate") {
+      const wandered =
+        Math.abs(local.x - gesture.x) >= CLICK_SLOP_PX ||
+        Math.abs(local.y - gesture.y) >= CLICK_SLOP_PX;
+      if (wandered) return;
+      const store = useClipStore.getState();
+      const mode = event.shiftKey
+        ? "add"
+        : event.ctrlKey || event.metaKey
+          ? "toggle"
+          : "replace";
+      const selection = clickSelection(
+        timeline,
+        store.selection,
+        gesture.hit,
+        mode,
+        anchorRef.current,
+      );
+      store.select(selection);
+      if (mode === "replace" && gesture.hit.kind === "clip") {
+        anchorRef.current = gesture.hit.clip.id;
+      } else if (gesture.hit.kind !== "clip") {
+        anchorRef.current = null;
+      }
       return;
     }
-    const store = useClipStore.getState();
-    const mode = event.shiftKey
-      ? "add"
-      : event.ctrlKey || event.metaKey
-        ? "toggle"
-        : "replace";
-    const selection = clickSelection(
-      timeline,
-      store.selection,
-      press.hit,
-      mode,
-      anchorRef.current,
-    );
-    store.select(selection);
-    if (mode === "replace" && press.hit.kind === "clip") {
-      anchorRef.current = press.hit.clip.id;
-    } else if (press.hit.kind !== "clip") {
-      anchorRef.current = null;
+    commitGesture(gesture);
+    setCursor(cursorFor(local));
+    schedule();
+  };
+
+  const onPointerCancel = () => {
+    draggingRef.current = false;
+    cancelGesture();
+  };
+
+  /** A right-click opens the cut's own menu, over whichever piece it landed on. */
+  const onContextMenu = (event: ReactMouseEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    const local = localPoint(event);
+    if (!local) return;
+    const hit = hitAt(local.x, local.y);
+    if (!hit) return;
+    // A seam badge has no menu yet: adjusting a window is 10's to offer, and
+    // anything here would be half of that work.
+    if (hit.kind === "transition" || hit.kind === "ruler") return;
+    if (hit.kind === "clip") {
+      const store = useClipStore.getState();
+      // The menu acts on the selection, so a piece it landed on that was not
+      // chosen is chosen first — the menu then reads as being about it.
+      if (!store.selection.clipIds.includes(hit.clip.id)) {
+        store.select({ clipIds: [hit.clip.id], transitionId: null });
+        anchorRef.current = hit.clip.id;
+      }
     }
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      target: { kind: "clips", onClip: hit.kind === "clip" },
+    });
   };
 
   /** Whether a drag carries a file from the shelf, which is the only drag the rows take. */
@@ -332,10 +782,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     const viewport = viewportRef.current;
     const local = localPoint(event);
     if (!assetId || !viewport || !local) return;
-    const view = {
-      pxPerSec: useClipStore.getState().view.pxPerSec,
-      scrollLeftPx: viewport.scrollLeft,
-    };
+    const view = viewNow();
     const hit = hitTest(timeline, view, {
       x: local.x,
       y: local.y + viewport.scrollTop,
@@ -360,6 +807,14 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     dropAssetOnTrack(timeline, assetId, trackId, startMs);
   };
 
+  const canvasClass = [
+    "clip-tl-canvas",
+    dropping ? "is-drop-target" : "",
+    cursor === "default" ? "" : CURSOR_CLASS[cursor],
+  ]
+    .filter((name) => name.length > 0)
+    .join(" ");
+
   return (
     <div className="clip-tl-viewport" ref={viewportRef}>
       <div
@@ -367,20 +822,37 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
         style={{ height: spacerHeight, width: spacerWidth }}
       />
       <canvas
-        className={
-          dropping ? "clip-tl-canvas is-drop-target" : "clip-tl-canvas"
-        }
+        className={canvasClass}
+        onContextMenu={onContextMenu}
         onDragLeave={onDragLeave}
         onDragOver={onDragOver}
         onDrop={onDrop}
-        onPointerCancel={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         ref={canvasRef}
       />
+      {menu && (
+        <TimelineMenu
+          onClose={() => setMenu(null)}
+          target={menu.target}
+          timeline={timeline}
+          x={menu.x}
+          y={menu.y}
+        />
+      )}
     </div>
   );
+}
+
+/** The row a content-space y falls in, pulled back to the rows when it falls past them. */
+function rowAt(rows: TrackRow[], y: number): number | null {
+  if (rows.length === 0) return null;
+  for (let index = 0; index < rows.length; index += 1) {
+    if (y < rows[index].top + rows[index].height) return index;
+  }
+  return rows.length - 1;
 }
 
 /** The backing store follows the device's pixel ratio; the drawing works in CSS pixels. */

@@ -6,6 +6,7 @@ import type {
   TransitionId,
 } from "../../../shared/domain";
 import { materialMoment } from "../preview/compositor";
+import type { DraftClip, TimelineDraft } from "../interactions/gestures";
 import {
   RULER_H,
   TRANSITION_BADGE_PX,
@@ -21,7 +22,7 @@ import {
   type TrackRow,
 } from "./geometry";
 import { TIMELINE_PALETTE, type TimelinePalette } from "./palette";
-import { formatTickLabel } from "./timecode";
+import { formatTickLabel, formatTimecode } from "./timecode";
 import { bucketAtIndex, downsample, type WaveformPeaks } from "./waveform";
 
 /**
@@ -51,8 +52,14 @@ export interface TimelineRenderModel {
   selection: { clipIds: readonly ClipId[]; transitionId: TransitionId | null };
   /** The drawing's decoration; null until 07's provider is there. */
   decor: TimelineDecor | null;
-  /** 08's drag ghost; null here and always until then. */
-  draft?: null;
+  /**
+   * What a gesture is drawing: blocks where a drag or a trim would leave
+   * them, the guide a snapped edge landed on, and the rectangle of a marquee.
+   *
+   * The canvas hands in whatever its pointer session holds at draw time, so
+   * the draft is read fresh every frame and never lives in a store.
+   */
+  draft?: TimelineDraft | null;
   palette?: TimelinePalette;
 }
 
@@ -93,6 +100,7 @@ export function renderTimeline(
       drawTransitions(ctx, model, rows, palette);
     }
   }
+  drawDraft(ctx, model, rows, palette);
   drawRuler(ctx, model, palette, rulerY);
   drawPlayhead(ctx, model, palette, rulerY);
 }
@@ -542,6 +550,177 @@ function drawTransitions(
     ctx.lineTo(centreX + 5, centreY + 3.5);
     ctx.stroke();
   }
+}
+
+/**
+ * What a gesture has in hand, drawn over the cut but under the ruler.
+ *
+ * Above the blocks, so a ghost is not hidden by the piece it would replace,
+ * and below the playhead, so the clock stays readable while blocks are
+ * dragged onto it. Nothing here is a document: a frame that loses the draft
+ * draws the cut exactly as it stands.
+ */
+function drawDraft(
+  ctx: CanvasRenderingContext2D,
+  model: TimelineRenderModel,
+  rows: TrackRow[],
+  palette: TimelinePalette,
+): void {
+  const draft = model.draft;
+  if (!draft || rows.length === 0) return;
+  if (draft.kind === "marquee") {
+    drawMarquee(ctx, model, draft.rect, palette);
+    return;
+  }
+  if (draft.kind === "move" && draft.rowTrackId !== null) {
+    // The row the group is landing on is lit from underneath: the one piece
+    // of feedback a cross-track drag needs, and the reason a refused row
+    // stays dark rather than the ghost jumping back without a word.
+    const row = rows.find((each) => each.track.id === draft.rowTrackId);
+    if (row) {
+      ctx.globalAlpha = 0.1;
+      ctx.fillStyle = palette.snap;
+      ctx.fillRect(
+        0,
+        row.top - model.viewport.scrollTopPx,
+        model.viewport.width,
+        row.height,
+      );
+      ctx.globalAlpha = 1;
+    }
+  }
+  const ghosts = draft.kind === "move" ? draft.clips : [draft.clip];
+  for (const ghost of ghosts) drawGhost(ctx, model, rows, ghost, palette);
+  if (draft.guideMs !== null)
+    drawGuide(ctx, model, rows, draft.guideMs, ghosts, palette);
+  if (draft.kind === "trim") drawTrimBubble(ctx, model, rows, draft, palette);
+}
+
+/** The rectangle a marquee covers, in content space, washed and outlined. */
+function drawMarquee(
+  ctx: CanvasRenderingContext2D,
+  model: TimelineRenderModel,
+  rect: { x: number; y: number; width: number; height: number },
+  palette: TimelinePalette,
+): void {
+  // A drag that never leaves its row is still a marquee: the rectangle the
+  // selection reads has no height, and the one drawn keeps a line's worth so
+  // the reader sees what they are sweeping.
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+  const y = rect.y - model.viewport.scrollTopPx;
+  ctx.fillStyle = palette.marqueeFill;
+  ctx.fillRect(rect.x, y, width, height);
+  ctx.beginPath();
+  ctx.rect(rect.x, y, width, height);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = palette.selection;
+  ctx.stroke();
+}
+
+/** A block where a gesture would leave it: the block's own colour, outlined. */
+function drawGhost(
+  ctx: CanvasRenderingContext2D,
+  model: TimelineRenderModel,
+  rows: TrackRow[],
+  ghost: DraftClip,
+  palette: TimelinePalette,
+): void {
+  const row = rows.find((each) => each.track.id === ghost.trackId);
+  if (!row) return;
+  const { width, height, scrollTopPx } = model.viewport;
+  const y = row.top - scrollTopPx;
+  if (y > height || y + row.height < 0) return;
+  const x = xAt(ghost.startMs, model.view);
+  const w = (ghost.durationMs / 1_000) * model.view.pxPerSec;
+  if (x + w < 0 || x > width) return;
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  ctx.beginPath();
+  ctx.roundRect(x, y + 0.5, w, row.height - 1, CLIP_RADIUS);
+  ctx.fillStyle = palette.clip[ghost.kind];
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([5, 3]);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = palette.snap;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * The guide a snapped edge landed on: a line through the rows and a mark on
+ * the edge that caught, so the reader can see which of a block's two edges
+ * is doing the catching.
+ */
+function drawGuide(
+  ctx: CanvasRenderingContext2D,
+  model: TimelineRenderModel,
+  rows: TrackRow[],
+  ms: number,
+  ghosts: readonly DraftClip[],
+  palette: TimelinePalette,
+): void {
+  const { width, height, scrollTopPx } = model.viewport;
+  const x = xAt(ms, model.view);
+  if (x < -1 || x > width + 1) return;
+  const top = Math.max(0, rows[0].top - scrollTopPx);
+  const bottom = Math.min(height, contentHeight(model.timeline) - scrollTopPx);
+  if (bottom <= top) return;
+  ctx.fillStyle = palette.snap;
+  ctx.fillRect(x - 0.5, top, 1, bottom - top);
+  for (const ghost of ghosts) {
+    const row = rows.find((each) => each.track.id === ghost.trackId);
+    if (!row) continue;
+    const y = row.top - scrollTopPx;
+    const centre = y + row.height / 2;
+    if (centre < 0 || centre > height) continue;
+    for (const edge of [ghost.startMs, ghost.startMs + ghost.durationMs]) {
+      if (Math.abs(edge - ms) > 0.5) continue;
+      ctx.fillRect(x - 5, centre - 1.5, 10, 3);
+    }
+  }
+}
+
+/** How long the trimmed block would run, read as the clock does. */
+function drawTrimBubble(
+  ctx: CanvasRenderingContext2D,
+  model: TimelineRenderModel,
+  rows: TrackRow[],
+  draft: { clip: DraftClip; edge: "start" | "end" },
+  palette: TimelinePalette,
+): void {
+  const row = rows.find((each) => each.track.id === draft.clip.trackId);
+  if (!row) return;
+  const { width, height, scrollTopPx } = model.viewport;
+  const y = row.top - scrollTopPx;
+  if (y > height || y + row.height < 0) return;
+  const ms =
+    draft.edge === "start"
+      ? draft.clip.startMs
+      : draft.clip.startMs + draft.clip.durationMs;
+  const text = formatTimecode(
+    draft.clip.durationMs,
+    model.timeline.settings.fps,
+  );
+  ctx.font = BADGE_FONT;
+  const w = ctx.measureText(text).width + 12;
+  const h = 16;
+  const edge = xAt(ms, model.view);
+  // Over the block, or under it when the ruler is in the way.
+  const top = y - h - 4 >= 0 ? y - h - 4 : y + row.height + 4;
+  const left = Math.min(Math.max(edge - w / 2, 2), width - w - 2);
+  ctx.beginPath();
+  ctx.roundRect(left, top, w, h, 4);
+  ctx.fillStyle = palette.badgeFill;
+  ctx.fill();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = palette.snap;
+  ctx.stroke();
+  ctx.fillStyle = palette.ink;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, left + w / 2, top + h / 2 + 0.5);
 }
 
 function drawPlayhead(

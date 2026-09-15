@@ -8,6 +8,7 @@ import {
   buildTimelineMokaFile,
 } from "../../../shared/domain/fixtures";
 import {
+  CLIP_EDGE_PX,
   DEFAULT_PX_PER_SEC,
   MAJOR_TICK_MIN_PX,
   MAX_PX_PER_SEC,
@@ -23,6 +24,7 @@ import {
   contentMs,
   contentWidth,
   cutEndMs,
+  edgeAt,
   hitTest,
   msAt,
   tickLadder,
@@ -233,6 +235,30 @@ describe("hit testing", () => {
       trackId: ids.textTrack,
     });
     expect(hit({ x: 60, y: 200 })).toEqual({ kind: "empty", trackId: null });
+  });
+});
+
+describe("the edges a pointer can catch", () => {
+  const clip = () => cut().clips[0];
+
+  it("calls an edge within its own margin and the body beyond it", () => {
+    const rows = trackRows(cut());
+    // The block runs 0–240 at 60px/s; six pixels either side is the margin.
+    expect(edgeAt(clip(), rows, VIEW, 0)).toBe("start");
+    expect(edgeAt(clip(), rows, VIEW, CLIP_EDGE_PX)).toBe("start");
+    expect(edgeAt(clip(), rows, VIEW, 240)).toBe("end");
+    expect(edgeAt(clip(), rows, VIEW, 240 - CLIP_EDGE_PX)).toBe("end");
+    expect(edgeAt(clip(), rows, VIEW, 120)).toBeNull();
+    expect(edgeAt(clip(), rows, VIEW, CLIP_EDGE_PX + 1)).toBeNull();
+  });
+
+  it("gives a block narrower than its two margins the nearer edge", () => {
+    const rows = trackRows(cut());
+    const tiny = { ...clip(), durationMs: 100 };
+    // 100ms at 60px/s is six pixels wide: both edges want every point in it.
+    expect(edgeAt(tiny, rows, VIEW, 0)).toBe("start");
+    expect(edgeAt(tiny, rows, VIEW, 6)).toBe("end");
+    expect(edgeAt(tiny, rows, VIEW, 3)).toBe("start");
   });
 });
 

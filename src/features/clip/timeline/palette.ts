@@ -38,6 +38,10 @@ export interface TimelinePalette {
   speedFill: string;
   playhead: string;
   lock: string;
+  /** The guide a snapped edge lands on, and the mark the edge wears. */
+  snap: string;
+  /** The wash inside a marquee's rectangle. */
+  marqueeFill: string;
 }
 
 export const TIMELINE_PALETTE: TimelinePalette = {
@@ -65,4 +69,6 @@ export const TIMELINE_PALETTE: TimelinePalette = {
   speedFill: "rgba(0, 0, 0, 0.45)",
   playhead: "#f5f5f7",
   lock: "#9a9aa4",
+  snap: "#f2ce7a",
+  marqueeFill: "rgba(245, 245, 247, 0.07)",
 };

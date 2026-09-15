@@ -453,6 +453,85 @@ export function EyeOffIcon({ size = 18 }: IconProps) {
   );
 }
 
+/** The open eye: the row that draws its picture and its sound again. */
+export function EyeIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M12 5.4c5 0 8.5 4.2 8.5 6.6 0 2.4-3.5 6.6-8.5 6.6S3.5 14.4 3.5 12c0-2.4 3.5-6.6 8.5-6.6Z" />
+      <circle cx="12" cy="12" r="2.7" />
+    </svg>
+  );
+}
+
+/** A padlock with its shackle open: the row that may be written on again. */
+export function UnlockIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <rect height="8.5" rx="2" width="12" x="6" y="10.5" />
+      <path d="M8.8 10.5V8a3.2 3.2 0 0 1 6.2-.6" />
+    </svg>
+  );
+}
+
+/** A plus: the corner that grows the cut another row. */
+export function PlusIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M12 5.5v13M5.5 12h13" />
+    </svg>
+  );
+}
+
+/** A horseshoe magnet: the edges that catch on each other. */
+export function MagnetIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M6.4 19.5v-6.8a5.6 5.6 0 0 1 11.2 0v6.8" />
+      <path d="M9.8 19.5v-6.6a2.2 2.2 0 0 1 4.4 0v6.6" />
+    </svg>
+  );
+}
+
 /** A speaker crossed out: the row that keeps its picture but not its sound. */
 export function MutedIcon({ size = 18 }: IconProps) {
   return (

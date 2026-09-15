@@ -183,6 +183,7 @@ export type PreviewQuality = "full" | "half" | "quarter";
 
 const QUALITY_STORED_UNDER = "moka-canvas:clip-quality";
 const VOLUME_STORED_UNDER = "moka-canvas:clip-volume";
+const SNAP_STORED_UNDER = "moka-canvas:clip-snap";
 
 /** The preview tier this machine was last left on. */
 export function rememberedQuality(): PreviewQuality {
@@ -207,6 +208,21 @@ export function rememberedMasterVolume(): number {
   } catch {
     // A store this cannot read is one that has nothing in it.
     return 1;
+  }
+}
+
+/**
+ * Whether this machine works with the magnet on, which is the default: a
+ * cut's blocks are almost always meant to butt against each other, and the
+ * ones that are not are dragged with Shift held.
+ */
+export function rememberedSnapEnabled(): boolean {
+  if (typeof localStorage === "undefined") return true;
+  try {
+    return localStorage.getItem(SNAP_STORED_UNDER) !== "off";
+  } catch {
+    // A store this cannot read is one that has nothing in it.
+    return true;
   }
 }
 
@@ -246,6 +262,14 @@ interface ClipState {
   quality: PreviewQuality;
   /** The master level the whole cut is heard at, 0..1, remembered on this machine. */
   masterVolume: number;
+  /**
+   * Whether edges catch on each other while they are dragged.
+   *
+   * A way of working on this machine rather than a fact about a cut, so it is
+   * remembered beside the quality and the level; Shift suspends it for one
+   * drag, which is the gesture's own business and never written down.
+   */
+  snapEnabled: boolean;
   /**
    * Whether the end of the cut comes back round to its head.
    *
@@ -290,6 +314,7 @@ interface ClipState {
   togglePlay: () => void;
   setQuality: (quality: PreviewQuality) => void;
   setMasterVolume: (volume: number) => void;
+  setSnapEnabled: (enabled: boolean) => void;
   toggleLoop: () => void;
 }
 
@@ -360,6 +385,7 @@ export const useClipStore = create<ClipState>()((set, get) => {
     playing: false,
     quality: rememberedQuality(),
     masterVolume: rememberedMasterVolume(),
+    snapEnabled: rememberedSnapEnabled(),
     loop: false,
     viewportPx: 0,
 
@@ -488,6 +514,11 @@ export const useClipStore = create<ClipState>()((set, get) => {
         : 0;
       remember(VOLUME_STORED_UNDER, String(level));
       set({ masterVolume: level });
+    },
+
+    setSnapEnabled(enabled) {
+      remember(SNAP_STORED_UNDER, enabled ? "on" : "off");
+      set({ snapEnabled: enabled });
     },
 
     toggleLoop() {

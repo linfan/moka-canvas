@@ -34,6 +34,8 @@ export const MIN_CONTENT_MS = 30_000;
 export const TAIL_MS = 4_000;
 /** The badge a seam gets, square, centred on the seam. */
 export const TRANSITION_BADGE_PX = 18;
+/** How near a block's edge a pointer must be to be trimming rather than moving it. */
+export const CLIP_EDGE_PX = 6;
 /** A major tick this far apart keeps its label off its neighbour's; a minor one reads at 48. */
 export const MAJOR_TICK_MIN_PX = 72;
 export const MINOR_TICK_MIN_PX = 48;
@@ -58,6 +60,9 @@ export type TimelineHit =
   | { kind: "transition"; transition: TimelineTransition }
   | { kind: "ruler" }
   | { kind: "empty"; trackId: TrackId | null };
+
+/** Which of a block's two edges a pointer is over, when it is over either. */
+export type ClipEdge = "start" | "end";
 
 /** How long the content runs: the last tail, the playhead, or the floor, plus room past the end. */
 export function contentMs(
@@ -156,6 +161,27 @@ export function clipRect(
     width: (clip.durationMs / 1_000) * view.pxPerSec,
     height: row?.height ?? TRACK_HEIGHT[clip.kind],
   };
+}
+
+/**
+ * Which edge of a block a point is over, or null when it is over the body.
+ *
+ * The block's own rect is what is measured, so a follower pulled back into a
+ * seam has its edges read where it draws. The nearer edge takes a point that
+ * is inside both margins — a block narrower than the two of them together
+ * still offers both edges rather than refusing to be trimmed at a tight zoom.
+ */
+export function edgeAt(
+  clip: TimelineClip,
+  rows: TrackRow[],
+  view: TimelineView,
+  x: number,
+): ClipEdge | null {
+  const rect = clipRect(clip, rows, view);
+  const toStart = Math.abs(x - rect.x);
+  const toEnd = Math.abs(x - (rect.x + rect.width));
+  if (toStart > CLIP_EDGE_PX && toEnd > CLIP_EDGE_PX) return null;
+  return toStart <= toEnd ? "start" : "end";
 }
 
 /** The x a seam's badge centres on: the tail of the clip it follows, or null when that clip is gone. */

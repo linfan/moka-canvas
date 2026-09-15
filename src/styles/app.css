@@ -2498,6 +2498,23 @@ button.danger:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
+/* A breath between the verbs a menu already lists and the ones it adds. */
+.menu-sep {
+  background: var(--stroke);
+  height: 1px;
+  margin: 4px 2px;
+}
+
+/* Naming a row in place, on the menu's own surface. */
+.menu-input {
+  background: var(--surface);
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  color: var(--ink);
+  font: inherit;
+  padding: 6px 8px;
+}
+
 .rename-overlay {
   position: absolute;
   z-index: 30;
@@ -4004,6 +4021,11 @@ body.is-dragging-split {
   color: var(--ink);
 }
 
+.clip-tl-button[aria-pressed="true"] {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
 .clip-tl-button:disabled {
   cursor: default;
   opacity: 0.35;
@@ -4028,9 +4050,12 @@ body.is-dragging-split {
 }
 
 .clip-tl-corner {
+  align-items: center;
   border-bottom: 1px solid var(--stroke);
   border-right: 1px solid var(--stroke);
+  display: flex;
   grid-area: 1 / 1;
+  justify-content: center;
 }
 
 .clip-tl-headers {
@@ -4069,11 +4094,32 @@ body.is-dragging-split {
 .clip-tl-track-flags {
   color: var(--muted);
   display: inline-flex;
-  gap: 4px;
+  gap: 2px;
 }
 
-.clip-tl-track-flag {
+/* A row's own switches: quiet marks that wear their state, not buttons that
+   read as buttons until a pointer comes near them. */
+.clip-tl-track-toggle {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
   display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+}
+
+.clip-tl-track-toggle:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.clip-tl-track-toggle[aria-pressed="true"] {
+  color: var(--ink);
 }
 
 .clip-tl-viewport {
@@ -4102,6 +4148,28 @@ body.is-dragging-split {
 /* A file dragged in is a file about to land where it is let go. */
 .clip-tl-canvas.is-drop-target {
   cursor: copy;
+}
+
+/* What the pointer is over, as the canvas's own edges say it: a block moves,
+   its edge trims, empty space draws a marquee. */
+.clip-tl-canvas.is-cursor-grab {
+  cursor: grab;
+}
+
+.clip-tl-canvas.is-cursor-grabbing {
+  cursor: grabbing;
+}
+
+.clip-tl-canvas.is-cursor-ew {
+  cursor: ew-resize;
+}
+
+.clip-tl-canvas.is-cursor-crosshair {
+  cursor: crosshair;
+}
+
+.clip-tl-canvas.is-cursor-pointer {
+  cursor: pointer;
 }
 
 /* The 02 copy over a cut with nothing on it: it reads the empty rows without

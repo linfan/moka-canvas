@@ -5,6 +5,7 @@ import { useHistoryStore } from "../../editor/stores/historyStore";
 import {
   DuplicateIcon,
   FitIcon,
+  MagnetIcon,
   RedoIcon,
   ScissorsIcon,
   TrashIcon,
@@ -45,6 +46,8 @@ export function TimelineToolbar({ timeline }: TimelineToolbarProps) {
   const zoomBy = useClipStore((state) => state.zoomBy);
   const zoomTo = useClipStore((state) => state.zoomTo);
   const fit = useClipStore((state) => state.fit);
+  const snapEnabled = useClipStore((state) => state.snapEnabled);
+  const setSnapEnabled = useClipStore((state) => state.setSnapEnabled);
   const canUndo = useCanUndo();
   const canRedo = useHistoryStore((state) => state.redoStack.length > 0);
 
@@ -109,6 +112,17 @@ export function TimelineToolbar({ timeline }: TimelineToolbarProps) {
           type="button"
         >
           <RedoIcon size={16} />
+        </button>
+        <button
+          aria-label="Snapping"
+          aria-pressed={snapEnabled}
+          className="clip-tl-button"
+          data-testid="clip-snap"
+          onClick={() => setSnapEnabled(!snapEnabled)}
+          title="Snap edges together — hold Shift to drag freely"
+          type="button"
+        >
+          <MagnetIcon size={16} />
         </button>
       </div>
       <div className="clip-tl-toolbar-view">

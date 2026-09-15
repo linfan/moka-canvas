@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createTimeline } from "../../../shared/domain";
 import type { TimelineDocument } from "../../../shared/domain";
 import { buildCutMokaFile } from "../../../shared/domain/fixtures";
+import type { DraftClip } from "../interactions/gestures";
 import { TIMELINE_PALETTE } from "./palette";
 import { renderTimeline, type TimelineRenderModel } from "./render";
 import { xAt } from "./geometry";
@@ -61,6 +62,14 @@ function recordingContext(): {
     drawImage: record("drawImage"),
     save: record("save"),
     restore: record("restore"),
+    setLineDash(lines: number[]) {
+      calls.push({
+        name: "setLineDash",
+        args: [lines],
+        fillStyle: String(this.fillStyle),
+        strokeStyle: String(this.strokeStyle),
+      });
+    },
     measureText(text: string) {
       return { width: text.length * 6 } as TextMetrics;
     },
@@ -189,5 +198,137 @@ describe("drawing a screen of the timeline", () => {
         (call) => call.strokeStyle === TIMELINE_PALETTE.selection,
       ),
     ).toBe(true);
+  });
+});
+
+describe("drawing what a gesture has in hand", () => {
+  /** A draft's view of the fixture's first block, moved a second later. */
+  function ghost(patch: Partial<DraftClip> = {}): DraftClip {
+    const clip = cut().clips[0];
+    return {
+      clipId: clip.id,
+      trackId: clip.trackId,
+      kind: clip.kind,
+      startMs: 1_000,
+      durationMs: clip.durationMs,
+      ...patch,
+    };
+  }
+
+  it("draws a drag's ghost where the release would leave it, dashed", () => {
+    const { ctx, calls } = recordingContext();
+    renderTimeline(
+      ctx,
+      model({
+        draft: {
+          kind: "move",
+          clips: [ghost()],
+          guideMs: 1_000,
+          rowTrackId: null,
+        },
+      }),
+    );
+    // The ghost is a block outline: roundRect at its own second, on its row.
+    const outline = named(calls, "roundRect").find(
+      (call) => Math.round(Number(call.args[0])) === 60,
+    );
+    expect(outline).toBeDefined();
+    expect(Number(outline!.args[1])).toBeCloseTo(120.5);
+    expect(Number(outline!.args[2])).toBeCloseTo(240);
+    // Dashed, and stroked in the guide's colour, which the cut alone never is.
+    expect(named(calls, "setLineDash").map((call) => call.args[0])).toEqual([
+      [5, 3],
+    ]);
+    expect(
+      named(calls, "stroke").some(
+        (call) => call.strokeStyle === TIMELINE_PALETTE.snap,
+      ),
+    ).toBe(true);
+    // The guide is the one-pixel line the snapping feedback promises.
+    const guide = named(calls, "fillRect").find(
+      (call) => call.fillStyle === TIMELINE_PALETTE.snap && call.args[2] === 1,
+    );
+    expect(guide).toBeDefined();
+    expect(Number(guide!.args[0])).toBeCloseTo(59.5);
+  });
+
+  it("lights the row a cross-track drag is landing on", () => {
+    const { ctx, calls } = recordingContext();
+    const textTrack = cut().tracks[2];
+    renderTimeline(
+      ctx,
+      model({
+        draft: {
+          kind: "move",
+          clips: [ghost()],
+          guideMs: null,
+          rowTrackId: textTrack.id,
+        },
+      }),
+    );
+    const lit = named(calls, "fillRect").find(
+      (call) =>
+        call.fillStyle === TIMELINE_PALETTE.snap &&
+        Number(call.args[1]) === 28 &&
+        Number(call.args[3]) === 36,
+    );
+    expect(lit).toBeDefined();
+  });
+
+  it("draws a trim's outline and its duration bubble", () => {
+    const { ctx, calls } = recordingContext();
+    renderTimeline(
+      ctx,
+      model({
+        draft: {
+          kind: "trim",
+          clip: ghost({ startMs: 0, durationMs: 2_500 }),
+          edge: "end",
+          guideMs: null,
+        },
+      }),
+    );
+    // The bubble reads the block's length on the document's clock.
+    expect(named(calls, "fillText").map((call) => call.args[0])).toContain(
+      "00:00:02:15",
+    );
+    expect(
+      named(calls, "stroke").some(
+        (call) => call.strokeStyle === TIMELINE_PALETTE.snap,
+      ),
+    ).toBe(true);
+  });
+
+  it("draws a marquee as a washed rectangle, outlined", () => {
+    const { ctx, calls } = recordingContext();
+    renderTimeline(
+      ctx,
+      model({
+        draft: {
+          kind: "marquee",
+          rect: { x: 100, y: 40, width: 200, height: 80 },
+        },
+      }),
+    );
+    const wash = named(calls, "fillRect").find(
+      (call) => call.fillStyle === TIMELINE_PALETTE.marqueeFill,
+    );
+    expect(wash).toBeDefined();
+    expect(wash!.args.slice(0, 4).map(Number)).toEqual([100, 40, 200, 80]);
+    const outline = named(calls, "rect").find(
+      (call) => Math.round(Number(call.args[0])) === 100,
+    );
+    expect(outline).toBeDefined();
+  });
+
+  it("leaves the guide colours out of a cut nobody is dragging", () => {
+    const { ctx, calls } = recordingContext();
+    renderTimeline(ctx, model());
+    expect(
+      named(calls, "stroke").some(
+        (call) => call.strokeStyle === TIMELINE_PALETTE.snap,
+      ),
+    ).toBe(false);
+    expect(named(calls, "setLineDash")).toEqual([]);
   });
 });

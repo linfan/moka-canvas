@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import type { TimelineDocument } from "../../../shared/domain";
+import { AddTrackButton } from "../components/TimelineMenu";
 import { TimelineIcon } from "../components/ClipIcons";
 import { useClipStore } from "../stores/clipStore";
 import { TimelineCanvas } from "../timeline/TimelineCanvas";
@@ -45,7 +46,9 @@ export function TimelineArea({ timeline }: TimelineAreaProps) {
     >
       <TimelineToolbar timeline={timeline} />
       <div className="clip-tl-body">
-        <div aria-hidden="true" className="clip-tl-corner" />
+        <div className="clip-tl-corner">
+          <AddTrackButton timeline={timeline} />
+        </div>
         <TrackHeaders ref={headersRef} timeline={timeline} />
         <TimelineCanvas headersRef={headersRef} timeline={timeline} />
       </div>
