@@ -22,6 +22,7 @@ import {
   contentHeight,
   contentMs,
   contentWidth,
+  cutEndMs,
   hitTest,
   msAt,
   tickLadder,
@@ -273,6 +274,26 @@ describe("content and zoom arithmetic", () => {
     expect(clampPxPerSec(10_000)).toBe(MAX_PX_PER_SEC);
     expect(clampPxPerSec(90.123_456)).toBe(90.12);
     expect(clampPxPerSec(Number.NaN)).toBe(DEFAULT_PX_PER_SEC);
+  });
+
+  it("ends the cut at the last tail on a row that draws", () => {
+    // The cut fixture runs to 8s: the video track's follower is pulled back
+    // into its seam and the audio track runs the full length.
+    expect(cutEndMs(cut())).toBe(8_000);
+    const trackless = { ...createTimeline("Trackless"), clips: cut().clips };
+    expect(cutEndMs(trackless)).toBe(0);
+    // A hidden row does not draw, so its clips are not where the cut ends.
+    const hidden = cut();
+    expect(
+      cutEndMs({
+        ...hidden,
+        tracks: hidden.tracks.map((track) =>
+          track.id === cutFixtureIds().audioTrack
+            ? { ...track, hidden: true }
+            : track,
+        ),
+      }),
+    ).toBe(5_500);
   });
 });
 

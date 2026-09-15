@@ -80,6 +80,22 @@ export function contentWidth(
   return (contentMs(timeline, playheadMs) / 1_000) * pxPerSec;
 }
 
+/**
+ * Where the cut ends: the last tail on a row that draws, or the head.
+ *
+ * The end 07's transport stops at and its keys jump to, and not the drawn
+ * content's length — a cut three seconds long does not end where its scroller
+ * does. A hidden row is a row that is not shown, so its clips are not where
+ * the cut ends on screen.
+ */
+export function cutEndMs(timeline: TimelineDocument): number {
+  return timeline.clips.reduce((end, clip) => {
+    const track = timeline.tracks.find((row) => row.id === clip.trackId);
+    if (!track || track.hidden) return end;
+    return Math.max(end, clip.startMs + clip.durationMs);
+  }, 0);
+}
+
 /** How tall the rows run, ruler included. */
 export function contentHeight(timeline: TimelineDocument): number {
   return trackRows(timeline).reduce(

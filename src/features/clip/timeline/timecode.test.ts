@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatTickLabel, formatTimecode, frameAligned } from "./timecode";
+import {
+  formatTickLabel,
+  formatTimecode,
+  frameAligned,
+  nextFrameMs,
+  prevFrameMs,
+  stepFrames,
+} from "./timecode";
 
 describe("formatTimecode", () => {
   it("reads the head as all zeroes", () => {
@@ -83,5 +90,29 @@ describe("formatTickLabel", () => {
   it("adds the hour past one, without padding it", () => {
     expect(formatTickLabel(3_600_000, 30)).toBe("1:00:00");
     expect(formatTickLabel(3_723_000, 30)).toBe("1:02:03");
+  });
+});
+
+describe("stepping the playhead by frames", () => {
+  it("walks one whole frame each way, on the document's own clock", () => {
+    expect(nextFrameMs(1_000, 30)).toBe(1_033);
+    expect(prevFrameMs(1_033, 30)).toBe(1_000);
+    expect(nextFrameMs(0, 30)).toBe(33);
+    expect(nextFrameMs(1_000, 24)).toBe(1_042);
+    expect(nextFrameMs(500, 60)).toBe(517);
+  });
+
+  it("holds a step before the head at the head", () => {
+    expect(prevFrameMs(0, 30)).toBe(0);
+    expect(prevFrameMs(10, 30)).toBe(0);
+    expect(stepFrames(0, 30, -3)).toBe(0);
+  });
+
+  it("steps from whatever frame the moment rounds to", () => {
+    // 1.016s is the frame that reads 00:00:01:00; a step forward from it is
+    // the frame after, and a step back is the one before it — not a step from
+    // the millisecond the playhead happens to read.
+    expect(nextFrameMs(1_016, 30)).toBe(1_033);
+    expect(prevFrameMs(1_016, 30)).toBe(967);
   });
 });

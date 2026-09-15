@@ -23,7 +23,7 @@ import {
 } from "./geometry";
 import { renderTimeline } from "./render";
 import { frameAligned } from "./timecode";
-import { useThumbCache } from "./thumbs";
+import { useTimelineDecor } from "./decor";
 
 interface TimelineCanvasProps {
   timeline: TimelineDocument;
@@ -60,7 +60,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
   const [dropping, setDropping] = useState(false);
   const pxPerSec = useClipStore((state) => state.view.pxPerSec);
   const playheadMs = useClipStore((state) => state.playheadMs);
-  const thumbs = useThumbCache();
+  const decor = useTimelineDecor();
   const spacerWidth = contentWidth(timeline, playheadMs, pxPerSec);
   const spacerHeight = contentHeight(timeline);
 
@@ -91,7 +91,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       viewport: { width: cssW, height: cssH, scrollTopPx: viewport.scrollTop },
       playheadMs: state.playheadMs,
       selection: state.selection,
-      thumbs,
+      decor,
     });
     // What is drawn is pixels, which nothing can read back: what changed is
     // written onto the room instead, a moment behind the frame that drew it.
@@ -109,7 +109,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
         state.selection.transitionId ?? "",
       );
     }
-  }, [timeline, thumbs]);
+  }, [timeline, decor]);
 
   const schedule = useCallback(() => {
     if (frameRef.current !== null) return;

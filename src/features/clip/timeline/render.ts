@@ -5,11 +5,13 @@ import type {
   TimelineDocument,
   TransitionId,
 } from "../../../shared/domain";
+import { materialMoment } from "../preview/compositor";
 import {
   RULER_H,
   TRANSITION_BADGE_PX,
   clipRect,
   contentHeight,
+  msAt,
   tickLadder,
   trackRows,
   transitionCenterX,
@@ -20,10 +22,24 @@ import {
 } from "./geometry";
 import { TIMELINE_PALETTE, type TimelinePalette } from "./palette";
 import { formatTickLabel } from "./timecode";
+import { bucketAtIndex, downsample, type WaveformPeaks } from "./waveform";
 
-/** The pictures a clip's label leaves room for; 07 grows this into filmstrips and waveforms. */
-export interface ThumbProvider {
-  get(assetId: AssetId): CanvasImageSource | null;
+/**
+ * A clip's sound as the timeline draws it: the buckets of its material, or the
+ * flat line that stands in for a sound this browser will not decode.
+ */
+export type WaveformDrawing =
+  { kind: "peaks"; peaks: WaveformPeaks } | { kind: "flat" };
+
+/**
+ * What a block is drawn with beyond its own colour: a sound's shape and a
+ * picture's first frame, both arriving from 07's provider and never waited on.
+ */
+export interface TimelineDecor {
+  /** The sound a clip's block wears, or null while it is still being measured. */
+  waveform(clip: TimelineClip): WaveformDrawing | null;
+  /** The picture an asset's block wears, or null until one has been made. */
+  thumb(assetId: AssetId): CanvasImageSource | null;
 }
 
 export interface TimelineRenderModel {
@@ -33,7 +49,8 @@ export interface TimelineRenderModel {
   viewport: { width: number; height: number; scrollTopPx: number };
   playheadMs: number;
   selection: { clipIds: readonly ClipId[]; transitionId: TransitionId | null };
-  thumbs: ThumbProvider | null;
+  /** The drawing's decoration; null until 07's provider is there. */
+  decor: TimelineDecor | null;
   /** 08's drag ghost; null here and always until then. */
   draft?: null;
   palette?: TimelinePalette;
@@ -42,6 +59,8 @@ export interface TimelineRenderModel {
 const CLIP_FONT = "12px ui-sans-serif, system-ui, sans-serif";
 const BADGE_FONT = "10px ui-sans-serif, system-ui, sans-serif";
 const CLIP_RADIUS = 6;
+/** How far apart a video block's pictures sit; one thumbnail's own width. */
+const FILMSTRIP_STEP_PX = 96;
 
 /**
  * A whole screen of timeline: rows, clips, seams, the ruler and the playhead.
@@ -224,28 +243,116 @@ function drawClip(
   if (rect.width < 8) return;
   drawFades(ctx, clip, rect, model, palette);
 
-  const thumb = clip.kind === "text" ? null : thumbOf(clip, model);
-  let textLeft = rect.x + 8;
-  if (thumb && rect.height >= 26) {
-    const thumbH = rect.height - 10;
-    const thumbW = (thumbH * 16) / 9;
-    const thumbX = rect.x + 5;
-    const thumbY = rect.y + 5;
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(thumbX, thumbY, thumbW, thumbH, 4);
-    ctx.clip();
-    ctx.drawImage(thumb, thumbX, thumbY, thumbW, thumbH);
-    ctx.restore();
-    textLeft = thumbX + thumbW + 6;
+  if (clip.kind === "audio") {
+    // A sound wears its own shape, read by the material's clock.
+    drawWaveform(ctx, clip, rect, model, palette);
+  } else if (clip.kind === "video") {
+    const thumb = thumbOf(clip, model);
+    if (thumb && rect.height >= 26) {
+      drawFilmstrip(ctx, thumb, rect);
+    }
   }
-  if (clip.kind === "text") {
-    drawTextMark(ctx, rect, palette);
-    textLeft = rect.x + 24;
-  }
+  if (clip.kind === "text") drawTextMark(ctx, rect, palette);
 
-  const label = clipName(clip);
-  const labelWidth = rect.x + rect.width - 8 - textLeft;
+  drawLabel(ctx, clip, rect, palette);
+  if (clip.speed !== 1) drawSpeedBadge(ctx, clip, rect, palette);
+}
+
+function thumbOf(
+  clip: TimelineClip,
+  model: TimelineRenderModel,
+): CanvasImageSource | null {
+  if (!clip.assetId || !model.decor) return null;
+  return model.decor.thumb(clip.assetId);
+}
+
+/** The pictures a video block wears: one first frame, laid down along the block. */
+function drawFilmstrip(
+  ctx: CanvasRenderingContext2D,
+  thumb: CanvasImageSource,
+  rect: { x: number; y: number; width: number; height: number },
+): void {
+  const imageHeight = rect.height - 10;
+  const imageWidth = (imageHeight * 16) / 9;
+  if (imageWidth <= 0) return;
+  ctx.save();
+  // Clipped to the block's own corners, a pixel in so the stroke stays on top.
+  ctx.beginPath();
+  ctx.roundRect(rect.x + 1, rect.y + 5, rect.width - 2, imageHeight, 4);
+  ctx.clip();
+  for (
+    let x = rect.x + 5;
+    x < rect.x + rect.width - 4;
+    x += FILMSTRIP_STEP_PX
+  ) {
+    ctx.drawImage(thumb, x, rect.y + 5, imageWidth, imageHeight);
+  }
+  ctx.restore();
+}
+
+/** The vertical min/max spans a sound's block is drawn with. */
+function drawWaveform(
+  ctx: CanvasRenderingContext2D,
+  clip: TimelineClip,
+  rect: { x: number; y: number; width: number; height: number },
+  model: TimelineRenderModel,
+  palette: TimelinePalette,
+): void {
+  const drawing = model.decor?.waveform(clip) ?? null;
+  if (!drawing) return;
+  // Only the columns the screen shows: a long block is wider than any canvas,
+  // and the material's clock is what says which part of the file each shows.
+  const from = Math.max(rect.x, 0);
+  const to = Math.min(rect.x + rect.width, model.viewport.width);
+  const visibleWidth = to - from;
+  if (visibleWidth < 1) return;
+  const columns = Math.max(1, Math.floor(visibleWidth));
+  const centre = rect.y + rect.height / 2;
+  const half = Math.max(1, rect.height / 2 - 6);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.width, rect.height);
+  ctx.clip();
+  if (drawing.kind === "flat") {
+    // A sound that would not decode is a flat line at the block's own level:
+    // a picture of a sound, not a report of a failure.
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = palette.waveform;
+    ctx.fillRect(from, centre - 1, visibleWidth, 2);
+    ctx.restore();
+    return;
+  }
+  const peaks = drawing.peaks;
+  // The block starts at the material moment its left edge reads and ends at
+  // the moment its right edge reads — the block's own range, not the file's.
+  const firstBucket = bucketAtIndex(
+    peaks,
+    materialMoment(clip, msAt(from, model.view)),
+  );
+  const lastBucket =
+    bucketAtIndex(peaks, materialMoment(clip, msAt(to, model.view))) + 1;
+  const { min, max } = downsample(peaks, columns, {
+    from: firstBucket,
+    to: lastBucket,
+  });
+  ctx.fillStyle = palette.waveform;
+  for (let column = 0; column < columns; column += 1) {
+    const low = centre - max[column] * half;
+    const high = centre - min[column] * half;
+    ctx.fillRect(from + column, low, 1, Math.max(1, high - low));
+  }
+  ctx.restore();
+}
+
+/** The clip's name over whatever the block is wearing. */
+function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  clip: TimelineClip,
+  rect: { x: number; y: number; width: number; height: number },
+  palette: TimelinePalette,
+): void {
+  const left = clip.kind === "text" ? rect.x + 24 : rect.x + 8;
+  const labelWidth = rect.x + rect.width - 8 - left;
   if (labelWidth < 8) return;
   ctx.save();
   ctx.beginPath();
@@ -254,19 +361,26 @@ function drawClip(
   ctx.font = CLIP_FONT;
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
+  const text = fitLabel(ctx, clipName(clip), labelWidth);
+  if (clip.kind !== "text") {
+    // Pictures and waveform spans would eat the words: the label sits on a
+    // small plate of the block's own colour.
+    ctx.globalAlpha = 0.72;
+    ctx.fillStyle = palette.clip[clip.kind];
+    ctx.beginPath();
+    ctx.roundRect(
+      left - 4,
+      rect.y + 4,
+      Math.min(ctx.measureText(text).width + 12, rect.width - 8),
+      Math.min(20, rect.height - 8),
+      4,
+    );
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
   ctx.fillStyle = palette.ink;
-  ctx.fillText(fitLabel(ctx, label, labelWidth), textLeft, rect.y + 6);
+  ctx.fillText(text, left, rect.y + 6);
   ctx.restore();
-
-  if (clip.speed !== 1) drawSpeedBadge(ctx, clip, rect, palette);
-}
-
-function thumbOf(
-  clip: TimelineClip,
-  model: TimelineRenderModel,
-): CanvasImageSource | null {
-  if (!clip.assetId || !model.thumbs) return null;
-  return model.thumbs.get(clip.assetId);
 }
 
 function clipName(clip: TimelineClip): string {

@@ -71,6 +71,7 @@ beforeEach(() => {
     selection: { clipIds: [], transitionId: null },
     view: { pxPerSec: 60, scrollLeftPx: 0 },
     playheadMs: 0,
+    playing: false,
     viewportPx: 0,
   });
   vi.mocked(undo).mockReset();
@@ -162,6 +163,52 @@ describe("the room's keys", () => {
     // An edge already stood on is stepped past rather than landed on again.
     press({ key: "ArrowUp" });
     expect(useClipStore.getState().playheadMs).toBe(0);
+  });
+
+  it("plays and pauses the cut with Space", () => {
+    openCut();
+    render(harness());
+
+    const started = press({ key: " " });
+    expect(started.defaultPrevented).toBe(true);
+    expect(useClipStore.getState().playing).toBe(true);
+
+    press({ key: " " });
+    expect(useClipStore.getState().playing).toBe(false);
+  });
+
+  it("walks the clock a frame at a time, and a second with Shift", () => {
+    openCut();
+    render(harness());
+    useClipStore.getState().setPlayhead(1_000);
+
+    const right = press({ key: "ArrowRight" });
+    expect(right.defaultPrevented).toBe(true);
+    expect(useClipStore.getState().playheadMs).toBe(1_033);
+
+    press({ key: "ArrowLeft" });
+    expect(useClipStore.getState().playheadMs).toBe(1_000);
+
+    press({ key: "ArrowRight", shiftKey: true });
+    expect(useClipStore.getState().playheadMs).toBe(2_000);
+    press({ key: "ArrowLeft", shiftKey: true });
+    expect(useClipStore.getState().playheadMs).toBe(1_000);
+
+    // The head is the floor: a step before it is the head.
+    useClipStore.getState().setPlayhead(0);
+    press({ key: "ArrowLeft" });
+    expect(useClipStore.getState().playheadMs).toBe(0);
+  });
+
+  it("stops the clock when a key places the playhead", () => {
+    openCut();
+    render(harness());
+    useClipStore.getState().play();
+    expect(useClipStore.getState().playing).toBe(true);
+
+    press({ key: "ArrowRight" });
+    expect(useClipStore.getState().playing).toBe(false);
+    expect(useClipStore.getState().playheadMs).toBe(33);
   });
 
   it("zooms a step either way", () => {

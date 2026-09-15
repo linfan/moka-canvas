@@ -1,7 +1,13 @@
 import type { AssetId } from "../../../shared/domain";
 import { assetUrl } from "../../../api";
-import { openMp4, readRange, type Mp4Index } from "./mp4";
-import { planFor } from "./samplePlan";
+import {
+  openMp4,
+  readRange,
+  type Mp4Index,
+  type Mp4Sample,
+  type Mp4VideoTrack,
+} from "./mp4";
+import { planFor, sampleAt, type SampleChunk } from "./samplePlan";
 
 /**
  * Frames straight out of the file, through WebCodecs.
@@ -60,6 +66,18 @@ function frameBytes(frame: VideoFrame): number {
     // A 4:2:0 plane and a half is what a decoded picture usually costs.
     return Math.round(frame.codedWidth * frame.codedHeight * 1.5);
   }
+}
+
+/** The configuration a video track is handed to a decoder with. */
+function videoConfig(video: Mp4VideoTrack): VideoDecoderConfig {
+  return {
+    codec: video.codec,
+    // The configuration record is written beside the samples, where there is one.
+    description: video.description,
+    codedWidth: video.width > 0 ? video.width : undefined,
+    codedHeight: video.height > 0 ? video.height : undefined,
+    optimizeForLatency: true,
+  };
 }
 
 function cacheFrame(key: string, frame: VideoFrame): VideoFrame {
@@ -197,14 +215,7 @@ async function decodeOn(
   const kept = cached(key);
   if (kept) return kept;
 
-  const config: VideoDecoderConfig = {
-    codec: video.codec,
-    // The configuration record is written beside the samples, where there is one.
-    description: video.description,
-    codedWidth: video.width > 0 ? video.width : undefined,
-    codedHeight: video.height > 0 ? video.height : undefined,
-    optimizeForLatency: true,
-  };
+  const config: VideoDecoderConfig = videoConfig(video);
   const support = await VideoDecoder.isConfigSupported(config).catch(
     () => null,
   );
@@ -299,4 +310,329 @@ export async function decodeFrameAt(
   } finally {
     slot.busy = null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Playing a file forward
+// ---------------------------------------------------------------------------
+
+/** How far ahead of the consumer the pump fetches, so the next second is in hand. */
+const STREAM_PREFETCH_MS = 2_000;
+/** The most frames the pump keeps queued; a consumer that falls behind drops the oldest. */
+const STREAM_QUEUE_LIMIT = 3;
+
+interface QueuedFrame {
+  ctsUs: number;
+  frame: VideoFrame;
+}
+
+/** A window of samples and the bytes they read from. */
+interface StreamWindow {
+  bytes: Uint8Array;
+  chunks: SampleChunk[];
+  /** Where the window's bytes begin in the file. */
+  startOffset: number;
+  index: number;
+}
+
+/**
+ * A run of frames fed forward in order, for playing rather than seeking.
+ *
+ * Random access re-decodes a whole GOP for every frame asked for, which at
+ * thirty frames a second is the same group decoded thirty times over; a
+ * playing clip instead starts at the keyframe its moment sits behind and is
+ * fed sample after sample, one small fetch per couple of seconds. The frames
+ * it has decoded wait in a queue of at most three, a consumer that falls
+ * behind drops the ones the moment has passed, and an empty queue reuses the
+ * frame last drawn rather than blocking the compositor on a decode.
+ *
+ * The stream owns its decoder for as long as it runs: a decoder handed back
+ * between windows would have to start over from a keyframe every time, which
+ * is the very cost this exists to avoid. When the file runs out, fails, or is
+ * asked to close — a pause, a seek, another clip — every frame it holds is
+ * closed with it.
+ */
+export interface FrameStream {
+  /**
+   * The frame showing a material moment, or null while one is on its way.
+   *
+   * The frame belongs to the stream: it is drawn with and not closed by the
+   * caller, and it stands until a newer one covers the moment.
+   */
+  frameAt(materialMs: number): DecodedPicture | null;
+  /** Whether the pump has given up; the still path takes the file from here. */
+  readonly failed: boolean;
+  /** Stops the pump and lets go of every frame it holds. */
+  close(): void;
+}
+
+class SequentialStream implements FrameStream {
+  readonly assetId: AssetId;
+  readonly fromMs: number;
+  private readonly abort = new AbortController();
+  private samples: Mp4Sample[] = [];
+  private decoder: VideoDecoder | null = null;
+  private window: StreamWindow | null = null;
+  /** The next sample to fetch, one past the window in hand. */
+  private next = 0;
+  private rotationDeg = 0;
+  private queue: QueuedFrame[] = [];
+  /** Frames already drawn with, newest last; two deep, so a paint is never cut short. */
+  private handed: QueuedFrame[] = [];
+  /** Woken when the consumer drains a frame, which is the pump's room to make more. */
+  private room: (() => void) | null = null;
+  private closed = false;
+  private gaveUp = false;
+
+  constructor(assetId: AssetId, fromMs: number) {
+    this.assetId = assetId;
+    this.fromMs = fromMs;
+  }
+
+  get failed(): boolean {
+    return this.gaveUp;
+  }
+
+  /** Opens the file and starts the pump; nothing is thrown into a frame's way. */
+  start(): void {
+    void this.open();
+  }
+
+  frameAt(materialMs: number): DecodedPicture | null {
+    if (this.closed) return null;
+    const targetUs = Math.round(materialMs * 1_000);
+    // The covering frame is the last whose presentation time has arrived;
+    // frames behind it are let go of, and those ahead keep waiting.
+    let covered: QueuedFrame | null = null;
+    while (this.queue.length > 0 && this.queue[0].ctsUs <= targetUs) {
+      const arriving = this.queue.shift() as QueuedFrame;
+      if (covered) covered.frame.close();
+      covered = arriving;
+    }
+    if (covered) {
+      this.keep(covered);
+      this.wake();
+    }
+    const shown = this.handed[this.handed.length - 1];
+    // An empty queue reuses the frame last drawn: a decode in flight is a
+    // reason to hold a picture, not a reason to go black.
+    return shown ? { frame: shown.frame, rotationDeg: this.rotationDeg } : null;
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.abort.abort();
+    this.wake();
+    try {
+      this.decoder?.close();
+    } catch {
+      // A decoder already closed by its own error has nothing left to close.
+    }
+    this.decoder = null;
+    for (const queued of this.queue) queued.frame.close();
+    this.queue = [];
+    for (const kept of this.handed) kept.frame.close();
+    this.handed = [];
+  }
+
+  /** The frame is handed out; the one before it is let go of once a newer paint is safe. */
+  private keep(frame: QueuedFrame): void {
+    const previous = this.handed[this.handed.length - 1];
+    if (previous && previous !== frame) previous.frame.close();
+    this.handed = [frame];
+  }
+
+  private wake(): void {
+    const resolve = this.room;
+    this.room = null;
+    resolve?.();
+  }
+
+  /** A file this run cannot read is one the still path owns from here on. */
+  private fail(): void {
+    this.gaveUp = true;
+    elementOnlyNow(this.assetId);
+    this.close();
+  }
+
+  private async open(): Promise<void> {
+    try {
+      const index = await mp4IndexFor(this.assetId);
+      if (this.closed) return;
+      const video = index?.video;
+      if (
+        !video ||
+        video.samples.length === 0 ||
+        typeof VideoDecoder === "undefined"
+      ) {
+        this.fail();
+        return;
+      }
+      const config = videoConfig(video);
+      const support = await VideoDecoder.isConfigSupported(config).catch(
+        () => null,
+      );
+      if (this.closed) return;
+      if (!support?.supported) {
+        this.fail();
+        return;
+      }
+      this.rotationDeg = video.rotationDeg;
+      this.decoder = new VideoDecoder({
+        output: (frame) => this.onFrame(frame),
+        error: () => this.fail(),
+      });
+      this.decoder.configure(config);
+      // A run starts where decoding can: back to the keyframe the moment sits
+      // behind, since a mid-GOP start decodes to noise until the next one.
+      const target = sampleAt(video.samples, this.fromMs);
+      if (target < 0) {
+        this.fail();
+        return;
+      }
+      this.samples = video.samples;
+      this.next = target;
+      while (this.next > 0 && !this.samples[this.next].key) this.next -= 1;
+      void this.pump();
+    } catch {
+      // A file that will not open for a stream is a file the stills own.
+      this.fail();
+    }
+  }
+
+  private onFrame(frame: VideoFrame): void {
+    if (this.closed) {
+      frame.close();
+      return;
+    }
+    // A B-frame run arrives out of decode order and the moment is found by
+    // presentation time, so the queue is kept in that order.
+    let at = this.queue.length;
+    while (at > 0 && this.queue[at - 1].ctsUs > frame.timestamp) at -= 1;
+    this.queue.splice(at, 0, { ctsUs: frame.timestamp, frame });
+    // Decoding outruns the consumer only by what is already in flight; the
+    // queue is held to three, dropping from behind.
+    while (this.queue.length > STREAM_QUEUE_LIMIT) {
+      (this.queue.shift() as QueuedFrame).frame.close();
+    }
+    this.wake();
+  }
+
+  private async pump(): Promise<void> {
+    while (!this.closed && this.decoder) {
+      if (this.queue.length >= STREAM_QUEUE_LIMIT) {
+        // The consumer is behind: waiting is what keeps the queue at three
+        // and the decoder from racing ahead of the picture.
+        await new Promise<void>((resolve) => {
+          this.room = resolve;
+        });
+        continue;
+      }
+      let chunk: EncodedVideoChunk | null;
+      try {
+        chunk = await this.nextChunk();
+      } catch {
+        // A fetch that failed mid-run ends the run; the stills take over.
+        this.fail();
+        return;
+      }
+      if (this.closed) return;
+      if (!chunk) {
+        // The file's end: what the decoder still holds is flushed out, and
+        // the queue is all the stream has left to give.
+        try {
+          await this.decoder.flush();
+        } catch {
+          // A flush that fails has nothing left to flush.
+        }
+        return;
+      }
+      try {
+        this.decoder.decode(chunk);
+      } catch {
+        this.fail();
+        return;
+      }
+    }
+  }
+
+  /** The next chunk to hand over, fetching the next window when the one in hand runs out. */
+  private async nextChunk(): Promise<EncodedVideoChunk | null> {
+    for (;;) {
+      if (this.window && this.window.index < this.window.chunks.length) {
+        const chunk = this.window.chunks[this.window.index];
+        this.window.index += 1;
+        const at = chunk.offset - this.window.startOffset;
+        return new EncodedVideoChunk({
+          type: chunk.key ? "key" : "delta",
+          timestamp: chunk.ctsUs,
+          // The sample's own place in the window; the chunk takes its copy.
+          data: this.window.bytes.subarray(at, at + chunk.size),
+        });
+      }
+      if (this.next >= this.samples.length) return null;
+      await this.fetchWindow();
+      if (this.closed) return null;
+    }
+  }
+
+  /** Fetches one window of the run: its bytes and the samples that read them. */
+  private async fetchWindow(): Promise<void> {
+    const first = this.samples[this.next];
+    const chunks: SampleChunk[] = [];
+    let endOffset = first.offset;
+    for (let index = this.next; index < this.samples.length; index += 1) {
+      const sample = this.samples[index];
+      chunks.push({
+        offset: sample.offset,
+        size: sample.size,
+        dtsUs: sample.dtsUs,
+        ctsUs: sample.ctsUs,
+        key: sample.key,
+      });
+      endOffset = Math.max(endOffset, sample.offset + sample.size);
+      // At least one sample a window, and no more than the prefetch beyond it.
+      if (
+        index > this.next &&
+        sample.ctsUs - first.ctsUs >= STREAM_PREFETCH_MS * 1_000
+      )
+        break;
+    }
+    const fetched = await readRange(
+      assetUrl(this.assetId),
+      first.offset,
+      endOffset,
+      this.abort.signal,
+    );
+    this.window = {
+      bytes: fetched.bytes,
+      chunks,
+      startOffset: first.offset,
+      index: 0,
+    };
+    this.next += chunks.length;
+  }
+}
+
+/**
+ * A run of frames from a material moment, starting at the keyframe behind it.
+ *
+ * Null is a file the still path has to read: an asset already known to need
+ * the elements, a browser without a decoder. The stream is left open until it
+ * is closed — a pause, a seek, another clip — and whatever it still holds is
+ * closed with it.
+ */
+export function streamFrom(
+  assetId: AssetId,
+  fromMs: number,
+): FrameStream | null {
+  if (elementOnly.has(assetId)) return null;
+  if (typeof VideoDecoder === "undefined") {
+    elementOnlyNow(assetId);
+    return null;
+  }
+  const stream = new SequentialStream(assetId, fromMs);
+  stream.start();
+  return stream;
 }

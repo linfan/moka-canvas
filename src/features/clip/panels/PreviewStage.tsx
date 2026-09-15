@@ -14,24 +14,31 @@ import {
 } from "../preview/capabilities";
 import { composeFrame, type FrameReport } from "../preview/compositor";
 import { frameEngine, previewFrames } from "../preview/frames";
-import { useClipStore } from "../stores/clipStore";
+import { useClipStore, type PreviewQuality } from "../stores/clipStore";
 import { formatTimecode } from "../timeline/timecode";
+import { ClipTransport } from "./ClipTransport";
 
 interface PreviewStageProps {
   timeline: TimelineDocument | null;
 }
 
 /**
- * The widest backing store the preview draws into.
+ * The widest backing store each quality tier composes into.
  *
  * A 4K cut is judged through a pane a fraction of its size, so the picture is
- * drawn at the size it is looked at rather than the size it is cut at; package
- * 07 hands its quality tiers through this same door.
+ * drawn at the size it is looked at rather than the size it is cut at: Full is
+ * the working resolution, Half and Quarter are for a machine that would rather
+ * keep up than keep sharp. Nothing here reaches the export — what leaves is
+ * always full size.
  */
-const MAX_BACKING_WIDTH = 1920;
+const QUALITY_BACKING_WIDTH: Record<PreviewQuality, number> = {
+  full: 1920,
+  half: 960,
+  quarter: 480,
+};
 
 /**
- * The picture the cut is being judged against.
+ * The picture the cut is being judged against, and the transport under it.
  *
  * The frame under the playhead, composed from the document: the background,
  * each track's picture in order, the words on top. Composition is scheduled on
@@ -41,9 +48,14 @@ const MAX_BACKING_WIDTH = 1920;
  * newer one. What the frame is made with, and what about it is only an
  * approximation, is written on the stage itself: a degradation is shown, never
  * silently wrong.
+ *
+ * The transport row lives inside the pane rather than beside it, so going
+ * fullscreen takes the controls with the picture and the same button brings
+ * the reader back.
  */
 export function PreviewStage({ timeline }: PreviewStageProps) {
   const sectionRef = useRef<HTMLElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -51,6 +63,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
   const sources = previewFrames();
   const capabilities = previewCapabilities();
   const playheadMs = useClipStore((state) => state.playheadMs);
+  const quality = useClipStore((state) => state.quality);
   const [engine, setEngine] = useState<PreviewEngine>("none");
   const [frameMs, setFrameMs] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -72,7 +85,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
     // scaled to fit by the browser, so what is composed is what is looked at.
     const dpr = window.devicePixelRatio || 1;
     const backingWidth = Math.min(
-      MAX_BACKING_WIDTH,
+      QUALITY_BACKING_WIDTH[quality],
       Math.max(1, Math.round(cssWidth * dpr)),
     );
     const backingHeight = Math.max(
@@ -110,7 +123,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
     setEngine(drawn);
     setFrameMs(atMs);
     setNote(approximateReason(capabilities, drawn, report.coloursSkipped));
-  }, [timeline, sources, capabilities]);
+  }, [timeline, sources, capabilities, quality]);
 
   const schedule = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -148,18 +161,11 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
   // composition itself. A room with no timeline yet keeps the shape a cut
   // would have rather than a box of no size.
   const layout = useCallback(() => {
-    const section = sectionRef.current;
+    const stage = stageRef.current;
     const frame = frameRef.current;
-    if (!section || !frame) return;
-    const style = getComputedStyle(section);
-    const boxWidth =
-      section.clientWidth -
-      parseFloat(style.paddingLeft) -
-      parseFloat(style.paddingRight);
-    const boxHeight =
-      section.clientHeight -
-      parseFloat(style.paddingTop) -
-      parseFloat(style.paddingBottom);
+    if (!stage || !frame) return;
+    const boxWidth = stage.clientWidth;
+    const boxHeight = stage.clientHeight;
     if (boxWidth <= 0 || boxHeight <= 0) return;
     const aspect =
       (timeline?.settings.width ?? 16) / (timeline?.settings.height ?? 9);
@@ -170,10 +176,10 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
   }, [timeline, schedule]);
 
   useLayoutEffect(() => {
-    const section = sectionRef.current;
-    if (!section) return;
+    const stage = stageRef.current;
+    if (!stage) return;
     const observer = new ResizeObserver(layout);
-    observer.observe(section);
+    observer.observe(stage);
     layout();
     return () => observer.disconnect();
   }, [layout]);
@@ -184,25 +190,32 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
       className="clip-preview"
       data-engine={timeline ? engine : "none"}
       data-frame-ms={frameMs ?? undefined}
+      data-quality={quality}
       ref={sectionRef}
     >
-      <div className="clip-preview-frame" ref={frameRef}>
-        {timeline === null ? (
-          <p className="clip-preview-empty">No timeline to preview.</p>
-        ) : (
-          <>
-            <canvas className="clip-preview-canvas" ref={canvasRef} />
-            <span className="clip-preview-time" data-testid="preview-timecode">
-              {formatTimecode(playheadMs, fps)}
-            </span>
-            {note !== null && (
-              <span className="clip-preview-badge" title={note}>
-                {APPROXIMATE_BADGE}
+      <div className="clip-preview-stage" ref={stageRef}>
+        <div className="clip-preview-frame" ref={frameRef}>
+          {timeline === null ? (
+            <p className="clip-preview-empty">No timeline to preview.</p>
+          ) : (
+            <>
+              <canvas className="clip-preview-canvas" ref={canvasRef} />
+              <span
+                className="clip-preview-time"
+                data-testid="preview-timecode"
+              >
+                {formatTimecode(playheadMs, fps)}
               </span>
-            )}
-          </>
-        )}
+              {note !== null && (
+                <span className="clip-preview-badge" title={note}>
+                  {APPROXIMATE_BADGE}
+                </span>
+              )}
+            </>
+          )}
+        </div>
       </div>
+      {timeline !== null && <ClipTransport timeline={timeline} />}
     </section>
   );
 }

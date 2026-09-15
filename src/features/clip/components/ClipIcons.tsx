@@ -472,3 +472,188 @@ export function MutedIcon({ size = 18 }: IconProps) {
     </svg>
   );
 }
+
+/** A bar and a triangle: back to the head of the cut. */
+export function SkipStartIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M5.5 5.6v12.8" />
+      <path d="M18.5 5.6v12.8L8.2 12l10.3-6.4Z" />
+    </svg>
+  );
+}
+
+/** The same triangle the other way: to the tail of the cut. */
+export function SkipEndIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M18.5 5.6v12.8" />
+      <path d="M5.5 5.6v12.8L15.8 12 5.5 5.6Z" />
+    </svg>
+  );
+}
+
+/** A triangle leaning forward: run the cut. */
+export function PlayIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.7"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M8.5 5.6v12.8L18.8 12 8.5 5.6Z" />
+    </svg>
+  );
+}
+
+/** Two bars: hold the cut where it stands. */
+export function PauseIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.9"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M9.6 5.6v12.8M14.4 5.6v12.8" />
+    </svg>
+  );
+}
+
+/** Two arrows chasing each other: the cut comes round again at its tail. */
+export function LoopIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M7.4 9.4A4.6 4.6 0 0 1 11.6 7h5" />
+      <path d="m14.4 4.8 2.4 2.2-2.4 2.2" />
+      <path d="M16.6 14.6A4.6 4.6 0 0 1 12.4 17h-5" />
+      <path d="m9.6 19.2-2.4-2.2 2.4-2.2" />
+    </svg>
+  );
+}
+
+/** A speaker with sound coming off it: the cut's master level. */
+export function VolumeIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M4.5 9.5h3l4-3.2v11.4l-4-3.2h-3z" />
+      <path d="M14.6 9.8a3.4 3.4 0 0 1 0 4.4" />
+      <path d="M17.1 7.4a6.6 6.6 0 0 1 0 9.2" />
+    </svg>
+  );
+}
+
+/** A camera: the frame under the playhead, saved as a picture. */
+export function SnapshotIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M4 9.1c0-.9.7-1.6 1.6-1.6h1.9l1.4-2.3h6.2l1.4 2.3h1.9c.9 0 1.6.7 1.6 1.6v7.3c0 .9-.7 1.6-1.6 1.6H5.6c-.9 0-1.6-.7-1.6-1.6V9.1Z" />
+      <circle cx="12" cy="12.6" r="3.1" />
+    </svg>
+  );
+}
+
+/** Corners opening out: the preview given the whole window. */
+export function FullscreenIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M4.5 9V6.1c0-.9.7-1.6 1.6-1.6H9" />
+      <path d="M15 4.5h2.9c.9 0 1.6.7 1.6 1.6V9" />
+      <path d="M19.5 15v2.9c0 .9-.7 1.6-1.6 1.6H15" />
+      <path d="M9 19.5H6.1c-.9 0-1.6-.7-1.6-1.6V15" />
+    </svg>
+  );
+}
+
+/** The same corners turned inward: back to the pane. */
+export function ExitFullscreenIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M9.5 4.5V9H5" />
+      <path d="M19.5 9.5H15V5" />
+      <path d="M14.5 19.5V15h4.5" />
+      <path d="M4.5 14.5H9v4.5" />
+    </svg>
+  );
+}

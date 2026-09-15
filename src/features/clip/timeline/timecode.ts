@@ -59,3 +59,27 @@ export function formatTickLabel(ms: number, fps: number): string {
     ? `${hours}:${pad(minutes)}:${pad(rest)}`
     : `${pad(minutes)}:${pad(rest)}`;
 }
+
+/**
+ * A moment a whole number of frames from another, on the frame clock.
+ *
+ * The arrow keys walk by these: the frame a moment rounds to is stepped and
+ * the answer put back on the clock, so a run of steps lands frame by frame
+ * rather than drifting on the millisecond. A step before the head is the head.
+ */
+export function stepFrames(ms: number, fps: number, frames: number): number {
+  const rate = frameRate(fps);
+  const current = Math.max(0, Math.round((ms / 1_000) * rate));
+  const next = Math.max(0, current + frames);
+  return Math.round((next / rate) * 1_000);
+}
+
+/** The next frame's moment. */
+export function nextFrameMs(ms: number, fps: number): number {
+  return stepFrames(ms, fps, 1);
+}
+
+/** The frame before this one. */
+export function prevFrameMs(ms: number, fps: number): number {
+  return stepFrames(ms, fps, -1);
+}

@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { redo, undo } from "../../editor/commands/execute";
 import { useClipStore } from "../stores/clipStore";
 import { ZOOM_STEP } from "../timeline/TimelineToolbar";
+import { cutEndMs } from "../timeline/geometry";
+import { nextFrameMs, prevFrameMs } from "../timeline/timecode";
 import {
   activeTimeline,
   clearSelection,
@@ -29,9 +31,7 @@ export interface ClipShortcutGroup {
  *
  * Written here under the handler so the two are read together: a key that
  * moves in one and not the other is caught between neighbours rather than
- * between files. Space and the arrow keys are not listed — they belong to the
- * transport of a later package, and a list that promises what a room cannot
- * yet do is worse than a shorter list.
+ * between files. Nothing is listed that the room cannot do today.
  */
 export const CLIP_SHORTCUT_GROUPS: ClipShortcutGroup[] = [
   {
@@ -49,8 +49,13 @@ export const CLIP_SHORTCUT_GROUPS: ClipShortcutGroup[] = [
   {
     title: "Moving the playhead",
     rows: [
+      { label: "Play / pause", chords: ["Space"] },
       { label: "Back to the head", chords: ["Home"] },
       { label: "To the end of the cut", chords: ["End"] },
+      { label: "Back one frame", chords: ["←"] },
+      { label: "Forward one frame", chords: ["→"] },
+      { label: "Back one second", chords: ["Shift + ←"] },
+      { label: "Forward one second", chords: ["Shift + →"] },
       { label: "To the clip edge above or below", chords: ["↑", "↓"] },
     ],
   },
@@ -80,22 +85,6 @@ export interface ClipShortcutOptions {
   isBlocked?: () => boolean;
   /** The `?` list, which the page owns the standing of. */
   onShowHelp?: () => void;
-}
-
-/**
- * Where the cut ends: the last tail on a row that draws, or the head.
- *
- * The same end 07's skip-to-the-end will seek to, and not the drawn content's
- * length — a cut three seconds long does not end where its scroller does.
- */
-function cutEndMs(): number {
-  const timeline = activeTimeline();
-  if (!timeline) return 0;
-  return timeline.clips.reduce((end, clip) => {
-    const track = timeline.tracks.find((row) => row.id === clip.trackId);
-    if (!track || track.hidden) return end;
-    return Math.max(end, clip.startMs + clip.durationMs);
-  }, 0);
 }
 
 /**
@@ -156,6 +145,12 @@ export function useClipShortcuts(options: ClipShortcutOptions = {}) {
         onShowHelp?.();
         return;
       }
+      if (event.key === " ") {
+        // The browser would otherwise page the room along under the keys.
+        event.preventDefault();
+        state.togglePlay();
+        return;
+      }
       if (event.key === "Home") {
         event.preventDefault();
         state.setPlayhead(0);
@@ -163,7 +158,26 @@ export function useClipShortcuts(options: ClipShortcutOptions = {}) {
       }
       if (event.key === "End") {
         event.preventDefault();
-        state.setPlayhead(cutEndMs());
+        const timeline = activeTimeline();
+        state.setPlayhead(timeline ? cutEndMs(timeline) : 0);
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        // A key at the playhead is a hand placing it, so the store's own
+        // setter stops the clock first. A second is a second; a frame is the
+        // document's own frame, stepped on its clock.
+        const fps = activeTimeline()?.settings.fps ?? 30;
+        const back = event.key === "ArrowLeft";
+        if (event.shiftKey) {
+          state.setPlayhead(state.playheadMs + (back ? -1_000 : 1_000));
+        } else {
+          state.setPlayhead(
+            back
+              ? prevFrameMs(state.playheadMs, fps)
+              : nextFrameMs(state.playheadMs, fps),
+          );
+        }
         return;
       }
       if (event.key === "ArrowUp" || event.key === "ArrowDown") {

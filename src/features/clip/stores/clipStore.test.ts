@@ -2,10 +2,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTimeline } from "../../../shared/domain";
 import type { MokaFile } from "../../../shared/domain";
-import { buildGoldenMokaFile } from "../../../shared/domain/fixtures";
+import {
+  buildCutMokaFile,
+  buildGoldenMokaFile,
+} from "../../../shared/domain/fixtures";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import {
   initialTimelineId,
+  rememberedMasterVolume,
+  rememberedQuality,
   rememberTimelineId,
   rememberedTimelineId,
   rememberedView,
@@ -48,6 +53,10 @@ beforeEach(() => {
     newTimelineOpen: false,
     view: { pxPerSec: 60, scrollLeftPx: 0 },
     playheadMs: 0,
+    playing: false,
+    quality: "full",
+    masterVolume: 1,
+    loop: false,
     viewportPx: 0,
   });
 });
@@ -276,5 +285,122 @@ describe("how the timeline is looked at", () => {
     expect(store().playheadMs).toBe(0);
     store().setPlayhead(Number.NaN);
     expect(store().playheadMs).toBe(0);
+  });
+});
+
+describe("the clock the cut is played by", () => {
+  /** The cut fixture open on the store, which is a timeline with clips on it. */
+  function openCut(): MokaFile {
+    const moka = buildCutMokaFile();
+    open(moka);
+    store().setActiveTimeline(moka.timelines![0].id);
+    return moka;
+  }
+
+  it("plays nothing when no row that draws holds anything", () => {
+    const moka = project("p1", 1);
+    open(moka);
+    store().setActiveTimeline(moka.timelines![0].id);
+    store().play();
+    expect(store().playing).toBe(false);
+  });
+
+  it("plays from where the playhead stands, and pauses there", () => {
+    openCut();
+    store().setPlayhead(1_000);
+    store().play();
+    expect(store().playing).toBe(true);
+    store().pause();
+    expect(store().playing).toBe(false);
+    expect(store().playheadMs).toBe(1_000);
+  });
+
+  it("asks for the cut from its head when play is pressed at the tail", () => {
+    openCut();
+    store().setPlayhead(8_000);
+    store().play();
+    expect(store().playing).toBe(true);
+    expect(store().playheadMs).toBe(0);
+  });
+
+  it("does nothing on a second play while the clock already runs", () => {
+    openCut();
+    store().play();
+    store().setPlayheadFromClock(500);
+    store().play();
+    expect(store().playing).toBe(true);
+    expect(store().playheadMs).toBe(500);
+  });
+
+  it("toggles between the two, from whichever side it is on", () => {
+    openCut();
+    store().togglePlay();
+    expect(store().playing).toBe(true);
+    store().togglePlay();
+    expect(store().playing).toBe(false);
+  });
+
+  it("stops the clock for a hand at the playhead, but not for its own writes", () => {
+    openCut();
+    store().play();
+    store().setPlayhead(2_000);
+    expect(store().playing).toBe(false);
+    expect(store().playheadMs).toBe(2_000);
+
+    // The running clock's own writes never pause what they are moving.
+    store().play();
+    store().setPlayheadFromClock(2_500);
+    expect(store().playing).toBe(true);
+    expect(store().playheadMs).toBe(2_500);
+  });
+
+  it("stops the clock when the room turns to another timeline", () => {
+    const moka = project("p2", 2);
+    open(moka);
+    store().setActiveTimeline(moka.timelines![0].id);
+    // A fixture with clips, since an empty cut cannot be played.
+    const cut = buildCutMokaFile().timelines![0];
+    useProjectStore.setState({
+      moka: { ...moka, timelines: [cut, moka.timelines![1]] },
+    });
+    store().setActiveTimeline(cut.id);
+    store().play();
+    expect(store().playing).toBe(true);
+    store().setActiveTimeline(moka.timelines![1].id);
+    expect(store().playing).toBe(false);
+  });
+
+  it("remembers the preview tier and the master level on this machine", () => {
+    store().setQuality("quarter");
+    store().setMasterVolume(0.4);
+    expect(localStorage.getItem("moka-canvas:clip-quality")).toBe("quarter");
+    expect(localStorage.getItem("moka-canvas:clip-volume")).toBe("0.4");
+    expect(rememberedQuality()).toBe("quarter");
+    expect(rememberedMasterVolume()).toBe(0.4);
+  });
+
+  it("holds the master level inside the range it can be", () => {
+    store().setMasterVolume(4);
+    expect(store().masterVolume).toBe(1);
+    store().setMasterVolume(-2);
+    expect(store().masterVolume).toBe(0);
+    store().setMasterVolume(Number.NaN);
+    expect(store().masterVolume).toBe(0);
+  });
+
+  it("reads a preference store holding something else as the start", () => {
+    localStorage.setItem("moka-canvas:clip-quality", "gigantic");
+    expect(rememberedQuality()).toBe("full");
+    localStorage.setItem("moka-canvas:clip-volume", "loud");
+    expect(rememberedMasterVolume()).toBe(1);
+    localStorage.setItem("moka-canvas:clip-volume", "4");
+    expect(rememberedMasterVolume()).toBe(1);
+  });
+
+  it("keeps the repeat a session's own arrangement, never the machine's", () => {
+    expect(store().loop).toBe(false);
+    store().toggleLoop();
+    expect(store().loop).toBe(true);
+    expect(localStorage.getItem("moka-canvas:clip-loop")).toBeNull();
   });
 });

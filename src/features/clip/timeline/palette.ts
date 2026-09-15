@@ -30,6 +30,8 @@ export interface TimelinePalette {
   clipStroke: string;
   /** The standard fade ramp drawn over a clip's corner. */
   fade: string;
+  /** A sound's shape inside a block, drawn as vertical spans. */
+  waveform: string;
   badgeFill: string;
   badgeStroke: string;
   badgeGlyph: string;
@@ -56,6 +58,7 @@ export const TIMELINE_PALETTE: TimelinePalette = {
   clip: { video: "#33507c", audio: "#2c6656", text: "#6a4f8e" },
   clipStroke: "rgba(0, 0, 0, 0.4)",
   fade: "rgba(255, 255, 255, 0.2)",
+  waveform: "rgba(255, 255, 255, 0.55)",
   badgeFill: "#202126",
   badgeStroke: "#2a2c33",
   badgeGlyph: "#f4f4f6",

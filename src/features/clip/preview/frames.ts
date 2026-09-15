@@ -1,8 +1,15 @@
-import type { AssetId, TimelineClip } from "../../../shared/domain";
+import type { AssetId, ClipId, TimelineClip } from "../../../shared/domain";
 import { assetUrl } from "../../../api";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
-import { decodeFrameAt, isElementOnly, mp4IndexFor } from "./decode";
+import { useClipStore } from "../stores/clipStore";
+import {
+  decodeFrameAt,
+  isElementOnly,
+  mp4IndexFor,
+  streamFrom,
+  type FrameStream,
+} from "./decode";
 import { elementEngine } from "./elementFrames";
 import type { AssetEngine, PreviewEngine } from "./capabilities";
 import type { FramePicture, FrameSources } from "./compositor";
@@ -17,6 +24,12 @@ import type { FramePicture, FrameSources } from "./compositor";
  * read two ways across a cut would show two different pictures — and the
  * engine an asset landed on is what the stage's badge is written from.
  *
+ * While the clock runs the video paths change shape: a decodable file is fed
+ * forward in order rather than re-decoded per frame, and a file on the
+ * elements plays its own picture rather than being seeked to each one. Both
+ * are closed the moment the clock stops, so a paused room holds no frames and
+ * no running elements.
+ *
  * A file the browser will not give up is reported once by name: a toast says
  * which one, rather than a frame that is quietly the background.
  */
@@ -26,6 +39,8 @@ export interface PreviewFrameSources extends FrameSources {
   engineOf(assetId: AssetId): AssetEngine | undefined;
   /** Subscribes to pictures arriving late, which is when the preview repaints. */
   onArrive(listener: () => void): () => void;
+  /** Stops every playing run: the clock has stopped, so the elements do too. */
+  stopPlayback(): void;
 }
 
 /** The asset's entry in the project, which is what says what kind of file it is. */
@@ -74,6 +89,8 @@ export function createFrameSources(): PreviewFrameSources {
   const started = new Set<AssetId>();
   const engines = new Map<AssetId, AssetEngine>();
   const reported = new Set<AssetId>();
+  /** The runs playing clips own, by clip, oldest first; a paused room holds none. */
+  const streams = new Map<ClipId, { stream: FrameStream; assetId: AssetId }>();
   let arrivals: (() => void)[] = [];
 
   const notifyArrive = (): void => {
@@ -133,6 +150,80 @@ export function createFrameSources(): PreviewFrameSources {
     return "element";
   };
 
+  /** A decoded frame as the compositor draws it. */
+  const decodedPicture = (
+    frame: VideoFrame,
+    rotationDeg: number,
+  ): FramePicture => ({
+    kind: "picture",
+    picture: {
+      source: frame,
+      width: frame.displayWidth,
+      height: frame.displayHeight,
+      rotationDeg,
+    },
+  });
+
+  /** An element stands its own picture up: the browser applies the display matrix. */
+  const elementPicture = (element: HTMLVideoElement): FramePicture => ({
+    kind: "picture",
+    picture: {
+      source: element,
+      width: element.videoWidth,
+      height: element.videoHeight,
+      rotationDeg: 0,
+    },
+  });
+
+  /**
+   * The run a playing clip reads, started at the moment it was asked for.
+   *
+   * A run that has given up on the file is let go of so the still path can
+   * read it, and only the two newest runs are kept: two clips is what a cut
+   * shows at once, and a run nobody has asked about is frames left decoding.
+   */
+  const streamFor = (
+    clip: TimelineClip,
+    materialMs: number,
+  ): FrameStream | null => {
+    const assetId = clip.assetId;
+    if (!assetId) return null;
+    const kept = streams.get(clip.id);
+    if (kept && (kept.assetId !== assetId || kept.stream.failed)) {
+      kept.stream.close();
+      streams.delete(clip.id);
+    }
+    let stream = streams.get(clip.id)?.stream ?? null;
+    if (stream) {
+      // Asked for is what keeps a run, the sweep below takes the quiet ones.
+      const recent = streams.get(clip.id) as {
+        stream: FrameStream;
+        assetId: AssetId;
+      };
+      streams.delete(clip.id);
+      streams.set(clip.id, recent);
+      return stream;
+    }
+    const made = streamFrom(assetId, materialMs);
+    if (!made) return null;
+    stream = made;
+    if (streams.size >= 2) {
+      const oldest = streams.keys().next().value;
+      if (oldest !== undefined) {
+        streams.get(oldest)?.stream.close();
+        streams.delete(oldest);
+      }
+    }
+    streams.set(clip.id, { stream, assetId });
+    return stream;
+  };
+
+  const stopPlayback = (): void => {
+    for (const kept of streams.values()) kept.stream.close();
+    streams.clear();
+    elementEngine().stopPlayback();
+  };
+
   const pictureOf = async (
     clip: TimelineClip,
     materialMs: number,
@@ -141,6 +232,7 @@ export function createFrameSources(): PreviewFrameSources {
     if (!assetId) return null;
     const engine = await engineFor(assetId);
     if (engine === null) return null;
+    const playing = useClipStore.getState().playing;
     if (engine === "image") {
       const image = imageFor(assetId);
       if (!image) return { kind: "waiting" };
@@ -154,44 +246,46 @@ export function createFrameSources(): PreviewFrameSources {
         },
       };
     }
+    if (engine === "webcodecs" && playing) {
+      // Playing reads a run fed forward in order; an empty queue answers with
+      // the frame last drawn rather than blocking the compositor on a decode.
+      const stream = streamFor(clip, materialMs);
+      if (stream) {
+        const decoded = stream.frameAt(materialMs);
+        return decoded
+          ? decodedPicture(decoded.frame, decoded.rotationDeg)
+          : { kind: "waiting" };
+      }
+    }
     if (engine === "webcodecs") {
       try {
         const decoded = await decodeFrameAt(assetId, materialMs);
-        if (decoded) {
-          return {
-            kind: "picture",
-            picture: {
-              source: decoded.frame,
-              width: decoded.frame.displayWidth,
-              height: decoded.frame.displayHeight,
-              rotationDeg: decoded.rotationDeg,
-            },
-          };
-        }
+        if (decoded) return decodedPicture(decoded.frame, decoded.rotationDeg);
       } catch {
         // A decode that failed after the engine was chosen sends the file to
         // the elements rather than failing the frame.
       }
       engines.set(assetId, "element");
     }
+    if (playing) {
+      // The element plays its own picture; the room's clock only asks where.
+      const element = elementEngine().startPlaying(
+        clip.id,
+        assetId,
+        materialMs,
+        clip.speed,
+      );
+      return element ? elementPicture(element) : { kind: "waiting" };
+    }
     const element = elementEngine().elementFor(clip.id, assetId, materialMs);
     if (!element) return { kind: "waiting" };
-    // An element stands its own picture up: the browser applies the file's own
-    // display matrix, so nothing is turned here.
-    return {
-      kind: "picture",
-      picture: {
-        source: element,
-        width: element.videoWidth,
-        height: element.videoHeight,
-        rotationDeg: 0,
-      },
-    };
+    return elementPicture(element);
   };
 
   return {
     frameFor: pictureOf,
     engineOf: (assetId) => engines.get(assetId),
+    stopPlayback,
     onArrive(listener) {
       arrivals.push(listener);
       return () => {

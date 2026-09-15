@@ -19,6 +19,7 @@ import { ClipRail } from "./panels/ClipRail";
 import { MediaColumn } from "./panels/MediaColumn";
 import { PreviewStage } from "./panels/PreviewStage";
 import { TimelineArea } from "./panels/TimelineArea";
+import { useTransport } from "./preview/transport";
 import { initialTimelineId, useClipStore } from "./stores/clipStore";
 import { useStageSplit } from "./stores/stageSplit";
 
@@ -58,6 +59,10 @@ export function ClipPage() {
     isBlocked: () => shortcutsOpen || useClipStore.getState().newTimelineOpen,
     onShowHelp: () => setShortcutsOpen(true),
   });
+
+  // The clock and the sound live exactly as long as the room does: a room
+  // nobody is standing in must not keep playing a cut behind them.
+  useTransport();
 
   // Entering the room is a seam in the history: the board's undos stop at the
   // door, and what is undone here is not undone on a canvas. Which timeline

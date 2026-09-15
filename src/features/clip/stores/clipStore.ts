@@ -14,6 +14,7 @@ import {
   TAIL_MS,
   clampPxPerSec,
   contentMs,
+  cutEndMs,
   viewAfterZoom,
   zoomAnchorMs,
   type TimelineView,
@@ -170,6 +171,54 @@ export interface ClipSelection {
   transitionId: TransitionId | null;
 }
 
+/**
+ * How finely the preview composes: its own size, or a fraction of it.
+ *
+ * The tiers cap the backing store the frame is drawn into — 1920, 960, 480 —
+ * and nothing else. They are a way of looking at a cut on this machine, so
+ * they are remembered beside the panel folds rather than inside a project,
+ * and the export side never reads them: what leaves is always full size.
+ */
+export type PreviewQuality = "full" | "half" | "quarter";
+
+const QUALITY_STORED_UNDER = "moka-canvas:clip-quality";
+const VOLUME_STORED_UNDER = "moka-canvas:clip-volume";
+
+/** The preview tier this machine was last left on. */
+export function rememberedQuality(): PreviewQuality {
+  // Tests that do not ask for a DOM have no store to read, and want the start.
+  if (typeof localStorage === "undefined") return "full";
+  try {
+    const kept = localStorage.getItem(QUALITY_STORED_UNDER);
+    return kept === "half" || kept === "quarter" ? kept : "full";
+  } catch {
+    // A store this cannot read is one that has nothing in it.
+    return "full";
+  }
+}
+
+/** The master level this machine was last left at, 0..1. */
+export function rememberedMasterVolume(): number {
+  if (typeof localStorage === "undefined") return 1;
+  try {
+    const kept = localStorage.getItem(VOLUME_STORED_UNDER);
+    const parsed = kept === null ? Number.NaN : Number(kept);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : 1;
+  } catch {
+    // A store this cannot read is one that has nothing in it.
+    return 1;
+  }
+}
+
+function remember(key: string, value: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // A store that will not take it costs the remembering, not the cut.
+  }
+}
+
 interface ClipState {
   /** The timeline being looked at; null = the document has none (or they all went). */
   activeTimelineId: TimelineId | null;
@@ -191,6 +240,19 @@ interface ClipState {
   view: TimelineView;
   /** The reader's place on the cut, in milliseconds from the head. */
   playheadMs: number;
+  /** Whether the clock is running; the transport's own state, never a document's. */
+  playing: boolean;
+  /** How finely the preview composes, remembered on this machine. */
+  quality: PreviewQuality;
+  /** The master level the whole cut is heard at, 0..1, remembered on this machine. */
+  masterVolume: number;
+  /**
+   * Whether the end of the cut comes back round to its head.
+   *
+   * A session's own arrangement — "this pass is easier to hear on repeat" —
+   * rather than a preference, so it is never written down.
+   */
+  loop: boolean;
   /**
    * How wide the canvas is, reported by the canvas itself.
    *
@@ -212,8 +274,23 @@ interface ClipState {
   zoomTo: (pxPerSec: number, anchorMs?: number) => void;
   /** The whole cut on screen at once. */
   fit: (viewportPx: number, contentMs: number) => void;
+  /**
+   * A hand moving the playhead — the ruler, a key, the transport's skip
+   * buttons. Placing the playhead is a pause: the reader is looking for a
+   * moment rather than watching one go by.
+   */
   setPlayhead: (ms: number) => void;
+  /** The running clock moving it; unlike a hand, this never pauses what it moves. */
+  setPlayheadFromClock: (ms: number) => void;
   setViewportPx: (px: number) => void;
+  /** Starts the clock at the playhead; nothing on a row that draws is a no-op. */
+  play: () => void;
+  /** Stops the clock where it stands. */
+  pause: () => void;
+  togglePlay: () => void;
+  setQuality: (quality: PreviewQuality) => void;
+  setMasterVolume: (volume: number) => void;
+  toggleLoop: () => void;
 }
 
 /** The timeline being read, from the project, for the zooms that need its length. */
@@ -257,6 +334,21 @@ export const useClipStore = create<ClipState>()((set, get) => {
     keep(view, state.playheadMs);
   };
 
+  /**
+   * Moves the playhead, holding it at the head rather than before it.
+   *
+   * The clock's own writes and a hand's writes land in the same field and are
+   * kept apart here: a hand moving the playhead stops the clock first, since
+   * placing it is a pause, while the running clock must not pause itself.
+   */
+  const movePlayhead = (ms: number, fromClock: boolean): void => {
+    const state = get();
+    if (!fromClock && state.playing) state.pause();
+    const playheadMs = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+    set({ playheadMs });
+    keep(get().view, playheadMs);
+  };
+
   return {
     activeTimelineId: null,
     face: "local",
@@ -265,6 +357,10 @@ export const useClipStore = create<ClipState>()((set, get) => {
     newTimelineOpen: false,
     view: { pxPerSec: DEFAULT_PX_PER_SEC, scrollLeftPx: 0 },
     playheadMs: 0,
+    playing: false,
+    quality: rememberedQuality(),
+    masterVolume: rememberedMasterVolume(),
+    loop: false,
     viewportPx: 0,
 
     setActiveTimeline(id) {
@@ -272,13 +368,15 @@ export const useClipStore = create<ClipState>()((set, get) => {
       if (state.activeTimelineId !== id) {
         // The view being left is written down under its own timeline before
         // the next one's is picked up, and a timeline nobody has opened yet
-        // starts where a new one should.
+        // starts where a new one should. A clock running on the old cut is
+        // stopped: it was keeping the old cut's time.
         if (state.activeTimelineId) {
           rememberView(state.activeTimelineId, state.view, state.playheadMs);
         }
         const remembered = id ? rememberedView(id) : null;
         set({
           activeTimelineId: id,
+          playing: false,
           view: remembered?.view ?? {
             pxPerSec: DEFAULT_PX_PER_SEC,
             scrollLeftPx: 0,
@@ -344,13 +442,56 @@ export const useClipStore = create<ClipState>()((set, get) => {
     },
 
     setPlayhead(ms) {
-      const playheadMs = Number.isFinite(ms) ? Math.max(0, ms) : 0;
-      set({ playheadMs });
-      keep(get().view, playheadMs);
+      movePlayhead(ms, false);
+    },
+
+    setPlayheadFromClock(ms) {
+      movePlayhead(ms, true);
     },
 
     setViewportPx(px) {
       set({ viewportPx: Math.max(0, px) });
+    },
+
+    play() {
+      const state = get();
+      if (state.playing) return;
+      const timeline = heldTimeline(state.activeTimelineId);
+      // Nothing on a row that draws is nothing to play: a clock running over
+      // a cut of no length would stop itself on its next frame.
+      if (!timeline || cutEndMs(timeline) <= 0) return;
+      const end = cutEndMs(timeline);
+      // Pressing play from the tail is asking for the cut from its head.
+      if (state.playheadMs >= end) movePlayhead(0, true);
+      set({ playing: true });
+    },
+
+    pause() {
+      if (!get().playing) return;
+      set({ playing: false });
+    },
+
+    togglePlay() {
+      const state = get();
+      if (state.playing) state.pause();
+      else state.play();
+    },
+
+    setQuality(quality) {
+      remember(QUALITY_STORED_UNDER, quality);
+      set({ quality });
+    },
+
+    setMasterVolume(volume) {
+      const level = Number.isFinite(volume)
+        ? Math.min(1, Math.max(0, volume))
+        : 0;
+      remember(VOLUME_STORED_UNDER, String(level));
+      set({ masterVolume: level });
+    },
+
+    toggleLoop() {
+      set((state) => ({ loop: !state.loop }));
     },
   };
 });

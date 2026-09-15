@@ -79,7 +79,7 @@ function model(patch: Partial<TimelineRenderModel> = {}): TimelineRenderModel {
     viewport: { width: 800, height: 300, scrollTopPx: 0 },
     playheadMs: 2_000,
     selection: { clipIds: [], transitionId: null },
-    thumbs: null,
+    decor: null,
     ...patch,
   };
 }
