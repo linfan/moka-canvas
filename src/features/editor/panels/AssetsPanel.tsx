@@ -18,14 +18,15 @@ import {
   ASSET_DRAG_MIME,
   assetReferencingNodeIds,
   editShelfEntry,
+  focusAssetUses,
   focusNodes,
   importFiles,
   markAssetKeeper,
   requestDeleteAsset,
 } from "../interactions/actions";
 import { useEditorStore } from "../stores/editorStore";
-import { useProjectStore } from "../stores/projectStore";
-import { shelfOf } from "./canvasAssets";
+import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
+import { canvasNodesUsing, shelfOf } from "./canvasAssets";
 import {
   KIND_SHELVES,
   OPEN_SHELF_FILTER,
@@ -56,20 +57,6 @@ interface ImportJob {
   file: File;
   progress: number;
   status: "uploading" | "done" | "error";
-}
-
-/** Selects every node referencing the asset, switching canvas if needed. */
-function focusAssetReferences(assetId: string) {
-  const nodeIds = assetReferencingNodeIds(assetId);
-  const editor = useEditorStore.getState();
-  if (nodeIds.length === 0) {
-    editor.announce("No nodes reference this asset");
-    return;
-  }
-  focusNodes(nodeIds);
-  editor.announce(
-    `Selected ${nodeIds.length} node${nodeIds.length === 1 ? "" : "s"} using this asset`,
-  );
 }
 
 /** Selects the node a generated asset came from, wherever it sits. */
@@ -155,13 +142,19 @@ function ResourceRow({
   entry,
   broken,
   focused,
+  inspected,
+  usesHere,
 }: {
   entry: ResourceEntry;
   broken: boolean;
   /** Whether a reader was just brought to this row from somewhere else. */
   focused: boolean;
+  /** Whether this is the file the column beside the canvas is reading. */
+  inspected: boolean;
+  /** The cards on the board being looked at that hold this file. */
+  usesHere: NodeId[];
 }) {
-  const openPreview = useEditorStore((state) => state.openPreview);
+  const inspectAsset = useEditorStore((state) => state.inspectAsset);
   const moka = useProjectStore((state) => state.moka);
   const [editing, setEditing] = useState(false);
   const rowRef = useRef<HTMLLIElement | null>(null);
@@ -183,7 +176,9 @@ function ResourceRow({
   const where = shelfWhere(entry);
   return (
     <li
-      className={`resource-row${focused ? " is-focused" : ""}`}
+      className={`resource-row${focused ? " is-focused" : ""}${
+        inspected ? " is-inspected" : ""
+      }`}
       data-asset-id={entry.id}
       draggable
       ref={rowRef}
@@ -201,8 +196,11 @@ function ResourceRow({
         )}
       </span>
       <button
+        aria-pressed={inspected}
         className="resource-main"
-        onClick={() => focusAssetReferences(entry.id)}
+        data-testid="resource-main"
+        onClick={() => inspectAsset(entry.id)}
+        title="Read this file in the inspector"
         type="button"
       >
         <strong>{entry.name}</strong>
@@ -233,13 +231,28 @@ function ResourceRow({
         >
           Tag
         </button>
+        {/*
+          The way to the cards rather than the way to the file: a reader who
+          wants to stand on the board and look at what holds this file goes
+          there on purpose. Greyed where this board holds none, since an offer
+          that could only say "nothing here" is an offer better left unsaid —
+          and the row already says how many cards in the project use it.
+        */}
         <button
-          aria-label={`Preview ${entry.name}`}
+          aria-label={`Focus the cards on this canvas using ${entry.name}`}
           className="resource-action"
-          onClick={() => openPreview(entry.id)}
+          disabled={usesHere.length === 0}
+          onClick={() => focusAssetUses(usesHere)}
+          title={
+            usesHere.length === 0
+              ? "No card on this canvas uses it"
+              : `Select the ${usesHere.length} card${
+                  usesHere.length === 1 ? "" : "s"
+                } on this canvas using it`
+          }
           type="button"
         >
-          View
+          Focus
         </button>
         <button
           aria-label={`Delete ${entry.name}`}
@@ -432,6 +445,11 @@ export function AssetsPanel() {
   const selfCheck = useProjectStore((state) => state.selfCheck);
   const kind = useEditorStore((state) => state.assetKind);
   const focusedAssetId = useEditorStore((state) => state.focusedAssetId);
+  // The file the column beside the canvas is reading, and the board it would
+  // be read against: a row that is the one being read says so, and a row's
+  // offer to go to the cards using it is an offer about this board only.
+  const inspected = useEditorStore((state) => state.inspectedAssetId);
+  const activeCanvas = useActiveCanvas();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [addNodes, setAddNodes] = useState(true);
@@ -634,7 +652,11 @@ export function AssetsPanel() {
                 broken={issues.has(entry.id)}
                 entry={entry}
                 focused={focused === entry.id}
+                inspected={inspected === entry.id}
                 key={entry.id}
+                usesHere={
+                  activeCanvas ? canvasNodesUsing(activeCanvas, entry.id) : []
+                }
               />
             ))}
           </ul>

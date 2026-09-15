@@ -885,6 +885,25 @@ export function focusNodes(nodeIds: NodeId[]): void {
 }
 
 /**
+ * Selects the cards on one board that hold a file, and says how many were chosen.
+ *
+ * Both places a file is read from — its row on the shelf and the column beside
+ * the canvas — offer this, and it is one action rather than two that could
+ * drift: the cards asked for are the ones on the board being looked at, since
+ * choosing a card on another board would leave a reader holding a count and
+ * nothing to look at.
+ */
+export function focusAssetUses(nodeIds: NodeId[]): void {
+  if (nodeIds.length === 0) return;
+  focusNodes(nodeIds);
+  useEditorStore
+    .getState()
+    .announce(
+      `Selected ${nodeIds.length} card${nodeIds.length === 1 ? "" : "s"} on this canvas using this asset`,
+    );
+}
+
+/**
  * Writes down whether this file is kept to hand. The registry entry is all it
  * touches, so marking a video a keeper costs nothing of the video's.
  */

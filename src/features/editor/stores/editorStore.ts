@@ -7,6 +7,7 @@ import type {
   Point,
   Viewport,
 } from "../../../shared/domain";
+import { usePanelFolds } from "./panelFolds";
 import type { BarEntry } from "./toolPrefs";
 
 export type EditorTool = "select" | "pan";
@@ -151,6 +152,17 @@ interface EditorState {
    * middle is a list nobody can find their place in.
    */
   focusedAssetId: AssetId | null;
+  /**
+   * The file the column beside the canvas is reading, when one is.
+   *
+   * A click on the shelf is a question about that file rather than a move on
+   * the canvas, so what the inspector reads is the file: what it is, what it
+   * holds, and where it came from. Going to the cards that use it is offered
+   * beside the row instead, since a reader who wanted the cards would have
+   * asked for the cards — and would not want the click that showed them a file
+   * to have moved the canvas under them first.
+   */
+  inspectedAssetId: AssetId | null;
   /** Which of its three faces the column beside the canvas is showing. */
   sidePanelTab: SidePanelTab;
   contextMenu: ContextMenuState | null;
@@ -211,6 +223,17 @@ interface EditorState {
    */
   showAssetOnShelf: (assetId: AssetId, kind: Capability) => void;
   clearAssetFocus: () => void;
+  /**
+   * Turns the column beside the canvas to its inspector and gives it a file to
+   * read. The turn is part of the ask rather than a second one: a reader who
+   * clicked a file to find out about it is not helped by an answer given to a
+   * conversation they were having on another face of the same column — nor by
+   * one given to a column they folded away, so a column that is away stands
+   * back up to answer.
+   */
+  inspectAsset: (assetId: AssetId) => void;
+  /** Puts the file down, leaving the inspector to whatever is chosen instead. */
+  clearAssetInspection: () => void;
   setSidePanelTab: (tab: SidePanelTab) => void;
   openContextMenu: (menu: ContextMenuState) => void;
   closeContextMenu: () => void;
@@ -254,6 +277,7 @@ export const useEditorStore = create<EditorState>()((set) => ({
   leftPanelTab: "project",
   assetKind: "image",
   focusedAssetId: null,
+  inspectedAssetId: null,
   sidePanelTab: "inspector",
   contextMenu: null,
   nodeMenu: null,
@@ -271,17 +295,27 @@ export const useEditorStore = create<EditorState>()((set) => ({
   setTool: (tool) => set({ tool }),
   setTemporaryTool: (tool) => set({ temporaryTool: tool }),
   setCamera: (camera) => set({ camera }),
-  setSelection: (selection) => set({ selection }),
+  // Choosing on the canvas puts the file down: what the inspector reads is
+  // whatever was chosen last, so a file read a moment ago does not keep the
+  // column from saying what the thing just clicked on is.
+  setSelection: (selection) => set({ selection, inspectedAssetId: null }),
   selectOnly: (nodeId) =>
-    set({ selection: { nodeIds: [nodeId], edgeIds: [] } }),
+    set({
+      selection: { nodeIds: [nodeId], edgeIds: [] },
+      inspectedAssetId: null,
+    }),
   toggleNode: (nodeId) =>
     set((state) => {
       const nodeIds = state.selection.nodeIds.includes(nodeId)
         ? state.selection.nodeIds.filter((id) => id !== nodeId)
         : [...state.selection.nodeIds, nodeId];
-      return { selection: { nodeIds, edgeIds: state.selection.edgeIds } };
+      return {
+        selection: { nodeIds, edgeIds: state.selection.edgeIds },
+        inspectedAssetId: null,
+      };
     }),
-  clearSelection: () => set({ selection: EMPTY_SELECTION }),
+  clearSelection: () =>
+    set({ selection: EMPTY_SELECTION, inspectedAssetId: null }),
   setHoveredNode: (nodeId) => set({ hoveredNodeId: nodeId }),
   setHoveredPort: (port) => set({ hoveredPort: port }),
   setGesture: (gesture) => set({ gesture }),
@@ -295,6 +329,14 @@ export const useEditorStore = create<EditorState>()((set) => ({
       focusedAssetId: assetId,
     }),
   clearAssetFocus: () => set({ focusedAssetId: null }),
+  inspectAsset: (assetId) => {
+    // A column folded away cannot answer, and a click that goes nowhere reads
+    // as a click that was not taken: the column stands back up to say what the
+    // file is, and stays standing until it is folded away again.
+    usePanelFolds.getState().setFolded("right", false);
+    set({ inspectedAssetId: assetId, sidePanelTab: "inspector" });
+  },
+  clearAssetInspection: () => set({ inspectedAssetId: null }),
   setSidePanelTab: (tab) => set({ sidePanelTab: tab }),
   openContextMenu: (menu) => set({ contextMenu: menu }),
   closeContextMenu: () => set({ contextMenu: null }),

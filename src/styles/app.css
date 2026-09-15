@@ -1324,6 +1324,21 @@ body.is-dragging-panel {
   box-shadow: inset 0 0 0 1px var(--muted);
 }
 
+/* The row the column beside the canvas is reading. Marked on the shelf as well
+   as answered in the inspector, so the two can be seen to be about one file:
+   a reader who clicked a row and got an answer somewhere else in the window
+   should not have to work out which row they clicked. */
+.resource-row.is-inspected {
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.resource-row.is-inspected .resource-main strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .side-resource-list,
 .inspector-list {
   display: grid;
@@ -1668,6 +1683,28 @@ body.is-dragging-panel {
 
 .inspector-title-input {
   width: 100%;
+}
+
+/* A file read on its own, filling the column the way a card's details do: the
+   same room between its parts, and the whole of it scrolling as one. */
+.inspector-asset {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+}
+
+/* The name of the file being read, as a heading rather than as a row: what the
+   column is about is the first thing in it, and a name too long for the column
+   is a name broken over lines rather than a name cut off. */
+.inspector-asset-name {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: normal;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-transform: none;
 }
 
 .inspector-section {

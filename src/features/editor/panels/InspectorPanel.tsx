@@ -14,6 +14,7 @@ import type {
   WorkflowNode,
 } from "../../../shared/domain";
 import {
+  ASSET_CATEGORY_LABELS,
   BACKGROUND_MODES,
   CAPABILITY_LABELS,
   PROVIDER_EXECUTOR_KEY,
@@ -56,12 +57,16 @@ import {
   disconnectEdge,
   fileNodeAsAsset,
   filingPossible,
+  focusAssetUses,
   linkAsset,
+  markAssetKeeper,
   renameNode,
   requestDeleteAsset,
   setCanvasViewSettings,
   setNodeGeneration,
 } from "../interactions/actions";
+import { canvasNodesUsing, shelfOf } from "./canvasAssets";
+import { SHELF_WHERE_LABELS, kindOfShelf, shelfWhere } from "./shelfFilter";
 import { BAR_ENTRIES, TOOL_LABELS } from "../stores/toolPrefs";
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -169,19 +174,6 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
   const entry = media?.entry;
   const broken = media && media.state !== "ready";
 
-  const reveal = async (assetId: AssetId) => {
-    try {
-      await assetsApi.reveal(assetId);
-    } catch (error) {
-      useAppStore
-        .getState()
-        .pushToast(
-          "error",
-          error instanceof Error ? error.message : "Reveal failed",
-        );
-    }
-  };
-
   return (
     <section className="inspector-section">
       <h3>Asset</h3>
@@ -217,7 +209,7 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
       )}
       {media?.state === "ready" && entry && (
         <div className="inspector-actions">
-          <button onClick={() => void reveal(entry.id)} type="button">
+          <button onClick={() => void revealAsset(entry.id)} type="button">
             Reveal
           </button>
           <a download={entry.name} href={assetUrl(entry.id)}>
@@ -427,6 +419,83 @@ function formatTime(iso?: string): string {
   if (!iso) return "";
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString();
+}
+
+/** When a file arrived or was last written, as this machine says it. */
+function formatStamp(iso?: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+
+/**
+ * Opens a file in this machine's file manager, and says so when it cannot.
+ *
+ * One function for both the file a card holds and the file a reader asked the
+ * shelf about, since what is being asked of the machine is the same in both
+ * cases and the answer it gives when it fails should be too.
+ */
+async function revealAsset(assetId: AssetId) {
+  try {
+    await assetsApi.reveal(assetId);
+  } catch (error) {
+    useAppStore
+      .getState()
+      .pushToast(
+        "error",
+        error instanceof Error ? error.message : "Reveal failed",
+      );
+  }
+}
+
+/**
+ * The words a text file holds.
+ *
+ * Read out of the file rather than out of its entry: an entry says what a file
+ * is about in a word or two, and a reader who clicked a text file to see what
+ * is in it is asking the file. Cut short, since the column beside the canvas is
+ * no place to read a long thing — the whole of it is a download away.
+ */
+function TextExcerpt({ entry }: { entry: ResourceEntry }) {
+  const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let wanted = true;
+    setText(null);
+    setFailed(false);
+    fetch(assetUrl(entry.id))
+      .then((response) =>
+        response.ok
+          ? response.text()
+          : Promise.reject(new Error(response.statusText)),
+      )
+      .then((body) => {
+        if (wanted) setText(body.slice(0, 600));
+      })
+      .catch(() => {
+        if (wanted) setFailed(true);
+      });
+    return () => {
+      wanted = false;
+    };
+  }, [entry.id]);
+
+  if (failed) {
+    return (
+      <p className="inspector-empty" data-testid="asset-text-failed">
+        What is in it could not be read.
+      </p>
+    );
+  }
+  if (text === null) {
+    return <p className="inspector-empty">Reading…</p>;
+  }
+  return (
+    <p className="inspector-text-excerpt" data-testid="asset-text">
+      {text.trim() ? text : "Empty"}
+    </p>
+  );
 }
 
 /** What a node asks a provider to make, as it stands now. */
@@ -973,9 +1042,194 @@ function CanvasViewSection({ canvas }: { canvas: CanvasDocument }) {
   );
 }
 
+/**
+ * A file the project holds, read on its own.
+ *
+ * What the column beside the canvas says when a reader clicked a file on the
+ * shelf rather than a card on the board: what the file is, what it holds, where
+ * it came from, and what in this project is made of it. The same file a card
+ * holds, described without the card — since a file nobody has put on a board
+ * yet is still a file worth reading, and one that forty cards hold is worth
+ * reading once.
+ */
+function AssetInspector({ entry }: { entry: ResourceEntry }) {
+  const moka = useProjectStore((state) => state.moka);
+  const selfCheck = useProjectStore((state) => state.selfCheck);
+  const activeCanvas = useActiveCanvas();
+  const resources = useMemo(
+    () => (moka ? buildResourceIndex(moka) : new Map<AssetId, ResourceEntry>()),
+    [moka],
+  );
+  const issue = buildIssueIndex(selfCheck).get(entry.id);
+  const mime = entry.mime ?? entry.probe?.mime ?? "";
+  const shelf = shelfOf(entry);
+  const keeper = entry.favorite === true;
+  const url = assetUrl(entry.id);
+  // Counted here rather than taken from the row that was clicked, since the
+  // column reads the file as it stands and not as it stood a click ago.
+  const usesHere = activeCanvas ? canvasNodesUsing(activeCanvas, entry.id) : [];
+  const usesProject =
+    moka?.canvas.reduce(
+      (total, canvas) => total + canvasNodesUsing(canvas, entry.id).length,
+      0,
+    ) ?? 0;
+  const cards = (count: number) => `${count} card${count === 1 ? "" : "s"}`;
+
+  return (
+    <div className="inspector-asset" data-testid="asset-inspector">
+      <h3 className="inspector-asset-name" title={entry.name}>
+        {entry.name}
+      </h3>
+      <section className="inspector-section">
+        <h3>Preview</h3>
+        {issue && (
+          <p className="inspector-media-broken" role="alert">
+            ⚠ Asset {issue}
+            {issue === "changed" ? " — file contents changed on disk" : ""}
+          </p>
+        )}
+        {!issue && <AssetPreview entry={entry} mime={mime} />}
+      </section>
+      <section className="inspector-section">
+        <h3>File</h3>
+        <Row
+          label="Shelf"
+          value={
+            shelf
+              ? `${ASSET_CATEGORY_LABELS[shelf]} · ${CAPABILITY_LABELS[kindOfShelf(shelf)]}`
+              : ""
+          }
+        />
+        <AssetRows entry={entry} />
+        <Row label="Origin" value={SHELF_WHERE_LABELS[shelfWhere(entry)]} />
+        <Row label="Kept to hand" value={keeper ? "Yes" : ""} />
+        <Row label="Words" value={(entry.tags ?? []).join(", ")} />
+        <Row label="About" value={entry.keyword ?? ""} />
+        <Row label="Added" value={formatStamp(entry.createdAt)} />
+        <Row label="Updated" value={formatStamp(entry.updatedAt)} />
+      </section>
+      {entry.note && (
+        <section className="inspector-section">
+          <h3>Note</h3>
+          <p className="inspector-text-excerpt">{entry.note}</p>
+        </section>
+      )}
+      {entry.provenance && (
+        <section className="inspector-section">
+          <ProvenanceRows entry={entry} resources={resources} />
+        </section>
+      )}
+      <section className="inspector-section">
+        <h3>Used by</h3>
+        <Row label="On this canvas" value={cards(usesHere.length)} />
+        <Row label="In this project" value={cards(usesProject)} />
+      </section>
+      {/* What can be done about the file rather than about a card: where it is
+          on this machine, the cards made of it, whether it is kept to hand, and
+          whether it stays in the project at all. */}
+      <div className="inspector-actions">
+        <button
+          disabled={usesHere.length === 0}
+          onClick={() => focusAssetUses(usesHere)}
+          title={
+            usesHere.length === 0
+              ? "No card on this canvas uses it"
+              : `Select the ${cards(usesHere.length)} on this canvas using it`
+          }
+          type="button"
+        >
+          Focus cards
+        </button>
+        <button onClick={() => void revealAsset(entry.id)} type="button">
+          Reveal
+        </button>
+        <a download={entry.name} href={url}>
+          Download
+        </a>
+        <button
+          aria-pressed={keeper}
+          onClick={() => void markAssetKeeper(entry, !keeper)}
+          type="button"
+        >
+          {keeper ? "Stop keeping" : "Keep to hand"}
+        </button>
+        <button
+          className="danger"
+          onClick={() => void requestDeleteAsset(entry.id)}
+          type="button"
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What a file looks like, when it is the kind of file that looks like anything.
+ *
+ * Drawn from the file itself rather than from a card that holds it, since what
+ * is being read here is the file the project holds — the same bytes whichever
+ * board it was dragged onto, and readable when no board holds it at all.
+ */
+function AssetPreview({ entry, mime }: { entry: ResourceEntry; mime: string }) {
+  const openPreview = useEditorStore((state) => state.openPreview);
+  const url = assetUrl(entry.id);
+  if (mime.startsWith("image/")) {
+    return (
+      <button
+        aria-label="Open full preview"
+        className="inspector-preview"
+        data-testid="asset-preview-image"
+        onClick={() => openPreview(entry.id)}
+        type="button"
+      >
+        <img alt={entry.name} src={url} />
+      </button>
+    );
+  }
+  if (mime.startsWith("video/")) {
+    return (
+      <video
+        controls
+        data-testid="asset-preview-video"
+        preload="metadata"
+        src={url}
+      />
+    );
+  }
+  if (mime.startsWith("audio/")) {
+    return (
+      <audio
+        controls
+        data-testid="asset-preview-audio"
+        preload="metadata"
+        src={url}
+      />
+    );
+  }
+  if (mime.startsWith("text/")) return <TextExcerpt entry={entry} />;
+  return (
+    <p className="inspector-empty" data-testid="asset-preview-none">
+      {mime ? `Nothing to show for ${mime}` : "Nothing to show for this file"}
+    </p>
+  );
+}
+
 export function InspectorPanel() {
   const selection = useEditorStore((state) => state.selection);
+  const inspectedAssetId = useEditorStore((state) => state.inspectedAssetId);
   const activeCanvas = useActiveCanvas();
+  const moka = useProjectStore((state) => state.moka);
+  // Read out of the project rather than held from the click that asked: a file
+  // deleted or replaced while the column was reading it is read as it stands.
+  const inspected = useMemo(
+    () =>
+      moka && inspectedAssetId
+        ? buildResourceIndex(moka).get(inspectedAssetId)
+        : undefined,
+    [moka, inspectedAssetId],
+  );
 
   const selectedNodes = activeCanvas
     ? activeCanvas.nodes.filter((node) => selection.nodeIds.includes(node.id))
@@ -985,7 +1239,15 @@ export function InspectorPanel() {
     : [];
 
   let body;
-  if (
+  // A file asked about on the shelf is read first, and stays read until
+  // something on the canvas is chosen instead: the shelf's import puts a card
+  // on the board and chooses it, so a reader who then clicked the file the card
+  // was made of would otherwise be answered about the card they never asked
+  // about. Choosing on the canvas puts the file down, so the column always
+  // reads the last thing asked of it.
+  if (inspected) {
+    body = <AssetInspector entry={inspected} />;
+  } else if (
     activeCanvas &&
     selectedNodes.length === 1 &&
     selectedEdges.length === 0
