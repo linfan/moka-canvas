@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTickLabel, formatTimecode } from "./timecode";
+import { formatTickLabel, formatTimecode, frameAligned } from "./timecode";
 
 describe("formatTimecode", () => {
   it("reads the head as all zeroes", () => {
@@ -28,6 +28,41 @@ describe("formatTimecode", () => {
 
   it("holds a moment before the head at the head", () => {
     expect(formatTimecode(-500, 30)).toBe("00:00:00:00");
+  });
+});
+
+describe("frameAligned", () => {
+  it("lands a moment on the frame the clock rounds it to", () => {
+    // 30fps: 33.33ms a frame, so the moments between two frames lean to one.
+    expect(frameAligned(0, 30)).toBe(0);
+    expect(frameAligned(10, 30)).toBe(0);
+    expect(frameAligned(20, 30)).toBe(33);
+    expect(frameAligned(34, 30)).toBe(33);
+    expect(frameAligned(999, 30)).toBe(1_000);
+    expect(frameAligned(1_016, 30)).toBe(1_000);
+  });
+
+  it("counts at whatever rate the document cuts at", () => {
+    expect(frameAligned(500, 24)).toBe(500);
+    expect(frameAligned(600, 24)).toBe(583);
+    expect(frameAligned(280, 25)).toBe(280);
+    expect(frameAligned(50, 25)).toBe(40);
+    expect(frameAligned(8, 60)).toBe(0);
+    expect(frameAligned(9, 60)).toBe(17);
+  });
+
+  it("agrees with the clock it was taken from", () => {
+    for (const fps of [24, 25, 30, 60]) {
+      for (const ms of [0, 1, 17, 33, 500, 999, 1_016, 2_500, 7_333]) {
+        expect(formatTimecode(frameAligned(ms, fps), fps)).toBe(
+          formatTimecode(ms, fps),
+        );
+      }
+    }
+  });
+
+  it("holds a moment before the head at the head", () => {
+    expect(frameAligned(-500, 30)).toBe(0);
   });
 });
 

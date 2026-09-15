@@ -31,6 +31,21 @@ export function formatTimecode(ms: number, fps: number): string {
   ].join(":");
 }
 
+/**
+ * The frame a moment falls on, by rounding, as whole milliseconds.
+ *
+ * The clock `formatTimecode` reads a moment with: rounding rather than
+ * truncating, so a click at 1.016s is the next second's first frame and not
+ * the one before it. Clicks and playheads are put on this clock before they
+ * become clip geometry, and the document's times are whole milliseconds, so
+ * the answer is rounded to one.
+ */
+export function frameAligned(ms: number, fps: number): number {
+  const rate = frameRate(fps);
+  const frame = Math.max(0, Math.round((ms / 1_000) * rate));
+  return Math.round((frame / rate) * 1_000);
+}
+
 /** A tick's label: a second reads as a clock, part of one as its frame. */
 export function formatTickLabel(ms: number, fps: number): string {
   const rate = frameRate(fps);

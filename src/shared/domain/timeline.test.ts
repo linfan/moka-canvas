@@ -20,7 +20,12 @@ import {
   timelineIds,
 } from "./fixtures";
 import { validateMokaFile } from "./validate";
-import type { DocumentCommand, MokaFile, ResourceEntry } from "./types";
+import type {
+  DocumentCommand,
+  MokaFile,
+  ResourceEntry,
+  TimelineClip,
+} from "./types";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 
@@ -571,6 +576,74 @@ describe("clip commands", () => {
     });
     expect(next.timelines![0].clips).toHaveLength(0);
     expect(next.timelines![0].transitions).toHaveLength(0);
+  });
+
+  it("reads a frame-aligned split of a sped clip as two honest sides", () => {
+    const moka = buildTimelineMokaFile();
+    const ids = timelineIds();
+    // One clip reading three seconds of material at 1.5×: two seconds on the
+    // timeline, and each half of a split must state its own window honestly.
+    const sped: TimelineClip = {
+      ...moka.timelines![0].clips[0],
+      speed: 1.5,
+      durationMs: 2_000,
+      inPointMs: 0,
+      outPointMs: 3_000,
+    };
+    const cut = apply(moka, {
+      type: "updateClips",
+      timelineId: ids.timeline,
+      patches: [
+        {
+          clipId: ids.videoClip,
+          patch: { speed: 1.5, durationMs: 2_000, outPointMs: 3_000 },
+        },
+      ],
+    }).next;
+
+    // The split the room assembles: shorten the left half, land the right one
+    // behind it, each side rounding its own run of material to the millisecond.
+    const p = 999;
+    const right: TimelineClip = {
+      ...sped,
+      id: "clip-cut-right",
+      startMs: p,
+      durationMs: 2_000 - p,
+      inPointMs: 3_000 - Math.round((2_000 - p) * 1.5),
+      outPointMs: 3_000,
+    };
+    const next = expectRoundTrip(
+      cut,
+      {
+        type: "updateClips",
+        timelineId: ids.timeline,
+        patches: [
+          {
+            clipId: ids.videoClip,
+            patch: {
+              durationMs: p,
+              outPointMs: Math.round(p * 1.5),
+            },
+          },
+        ],
+      },
+      { type: "addClips", timelineId: ids.timeline, clips: [right] },
+    );
+
+    const clips = next.timelines![0].clips;
+    const left = clips.find((clip) => clip.id === ids.videoClip)!;
+    const landed = clips.find((clip) => clip.id === "clip-cut-right")!;
+    for (const clip of [left, landed]) {
+      expect(Math.round(clip.durationMs * clip.speed)).toBe(
+        clip.outPointMs - clip.inPointMs,
+      );
+    }
+    // The two windows are whole milliseconds, so the seam between them may
+    // hold a millisecond of material that neither side reads — the honest
+    // width of the grid, and never more.
+    expect(Math.abs(landed.inPointMs - left.outPointMs)).toBeLessThanOrEqual(1);
+    expect(left.inPointMs).toBe(0);
+    expect(landed.outPointMs).toBe(3_000);
   });
 
   it("lands no more clips than one step of history may hold", () => {

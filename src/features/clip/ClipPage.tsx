@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { historyBoundary } from "../editor/commands/execute";
 import { PanelUnfold } from "../editor/components/PanelFold";
 import { PanelResizer } from "../editor/components/PanelResizer";
@@ -8,10 +8,12 @@ import { usePanelFolds } from "../editor/stores/panelFolds";
 import { usePanelWidths } from "../editor/stores/panelWidths";
 import { useProjectStore } from "../editor/stores/projectStore";
 import { useRunStore } from "../editor/stores/runStore";
+import { ClipShortcutsDialog } from "./components/ClipShortcutsDialog";
 import { ClipTopBar } from "./components/ClipTopBar";
 import { TimelineIcon } from "./components/ClipIcons";
 import { StageSplit } from "./components/StageSplit";
 import { TimelineDialog } from "./components/TimelineDialog";
+import { useClipShortcuts } from "./interactions/clipShortcuts";
 import { ClipInspector } from "./panels/ClipInspector";
 import { ClipRail } from "./panels/ClipRail";
 import { MediaColumn } from "./panels/MediaColumn";
@@ -47,6 +49,15 @@ export function ClipPage() {
   const rightFolded = usePanelFolds((state) => state.right);
   const previewShare = useStageSplit((state) => state.share);
   const projectId = moka?.metadata.id ?? null;
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // The room's keys live exactly as long as the room does, and a dialog that
+  // is standing — the new-timeline question, or this list itself — keeps its
+  // own keys: what it answers is not also answered behind it.
+  useClipShortcuts({
+    isBlocked: () => shortcutsOpen || useClipStore.getState().newTimelineOpen,
+    onShowHelp: () => setShortcutsOpen(true),
+  });
 
   // Entering the room is a seam in the history: the board's undos stop at the
   // door, and what is undone here is not undone on a canvas. Which timeline
@@ -153,6 +164,9 @@ export function ClipPage() {
         {rightFolded ? <PanelUnfold side="right" /> : <ClipInspector />}
       </div>
       {newTimelineOpen && <TimelineDialog />}
+      {shortcutsOpen && (
+        <ClipShortcutsDialog onClose={() => setShortcutsOpen(false)} />
+      )}
     </div>
   );
 }

@@ -3834,8 +3834,7 @@ body.is-dragging-split {
   position: relative;
 }
 
-/* The timeline's toolbar: the view group stands at the right, and the left
-   side stays empty until the packages that act on the cut arrive. */
+/* The timeline's toolbar: the tools on the left, the view on the right. */
 .clip-tl-toolbar {
   align-items: center;
   border-bottom: 1px solid var(--stroke);
@@ -3843,10 +3842,11 @@ body.is-dragging-split {
   flex: none;
   gap: 10px;
   height: 34px;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 0 10px;
 }
 
+.clip-tl-toolbar-actions,
 .clip-tl-toolbar-view {
   align-items: center;
   display: flex;
@@ -3965,6 +3965,11 @@ body.is-dragging-split {
   left: 0;
   position: sticky;
   top: 0;
+}
+
+/* A file dragged in is a file about to land where it is let go. */
+.clip-tl-canvas.is-drop-target {
+  cursor: copy;
 }
 
 /* The 02 copy over a cut with nothing on it: it reads the empty rows without

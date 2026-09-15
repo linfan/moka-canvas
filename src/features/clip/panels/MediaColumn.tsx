@@ -14,6 +14,7 @@ import {
   RunsIcon,
   TextIcon,
 } from "../components/ClipIcons";
+import { addAssetAtPlayhead } from "../interactions/clipActions";
 import { useClipStore, type ClipFace } from "../stores/clipStore";
 import {
   stopAudioPreview,
@@ -57,9 +58,30 @@ function AudioPreviewAction({ entry }: { entry: ResourceEntry }) {
   );
 }
 
-/** The row actions the audio face adds to the shelf's own. */
-function previewRowAction(entry: ResourceEntry) {
-  return <AudioPreviewAction entry={entry} />;
+/** The row's own small offer on every face: the file lands where the playhead is. */
+function AddAtPlayheadAction({ entry }: { entry: ResourceEntry }) {
+  return (
+    <button
+      aria-label={`Add ${entry.name} at the playhead`}
+      className="resource-action clip-media-action"
+      data-testid="clip-media-add"
+      onClick={() => addAssetAtPlayhead(entry.id)}
+      title="Add at the playhead"
+      type="button"
+    >
+      ＋
+    </button>
+  );
+}
+
+/** The row actions the media faces add to the shelf's own. */
+function mediaRowExtras(face: ClipFace) {
+  return (entry: ResourceEntry) => (
+    <>
+      {face === "audio" && <AudioPreviewAction entry={entry} />}
+      <AddAtPlayheadAction entry={entry} />
+    </>
+  );
 }
 
 /** Reads the row a reader chose, which the material card in the inspector reads. */
@@ -113,7 +135,7 @@ export function MediaColumn() {
               {...shelf}
               onImported={backToLocal}
               onSelect={chooseMedia}
-              rowExtras={face === "audio" ? previewRowAction : undefined}
+              rowExtras={mediaRowExtras(face)}
               selectedId={mediaSelection}
             />
           </div>

@@ -1,0 +1,717 @@
+import {
+  MAX_CLIPS_PER_COMMAND,
+  MIN_CLIP_DURATION_MS,
+  createClipFromAsset,
+  newId,
+  nowIso,
+  type AssetId,
+  type ClipId,
+  type ClipKind,
+  type ClipPatch,
+  type DocumentCommand,
+  type MokaFile,
+  type ResourceEntry,
+  type TimelineClip,
+  type TimelineDocument,
+  type TimelineTrack,
+  type TimelineTransition,
+  type TrackId,
+} from "../../../shared/domain";
+import {
+  followerOf,
+  trackAccepts,
+  trackClipsInOrder,
+  transitionsOfSeams,
+} from "../../../shared/domain/timeline";
+import { execute } from "../../editor/commands/execute";
+import { shelfOf } from "../../editor/panels/canvasAssets";
+import { useAppStore } from "../../editor/stores/appStore";
+import { useProjectStore } from "../../editor/stores/projectStore";
+import { useClipStore, type ClipSelection } from "../stores/clipStore";
+import type { TimelineHit } from "../timeline/geometry";
+import { frameAligned } from "../timeline/timecode";
+
+/**
+ * What the cutting room does to a cut, as commands.
+ *
+ * Every action here is a thin assembly: what a drop, a split or a deletion
+ * means is decided in the document layer, and this file only says which
+ * commands carry that meaning and which command starts the step — one label,
+ * one entry of history. What the document layer refuses is toasted where it
+ * is refused; the words spoken here are only the ones the room itself has to
+ * say before a command could ever be built (a shelf that makes no clip, a row
+ * that takes none, a track that is locked).
+ */
+
+function toast(kind: "info" | "success" | "error", message: string): void {
+  useAppStore.getState().pushToast(kind, message);
+}
+
+/** The cut being worked on, read from the two stores that hold it. */
+export function activeTimeline(): TimelineDocument | null {
+  const moka = useProjectStore.getState().moka;
+  const id = useClipStore.getState().activeTimelineId;
+  if (!moka || !id) return null;
+  return (moka.timelines ?? []).find((timeline) => timeline.id === id) ?? null;
+}
+
+/** The asset an id names, wherever on the shelf it is filed, or null. */
+function findAsset(
+  moka: MokaFile | null,
+  assetId: AssetId,
+): ResourceEntry | null {
+  for (const entries of Object.values(moka?.resources ?? {})) {
+    const found = entries.find((entry) => entry.id === assetId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function trackOf(
+  timeline: TimelineDocument,
+  trackId: TrackId,
+): TimelineTrack | null {
+  return timeline.tracks.find((track) => track.id === trackId) ?? null;
+}
+
+function isLocked(timeline: TimelineDocument, clip: TimelineClip): boolean {
+  return trackOf(timeline, clip.trackId)?.locked === true;
+}
+
+/** A list cut into the batches one command may land. */
+function inBatches<T>(items: T[], size: number = MAX_CLIPS_PER_COMMAND): T[][] {
+  const batches: T[][] = [];
+  for (let at = 0; at < items.length; at += size) {
+    batches.push(items.slice(at, at + size));
+  }
+  return batches;
+}
+
+// ---------------------------------------------------------------------------
+// Reading the cut
+// ---------------------------------------------------------------------------
+
+/** The chosen clips, in the order the timeline holds them. */
+export function selectedClips(
+  timeline: TimelineDocument,
+  selection: ClipSelection,
+): TimelineClip[] {
+  const chosen = new Set(selection.clipIds);
+  return timeline.clips.filter((clip) => chosen.has(clip.id));
+}
+
+/**
+ * The clips the playhead is over, on rows that will take an edit.
+ *
+ * A locked row is left out: its clips can be pointed at, but nothing that
+ * changes the cut may touch them, so an action looking for work skips it
+ * rather than finding some it cannot do.
+ */
+export function clipsCrossingPlayhead(
+  timeline: TimelineDocument,
+  ms: number,
+): TimelineClip[] {
+  return timeline.clips.filter((clip) => {
+    const track = trackOf(timeline, clip.trackId);
+    return (
+      track !== null &&
+      !track.locked &&
+      clip.startMs < ms &&
+      ms < clip.startMs + clip.durationMs
+    );
+  });
+}
+
+/**
+ * The nearest clip edge up or down the cut, across every row that draws.
+ *
+ * An edge is the head or the tail of a clip; the search is strict, so a
+ * playhead already on an edge steps to its neighbour rather than standing
+ * still. A cut with no edge that way answers null and the playhead stays put.
+ */
+export function nearestClipEdgeMs(
+  timeline: TimelineDocument,
+  ms: number,
+  dir: -1 | 1,
+): number | null {
+  let nearest: number | null = null;
+  for (const clip of timeline.clips) {
+    const track = trackOf(timeline, clip.trackId);
+    if (!track || track.hidden) continue;
+    for (const edge of [clip.startMs, clip.startMs + clip.durationMs]) {
+      if (dir === -1 ? edge >= ms : edge <= ms) continue;
+      if (nearest === null || (dir === -1 ? edge > nearest : edge < nearest)) {
+        nearest = edge;
+      }
+    }
+  }
+  return nearest;
+}
+
+/** The clips of a track from the anchor to a click, in track order, or null when the two do not share a row. */
+export function rangeBetween(
+  timeline: TimelineDocument,
+  fromId: ClipId,
+  toId: ClipId,
+): ClipId[] | null {
+  const from = timeline.clips.find((clip) => clip.id === fromId);
+  const to = timeline.clips.find((clip) => clip.id === toId);
+  if (!from || !to || from.trackId !== to.trackId) return null;
+  const ordered = trackClipsInOrder(timeline, from.trackId);
+  const a = ordered.findIndex((clip) => clip.id === from.id);
+  const b = ordered.findIndex((clip) => clip.id === to.id);
+  if (a < 0 || b < 0) return null;
+  return ordered
+    .slice(Math.min(a, b), Math.max(a, b) + 1)
+    .map((clip) => clip.id);
+}
+
+/** How a click adds to what is held. */
+export type ClipClickMode = "replace" | "add" | "toggle";
+
+/**
+ * What a pointer click leaves selected.
+ *
+ * A plain click takes one clip and makes it the anchor; a Shift click reaches
+ * from the anchor to the clicked clip along its own row; Ctrl or the command
+ * key takes one clip in or out. A click on a seam badge takes the seam, and a
+ * click on anything else lets go of everything.
+ */
+export function clickSelection(
+  timeline: TimelineDocument,
+  selection: ClipSelection,
+  hit: TimelineHit,
+  mode: ClipClickMode,
+  anchorId: ClipId | null,
+): ClipSelection {
+  if (hit.kind === "transition") {
+    return { clipIds: [], transitionId: hit.transition.id };
+  }
+  if (hit.kind !== "clip") {
+    return { clipIds: [], transitionId: null };
+  }
+  const clip = hit.clip;
+  if (mode === "add" && anchorId) {
+    const range = rangeBetween(timeline, anchorId, clip.id);
+    if (range) {
+      return {
+        clipIds: [...new Set([...selection.clipIds, ...range])],
+        transitionId: null,
+      };
+    }
+  }
+  if (mode === "toggle") {
+    const held = selection.clipIds.includes(clip.id);
+    return {
+      clipIds: held
+        ? selection.clipIds.filter((id) => id !== clip.id)
+        : [...selection.clipIds, clip.id],
+      transitionId: null,
+    };
+  }
+  return { clipIds: [clip.id], transitionId: null };
+}
+
+/** Everything on the cut, across its rows. */
+export function selectAll(): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  useClipStore.getState().select({
+    clipIds: timeline.clips.map((clip) => clip.id),
+    transitionId: null,
+  });
+}
+
+export function clearSelection(): void {
+  useClipStore.getState().select({ clipIds: [], transitionId: null });
+}
+
+// ---------------------------------------------------------------------------
+// Landing media on a row
+// ---------------------------------------------------------------------------
+
+/**
+ * The kind of clip an asset lands as, or null for a shelf that makes none.
+ *
+ * Words have a page of their own and are refused here with a pointer to it;
+ * an audio file lands as sound and everything else — a video, a picture, a
+ * file whose mime says nothing — lands as the picture kind the factory gives
+ * a picture clip.
+ */
+function clipKindFor(entry: ResourceEntry): ClipKind | null {
+  if (shelfOf(entry) === "texts" || entry.mime?.startsWith("text/")) {
+    return null;
+  }
+  return entry.mime?.startsWith("audio/") ? "audio" : "video";
+}
+
+/** What the room says when an asset's kind is not the row's. */
+function kindMismatch(kind: ClipKind): string {
+  return kind === "audio"
+    ? "An audio file goes on an audio track."
+    : "A video or an image goes on a video track.";
+}
+
+/**
+ * Whether the factory will have to fall back to its four-second default.
+ *
+ * Only material does this: a picture may be four seconds by design, while a
+ * video or a sound nobody measured is a clip whose length the document only
+ * appears to know.
+ */
+function durationIsUnknown(entry: ResourceEntry): boolean {
+  const material =
+    entry.mime?.startsWith("video/") === true ||
+    entry.mime?.startsWith("audio/") === true;
+  return material && entry.probe?.durationMs === undefined;
+}
+
+/** Lands one asset on one row, or says why the row will not take it. */
+function landOnTrack(
+  timeline: TimelineDocument,
+  entry: ResourceEntry,
+  track: TimelineTrack,
+  startMs: number,
+): TimelineClip | null {
+  const kind = clipKindFor(entry);
+  if (kind === null) {
+    toast("info", "Text clips are made on the Text page.");
+    return null;
+  }
+  if (track.locked) {
+    toast("error", "That track is locked.");
+    return null;
+  }
+  if (!trackAccepts(track, kind)) {
+    toast("error", kindMismatch(kind));
+    return null;
+  }
+  if (durationIsUnknown(entry)) {
+    toast("info", "Duration unknown — the clip runs 4s; trim it to fit.");
+  }
+  const clip = createClipFromAsset(entry, track.id, startMs);
+  const done = execute("Add clip", [
+    { type: "addClips", timelineId: timeline.id, clips: [clip] },
+  ]);
+  return done ? clip : null;
+}
+
+/**
+ * A file dropped from the shelf lands where the pointer put it.
+ *
+ * A drag that outlived the shelf it started on is ignored without a word: the
+ * id names nothing, so there is nothing to say about it. Everything else the
+ * row decides: its kind, its lock, and the place the pointer's moment falls on
+ * the frame clock.
+ */
+export function dropAssetOnTrack(
+  timeline: TimelineDocument,
+  assetId: AssetId,
+  trackId: TrackId | null,
+  startMs: number,
+): void {
+  const entry = findAsset(useProjectStore.getState().moka, assetId);
+  if (!entry) return;
+  const track = trackId === null ? null : trackOf(timeline, trackId);
+  if (!track) return;
+  const clip = landOnTrack(timeline, entry, track, startMs);
+  if (clip) {
+    useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
+  }
+}
+
+/** The row a file dragged by an id would land on: display order, topmost first. */
+export function firstAcceptingTrack(
+  timeline: TimelineDocument,
+  kind: ClipKind,
+): TimelineTrack | null {
+  // The rows draw in reversed document order, so the top of the stack is the
+  // last track and the first row that takes the kind is found from the end.
+  for (let i = timeline.tracks.length - 1; i >= 0; i -= 1) {
+    const track = timeline.tracks[i];
+    if (!track.locked && trackAccepts(track, kind)) return track;
+  }
+  return null;
+}
+
+/**
+ * The row's plus: the asset lands at the playhead rather than under a pointer.
+ *
+ * The first row that takes the kind and will hold an edit, topmost first, is
+ * the one it lands on; the words said afterwards are the only answer a reader
+ * gets, since the clip may well land out of sight of where they are looking.
+ */
+export function addAssetAtPlayhead(assetId: AssetId): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  const entry = findAsset(useProjectStore.getState().moka, assetId);
+  if (!entry) return;
+  const kind = clipKindFor(entry);
+  if (kind === null) {
+    toast("info", "Text clips are made on the Text page.");
+    return;
+  }
+  const track = firstAcceptingTrack(timeline, kind);
+  if (!track) {
+    const takesKind = timeline.tracks.some((row) => trackAccepts(row, kind));
+    toast("error", takesKind ? "That track is locked." : kindMismatch(kind));
+    return;
+  }
+  const startMs = frameAligned(
+    useClipStore.getState().playheadMs,
+    timeline.settings.fps,
+  );
+  const clip = landOnTrack(timeline, entry, track, startMs);
+  if (!clip) return;
+  useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
+  toast("success", `Added ${entry.name}.`);
+}
+
+// ---------------------------------------------------------------------------
+// Splitting
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a clip's material clock is its own duration — a cue, or a still.
+ *
+ * Such a clip has no window into anything longer than itself, so neither half
+ * of a split may read the material at an offset: each one starts its own
+ * clock, the way the factory made it.
+ */
+function readsItsOwnClock(moka: MokaFile | null, clip: TimelineClip): boolean {
+  if (clip.kind === "text") return true;
+  const asset = clip.assetId ? findAsset(moka, clip.assetId) : null;
+  return asset?.mime?.startsWith("image/") === true;
+}
+
+/**
+ * The two pieces a split at `p` leaves: the patch that shortens the clip the
+ * timeline already holds, and the right-hand piece that follows it.
+ *
+ * Both sides round their own run of material to the millisecond, which is
+ * what the document's timing identity is stated in; a sped clip may leave a
+ * millisecond of material between the two windows, which is the honest width
+ * of a whole-millisecond grid.
+ */
+function splitPieces(
+  moka: MokaFile | null,
+  clip: TimelineClip,
+  p: number,
+): { patch: ClipPatch; right: TimelineClip } {
+  const end = clip.startMs + clip.durationMs;
+  const leftMs = p - clip.startMs;
+  const rightMs = end - p;
+  const right: TimelineClip = {
+    ...clip,
+    id: newId(),
+    startMs: p,
+    durationMs: rightMs,
+  };
+  if (readsItsOwnClock(moka, clip)) {
+    return {
+      patch: { durationMs: leftMs, outPointMs: leftMs },
+      right: { ...right, inPointMs: 0, outPointMs: rightMs },
+    };
+  }
+  return {
+    patch: {
+      durationMs: leftMs,
+      outPointMs: clip.inPointMs + Math.round(leftMs * clip.speed),
+    },
+    right: {
+      ...right,
+      inPointMs: clip.outPointMs - Math.round(rightMs * clip.speed),
+      outPointMs: clip.outPointMs,
+    },
+  };
+}
+
+/** The run of seams from the one behind a clip down to the last, left to right. */
+function seamRunFrom(
+  timeline: TimelineDocument,
+  leaderId: ClipId,
+): TimelineTransition[] {
+  const run: TimelineTransition[] = [];
+  let leader = timeline.clips.find((clip) => clip.id === leaderId);
+  while (leader) {
+    const held: TimelineClip = leader;
+    const transition = timeline.transitions.find(
+      (seam) => seam.afterClipId === held.id,
+    );
+    if (!transition) break;
+    run.push(transition);
+    leader = followerOf(timeline, held);
+  }
+  return run;
+}
+
+/**
+ * Every seam the split has to take down and put back, once each.
+ *
+ * A seam's follower is held against the tail of the clip ahead of it, so
+ * shortening that clip would tear the seam; and releasing one seam shifts a
+ * whole chain of them, so the run from the first seam rightwards comes down
+ * and goes back up as one batch — the same shape the transition tools use.
+ */
+function seamsToReassemble(
+  timeline: TimelineDocument,
+  crossings: TimelineClip[],
+): TimelineTransition[] {
+  const seams: TimelineTransition[] = [];
+  const seen = new Set<string>();
+  for (const clip of crossings) {
+    for (const transition of seamRunFrom(timeline, clip.id)) {
+      if (seen.has(transition.id)) continue;
+      seen.add(transition.id);
+      seams.push(transition);
+    }
+  }
+  return seams;
+}
+
+/** The clips a split would cut: the selection when there is one, every crossing clip otherwise. */
+function crossingsToSplit(
+  timeline: TimelineDocument,
+  selection: ClipSelection,
+  p: number,
+): TimelineClip[] {
+  const crossed = (clip: TimelineClip) =>
+    clip.startMs < p && p < clip.startMs + clip.durationMs;
+  const candidates =
+    selection.clipIds.length > 0
+      ? selectedClips(timeline, selection)
+      : clipsCrossingPlayhead(timeline, p);
+  return candidates
+    .filter(crossed)
+    .sort((a, b) => a.startMs - b.startMs || (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * Cuts what is selected — or everything the playhead is over — in one step.
+ *
+ * The left half keeps its id and is shortened first, so the right half lands
+ * in a place that was just vacated; the pieces then satisfy the document's
+ * timing identity on their own, and a piece too short to be seen refuses the
+ * whole batch rather than leaving half a cut behind.
+ */
+export function splitSelectionAtPlayhead(): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  const { selection, playheadMs } = useClipStore.getState();
+  const p = frameAligned(playheadMs, timeline.settings.fps);
+  const crossings = crossingsToSplit(timeline, selection, p);
+  if (crossings.length === 0) {
+    toast("info", "The playhead is not over the selected clip.");
+    return;
+  }
+  if (crossings.some((clip) => isLocked(timeline, clip))) {
+    toast("error", "That track is locked.");
+    return;
+  }
+  if (
+    crossings.some(
+      (clip) =>
+        p - clip.startMs < MIN_CLIP_DURATION_MS ||
+        clip.startMs + clip.durationMs - p < MIN_CLIP_DURATION_MS,
+    )
+  ) {
+    toast("error", "Too short to split at the playhead.");
+    return;
+  }
+
+  const moka = useProjectStore.getState().moka;
+  const pieces = crossings.map((clip) => ({
+    original: clip,
+    ...splitPieces(moka, clip, p),
+  }));
+  // The seams a split affects come down first and go back up last: a follower
+  // released mid-batch is a follower butted against its leader, which is the
+  // only state the split's own commands may see.
+  const seams = seamsToReassemble(timeline, crossings);
+  const commands: DocumentCommand[] = [];
+  if (seams.length > 0) {
+    commands.push({
+      type: "removeTransitions",
+      timelineId: timeline.id,
+      transitionIds: seams.map((seam) => seam.id),
+    });
+  }
+  for (const { original, patch, right } of pieces) {
+    commands.push({
+      type: "updateClips",
+      timelineId: timeline.id,
+      patches: [{ clipId: original.id, patch }],
+    });
+    commands.push({
+      type: "addClips",
+      timelineId: timeline.id,
+      clips: [right],
+    });
+  }
+  if (seams.length > 0) {
+    commands.push({
+      type: "addTransitions",
+      timelineId: timeline.id,
+      // The seam behind a split piece now follows its right half — the
+      // geometry is unchanged, only who stands on the left of the seam is.
+      transitions: seams.map((seam) => {
+        const split = pieces.find(
+          (piece) => piece.original.id === seam.afterClipId,
+        );
+        return split ? { ...seam, afterClipId: split.right.id } : seam;
+      }),
+    });
+  }
+  const done = execute("Split clip(s)", commands);
+  if (!done) return;
+  // The right-hand pieces stay selected: cutting the tail further is the move
+  // that usually follows cutting a clip in two.
+  useClipStore.getState().select({
+    clipIds: pieces.map((piece) => piece.right.id),
+    transitionId: null,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Removing and duplicating
+// ---------------------------------------------------------------------------
+
+/**
+ * Takes the chosen clips — and a chosen seam — out of the cut in one step.
+ *
+ * The clips go first, in the batches one command may hold: removing a clip
+ * takes the seams it touched with it, so a seam the batch named is left to
+ * that cascade rather than named twice. Everything comes back on one undo.
+ */
+export function deleteSelection(): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  const { selection } = useClipStore.getState();
+  const clips = selectedClips(timeline, selection);
+  const seam =
+    timeline.transitions.find((each) => each.id === selection.transitionId) ??
+    null;
+  if (clips.length === 0 && !seam) return;
+  if (clips.some((clip) => isLocked(timeline, clip))) {
+    toast("error", "That track is locked.");
+    return;
+  }
+  const commands: DocumentCommand[] = [];
+  for (const batch of inBatches(clips.map((clip) => clip.id))) {
+    commands.push({
+      type: "removeClips",
+      timelineId: timeline.id,
+      clipIds: batch,
+    });
+  }
+  if (
+    seam &&
+    !transitionsOfSeams(
+      timeline,
+      clips.map((c) => c.id),
+    ).some((each) => each.id === seam.id)
+  ) {
+    commands.push({
+      type: "removeTransitions",
+      timelineId: timeline.id,
+      transitionIds: [seam.id],
+    });
+  }
+  const done = execute("Delete clips", commands);
+  if (done) {
+    useClipStore.getState().select({ clipIds: [], transitionId: null });
+  }
+}
+
+/**
+ * Lays a copy of each chosen clip right after it, in one step.
+ *
+ * The copy has a new id and the same words, and lands on the tail of the
+ * piece it copies. A copy that lands on something is refused whole — finding
+ * a hole would be the room guessing at where the reader wanted it.
+ */
+export function duplicateSelection(): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  const { selection } = useClipStore.getState();
+  const clips = selectedClips(timeline, selection);
+  if (clips.length === 0) return;
+  if (clips.some((clip) => isLocked(timeline, clip))) {
+    toast("error", "That track is locked.");
+    return;
+  }
+  const copies = clips.map((clip) => ({
+    ...clip,
+    id: newId(),
+    startMs: clip.startMs + clip.durationMs,
+  }));
+  const commands: DocumentCommand[] = [];
+  for (const batch of inBatches(copies)) {
+    commands.push({ type: "addClips", timelineId: timeline.id, clips: batch });
+  }
+  execute("Duplicate clips", commands);
+}
+
+/** The name a row added for sound wears: the next number past the ones taken. */
+function nextAudioTrackName(timeline: TimelineDocument): string {
+  const used = new Set(timeline.tracks.map((track) => track.name));
+  let n = timeline.tracks.filter((track) => track.kind === "audio").length + 1;
+  while (used.has(`Audio ${n}`)) n += 1;
+  return `Audio ${n}`;
+}
+
+/**
+ * Lifts the sound of the chosen video clips onto a row of its own.
+ *
+ * The copy reads the same material from the same window and lands on the same
+ * place; the picture is then muted, since its sound is the other clip's now.
+ * The first audio row that will hold an edit takes it, topmost first, and a
+ * cut with no such row grows one in the same step.
+ */
+export function detachAudio(): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  const { selection } = useClipStore.getState();
+  const clips = selectedClips(timeline, selection).filter(
+    (clip) => clip.kind === "video",
+  );
+  if (clips.length === 0) return;
+  if (clips.some((clip) => isLocked(timeline, clip))) {
+    toast("error", "That track is locked.");
+    return;
+  }
+  const commands: DocumentCommand[] = [];
+  const held = firstAcceptingTrack(timeline, "audio");
+  const target: TimelineTrack = held ?? {
+    id: newId(),
+    kind: "audio",
+    name: nextAudioTrackName(timeline),
+    muted: false,
+    hidden: false,
+    locked: false,
+    createdAt: nowIso(),
+  };
+  if (!held) {
+    commands.push({ type: "addTrack", timelineId: timeline.id, track: target });
+  }
+  const sound = clips.map((clip) => ({
+    ...clip,
+    id: newId(),
+    trackId: target.id,
+    kind: "audio" as const,
+  }));
+  for (const batch of inBatches(sound)) {
+    commands.push({ type: "addClips", timelineId: timeline.id, clips: batch });
+  }
+  for (const batch of inBatches(clips)) {
+    commands.push({
+      type: "updateClips",
+      timelineId: timeline.id,
+      patches: batch.map((clip) => ({
+        clipId: clip.id,
+        patch: { muted: true },
+      })),
+    });
+  }
+  execute("Detach audio", commands);
+}

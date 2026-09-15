@@ -308,6 +308,109 @@ export function FitIcon({ size = 18 }: IconProps) {
   );
 }
 
+/** Scissors: the cut made where the playhead stands. */
+export function ScissorsIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <circle cx="6.4" cy="7" r="2.5" />
+      <circle cx="6.4" cy="17" r="2.5" />
+      <path d="m8.5 8.4 11 6.1M8.5 15.6l11-6.1" />
+    </svg>
+  );
+}
+
+/** Two sheets: the chosen clip laid down again behind its own tail. */
+export function DuplicateIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <rect height="11.5" rx="1.8" width="11.5" x="8.5" y="4.5" />
+      <path d="M15.5 19.5h-11v-11" />
+    </svg>
+  );
+}
+
+/** A bin: the chosen clips taken off the cut. */
+export function TrashIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M4.5 7h15" />
+      <path d="M9.5 7V5.6c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3V7" />
+      <path d="m6.7 7 .8 11.7c0 .7.7 1.3 1.4 1.3h6.2c.7 0 1.4-.6 1.4-1.3L17.3 7" />
+      <path d="M10.3 10.6v5.6M13.7 10.6v5.6" />
+    </svg>
+  );
+}
+
+/** An arrow curving back: the last step taken off the history. */
+export function UndoIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M5 9h9.5a5 5 0 0 1 0 10H9" />
+      <path d="M8.5 5.5 5 9l3.5 3.5" />
+    </svg>
+  );
+}
+
+/** The same arrow, put back on: the step undone. */
+export function RedoIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M19 9H9.5a5 5 0 0 0 0 10H15" />
+      <path d="M15.5 5.5 19 9l-3.5 3.5" />
+    </svg>
+  );
+}
+
 /** A padlock: the row that will not be moved. */
 export function LockIcon({ size = 18 }: IconProps) {
   return (
