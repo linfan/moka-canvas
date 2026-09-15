@@ -1,26 +1,207 @@
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { TimelineDocument } from "../../../shared/domain";
+import {
+  APPROXIMATE_BADGE,
+  approximateReason,
+  previewCapabilities,
+  type PreviewEngine,
+} from "../preview/capabilities";
+import { composeFrame, type FrameReport } from "../preview/compositor";
+import { frameEngine, previewFrames } from "../preview/frames";
+import { useClipStore } from "../stores/clipStore";
+import { formatTimecode } from "../timeline/timecode";
 
 interface PreviewStageProps {
   timeline: TimelineDocument | null;
 }
 
 /**
+ * The widest backing store the preview draws into.
+ *
+ * A 4K cut is judged through a pane a fraction of its size, so the picture is
+ * drawn at the size it is looked at rather than the size it is cut at; package
+ * 07 hands its quality tiers through this same door.
+ */
+const MAX_BACKING_WIDTH = 1920;
+
+/**
  * The picture the cut is being judged against.
  *
- * A frame and a readout for now: the timecode stands at the head, where it
- * will read the playhead once there is one, and the badge says the frame the
- * timeline is cut in, which is a fact of the document and reads right even
- * while the frame itself is still grey. Package 06 fills the frame.
+ * The frame under the playhead, composed from the document: the background,
+ * each track's picture in order, the words on top. Composition is scheduled on
+ * the animation frame so a drag across the ruler asks once a frame rather than
+ * once a pointer event, and every composition carries a generation — a frame
+ * the reader has already moved past is dropped rather than painted over a
+ * newer one. What the frame is made with, and what about it is only an
+ * approximation, is written on the stage itself: a degradation is shown, never
+ * silently wrong.
  */
 export function PreviewStage({ timeline }: PreviewStageProps) {
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const generationRef = useRef(0);
+  const sources = previewFrames();
+  const capabilities = previewCapabilities();
+  const playheadMs = useClipStore((state) => state.playheadMs);
+  const [engine, setEngine] = useState<PreviewEngine>("none");
+  const [frameMs, setFrameMs] = useState<number | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const fps = timeline?.settings.fps ?? 30;
 
+  const paint = useCallback(async () => {
+    const canvas = canvasRef.current;
+    const frame = frameRef.current;
+    if (!timeline || !canvas || !frame) return;
+    const cssWidth = frame.clientWidth;
+    const cssHeight = frame.clientHeight;
+    // A pane with no room in it — a folded column, a hidden stage — has nothing
+    // to draw into, and a canvas of no pixels is not a picture.
+    if (cssWidth <= 0 || cssHeight <= 0) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // The canvas's own pixels: the drawing works in them and the element is
+    // scaled to fit by the browser, so what is composed is what is looked at.
+    const dpr = window.devicePixelRatio || 1;
+    const backingWidth = Math.min(
+      MAX_BACKING_WIDTH,
+      Math.max(1, Math.round(cssWidth * dpr)),
+    );
+    const backingHeight = Math.max(
+      1,
+      Math.round(
+        backingWidth * (timeline.settings.height / timeline.settings.width),
+      ),
+    );
+    if (canvas.width !== backingWidth) canvas.width = backingWidth;
+    if (canvas.height !== backingHeight) canvas.height = backingHeight;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    const generation = (generationRef.current += 1);
+    const atMs = useClipStore.getState().playheadMs;
+    let report: FrameReport | null = null;
+    try {
+      report = await composeFrame(ctx, {
+        width: backingWidth,
+        height: backingHeight,
+        timeline,
+        atMs,
+        sources,
+        filter: capabilities.filter,
+        isCurrent: () => generation === generationRef.current,
+      });
+    } catch {
+      // A frame that cannot be composed leaves the one already on the canvas
+      // standing: a preview that stopped drawing is worse than a stale one.
+      return;
+    }
+    if (!report) return;
+    const drawn = frameEngine(report.clips, (assetId) =>
+      sources.engineOf(assetId),
+    );
+    setEngine(drawn);
+    setFrameMs(atMs);
+    setNote(approximateReason(capabilities, drawn, report.coloursSkipped));
+  }, [timeline, sources, capabilities]);
+
+  const schedule = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      void paint();
+    });
+  }, [paint]);
+
+  // The playhead is what the frame answers to; the document reaches the stage
+  // through the timeline it is handed, and a picture arriving late through the
+  // sources' own signal.
+  useEffect(
+    () =>
+      useClipStore.subscribe((state, previous) => {
+        if (state.playheadMs !== previous.playheadMs) schedule();
+      }),
+    [schedule],
+  );
+
+  useEffect(() => sources.onArrive(schedule), [sources, schedule]);
+
+  useEffect(() => {
+    schedule();
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [schedule]);
+
+  // The frame is the timeline's shape, as large as the pane leaves it: the
+  // letterbox is the pane's letterbox, and what is drawn inside is the
+  // composition itself. A room with no timeline yet keeps the shape a cut
+  // would have rather than a box of no size.
+  const layout = useCallback(() => {
+    const section = sectionRef.current;
+    const frame = frameRef.current;
+    if (!section || !frame) return;
+    const style = getComputedStyle(section);
+    const boxWidth =
+      section.clientWidth -
+      parseFloat(style.paddingLeft) -
+      parseFloat(style.paddingRight);
+    const boxHeight =
+      section.clientHeight -
+      parseFloat(style.paddingTop) -
+      parseFloat(style.paddingBottom);
+    if (boxWidth <= 0 || boxHeight <= 0) return;
+    const aspect =
+      (timeline?.settings.width ?? 16) / (timeline?.settings.height ?? 9);
+    const width = Math.min(boxWidth, boxHeight * aspect);
+    frame.style.width = `${Math.floor(width)}px`;
+    frame.style.height = `${Math.floor(width / aspect)}px`;
+    schedule();
+  }, [timeline, schedule]);
+
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const observer = new ResizeObserver(layout);
+    observer.observe(section);
+    layout();
+    return () => observer.disconnect();
+  }, [layout]);
+
   return (
-    <section aria-label="Preview" className="clip-preview">
-      <div className="clip-preview-frame" />
-      <div className="clip-preview-bar">
-        <span className="clip-timecode">00:00:00:00</span>
-        <span className="clip-preview-badge">{`${fps}fps Full`}</span>
+    <section
+      aria-label="Preview"
+      className="clip-preview"
+      data-engine={timeline ? engine : "none"}
+      data-frame-ms={frameMs ?? undefined}
+      ref={sectionRef}
+    >
+      <div className="clip-preview-frame" ref={frameRef}>
+        {timeline === null ? (
+          <p className="clip-preview-empty">No timeline to preview.</p>
+        ) : (
+          <>
+            <canvas className="clip-preview-canvas" ref={canvasRef} />
+            <span className="clip-preview-time" data-testid="preview-timecode">
+              {formatTimecode(playheadMs, fps)}
+            </span>
+            {note !== null && (
+              <span className="clip-preview-badge" title={note}>
+                {APPROXIMATE_BADGE}
+              </span>
+            )}
+          </>
+        )}
       </div>
     </section>
   );

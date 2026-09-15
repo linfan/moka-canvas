@@ -3732,48 +3732,71 @@ button.danger:hover:not(:disabled) {
 }
 
 .clip-preview {
+  align-items: center;
   display: flex;
   flex: none;
-  flex-direction: column;
-  gap: 10px;
   /* The share of the stage the preview takes, written by the splitter on the
      stage itself; a stage nobody has split is a 60/40 one. */
   height: calc(var(--clip-preview-share, 0.6) * 100%);
+  justify-content: center;
   min-height: 140px;
-  padding: 14px 16px 0;
+  padding: 14px 16px 12px;
 }
 
+/* The frame is the timeline's shape fitted to the pane — the stage writes its
+   size — and what is drawn inside it is the composition at the playhead. */
 .clip-preview-frame {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  flex: 1;
-  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 
-.clip-preview-bar {
-  align-items: center;
-  display: flex;
-  flex: none;
-  gap: 10px;
-  justify-content: space-between;
-  padding: 0 2px 10px;
+.clip-preview-canvas {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
-.clip-timecode {
-  color: var(--muted);
+/* Over the picture rather than under it: the moment is read against the frame
+   it is standing on, and the pane has no bar of its own to lend it. */
+.clip-preview-time {
+  background: var(--surface-glass);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  left: 10px;
   letter-spacing: 0.04em;
+  padding: 3px 7px;
+  position: absolute;
+  top: 10px;
 }
 
+/* Every degradation the preview takes is said here: the title carries why. */
 .clip-preview-badge {
-  background: var(--surface-raised);
+  background: var(--surface-glass);
   border: 1px solid var(--stroke);
   border-radius: 999px;
-  color: var(--muted);
+  bottom: 10px;
+  color: var(--ink);
+  cursor: help;
   font-size: 11px;
   padding: 3px 9px;
+  position: absolute;
+  right: 10px;
+}
+
+.clip-preview-empty {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  inset: 0;
+  justify-content: center;
+  margin: 0;
+  position: absolute;
 }
 
 /* The edge the preview and the timeline are dragged apart by: the column edge,

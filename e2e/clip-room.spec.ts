@@ -55,7 +55,10 @@ test("a project without timelines opens onto the first-run question", async ({
   ).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("No timelines yet")).toHaveCount(0);
   await expect(page.getByText("Nothing here yet")).toBeVisible();
-  await expect(page.getByText("30fps Full")).toBeVisible();
+  // The preview stands on the empty cut: the frame the playhead will be read
+  // against, and the timecode at the head it has not moved off yet.
+  await expect(page.locator("canvas.clip-preview-canvas")).toBeVisible();
+  await expect(page.getByTestId("preview-timecode")).toHaveText("00:00:00:00");
 
   rmSync(home, { recursive: true, force: true });
 });
