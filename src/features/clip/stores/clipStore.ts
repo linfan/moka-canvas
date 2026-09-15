@@ -4,6 +4,7 @@ import type {
   ClipAdjust,
   ClipId,
   MokaFile,
+  TextClipData,
   TimelineDocument,
   TimelineId,
   TransitionId,
@@ -189,6 +190,22 @@ export interface AdjustDraft {
 }
 
 /**
+ * Words a reader is typing, before they are a change to the cut.
+ *
+ * The inspector writes one of these while the textarea or a style control is
+ * being used: the compositor reads it in place of the document's own text, so
+ * the picture answers the keyboard at once and no command is sent until the
+ * commit point — a blur, a release, or a click on a discrete switch. Like a
+ * grade, it is a reading rather than a fact about a cut: it lives here and
+ * never reaches the document.
+ */
+export interface TextDraft {
+  /** The clips the draft stands in for. */
+  clipIds: ClipId[];
+  text: TextClipData;
+}
+
+/**
  * How finely the preview composes: its own size, or a fraction of it.
  *
  * The tiers cap the backing store the frame is drawn into — 1920, 960, 480 —
@@ -268,6 +285,14 @@ interface ClipState {
    */
   adjustDraft: AdjustDraft | null;
   /**
+   * The words being edited on the inspector's text form, or null when none are.
+   *
+   * Held here for the same reason a grade is: the compositor reads the store
+   * the rest of the room reads, and a draft that outlives its own form is
+   * dropped by the store rather than drawn forever.
+   */
+  textDraft: TextDraft | null;
+  /**
    * The file chosen on the media shelf, which the inspector reads as material.
    *
    * Kept apart from the timeline's own choice: the two columns each hold their
@@ -316,6 +341,8 @@ interface ClipState {
   select: (patch: Partial<ClipSelection>) => void;
   /** Writes the grade being dragged, clamped to what a grade may be; null lets it go. */
   setAdjustDraft: (draft: AdjustDraft | null) => void;
+  /** Writes the words being edited; null lets the document's own text show again. */
+  setTextDraft: (draft: TextDraft | null) => void;
   selectMedia: (id: AssetId | null) => void;
   setNewTimelineOpen: (open: boolean) => void;
   setView: (patch: Partial<TimelineView>) => void;
@@ -406,6 +433,7 @@ export const useClipStore = create<ClipState>()((set, get) => {
     face: "local",
     selection: { clipIds: [], transitionId: null },
     adjustDraft: null,
+    textDraft: null,
     mediaSelection: null,
     newTimelineOpen: false,
     view: { pxPerSec: DEFAULT_PX_PER_SEC, scrollLeftPx: 0 },
@@ -456,8 +484,9 @@ export const useClipStore = create<ClipState>()((set, get) => {
         selection: { ...state.selection, ...patch },
         // A draft stands in for the clips it named. Choosing other clips is
         // therefore a draft that stands for nothing, and keeping it would
-        // leave the preview showing a grade no command ever carried.
+        // leave the preview showing a grade or words no command ever carried.
         adjustDraft: patch.clipIds === undefined ? state.adjustDraft : null,
+        textDraft: patch.clipIds === undefined ? state.textDraft : null,
       }));
     },
 
@@ -472,6 +501,18 @@ export const useClipStore = create<ClipState>()((set, get) => {
                 clipIds: [...draft.clipIds],
                 adjust: clampAdjust(draft.adjust),
               },
+      });
+    },
+
+    setTextDraft(draft) {
+      // The same guard a grade has: a draft that stands for no clip is no
+      // draft at all, and the named clips are copied so a caller's own list
+      // going stale cannot change what the preview is showing.
+      set({
+        textDraft:
+          draft === null || draft.clipIds.length === 0
+            ? null
+            : { clipIds: [...draft.clipIds], text: draft.text },
       });
     },
 

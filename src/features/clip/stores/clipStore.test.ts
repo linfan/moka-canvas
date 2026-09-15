@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { createTimeline } from "../../../shared/domain";
+import { createTimeline, defaultTextStyle } from "../../../shared/domain";
 import type { MokaFile } from "../../../shared/domain";
 import {
   buildCutMokaFile,
@@ -460,5 +460,49 @@ describe("the grade a hand is dragging", () => {
     });
     store().select({ transitionId: null });
     expect(store().adjustDraft).not.toBeNull();
+  });
+});
+
+describe("the words a hand is editing", () => {
+  const words = { content: "hello", style: defaultTextStyle() };
+
+  it("holds the draft apart from the document, copied as it was written", () => {
+    const clipIds = ["clip-1"];
+    store().setTextDraft({ clipIds, text: words });
+    expect(store().textDraft).toEqual({ clipIds: ["clip-1"], text: words });
+    // The caller's own list going stale cannot change what stands in for it.
+    clipIds.push("clip-2");
+    expect(store().textDraft?.clipIds).toEqual(["clip-1"]);
+  });
+
+  it("lets the draft go when nothing is written or nothing is named", () => {
+    store().setTextDraft({ clipIds: ["clip-1"], text: words });
+    store().setTextDraft(null);
+    expect(store().textDraft).toBeNull();
+    store().setTextDraft({ clipIds: [], text: words });
+    expect(store().textDraft).toBeNull();
+  });
+
+  it("drops a draft standing for clips that are no longer chosen", () => {
+    store().setTextDraft({ clipIds: ["clip-1"], text: words });
+    store().select({ clipIds: ["clip-2"] });
+    expect(store().textDraft).toBeNull();
+    // A write that says nothing about the clips is not a new choice.
+    store().setTextDraft({ clipIds: ["clip-2"], text: words });
+    store().select({ transitionId: null });
+    expect(store().textDraft).not.toBeNull();
+  });
+
+  it("keeps the two kinds of draft apart", () => {
+    store().setAdjustDraft({
+      clipIds: ["clip-1"],
+      adjust: { brightness: 0.5, contrast: 0, saturation: 0 },
+    });
+    store().setTextDraft({ clipIds: ["clip-1"], text: words });
+    expect(store().adjustDraft).not.toBeNull();
+    expect(store().textDraft).not.toBeNull();
+    store().select({ clipIds: ["clip-2"] });
+    expect(store().adjustDraft).toBeNull();
+    expect(store().textDraft).toBeNull();
   });
 });

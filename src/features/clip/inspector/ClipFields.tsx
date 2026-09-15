@@ -4,7 +4,10 @@ import {
   MAX_CLIP_SPEED,
   MAX_CLIP_VOLUME,
   MIN_CLIP_SPEED,
+  defaultTextStyle,
   type ClipPatch,
+  type TextClipData,
+  type TextClipStyle,
   type TimelineClip,
   type TimelineDocument,
 } from "../../../shared/domain";
@@ -22,6 +25,12 @@ import {
   materialOf,
   splitSelectionAtPlayhead,
 } from "../interactions/clipActions";
+import {
+  clampTextContent,
+  legalStyle,
+  sameText,
+  styleApplyPatches,
+} from "../interactions/textActions";
 import { useClipStore } from "../stores/clipStore";
 import {
   formatTimecode,
@@ -39,6 +48,7 @@ import {
   startPatch,
   wholeNumberIn,
 } from "./clipFieldMath";
+import { TextFields } from "./TextFields";
 
 /**
  * What a clip is, and how it plays, as a form over the document.
@@ -323,8 +333,115 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
       clip.startMs < playhead && playhead < clip.startMs + clip.durationMs,
   ).length;
 
+  // The text clips of the selection, and the style they agree on. A field the
+  // set disagrees about reads as `Mixed`, and the words are editable exactly
+  // when one clip is chosen: a whole-object patch has one content to carry.
+  const textClips = clips.filter(
+    (clip): clip is TimelineClip & { text: TextClipData } =>
+      clip.kind === "text" && clip.text !== undefined,
+  );
+  const textDraft = useClipStore((state) => state.textDraft);
+  const wordsEditable = clips.length === 1 && textClips.length === 1;
+  const textBase = defaultTextStyle();
+  const textStyles = textClips.map((clip) => clip.text.style);
+  const mixedStyle = new Set<keyof TextClipStyle>(
+    textStyles.length > 1
+      ? (Object.keys(textBase) as (keyof TextClipStyle)[]).filter((key) => {
+          const first = textStyles[0][key];
+          return !textStyles.every((style) => style[key] === first);
+        })
+      : [],
+  );
+  const sharedTextStyle: TextClipStyle = {
+    fontFamily:
+      sharedValue(textStyles.map((style) => style.fontFamily)) ??
+      textBase.fontFamily,
+    fontSize:
+      sharedValue(textStyles.map((style) => style.fontSize)) ??
+      textBase.fontSize,
+    color:
+      sharedValue(textStyles.map((style) => style.color)) ?? textBase.color,
+    bold: sharedValue(textStyles.map((style) => style.bold)) ?? textBase.bold,
+    italic:
+      sharedValue(textStyles.map((style) => style.italic)) ?? textBase.italic,
+    align:
+      sharedValue(textStyles.map((style) => style.align)) ?? textBase.align,
+    position:
+      sharedValue(textStyles.map((style) => style.position)) ??
+      textBase.position,
+    background: textStyles.every((style) => style.background === null)
+      ? null
+      : (sharedValue(textStyles.map((style) => style.background)) ??
+        textBase.background),
+    strokeWidth:
+      sharedValue(textStyles.map((style) => style.strokeWidth)) ??
+      textBase.strokeWidth,
+    strokeColor:
+      sharedValue(textStyles.map((style) => style.strokeColor)) ??
+      textBase.strokeColor,
+  };
+  // A draft stands in for the same set of clips, exactly as a grade draft does.
+  const drafted =
+    textDraft !== null &&
+    textDraft.clipIds.length === textClips.length &&
+    textDraft.clipIds.every((id) => textClips.some((clip) => clip.id === id));
+  const textValue: TextClipData = drafted
+    ? textDraft.text
+    : {
+        content: wordsEditable ? textClips[0].text.content : "",
+        style: sharedTextStyle,
+      };
+
+  /**
+   * One change to the words, committed the way §2 says each gesture is.
+   *
+   * While a keystroke or a drag is still going on the value goes to the draft
+   * in the store, which is what the compositor reads; the commit point sends
+   * one whole-object patch — every chosen clip's own words kept when the set
+   * is plural, since only the style could have been edited there. A commit is
+   * measured against the document, never against the draft: a draft is by
+   * definition different, and reading it as "already written" would leave the
+   * words in the store and out of the cut.
+   */
+  const changeText = (next: TextClipData, committed: boolean) => {
+    if (!timeline || textClips.length === 0) return;
+    const text: TextClipData = {
+      content: clampTextContent(next.content),
+      style: legalStyle(next.style),
+    };
+    if (!committed) {
+      useClipStore
+        .getState()
+        .setTextDraft({ clipIds: textClips.map((clip) => clip.id), text });
+      return;
+    }
+    useClipStore.getState().setTextDraft(null);
+    const patches = wordsEditable
+      ? sameText(text, textClips[0].text)
+        ? []
+        : [{ clipId: textClips[0].id, patch: { text } }]
+      : styleApplyPatches(textClips, text.style);
+    if (patches.length === 0) return;
+    execute(
+      wordsEditable ? "Edit text clip" : "Edit text clips",
+      patchCommands(timeline.id, patches),
+    );
+  };
+
   return (
     <div className="clip-inspector-body" data-testid="clip-fields">
+      {textClips.length > 0 && (
+        <section className="inspector-section">
+          <h3>Text</h3>
+          <TextFields
+            mixed={mixedStyle}
+            onChange={changeText}
+            onEscape={() => useClipStore.getState().setTextDraft(null)}
+            value={textValue}
+            words={wordsEditable}
+          />
+        </section>
+      )}
       <section className="inspector-section">
         <h3>{many ? `${clips.length} clips` : (single?.label ?? "Clip")}</h3>
         <div className="clip-inspector-pair">

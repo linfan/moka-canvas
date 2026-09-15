@@ -68,6 +68,8 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
   // than through the document, which is what makes the picture answer the
   // slider before any command has been sent.
   const adjustDraft = useClipStore((state) => state.adjustDraft);
+  // Words being edited reach it the same way, through the same kind of draft.
+  const textDraft = useClipStore((state) => state.textDraft);
   const [engine, setEngine] = useState<PreviewEngine>("none");
   const [frameMs, setFrameMs] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -114,6 +116,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
         sources,
         filter: capabilities.filter,
         adjustDraft,
+        textDraft,
         isCurrent: () => generation === generationRef.current,
       });
     } catch {
@@ -128,7 +131,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
     setEngine(drawn);
     setFrameMs(atMs);
     setNote(approximateReason(capabilities, drawn, report.coloursSkipped));
-  }, [timeline, sources, capabilities, quality, adjustDraft]);
+  }, [timeline, sources, capabilities, quality, adjustDraft, textDraft]);
 
   const schedule = useCallback(() => {
     if (rafRef.current !== null) return;

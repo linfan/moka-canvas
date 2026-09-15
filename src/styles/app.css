@@ -4594,3 +4594,215 @@ body.is-dragging-split {
 .clip-seam-window > span {
   white-space: nowrap;
 }
+
+/* The Text page: the composer's fields, the add button, and the cue list. */
+.clip-text-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.clip-text-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.clip-text-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.clip-text-label {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 6px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.clip-text-mixed {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.clip-text-field > input,
+.clip-text-field > select,
+.clip-text-field > textarea {
+  font-size: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.clip-text-field > textarea {
+  font-family: inherit;
+  resize: vertical;
+}
+
+.clip-text-count {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.clip-text-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.clip-text-row {
+  align-items: end;
+  display: flex;
+  gap: 8px;
+}
+
+.clip-text-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.clip-text-size {
+  flex: 1;
+  min-width: 0;
+}
+
+.clip-text-stepper {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 22px minmax(0, 1fr) 22px;
+}
+
+.clip-text-stepper > input {
+  font-size: 12px;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+.clip-text-stepper > button {
+  font-size: 12px;
+  padding: 0;
+}
+
+.clip-text-group {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.clip-text-toggles {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.clip-text-toggles > input[type="color"],
+.clip-text-field > input[type="color"] {
+  height: 22px;
+  padding: 1px;
+  width: 34px;
+}
+
+.clip-text-toggles > button,
+.clip-text-toggle {
+  font-size: 11px;
+  padding: 3px 7px;
+}
+
+.clip-text-toggle[aria-pressed="true"],
+.clip-text-toggle.is-on {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.clip-text-add {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.clip-text-subtitles {
+  border-top: 1px solid var(--stroke);
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.clip-text-subtitle-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.clip-text-subtitle-head h3 {
+  font-size: 12px;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.clip-text-subtitle-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.clip-text-subtitle-actions > button {
+  font-size: 11px;
+  padding: 3px 7px;
+}
+
+.clip-text-file {
+  display: none;
+}
+
+.clip-subtitle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.clip-subtitle-row {
+  align-items: baseline;
+  background: none;
+  border: 1px solid transparent;
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 6px;
+  text-align: left;
+}
+
+.clip-subtitle-row:hover {
+  background: var(--surface-raised);
+}
+
+.clip-subtitle-row.is-selected {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.clip-subtitle-time {
+  color: var(--muted);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-subtitle-row.is-selected .clip-subtitle-time {
+  color: inherit;
+}
+
+.clip-subtitle-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

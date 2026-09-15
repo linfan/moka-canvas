@@ -665,7 +665,10 @@ export function duplicateSelection(): void {
 }
 
 /** The name a row wears: the next number past the ones already taken. */
-function nextTrackName(timeline: TimelineDocument, kind: ClipKind): string {
+export function nextTrackName(
+  timeline: TimelineDocument,
+  kind: ClipKind,
+): string {
   const label =
     kind === "video" ? "Video" : kind === "audio" ? "Audio" : "Text";
   const used = new Set(timeline.tracks.map((track) => track.name));

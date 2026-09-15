@@ -24,6 +24,7 @@ import {
 } from "./audioPreview";
 import { FiltersPanel } from "./FiltersPanel";
 import { canvasHeldIds, faceShelf, isMediaFace } from "./mediaLenses";
+import { TextPanel } from "./TextPanel";
 
 const FACES: Record<
   ClipFace,
@@ -102,9 +103,10 @@ function backToLocal() {
  * Six of the nine faces read the project's shelf — the same shelf the canvas
  * column shows — through a lens apiece (mediaLenses says which), with the
  * audio face adding its own little way of hearing a row. Two more are the
- * rooms's quick tools: the looks a clip can wear and the three sliders that
- * grade it, both working on whatever the timeline holds chosen. The text face
- * keeps its placeholder until the package that fills it comes.
+ * room's quick tools: the looks a clip can wear and the three sliders that
+ * grade it, both working on whatever the timeline holds chosen. The last is
+ * the text face, where words are written and subtitles come and go — a page
+ * of its own rather than a shelf, so it stands where the placeholders used to.
  */
 export function MediaColumn() {
   const face = useClipStore((state) => state.face);
@@ -133,6 +135,15 @@ export function MediaColumn() {
           </div>
           <div className="clip-column-body">
             {face === "filters" ? <FiltersPanel /> : <AdjustPanel />}
+          </div>
+        </>
+      ) : face === "text" ? (
+        <>
+          <div className="clip-column-head">
+            <h2>{title}</h2>
+          </div>
+          <div className="clip-column-body">
+            <TextPanel />
           </div>
         </>
       ) : shelf ? (

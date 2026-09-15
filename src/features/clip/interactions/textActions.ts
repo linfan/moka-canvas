@@ -1,0 +1,339 @@
+import {
+  DEFAULT_TEXT_CLIP_MS,
+  MAX_CLIPS_PER_COMMAND,
+  MAX_CLIPS_PER_TIMELINE,
+  MAX_TIMELINE_TEXT_CONTENT,
+  MIN_CLIP_DURATION_MS,
+  createTextClip,
+  newId,
+  nowIso,
+  type ClipPatch,
+  type DocumentCommand,
+  type TextClipData,
+  type TextClipStyle,
+  type TimelineClip,
+  type TimelineDocument,
+  type TimelineTrack,
+} from "../../../shared/domain";
+import { execute } from "../../editor/commands/execute";
+import { useAppStore } from "../../editor/stores/appStore";
+import { useClipStore } from "../stores/clipStore";
+import { firstOverlap, parseSrt, type SrtCue } from "../subtitles/srt";
+import { sameStyle } from "../textStyles";
+import { formatTimecode, frameAligned } from "../timeline/timecode";
+import {
+  activeTimeline,
+  firstAcceptingTrack,
+  nextTrackName,
+} from "./clipActions";
+
+/**
+ * Words on the cut: one clip at the playhead, or a whole subtitle file at
+ * once.
+ *
+ * Everything hard about both is decided before a command is built: where the
+ * words land on the frame clock, which row takes them, how a batch of cues is
+ * cut into the steps one history entry may carry, and what the room says when
+ * the batch would collide with what is already there. The planning is pure —
+ * it takes the timeline as an argument and answers with a command array — so
+ * the rules can be read and tested without a store, and the thin executors
+ * below only hand the plan to `execute` and speak its verdict.
+ */
+
+function toast(kind: "info" | "success" | "error", message: string): void {
+  useAppStore.getState().pushToast(kind, message);
+}
+
+// ---------------------------------------------------------------------------
+// What the form is allowed to produce
+// ---------------------------------------------------------------------------
+
+/** The size range the form keeps to; the domain states no bounds of its own. */
+export const FONT_SIZE_MIN = 12;
+export const FONT_SIZE_MAX = 240;
+/** How wide an outline the form offers; zero means no outline. */
+export const STROKE_WIDTH_MAX = 16;
+/** What an oversized file is told before it is read at all. */
+export const MAX_SUBTITLE_FILE_BYTES = 2 * 1024 * 1024;
+
+/** A font size the form would commit: a whole number inside the range. */
+export function clampFontSize(value: number): number {
+  const whole = Number.isFinite(value) ? Math.round(value) : FONT_SIZE_MIN;
+  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, whole));
+}
+
+/** An outline width the form would commit: a whole number, never negative. */
+export function clampStrokeWidth(value: number): number {
+  const whole = Number.isFinite(value) ? Math.round(value) : 0;
+  return Math.min(STROKE_WIDTH_MAX, Math.max(0, whole));
+}
+
+/** The words kept to what one clip may say; the counter stops at the same place. */
+export function clampTextContent(text: string): string {
+  return text.slice(0, MAX_TIMELINE_TEXT_CONTENT);
+}
+
+/** A cue's words as one line: the author's breaks folded, cut to 40 characters. */
+export function cueSummary(content: string): string {
+  const line = content.replace(/\s*\n\s*/g, " ").trim();
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line;
+}
+
+/** A style made legal where the UI owns the bounds: whole sizes, no negatives. */
+export function legalStyle(style: TextClipStyle): TextClipStyle {
+  return {
+    ...style,
+    fontSize: clampFontSize(style.fontSize),
+    strokeWidth: clampStrokeWidth(style.strokeWidth),
+  };
+}
+
+/** A text clip built to the factory's own rules, wearing the asked-for style. */
+export function styledTextClip(
+  content: string,
+  trackId: string,
+  startMs: number,
+  durationMs: number,
+  style: TextClipStyle,
+): TimelineClip {
+  const clip = createTextClip(content, trackId, startMs, durationMs);
+  return { ...clip, text: { content, style: legalStyle(style) } };
+}
+
+/** A text clip whose text a caller can read without a null check. */
+export type TextClip = TimelineClip & { text: TextClipData };
+
+function isTextClip(clip: TimelineClip): clip is TextClip {
+  return clip.kind === "text" && clip.text !== undefined;
+}
+
+/**
+ * The patches a style change leaves on a set of clips.
+ *
+ * Each clip keeps its own words and takes the new style whole; a clip already
+ * wearing the style is left out, so pressing what is already set spends no
+ * history. The patches are `updateClips` shapes, ready for `patchCommands`.
+ */
+export function styleApplyPatches(
+  clips: readonly TimelineClip[],
+  style: TextClipStyle,
+): { clipId: string; patch: ClipPatch }[] {
+  const legal = legalStyle(style);
+  return clips.filter(isTextClip).flatMap((clip) => {
+    if (sameStyle(clip.text.style, legal)) return [];
+    return [
+      {
+        clipId: clip.id,
+        patch: { text: { content: clip.text.content, style: legal } },
+      },
+    ];
+  });
+}
+
+/** Whether two whole texts ask for the same words and the same look. */
+export function sameText(a: TextClipData, b: TextClipData): boolean {
+  return a.content === b.content && sameStyle(a.style, b.style);
+}
+
+// ---------------------------------------------------------------------------
+// One clip at the playhead
+// ---------------------------------------------------------------------------
+
+/**
+ * Lands a text clip where the playhead stands, and chooses it.
+ *
+ * The moment is put on the frame clock and the row is the first text track in
+ * display order that will hold an edit; a cut with no such row grows one in
+ * the same step, named by the one rule every other row is named by. The
+ * factory makes the clip and the form's style is laid over it, so the label
+ * and the timing are the factory's own. Null is a step that never landed.
+ */
+export function addTextClipAtPlayhead(
+  content: string,
+  style: TextClipStyle,
+): TimelineClip | null {
+  const timeline = activeTimeline();
+  if (!timeline) return null;
+  const words = clampTextContent(content);
+  if (words.length === 0) return null;
+  const startMs = frameAligned(
+    useClipStore.getState().playheadMs,
+    timeline.settings.fps,
+  );
+  const commands: DocumentCommand[] = [];
+  const held = firstAcceptingTrack(timeline, "text");
+  const track: TimelineTrack = held ?? {
+    id: newId(),
+    kind: "text",
+    name: nextTrackName(timeline, "text"),
+    muted: false,
+    hidden: false,
+    locked: false,
+    createdAt: nowIso(),
+  };
+  if (!held)
+    commands.push({ type: "addTrack", timelineId: timeline.id, track });
+  const clip = styledTextClip(
+    words,
+    track.id,
+    startMs,
+    DEFAULT_TEXT_CLIP_MS,
+    style,
+  );
+  commands.push({ type: "addClips", timelineId: timeline.id, clips: [clip] });
+  const done = execute("Add text clip", commands);
+  if (!done) return null;
+  useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
+  return clip;
+}
+
+// ---------------------------------------------------------------------------
+// A subtitle file
+// ---------------------------------------------------------------------------
+
+export type SrtImportPlan =
+  | {
+      ok: true;
+      commands: DocumentCommand[];
+      /** The clips the commands land, in cue order. */
+      clips: TimelineClip[];
+      /** Cues dropped because they were too short to be seen. */
+      skipped: number;
+    }
+  | { ok: false; message: string };
+
+/**
+ * The commands a subtitle file would land, or the words the room refuses it in.
+ *
+ * Both ends of a cue are put on the frame clock and a cue that rounds to less
+ * than a clip can be is dropped and counted — never stretched, since stretching
+ * would run it into its neighbour. What is left is checked before any command
+ * is built: cues against each other and against what the target row already
+ * holds, naming the first pair; then the timeline's clip ceiling, saying how
+ * many would have to be deleted. The target row is the first text track in
+ * document order, exactly as §3 states, and a cut with none grows one as the
+ * plan's first command. The batch is cut into `addClips` steps no larger than
+ * one command may hold, all of them in the single entry `execute` records.
+ */
+export function srtImportPlan(
+  timeline: TimelineDocument,
+  cues: readonly SrtCue[],
+  style: TextClipStyle,
+): SrtImportPlan {
+  const fps = timeline.settings.fps;
+  const aligned: SrtCue[] = [];
+  let skipped = 0;
+  for (const cue of cues) {
+    const startMs = frameAligned(cue.startMs, fps);
+    const endMs = frameAligned(cue.endMs, fps);
+    if (endMs - startMs < MIN_CLIP_DURATION_MS) {
+      skipped += 1;
+      continue;
+    }
+    aligned.push({ startMs, endMs, text: clampTextContent(cue.text) });
+  }
+  if (aligned.length === 0) {
+    return {
+      ok: false,
+      message: "No cues were long enough to import.",
+    };
+  }
+  const clash = firstOverlap(aligned);
+  if (clash) {
+    return {
+      ok: false,
+      message: `The subtitles overlap each other at ${formatTimecode(
+        Math.max(clash[0].startMs, clash[1].startMs),
+        fps,
+      )}.`,
+    };
+  }
+  const target = timeline.tracks.find((track) => track.kind === "text") ?? null;
+  if (target) {
+    for (const cue of aligned) {
+      const collision = timeline.clips.some(
+        (clip) =>
+          clip.trackId === target.id &&
+          cue.startMs < clip.startMs + clip.durationMs &&
+          clip.startMs < cue.endMs,
+      );
+      if (collision) {
+        return {
+          ok: false,
+          message: `The subtitles overlap a clip already on ${target.name}.`,
+        };
+      }
+    }
+  }
+  const total = timeline.clips.length + aligned.length;
+  if (total > MAX_CLIPS_PER_TIMELINE) {
+    return {
+      ok: false,
+      message: `The timeline holds at most ${MAX_CLIPS_PER_TIMELINE} clips — delete ${
+        total - MAX_CLIPS_PER_TIMELINE
+      } first.`,
+    };
+  }
+
+  const commands: DocumentCommand[] = [];
+  const track: TimelineTrack = target ?? {
+    id: newId(),
+    kind: "text",
+    name: nextTrackName(timeline, "text"),
+    muted: false,
+    hidden: false,
+    locked: false,
+    createdAt: nowIso(),
+  };
+  if (!target)
+    commands.push({ type: "addTrack", timelineId: timeline.id, track });
+  const clips = aligned.map((cue) =>
+    styledTextClip(
+      cue.text,
+      track.id,
+      cue.startMs,
+      cue.endMs - cue.startMs,
+      style,
+    ),
+  );
+  for (let at = 0; at < clips.length; at += MAX_CLIPS_PER_COMMAND) {
+    commands.push({
+      type: "addClips",
+      timelineId: timeline.id,
+      clips: clips.slice(at, at + MAX_CLIPS_PER_COMMAND),
+    });
+  }
+  return { ok: true, commands, clips, skipped };
+}
+
+/**
+ * A subtitle file brought in: read, planned, landed in one step, and answered.
+ *
+ * The reading and the plan do the deciding; what is left here is the verdict
+ * the reader hears — a file with nothing to say, a batch the room refuses, or
+ * the count of cues that arrived and cues that were too short to keep.
+ */
+export function importSrt(text: string, style: TextClipStyle): void {
+  const timeline = activeTimeline();
+  if (!timeline) return;
+  const parsed = parseSrt(text);
+  if (!parsed.ok) {
+    toast("error", parsed.message);
+    return;
+  }
+  const plan = srtImportPlan(timeline, parsed.cues, style);
+  if (!plan.ok) {
+    toast("error", plan.message);
+    return;
+  }
+  const done = execute("Import subtitles", plan.commands);
+  if (!done) return;
+  const skipped = parsed.skipped + plan.skipped;
+  const cues = plan.clips.length;
+  toast(
+    "success",
+    skipped > 0
+      ? `Imported ${cues} cues (${skipped} skipped as too short).`
+      : `Imported ${cues} cues.`,
+  );
+}

@@ -776,4 +776,47 @@ describe("words on the picture", () => {
     });
     expect(calls.filter((call) => call.name === "fillText")).toEqual([]);
   });
+
+  it("writes the words a draft names, and leaves the rest as the document holds them", async () => {
+    const timeline = cut(
+      [track("t1", "text"), track("t2", "text")],
+      [
+        clip({
+          id: "edited",
+          trackId: "t1",
+          kind: "text",
+          text: { content: "old words", style: textStyle() },
+        }),
+        clip({
+          id: "kept",
+          trackId: "t2",
+          kind: "text",
+          text: { content: "kept words", style: textStyle() },
+        }),
+      ],
+    );
+    const { ctx, calls } = recordingContext();
+    await composeFrame(ctx, {
+      width: FRAME.width,
+      height: FRAME.height,
+      timeline,
+      atMs: 100,
+      sources: sourcesFor(() => null),
+      filter: true,
+      // The hand is in the lower clip's words only: the other keeps its own.
+      textDraft: {
+        clipIds: ["edited"],
+        text: { content: "new words", style: textStyle({ bold: true }) },
+      },
+    });
+    const written = calls
+      .filter((call) => call.name === "fillText")
+      .map((call) => call.args[0]);
+    expect(written).toEqual(["new words", "kept words"]);
+    const fonts = calls
+      .filter((call) => call.name === "fillText")
+      .map((call) => call.font);
+    expect(fonts[0]).toContain("bold");
+    expect(fonts[1]).not.toContain("bold");
+  });
 });

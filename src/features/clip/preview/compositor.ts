@@ -2,6 +2,7 @@ import type {
   ClipAdjust,
   ClipId,
   Rect,
+  TextClipData,
   TimelineClip,
   TimelineDocument,
 } from "../../../shared/domain";
@@ -66,6 +67,16 @@ export interface ComposeFrameOptions {
    * composition stays a pure reading of what it is handed.
    */
   adjustDraft?: { clipIds: readonly ClipId[]; adjust: ClipAdjust } | null;
+  /**
+   * The words a reader is editing, standing in for the document's own.
+   *
+   * A text clip the draft names wears the draft's words and style in this
+   * frame rather than what the document holds, so the picture answers the
+   * keyboard before any command has been sent. Like the grade draft, it is
+   * passed in rather than read from a store: the composition stays a pure
+   * reading of what it is handed.
+   */
+  textDraft?: { clipIds: readonly ClipId[]; text: TextClipData } | null;
   /**
    * Asked once the pictures are in hand and before anything is drawn: a frame
    * the reader has already moved past is dropped rather than painted.
@@ -311,6 +322,15 @@ export async function composeFrame(
           adjust: options.adjustDraft.adjust,
         }
       : null;
+  // The words being edited, read the same way: a clip the draft names draws
+  // its draft rather than the text the document holds.
+  const draftedText =
+    options.textDraft && options.textDraft.clipIds.length > 0
+      ? {
+          ids: new Set(options.textDraft.clipIds),
+          text: options.textDraft.text,
+        }
+      : null;
   /** Draws one clip as the track would show it alone; says if a grade was dropped. */
   const drawOne = (
     target: CanvasRenderingContext2D,
@@ -318,10 +338,11 @@ export async function composeFrame(
     picture: FramePicture | null,
   ): boolean => {
     if (clip.kind === "text") {
-      if (clip.text)
+      const data = draftedText?.ids.has(clip.id) ? draftedText.text : clip.text;
+      if (data)
         drawTextClip(
           target,
-          clip.text,
+          data,
           { width, height },
           timeline.settings.width,
           Math.max(0, Math.min(1, clip.opacity)) * fadeFactor(clip, atMs),
