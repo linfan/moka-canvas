@@ -34,6 +34,7 @@ import type {
   WorkflowNode,
 } from "./types";
 import { folderDepth, foldersOf } from "./folders";
+import { validateTimeline } from "./timeline";
 
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -255,13 +256,20 @@ export function topologicalOrder(canvas: CanvasDocument): WorkflowNode[] {
   return ordered;
 }
 
-export function collectAssetReferences(moka: MokaFile): Map<string, NodeId[]> {
-  const refs = new Map<string, NodeId[]>();
-  const add = (assetId: string | undefined, nodeId: NodeId) => {
+/**
+ * What points at each asset, as a list of the cards and clips that do.
+ *
+ * Both halves of a document hold assets — a canvas node shows one, a timeline
+ * clip reads one — so the two are collected together: whether an asset is
+ * still in use is a question about the project, not about one board.
+ */
+export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
+  const refs = new Map<string, string[]>();
+  const add = (assetId: string | undefined, holderId: string) => {
     if (!assetId) return;
     const list = refs.get(assetId);
-    if (list) list.push(nodeId);
-    else refs.set(assetId, [nodeId]);
+    if (list) list.push(holderId);
+    else refs.set(assetId, [holderId]);
   };
   for (const canvas of moka.canvas) {
     for (const node of canvas.nodes) {
@@ -273,6 +281,9 @@ export function collectAssetReferences(moka: MokaFile): Map<string, NodeId[]> {
         for (const slot of slots) add(slot.assetId, node.id);
       }
     }
+  }
+  for (const timeline of moka.timelines ?? []) {
+    for (const clip of timeline.clips) add(clip.assetId, clip.id);
   }
   return refs;
 }
@@ -760,13 +771,16 @@ export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
     issues.push(...shelfIssues(entry));
   }
 
+  for (const timeline of moka.timelines ?? []) {
+    issues.push(...validateTimeline(timeline, moka));
+  }
+
   const refs = collectAssetReferences(moka);
-  for (const [assetId, nodeIds] of refs) {
+  for (const assetId of refs.keys()) {
     if (!resourceIds.has(assetId)) {
       issues.push({
         code: "ASSET_MISSING",
-        message: `Node references unregistered asset ${assetId}`,
-        nodeId: nodeIds[0],
+        message: `Something in the project references unregistered asset ${assetId}`,
       });
     }
   }

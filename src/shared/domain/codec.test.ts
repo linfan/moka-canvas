@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { CANVAS_SCHEMA_VERSION } from "./constants";
 import {
   buildConversationMokaFile,
+  buildCutMokaFile,
   buildGenerationMokaFile,
   buildGoldenMokaFile,
   buildLegacyV1MokaFile,
@@ -13,7 +14,7 @@ import {
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 import { derivePorts } from "./factories";
-import type { MediaNodeData } from "./types";
+import type { MediaNodeData, MokaFile } from "./types";
 
 const FIXTURE_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -28,6 +29,8 @@ const SHELF_BINARY = join(FIXTURE_DIR, "shelf.canvas.moka");
 const TREE_JSON = join(FIXTURE_DIR, "tree.moka.json");
 const TREE_BINARY = join(FIXTURE_DIR, "tree.canvas.moka");
 const LEGACY_BINARY = join(FIXTURE_DIR, "v1-legacy.moka");
+const CUT_JSON = join(FIXTURE_DIR, "cut.moka.json");
+const CUT_BINARY = join(FIXTURE_DIR, "cut.canvas.moka");
 
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
@@ -385,5 +388,78 @@ describe("moka codec", () => {
     entry.origin = "inherited";
     const decoded = decodeMokaFile(encodeMokaFile(shelf));
     expect(decoded.resources.images[0].origin).toBe("inherited");
+  });
+
+  it("round-trips the cut timeline semantically", () => {
+    const cut = buildCutMokaFile();
+    const decoded = decodeMokaFile(encodeMokaFile(cut));
+    expect(normalize(decoded)).toEqual(normalize(cut));
+    const style = decoded.timelines![0].clips[3].text!.style;
+    expect([style.strokeWidth, style.strokeColor, style.background]).toEqual([
+      4,
+      "#101010",
+      null,
+    ]);
+  });
+
+  it("keeps the cut timeline byte-canonical on re-save", () => {
+    const cut = buildCutMokaFile();
+    const first = encodeMokaFile(cut);
+    const second = encodeMokaFile(decodeMokaFile(first));
+    expect(Buffer.from(second).equals(Buffer.from(first))).toBe(true);
+  });
+
+  /**
+   * The shared pair the other language reads: it decodes the binary to this
+   * model and writes the binary back byte for byte, so what a cut timeline
+   * looks like on the disk is one contract rather than two opinions about it.
+   */
+  it("matches the shared cut fixtures", () => {
+    const cut = buildCutMokaFile();
+    const encoded = encodeMokaFile(cut);
+    const json = `${JSON.stringify(cut, null, 2)}\n`;
+
+    if (process.env.UPDATE_FIXTURES === "1" || !existsSync(CUT_BINARY)) {
+      mkdirSync(FIXTURE_DIR, { recursive: true });
+      writeFileSync(CUT_BINARY, encoded);
+      writeFileSync(CUT_JSON, json);
+    }
+
+    expect(
+      Buffer.from(readFileSync(CUT_BINARY)).equals(Buffer.from(encoded)),
+    ).toBe(true);
+    expect(readFileSync(CUT_JSON, "utf8")).toBe(json);
+  });
+
+  /**
+   * The other language refuses an enum word it does not know when it
+   * deserializes, so the reader here has to refuse the same bytes: a word
+   * two builds read differently must not pass through either of them.
+   */
+  it("refuses an enum word this build does not read", () => {
+    const breakages: ((cut: MokaFile) => void)[] = [
+      (cut) => {
+        cut.timelines![0].tracks[0].kind = "subtitle" as never;
+      },
+      (cut) => {
+        cut.timelines![0].clips[0].kind = "sticker" as never;
+      },
+      (cut) => {
+        cut.timelines![0].clips[3].text!.style.align = "justify" as never;
+      },
+      (cut) => {
+        cut.timelines![0].clips[3].text!.style.position = "middle" as never;
+      },
+    ];
+    for (const breakIt of breakages) {
+      const cut = buildCutMokaFile();
+      breakIt(cut);
+      try {
+        decodeMokaFile(encodeMokaFile(cut));
+        expect.unreachable();
+      } catch (error) {
+        expect((error as MokaCodecError).code).toBe("MOKA_BSON_INVALID");
+      }
+    }
   });
 });

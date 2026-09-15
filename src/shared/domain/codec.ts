@@ -4,8 +4,14 @@ import {
   MOKA_FILE_VERSION,
   MOKA_MAGIC,
   PROJECT_ASSET_CATEGORIES,
+  TIMELINE_SCHEMA_VERSION,
+  TRANSITION_KINDS,
 } from "./constants";
-import type { ProblemCode } from "./constants";
+import type {
+  ProblemCode,
+  ClipFilterPreset,
+  TransitionKind,
+} from "./constants";
 import { reconcilePorts } from "./factories";
 import type {
   AssistantFailure,
@@ -16,6 +22,7 @@ import type {
   AssistantToolCall,
   CanvasDocument,
   CanvasFolder,
+  ClipAdjust,
   GroupMembership,
   MokaFile,
   NodeData,
@@ -23,6 +30,11 @@ import type {
   ProjectMetadata,
   ResourceEntry,
   ResultSlot,
+  TextClipStyle,
+  TimelineClip,
+  TimelineDocument,
+  TimelineTrack,
+  TimelineTransition,
   WorkflowEdge,
   WorkflowNode,
 } from "./types";
@@ -251,6 +263,106 @@ function encodeFolder(folder: CanvasFolder): Record<string, unknown> {
   return doc;
 }
 
+// ---------------------------------------------------------------------------
+// The cutting room
+// ---------------------------------------------------------------------------
+
+function encodeAdjust(adjust: ClipAdjust): Record<string, unknown> {
+  return {
+    brightness: asDouble(adjust.brightness),
+    contrast: asDouble(adjust.contrast),
+    saturation: asDouble(adjust.saturation),
+  };
+}
+
+function encodeTextStyle(style: TextClipStyle): Record<string, unknown> {
+  return {
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize,
+    color: style.color,
+    bold: style.bold,
+    italic: style.italic,
+    align: style.align,
+    position: style.position,
+    background: style.background,
+    strokeWidth: style.strokeWidth,
+    strokeColor: style.strokeColor,
+  };
+}
+
+function encodeClip(clip: TimelineClip): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    id: clip.id,
+    trackId: clip.trackId,
+    kind: clip.kind,
+    label: clip.label,
+    startMs: asLong(clip.startMs),
+    durationMs: asLong(clip.durationMs),
+    inPointMs: asLong(clip.inPointMs),
+    outPointMs: asLong(clip.outPointMs),
+    speed: asDouble(clip.speed),
+    volume: asDouble(clip.volume),
+    fadeInMs: asLong(clip.fadeInMs),
+    fadeOutMs: asLong(clip.fadeOutMs),
+    muted: clip.muted,
+    opacity: asDouble(clip.opacity),
+    createdAt: clip.createdAt,
+    updatedAt: clip.updatedAt,
+  };
+  if (clip.assetId !== undefined) doc.assetId = clip.assetId;
+  if (clip.adjust !== undefined) doc.adjust = encodeAdjust(clip.adjust);
+  if (clip.filter !== undefined) doc.filter = clip.filter;
+  if (clip.text !== undefined)
+    doc.text = {
+      content: clip.text.content,
+      style: encodeTextStyle(clip.text.style),
+    };
+  return doc;
+}
+
+function encodeTrack(track: TimelineTrack): Record<string, unknown> {
+  return {
+    id: track.id,
+    kind: track.kind,
+    name: track.name,
+    muted: track.muted,
+    hidden: track.hidden,
+    locked: track.locked,
+    createdAt: track.createdAt,
+  };
+}
+
+function encodeTransition(
+  transition: TimelineTransition,
+): Record<string, unknown> {
+  return {
+    id: transition.id,
+    afterClipId: transition.afterClipId,
+    kind: transition.kind,
+    durationMs: asLong(transition.durationMs),
+    createdAt: transition.createdAt,
+  };
+}
+
+function encodeTimeline(timeline: TimelineDocument): Record<string, unknown> {
+  return {
+    id: timeline.id,
+    name: timeline.name,
+    schemaVersion: timeline.schemaVersion,
+    settings: {
+      fps: timeline.settings.fps,
+      width: timeline.settings.width,
+      height: timeline.settings.height,
+      background: timeline.settings.background,
+    },
+    tracks: timeline.tracks.map(encodeTrack),
+    clips: timeline.clips.map(encodeClip),
+    transitions: timeline.transitions.map(encodeTransition),
+    createdAt: timeline.createdAt,
+    updatedAt: timeline.updatedAt,
+  };
+}
+
 function encodeProbe(
   probe: ResourceEntry["probe"],
 ): Record<string, unknown> | undefined {
@@ -339,6 +451,8 @@ export function encodeMokaFile(moka: MokaFile, maxBytes?: number): Uint8Array {
     ),
   };
   if (moka.folders !== undefined) doc.folders = moka.folders.map(encodeFolder);
+  if (moka.timelines !== undefined)
+    doc.timelines = moka.timelines.map(encodeTimeline);
   doc.canvas = moka.canvas.map(encodeCanvas);
   const bson = serialize(doc);
   const bytes = new Uint8Array(4 + bson.length);
@@ -674,6 +788,223 @@ function decodeFolders(value: unknown): CanvasFolder[] | undefined {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The cutting room
+// ---------------------------------------------------------------------------
+
+function decodeAdjust(value: unknown): ClipAdjust | undefined {
+  if (value === undefined || value === null) return undefined;
+  const doc = asRecord(value, "clips[].adjust");
+  return {
+    brightness: requireField(unwrapNumber(doc.brightness), "adjust.brightness"),
+    contrast: requireField(unwrapNumber(doc.contrast), "adjust.contrast"),
+    saturation: requireField(unwrapNumber(doc.saturation), "adjust.saturation"),
+  };
+}
+
+const TEXT_STYLE_KEYS = [
+  "fontFamily",
+  "fontSize",
+  "color",
+  "bold",
+  "italic",
+  "align",
+  "position",
+  "background",
+  "strokeWidth",
+  "strokeColor",
+] as const;
+
+const TEXT_ALIGNS = ["left", "center", "right"] as const;
+const TEXT_POSITIONS = ["top", "center", "bottom"] as const;
+
+/**
+ * One of the words an enum field may hold, refused the way the other
+ * language's deserializer would refuse it: a reader and a writer that
+ * disagree about what a stored word means must not both accept the file.
+ */
+function oneOf<T extends string>(
+  values: readonly T[],
+  value: string,
+  what: string,
+): T {
+  if (!values.includes(value as T))
+    throw new MokaCodecError(
+      "MOKA_BSON_INVALID",
+      `${what} "${value}" is not one this build reads`,
+    );
+  return value as T;
+}
+
+function decodeTextStyle(value: unknown): TextClipStyle {
+  const doc = asRecord(value, "clips[].text.style");
+  const style: Record<string, unknown> = {};
+  for (const key of TEXT_STYLE_KEYS) {
+    if (key === "background") {
+      // Null is a value here — no backing plate — so the key is asked for
+      // by its presence rather than by its value.
+      if (!("background" in doc))
+        throw new MokaCodecError(
+          "MOKA_FIELD_MISSING",
+          `canvas.moka is missing required field "text.style.background"`,
+        );
+      style.background = doc.background;
+      continue;
+    }
+    style[key] = requireField(doc[key], `text.style.${key}`);
+  }
+  style.align = oneOf(TEXT_ALIGNS, style.align as string, "Text align");
+  style.position = oneOf(
+    TEXT_POSITIONS,
+    style.position as string,
+    "Text position",
+  );
+  return style as unknown as TextClipStyle;
+}
+
+const TRACK_KINDS = ["video", "audio", "text"] as const;
+
+function decodeClip(value: unknown): TimelineClip {
+  const doc = asRecord(value, "timelines[].clips[]");
+  const clip: TimelineClip = {
+    id: asString(doc.id, "clips[].id"),
+    trackId: asString(doc.trackId, "clips[].trackId"),
+    kind: oneOf(TRACK_KINDS, asString(doc.kind, "clips[].kind"), "Clip kind"),
+    label: asString(doc.label, "clips[].label"),
+    startMs: requireField(decodeLongField(doc.startMs), "clips[].startMs"),
+    durationMs: requireField(
+      decodeLongField(doc.durationMs),
+      "clips[].durationMs",
+    ),
+    inPointMs: requireField(
+      decodeLongField(doc.inPointMs),
+      "clips[].inPointMs",
+    ),
+    outPointMs: requireField(
+      decodeLongField(doc.outPointMs),
+      "clips[].outPointMs",
+    ),
+    speed: requireField(unwrapNumber(doc.speed), "clips[].speed"),
+    volume: requireField(unwrapNumber(doc.volume), "clips[].volume"),
+    fadeInMs: requireField(decodeLongField(doc.fadeInMs), "clips[].fadeInMs"),
+    fadeOutMs: requireField(
+      decodeLongField(doc.fadeOutMs),
+      "clips[].fadeOutMs",
+    ),
+    muted: Boolean(doc.muted),
+    opacity: requireField(unwrapNumber(doc.opacity), "clips[].opacity"),
+    createdAt: asString(doc.createdAt, "clips[].createdAt"),
+    updatedAt: asString(doc.updatedAt, "clips[].updatedAt"),
+  };
+  if (doc.assetId !== undefined)
+    clip.assetId = asString(doc.assetId, "clips[].assetId");
+  if (doc.adjust !== undefined) clip.adjust = decodeAdjust(doc.adjust);
+  if (doc.filter !== undefined) {
+    const filter = asString(doc.filter, "clips[].filter") as ClipFilterPreset;
+    clip.filter = filter;
+  }
+  if (doc.text !== undefined) {
+    const textDoc = asRecord(doc.text, "clips[].text");
+    clip.text = {
+      content: asString(textDoc.content, "clips[].text.content"),
+      style: decodeTextStyle(textDoc.style),
+    };
+  }
+  return clip;
+}
+
+function decodeTrack(value: unknown): TimelineTrack {
+  const doc = asRecord(value, "timelines[].tracks[]");
+  return {
+    id: asString(doc.id, "tracks[].id"),
+    kind: oneOf(TRACK_KINDS, asString(doc.kind, "tracks[].kind"), "Track kind"),
+    name: asString(doc.name, "tracks[].name"),
+    muted: Boolean(doc.muted),
+    hidden: Boolean(doc.hidden),
+    locked: Boolean(doc.locked),
+    createdAt: asString(doc.createdAt, "tracks[].createdAt"),
+  };
+}
+
+function decodeTransition(value: unknown): TimelineTransition {
+  const doc = asRecord(value, "timelines[].transitions[]");
+  const kind = asString(doc.kind, "transitions[].kind") as TransitionKind;
+  if (!TRANSITION_KINDS.includes(kind)) {
+    throw new MokaCodecError(
+      "MOKA_BSON_INVALID",
+      `Transition kind "${kind}" is not one this build reads`,
+    );
+  }
+  return {
+    id: asString(doc.id, "transitions[].id"),
+    afterClipId: asString(doc.afterClipId, "transitions[].afterClipId"),
+    kind,
+    durationMs: requireField(
+      decodeLongField(doc.durationMs),
+      "transitions[].durationMs",
+    ),
+    createdAt: asString(doc.createdAt, "transitions[].createdAt"),
+  };
+}
+
+function decodeTimeline(value: unknown): TimelineDocument {
+  const doc = asRecord(value, "timelines[]");
+  const settings = asRecord(doc.settings, "timelines[].settings");
+  const schemaVersion = Math.trunc(
+    requireField(unwrapNumber(doc.schemaVersion), "timelines[].schemaVersion"),
+  );
+  if (schemaVersion > TIMELINE_SCHEMA_VERSION) {
+    throw new MokaCodecError(
+      "MOKA_VERSION_UNSUPPORTED",
+      `Timeline schema version ${schemaVersion} is not supported (expected ${TIMELINE_SCHEMA_VERSION} or earlier)`,
+    );
+  }
+  return {
+    id: asString(doc.id, "timelines[].id"),
+    name: asString(doc.name, "timelines[].name"),
+    schemaVersion,
+    settings: {
+      fps: Math.trunc(
+        requireField(unwrapNumber(settings.fps), "timelines[].settings.fps"),
+      ),
+      width: Math.trunc(
+        requireField(
+          unwrapNumber(settings.width),
+          "timelines[].settings.width",
+        ),
+      ),
+      height: Math.trunc(
+        requireField(
+          unwrapNumber(settings.height),
+          "timelines[].settings.height",
+        ),
+      ),
+      background: asString(
+        settings.background,
+        "timelines[].settings.background",
+      ),
+    },
+    tracks: asArray(doc.tracks, "timelines[].tracks").map(decodeTrack),
+    clips: asArray(doc.clips, "timelines[].clips").map(decodeClip),
+    transitions: asArray(doc.transitions, "timelines[].transitions").map(
+      decodeTransition,
+    ),
+    createdAt: asString(doc.createdAt, "timelines[].createdAt"),
+    updatedAt: asString(doc.updatedAt, "timelines[].updatedAt"),
+  };
+}
+
+/**
+ * The timelines a project has cut, or undefined when it has cut none.
+ *
+ * Undefined and not an empty list, so that a document written before the
+ * cutting room existed is read and written back as the bytes it arrived with.
+ */
+function decodeTimelines(value: unknown): TimelineDocument[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return asArray(value, "timelines").map(decodeTimeline);
+}
+
 export function decodeMokaFile(bytes: Uint8Array): MokaFile {
   if (bytes.length < 5) {
     throw new MokaCodecError(
@@ -732,12 +1063,14 @@ export function decodeMokaFile(bytes: Uint8Array): MokaFile {
 
   const canvas = asArray(doc.canvas, "canvas").map(decodeCanvas);
   const folders = decodeFolders(doc.folders);
+  const timelines = decodeTimelines(doc.timelines);
 
   return {
     version: MOKA_FILE_VERSION,
     metadata,
     resources,
     ...(folders !== undefined ? { folders } : {}),
+    ...(timelines !== undefined ? { timelines } : {}),
     canvas,
   };
 }

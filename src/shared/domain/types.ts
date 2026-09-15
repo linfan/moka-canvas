@@ -2,7 +2,9 @@ import type {
   AssetCategory,
   AssetOrigin,
   Capability,
+  ClipFilterPreset,
   ProblemCode,
+  TransitionKind,
 } from "./constants";
 
 export type ProjectId = string;
@@ -14,6 +16,10 @@ export type AssetId = string;
 export type RunId = string;
 export type SessionId = string;
 export type MessageId = string;
+export type TimelineId = string;
+export type TrackId = string;
+export type ClipId = string;
+export type TransitionId = string;
 export type IsoTimestamp = string;
 export type ProjectRelativePath = string;
 
@@ -159,6 +165,163 @@ export interface CanvasDocument {
 export interface GroupMembership {
   groupId: NodeId;
   childNodeIds: NodeId[];
+}
+
+// ---------------------------------------------------------------------------
+// The cutting room: one project's timelines
+// ---------------------------------------------------------------------------
+
+/** What a track holds, which is also what a clip of that kind may land on. */
+export type TrackKind = "video" | "audio" | "text";
+/** Clip kinds are the same set: a clip is a track's content. */
+export type ClipKind = TrackKind;
+
+/**
+ * One row of a timeline.
+ *
+ * The order of the list is the order the rows draw in: an upper video track
+ * draws over a lower one, and an audio or text row sits wherever the reader
+ * put it. Muting is sound and hiding is picture, and the two say nothing
+ * about each other: a hidden track's sound still mixes in, and a muted one's
+ * picture still draws. Locking is neither — it only keeps the editor from
+ * moving the row's clips, and the document itself holds no rule about it.
+ */
+export interface TimelineTrack {
+  id: TrackId;
+  kind: TrackKind;
+  name: string;
+  muted: boolean;
+  hidden: boolean;
+  locked: boolean;
+  createdAt: IsoTimestamp;
+}
+
+/**
+ * The visual grade a video clip wears. Absent means untouched.
+ *
+ * Each axis is a fraction of the range the picture allows, so a quarter is
+ * the same intent whatever the exporter or the previewer calls it.
+ */
+export interface ClipAdjust {
+  /** -1..1, darkening to lightening. */
+  brightness: number;
+  /** -1..1, flatter to punchier. */
+  contrast: number;
+  /** -1..1, drained to loud. */
+  saturation: number;
+}
+
+/** How a text clip is written, in pixels on the timeline's own canvas. */
+export interface TextClipStyle {
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  align: "left" | "center" | "right";
+  position: "top" | "center" | "bottom";
+  /** #rrggbb, or null for no backing plate. */
+  background: string | null;
+  /** Outline width in timeline pixels; 0 is no outline. */
+  strokeWidth: number;
+  /** #rrggbb; always present, harmless at zero width. */
+  strokeColor: string;
+}
+
+/** What a text clip says and how it is set. */
+export interface TextClipData {
+  content: string;
+  style: TextClipStyle;
+}
+
+/**
+ * A piece of material placed on a timeline.
+ *
+ * `startMs` is where it sits and `durationMs` is how long it runs there, so a
+ * sped-up clip is shorter on the timeline than the material it reads.
+ * `inPointMs`/`outPointMs` are the material's own clock, and the identity
+ * `durationMs * speed === outPointMs - inPointMs` holds everywhere: a clip
+ * that breaks it is refused rather than played back wrongly. An image or a
+ * text clip has no material clock of its own, so its in point is 0 and its
+ * out point is its duration.
+ */
+export interface TimelineClip {
+  id: ClipId;
+  trackId: TrackId;
+  kind: ClipKind;
+  /** What the timeline reads on the clip; the asset's name by default. */
+  label: string;
+  /** The material the clip reads; a text clip names none. */
+  assetId?: AssetId;
+  startMs: number;
+  durationMs: number;
+  inPointMs: number;
+  outPointMs: number;
+  /** 0.25..4, 1 being the material's own pace. */
+  speed: number;
+  /** 0..2, 1 being the material's own level. Video clips carry audio too. */
+  volume: number;
+  fadeInMs: number;
+  fadeOutMs: number;
+  muted: boolean;
+  /** Visual grade; absent means the clip is untouched. */
+  adjust?: ClipAdjust;
+  /** Preset look; absent and "none" mean the same untouched thing. */
+  filter?: ClipFilterPreset;
+  /** 0..1, for a clip on an upper video track drawing over the one below. */
+  opacity: number;
+  /** Present exactly on text clips. */
+  text?: TextClipData;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+/**
+ * How two neighbouring clips meet.
+ *
+ * A transition sits on the seam after `afterClipId`: its window is the tail of
+ * that clip and the head of the clip that follows it on the same track, and
+ * the two play together through the window. The follower's start is moved
+ * back by the window's length when the transition is added, so the overlap
+ * is in the document's geometry rather than implied here — and while the
+ * record exists, `follower.startMs === leader.endMs − durationMs` is a
+ * promise the document holds. It is the one overlap of clips a track may
+ * carry; any other overlap is refused.
+ */
+export interface TimelineTransition {
+  id: TransitionId;
+  afterClipId: ClipId;
+  kind: TransitionKind;
+  durationMs: number;
+  createdAt: IsoTimestamp;
+}
+
+/** The frame the cutting room works at and the colour it cuts to. */
+export interface TimelineSettings {
+  fps: number;
+  width: number;
+  height: number;
+  background: string;
+}
+
+/**
+ * One timeline: the tracks, the clips on them, and the transitions on their
+ * seams.
+ *
+ * Clips hold their own `trackId` rather than sitting in per-track lists, so a
+ * clip moved between rows is one field's change and the rows are an order the
+ * reader chose, not one the document has to keep in two places.
+ */
+export interface TimelineDocument {
+  id: TimelineId;
+  name: string;
+  schemaVersion: number;
+  settings: TimelineSettings;
+  tracks: TimelineTrack[];
+  clips: TimelineClip[];
+  transitions: TimelineTransition[];
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
 }
 
 /** Who a line of a conversation is from: the reader, a model, or a failure. */
@@ -354,6 +517,16 @@ export interface MokaFile {
    * canvases says so by carrying nothing here.
    */
   folders?: CanvasFolder[];
+  /**
+   * The project's timelines, in the order the cutting room's tabs read them.
+   *
+   * Left off rather than left empty on a document that has no timelines,
+   * which is every document written before the cutting room existed: a
+   * project that has cut nothing says so by carrying nothing here, and an
+   * older build reading a newer document skips the field it does not know
+   * rather than failing on it.
+   */
+  timelines?: TimelineDocument[];
   canvas: CanvasDocument[];
 }
 
@@ -361,6 +534,25 @@ export interface NodePatch {
   title?: string;
   zIndex?: number;
   data?: NodeData;
+}
+
+/**
+ * The fields a caller may move on a clip.
+ *
+ * A field left off is not touched; `adjust: null` is how a grade is cleared,
+ * since JSON cannot spell "this key goes away" any other way. Every patch
+ * that arrives through the document pipeline is JSON, so the merge rule and
+ * the undo rule are one rule: what a patch carries moves, what a patch
+ * carries as null goes.
+ */
+export type ClipPatch = Partial<Omit<TimelineClip, "adjust">> & {
+  adjust?: ClipAdjust | null;
+};
+
+/** A change to one clip, named by id, for `updateClips`. */
+export interface ClipPatchEntry {
+  clipId: ClipId;
+  patch: ClipPatch;
 }
 
 export type DocumentCommand =
@@ -467,6 +659,109 @@ export type DocumentCommand =
       canvasId: CanvasId;
       folderId: FolderId | null;
       index: number;
+    }
+  // -------------------------------------------------------------------------
+  // The cutting room. Every command names the timeline it works on, and none
+  // of them reaches into the canvases: the two halves of a document do not
+  // borrow each other's geometry.
+  // -------------------------------------------------------------------------
+  /** A timeline is added whole — its tracks, clips, and transitions included. */
+  | { type: "addTimeline"; timeline: TimelineDocument; index?: number }
+  | { type: "removeTimeline"; timelineId: TimelineId }
+  | { type: "renameTimeline"; timelineId: TimelineId; name: string }
+  /**
+   * A change to the timeline's own frame: only what is named moves, so a
+   * reader changing the frame rate leaves the resolution where it was.
+   */
+  | {
+      type: "updateTimelineSettings";
+      timelineId: TimelineId;
+      settings: Partial<TimelineSettings>;
+    }
+  /** A track is added empty; its clips arrive by `addClips` naming it. */
+  | {
+      type: "addTrack";
+      timelineId: TimelineId;
+      track: TimelineTrack;
+      index?: number;
+    }
+  /**
+   * Takes a track out only when it holds nothing: taking a track and its clips
+   * in one go is a deletion the reader did not watch, so the caller is asked to
+   * clear the row first.
+   */
+  | { type: "removeTrack"; timelineId: TimelineId; trackId: TrackId }
+  /** Only what is named moves, so renaming a track leaves its mute where it was. */
+  | {
+      type: "updateTrack";
+      timelineId: TimelineId;
+      trackId: TrackId;
+      patch: Partial<
+        Pick<TimelineTrack, "name" | "muted" | "hidden" | "locked">
+      >;
+    }
+  /**
+   * Clips land together — a division or a paste arrives as many clips in one
+   * step of history, and one seam's transition is taken out with the clip it
+   * belongs to by `removeClips`, never by this command.
+   *
+   * `seams` restores transitions together with the clips they join, in one
+   * step: the undo of a removal must not pass through the bare overlap a
+   * landed seam would otherwise be. Restored seams are read as already in
+   * place — nothing is pulled back — while `addTransitions` is the command
+   * that makes a seam, pulling the follower itself.
+   */
+  | {
+      type: "addClips";
+      timelineId: TimelineId;
+      clips: TimelineClip[];
+      seams?: TimelineTransition[];
+    }
+  | { type: "removeClips"; timelineId: TimelineId; clipIds: ClipId[] }
+  /**
+   * A change to what a clip is or how it plays. Only the fields the patch
+   * carries move, so changing a clip's volume leaves its text alone; a clip
+   * whose patch moves or stretches it is re-checked against its neighbours,
+   * since two clips cannot hold the same place on a track.
+   */
+  | {
+      type: "updateClips";
+      timelineId: TimelineId;
+      patches: ClipPatchEntry[];
+    }
+  /**
+   * Only where a clip sits: `startMs` on the timeline's clock and, when the
+   * clip is named for a different track, the `trackId` it lands on. A move
+   * re-checks against the clips already on the track it lands on.
+   */
+  | {
+      type: "moveClips";
+      timelineId: TimelineId;
+      moves: { clipId: ClipId; startMs: number; trackId?: TrackId }[];
+    }
+  /**
+   * A transition lands on a seam: the clip it follows must have a neighbour
+   * behind it and the two must be butted, and the command pulls the follower
+   * back by the window's length itself so the overlap the window plays is
+   * the geometry the document then holds. A batch is listed left to right
+   * along the track.
+   */
+  | {
+      type: "addTransitions";
+      timelineId: TimelineId;
+      transitions: TimelineTransition[];
+    }
+  /**
+   * Transitions come off their seams and the followers take their places
+   * back. A batch is listed left to right along the track, and seams this
+   * batch itself undoes do not count against it; what remains broken — a
+   * follower running into the clip behind it, or a seam the release tears
+   * out from under another — is refused.
+   */
+  | {
+      type: "removeTransitions";
+      timelineId: TimelineId;
+      transitionIds: TransitionId[];
     };
 
 export interface SelfCheckIssue {
@@ -489,6 +784,10 @@ export interface ValidationIssue {
   nodeId?: NodeId;
   portId?: string;
   edgeId?: EdgeId;
+  timelineId?: TimelineId;
+  trackId?: TrackId;
+  clipId?: ClipId;
+  transitionId?: TransitionId;
 }
 
 export type RunStatus =

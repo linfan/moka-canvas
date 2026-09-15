@@ -600,3 +600,389 @@ export function buildTreeMokaFile(): MokaFile {
   );
   return moka;
 }
+
+// ---------------------------------------------------------------------------
+// The cutting room
+// ---------------------------------------------------------------------------
+
+/**
+ * A project with one timeline: a four-second video clip on the video track, a
+ * crossfade transition behind it onto a pulled-back follower, and the two
+ * media assets the clips read. The seam is the shape every transition test
+ * starts from: the follower pulled back by the window, exactly as the
+ * document must hold it for the transition to be legal.
+ */
+export function timelineIds() {
+  return {
+    timeline: "timeline-1",
+    videoTrack: "track-video",
+    audioTrack: "track-audio",
+    textTrack: "track-text",
+    videoClip: "clip-video",
+    followerClip: "clip-follower",
+    transition: "transition-1",
+    videoAsset: "asset-video-a",
+    followerAsset: "asset-video-b",
+  };
+}
+
+export function buildTimelineMokaFile(): MokaFile {
+  const ids = timelineIds();
+  const moka = buildGoldenMokaFile();
+  moka.timelines = [
+    {
+      id: ids.timeline,
+      name: "Timeline 1",
+      schemaVersion: 1,
+      settings: { fps: 30, width: 1920, height: 1080, background: "#000000" },
+      tracks: [
+        {
+          id: ids.videoTrack,
+          kind: "video",
+          name: "Video 1",
+          muted: false,
+          hidden: false,
+          locked: false,
+          createdAt: T0,
+        },
+        {
+          id: ids.audioTrack,
+          kind: "audio",
+          name: "Audio 1",
+          muted: false,
+          hidden: false,
+          locked: false,
+          createdAt: T0,
+        },
+        {
+          id: ids.textTrack,
+          kind: "text",
+          name: "Text 1",
+          muted: false,
+          hidden: false,
+          locked: false,
+          createdAt: T0,
+        },
+      ],
+      clips: [
+        {
+          id: ids.videoClip,
+          trackId: ids.videoTrack,
+          kind: "video",
+          label: "opening.mp4",
+          assetId: ids.videoAsset,
+          startMs: 0,
+          durationMs: 4_000,
+          inPointMs: 0,
+          outPointMs: 4_000,
+          speed: 1,
+          volume: 1,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+          muted: false,
+          opacity: 1,
+          createdAt: T0,
+          updatedAt: T0,
+        },
+      ],
+      // The golden timeline carries no transitions, and the tests that want
+      // one add it through the commands — a seam is a command's doing.
+      transitions: [],
+      createdAt: T0,
+      updatedAt: T0,
+    },
+  ];
+  moka.resources.videos.push(
+    {
+      id: ids.videoAsset,
+      name: "opening.mp4",
+      path: "assets/videos/opening-00000000.mp4",
+      mime: "video/mp4",
+      bytes: 480_000,
+      createdAt: T0,
+      updatedAt: T0,
+      probe: {
+        mime: "video/mp4",
+        bytes: 480_000,
+        sha256: "a".repeat(64),
+        width: 1920,
+        height: 1080,
+        durationMs: 4_000,
+        codecSummary: "avc1",
+      },
+    },
+    {
+      id: ids.followerAsset,
+      name: "closing.mp4",
+      path: "assets/videos/closing-00000000.mp4",
+      mime: "video/mp4",
+      bytes: 360_000,
+      createdAt: T0,
+      updatedAt: T0,
+      probe: {
+        mime: "video/mp4",
+        bytes: 360_000,
+        sha256: "b".repeat(64),
+        width: 1920,
+        height: 1080,
+        durationMs: 3_000,
+        codecSummary: "avc1",
+      },
+    },
+  );
+  return moka;
+}
+
+export function cutFixtureIds() {
+  return {
+    timeline: "timeline-cut",
+    videoTrack: "track-cut-video",
+    audioTrack: "track-cut-audio",
+    textTrack: "track-cut-text",
+    clipA: "clip-cut-a",
+    clipB: "clip-cut-b",
+    clipC: "clip-cut-c",
+    clipD: "clip-cut-d",
+    transition: "transition-cut",
+    transition2: "transition-cut-2",
+    videoAssetA: "asset-cut-video-a",
+    videoAssetB: "asset-cut-video-b",
+    audioAsset: "asset-cut-audio",
+    imageAsset: "asset-cut-image",
+  };
+}
+
+/**
+ * A project with one cut timeline, carrying every shape a timeline can hold.
+ *
+ * The video track runs a graded, filtered, fading clip A into a pulled-back
+ * follower B through a crossfade — the one overlap a track may hold, stored
+ * as geometry — while the locked audio track runs a loud clip C and the text
+ * track holds a stroked, plated-nothing caption D. Between them the fixture
+ * pins the seams (R1), the track lock, the outline fields, the explicit null
+ * background, and every clip kind across the two languages.
+ */
+export function buildCutMokaFile(): MokaFile {
+  const ids = cutFixtureIds();
+  const moka = buildGoldenMokaFile();
+  const clipA = 4_000;
+  const window = 500;
+
+  moka.timelines = [
+    {
+      id: ids.timeline,
+      name: "Timeline 1",
+      schemaVersion: 1,
+      settings: { fps: 30, width: 1920, height: 1080, background: "#000000" },
+      tracks: [
+        {
+          id: ids.videoTrack,
+          kind: "video",
+          name: "Video 1",
+          muted: false,
+          hidden: false,
+          locked: false,
+          createdAt: T0,
+        },
+        {
+          id: ids.audioTrack,
+          kind: "audio",
+          name: "Audio 1",
+          muted: false,
+          hidden: false,
+          locked: true,
+          createdAt: T0,
+        },
+        {
+          id: ids.textTrack,
+          kind: "text",
+          name: "Text 1",
+          muted: false,
+          hidden: false,
+          locked: false,
+          createdAt: T1,
+        },
+      ],
+      clips: [
+        {
+          id: ids.clipA,
+          trackId: ids.videoTrack,
+          kind: "video",
+          label: "opening.mp4",
+          assetId: ids.videoAssetA,
+          startMs: 0,
+          durationMs: clipA,
+          inPointMs: 0,
+          outPointMs: clipA,
+          speed: 1,
+          volume: 0.8,
+          fadeInMs: 200,
+          fadeOutMs: 300,
+          muted: false,
+          adjust: { brightness: 0.1, contrast: -0.2, saturation: 0.3 },
+          filter: "warm",
+          opacity: 0.9,
+          createdAt: T0,
+          updatedAt: T0,
+        },
+        {
+          // The follower sits inside its window's pull-back, as R1 promises:
+          // twice the pace over the material's opening four seconds.
+          id: ids.clipB,
+          trackId: ids.videoTrack,
+          kind: "video",
+          label: "closing.mp4",
+          assetId: ids.videoAssetB,
+          startMs: clipA - window,
+          durationMs: 2_000,
+          inPointMs: 0,
+          outPointMs: 4_000,
+          speed: 2,
+          volume: 1,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+          muted: true,
+          opacity: 1,
+          createdAt: T0,
+          updatedAt: T1,
+        },
+        {
+          id: ids.clipC,
+          trackId: ids.audioTrack,
+          kind: "audio",
+          label: "score.mp3",
+          assetId: ids.audioAsset,
+          startMs: 0,
+          durationMs: 8_000,
+          inPointMs: 0,
+          outPointMs: 8_000,
+          speed: 1,
+          volume: 1.4,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+          muted: false,
+          opacity: 1,
+          createdAt: T0,
+          updatedAt: T0,
+        },
+        {
+          id: ids.clipD,
+          trackId: ids.textTrack,
+          kind: "text",
+          label: "A lantern over the lake",
+          startMs: 0,
+          durationMs: 2_000,
+          inPointMs: 0,
+          outPointMs: 2_000,
+          speed: 1,
+          volume: 1,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+          muted: false,
+          opacity: 1,
+          text: {
+            content: "A lantern over the lake",
+            style: {
+              fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+              fontSize: 64,
+              color: "#ffffff",
+              bold: true,
+              italic: false,
+              align: "center",
+              position: "top",
+              background: null,
+              strokeWidth: 4,
+              strokeColor: "#101010",
+            },
+          },
+          createdAt: T0,
+          updatedAt: T1,
+        },
+      ],
+      transitions: [
+        {
+          id: ids.transition,
+          afterClipId: ids.clipA,
+          kind: "crossfade",
+          durationMs: window,
+          createdAt: T0,
+        },
+      ],
+      createdAt: T0,
+      updatedAt: T1,
+    },
+  ];
+  moka.resources.videos.push(
+    {
+      id: ids.videoAssetA,
+      name: "opening.mp4",
+      path: "assets/videos/opening-00000000.mp4",
+      mime: "video/mp4",
+      bytes: 480_000,
+      createdAt: T0,
+      updatedAt: T0,
+      probe: {
+        mime: "video/mp4",
+        bytes: 480_000,
+        sha256: "c".repeat(64),
+        width: 1920,
+        height: 1080,
+        durationMs: 4_000,
+        codecSummary: "avc1",
+      },
+    },
+    {
+      id: ids.videoAssetB,
+      name: "closing.mp4",
+      path: "assets/videos/closing-00000000.mp4",
+      mime: "video/mp4",
+      bytes: 640_000,
+      createdAt: T0,
+      updatedAt: T0,
+      probe: {
+        mime: "video/mp4",
+        bytes: 640_000,
+        sha256: "d".repeat(64),
+        width: 1920,
+        height: 1080,
+        durationMs: 4_000,
+        codecSummary: "avc1",
+      },
+    },
+  );
+  moka.resources.music.push({
+    id: ids.audioAsset,
+    name: "score.mp3",
+    path: "assets/music/score-00000000.mp3",
+    mime: "audio/mpeg",
+    bytes: 128_000,
+    createdAt: T0,
+    updatedAt: T0,
+    probe: {
+      mime: "audio/mpeg",
+      bytes: 128_000,
+      sha256: "e".repeat(64),
+      durationMs: 8_000,
+      sampleRate: 44_100,
+      channels: 2,
+      codecSummary: "mp3",
+    },
+  });
+  moka.resources.images.push({
+    id: ids.imageAsset,
+    name: "plate.png",
+    path: "assets/images/plate-00000000.png",
+    mime: "image/png",
+    bytes: 4_096,
+    createdAt: T0,
+    updatedAt: T0,
+    probe: {
+      mime: "image/png",
+      bytes: 4_096,
+      sha256: "f".repeat(64),
+      width: 1920,
+      height: 1080,
+    },
+  });
+  return moka;
+}

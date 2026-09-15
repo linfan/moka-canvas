@@ -1,0 +1,581 @@
+{
+  "version": "v1",
+  "metadata": {
+    "id": "00000000-0000-7000-8000-000000000001",
+    "name": "Golden Fixture",
+    "description": "Shared cross-language fixture",
+    "revision": 3,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:01.000Z"
+  },
+  "resources": {
+    "images": [
+      {
+        "id": "00000000-0000-7000-8000-00000000001e",
+        "name": "lake.png",
+        "path": "assets/images/lake-00000000.png",
+        "mime": "image/png",
+        "bytes": 2048,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "probe": {
+          "mime": "image/png",
+          "bytes": 2048,
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "width": 64,
+          "height": 64
+        }
+      },
+      {
+        "id": "asset-cut-image",
+        "name": "plate.png",
+        "path": "assets/images/plate-00000000.png",
+        "mime": "image/png",
+        "bytes": 4096,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "probe": {
+          "mime": "image/png",
+          "bytes": 4096,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "width": 1920,
+          "height": 1080
+        }
+      }
+    ],
+    "music": [
+      {
+        "id": "asset-cut-audio",
+        "name": "score.mp3",
+        "path": "assets/music/score-00000000.mp3",
+        "mime": "audio/mpeg",
+        "bytes": 128000,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "probe": {
+          "mime": "audio/mpeg",
+          "bytes": 128000,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "durationMs": 8000,
+          "sampleRate": 44100,
+          "channels": 2,
+          "codecSummary": "mp3"
+        }
+      }
+    ],
+    "voice": [],
+    "texts": [],
+    "videos": [
+      {
+        "id": "asset-cut-video-a",
+        "name": "opening.mp4",
+        "path": "assets/videos/opening-00000000.mp4",
+        "mime": "video/mp4",
+        "bytes": 480000,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "probe": {
+          "mime": "video/mp4",
+          "bytes": 480000,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "width": 1920,
+          "height": 1080,
+          "durationMs": 4000,
+          "codecSummary": "avc1"
+        }
+      },
+      {
+        "id": "asset-cut-video-b",
+        "name": "closing.mp4",
+        "path": "assets/videos/closing-00000000.mp4",
+        "mime": "video/mp4",
+        "bytes": 640000,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "probe": {
+          "mime": "video/mp4",
+          "bytes": 640000,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "width": 1920,
+          "height": 1080,
+          "durationMs": 4000,
+          "codecSummary": "avc1"
+        }
+      }
+    ]
+  },
+  "canvas": [
+    {
+      "id": "00000000-0000-7000-8000-000000000002",
+      "name": "Canvas 1",
+      "schemaVersion": 2,
+      "viewport": {
+        "x": 120.5,
+        "y": -40.25,
+        "zoom": 1.5
+      },
+      "nodes": [
+        {
+          "id": "00000000-0000-7000-8000-00000000000a",
+          "kind": "text",
+          "title": "Brief",
+          "bounds": {
+            "x": -320,
+            "y": -120,
+            "width": 280,
+            "height": 200
+          },
+          "zIndex": 0,
+          "ports": [
+            {
+              "id": "prompt",
+              "direction": "input",
+              "dataTypes": [
+                "text"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Prompt"
+            },
+            {
+              "id": "images",
+              "direction": "input",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Images"
+            },
+            {
+              "id": "audio",
+              "direction": "input",
+              "dataTypes": [
+                "audio"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Audio"
+            },
+            {
+              "id": "video",
+              "direction": "input",
+              "dataTypes": [
+                "video"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Video"
+            },
+            {
+              "id": "out",
+              "direction": "output",
+              "dataTypes": [
+                "text"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Text"
+            }
+          ],
+          "data": {
+            "content": "A lantern floats over a quiet lake at dusk."
+          },
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "00000000-0000-7000-8000-00000000000b",
+          "kind": "image",
+          "title": "Reference image",
+          "bounds": {
+            "x": -320,
+            "y": 160,
+            "width": 280,
+            "height": 220
+          },
+          "zIndex": 1,
+          "ports": [
+            {
+              "id": "prompt",
+              "direction": "input",
+              "dataTypes": [
+                "text"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Prompt"
+            },
+            {
+              "id": "images",
+              "direction": "input",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Images"
+            },
+            {
+              "id": "mask",
+              "direction": "input",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Mask"
+            },
+            {
+              "id": "out",
+              "direction": "output",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Image"
+            }
+          ],
+          "data": {
+            "assetId": "00000000-0000-7000-8000-00000000001e"
+          },
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "00000000-0000-7000-8000-00000000000c",
+          "kind": "operation",
+          "title": "Generate frame",
+          "bounds": {
+            "x": 40,
+            "y": -120,
+            "width": 300,
+            "height": 220
+          },
+          "zIndex": 2,
+          "ports": [
+            {
+              "id": "text",
+              "direction": "input",
+              "dataTypes": [
+                "text"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Text"
+            },
+            {
+              "id": "images",
+              "direction": "input",
+              "dataTypes": [
+                "image"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Images"
+            },
+            {
+              "id": "audio",
+              "direction": "input",
+              "dataTypes": [
+                "audio"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Audio"
+            },
+            {
+              "id": "video",
+              "direction": "input",
+              "dataTypes": [
+                "video"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Video"
+            },
+            {
+              "id": "out",
+              "direction": "output",
+              "dataTypes": [
+                "text",
+                "image",
+                "audio",
+                "video"
+              ],
+              "required": false,
+              "cardinality": "many",
+              "label": "Result"
+            }
+          ],
+          "data": {
+            "operationType": "deterministic.text",
+            "parameters": {
+              "style": "storyboard"
+            },
+            "executorKey": "deterministic",
+            "resultSlots": [],
+            "resultNodeIds": []
+          },
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "00000000-0000-7000-8000-00000000000d",
+          "kind": "export",
+          "title": "Export",
+          "bounds": {
+            "x": 420,
+            "y": -120,
+            "width": 280,
+            "height": 180
+          },
+          "zIndex": 3,
+          "ports": [
+            {
+              "id": "video",
+              "direction": "input",
+              "dataTypes": [
+                "video"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Video"
+            },
+            {
+              "id": "audio",
+              "direction": "input",
+              "dataTypes": [
+                "audio"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Audio"
+            },
+            {
+              "id": "out",
+              "direction": "output",
+              "dataTypes": [
+                "artifact"
+              ],
+              "required": false,
+              "cardinality": "one",
+              "label": "Artifact"
+            }
+          ],
+          "data": {
+            "format": "mp4",
+            "parameters": {
+              "resolution": "1080p"
+            }
+          },
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      "edges": [
+        {
+          "id": "00000000-0000-7000-8000-000000000014",
+          "source": {
+            "nodeId": "00000000-0000-7000-8000-00000000000a",
+            "portId": "out"
+          },
+          "target": {
+            "nodeId": "00000000-0000-7000-8000-00000000000c",
+            "portId": "text"
+          },
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "00000000-0000-7000-8000-000000000015",
+          "source": {
+            "nodeId": "00000000-0000-7000-8000-00000000000c",
+            "portId": "out"
+          },
+          "target": {
+            "nodeId": "00000000-0000-7000-8000-00000000000d",
+            "portId": "video"
+          },
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      "groups": [],
+      "settings": {
+        "background": "dots",
+        "showMinimap": true,
+        "snapToGrid": true
+      }
+    },
+    {
+      "id": "00000000-0000-7000-8000-000000000003",
+      "name": "Canvas 2",
+      "schemaVersion": 2,
+      "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "nodes": [],
+      "edges": [],
+      "groups": [],
+      "settings": {
+        "background": "lines",
+        "showMinimap": false,
+        "snapToGrid": false
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "timeline-cut",
+      "name": "Timeline 1",
+      "schemaVersion": 1,
+      "settings": {
+        "fps": 30,
+        "width": 1920,
+        "height": 1080,
+        "background": "#000000"
+      },
+      "tracks": [
+        {
+          "id": "track-cut-video",
+          "kind": "video",
+          "name": "Video 1",
+          "muted": false,
+          "hidden": false,
+          "locked": false,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "track-cut-audio",
+          "kind": "audio",
+          "name": "Audio 1",
+          "muted": false,
+          "hidden": false,
+          "locked": true,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "track-cut-text",
+          "kind": "text",
+          "name": "Text 1",
+          "muted": false,
+          "hidden": false,
+          "locked": false,
+          "createdAt": "2026-01-01T00:00:01.000Z"
+        }
+      ],
+      "clips": [
+        {
+          "id": "clip-cut-a",
+          "trackId": "track-cut-video",
+          "kind": "video",
+          "label": "opening.mp4",
+          "assetId": "asset-cut-video-a",
+          "startMs": 0,
+          "durationMs": 4000,
+          "inPointMs": 0,
+          "outPointMs": 4000,
+          "speed": 1,
+          "volume": 0.8,
+          "fadeInMs": 200,
+          "fadeOutMs": 300,
+          "muted": false,
+          "adjust": {
+            "brightness": 0.1,
+            "contrast": -0.2,
+            "saturation": 0.3
+          },
+          "filter": "warm",
+          "opacity": 0.9,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "clip-cut-b",
+          "trackId": "track-cut-video",
+          "kind": "video",
+          "label": "closing.mp4",
+          "assetId": "asset-cut-video-b",
+          "startMs": 3500,
+          "durationMs": 2000,
+          "inPointMs": 0,
+          "outPointMs": 4000,
+          "speed": 2,
+          "volume": 1,
+          "fadeInMs": 0,
+          "fadeOutMs": 0,
+          "muted": true,
+          "opacity": 1,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:01.000Z"
+        },
+        {
+          "id": "clip-cut-c",
+          "trackId": "track-cut-audio",
+          "kind": "audio",
+          "label": "score.mp3",
+          "assetId": "asset-cut-audio",
+          "startMs": 0,
+          "durationMs": 8000,
+          "inPointMs": 0,
+          "outPointMs": 8000,
+          "speed": 1,
+          "volume": 1.4,
+          "fadeInMs": 0,
+          "fadeOutMs": 0,
+          "muted": false,
+          "opacity": 1,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "clip-cut-d",
+          "trackId": "track-cut-text",
+          "kind": "text",
+          "label": "A lantern over the lake",
+          "startMs": 0,
+          "durationMs": 2000,
+          "inPointMs": 0,
+          "outPointMs": 2000,
+          "speed": 1,
+          "volume": 1,
+          "fadeInMs": 0,
+          "fadeOutMs": 0,
+          "muted": false,
+          "opacity": 1,
+          "text": {
+            "content": "A lantern over the lake",
+            "style": {
+              "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif",
+              "fontSize": 64,
+              "color": "#ffffff",
+              "bold": true,
+              "italic": false,
+              "align": "center",
+              "position": "top",
+              "background": null,
+              "strokeWidth": 4,
+              "strokeColor": "#101010"
+            }
+          },
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:01.000Z"
+        }
+      ],
+      "transitions": [
+        {
+          "id": "transition-cut",
+          "afterClipId": "clip-cut-a",
+          "kind": "crossfade",
+          "durationMs": 500,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:01.000Z"
+    }
+  ]
+}

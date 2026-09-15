@@ -7,8 +7,11 @@ import {
   MOKA_FILE_VERSION,
   NODE_PORTS,
   PROVIDER_EXECUTOR_KEY,
+  TIMELINE_SCHEMA_VERSION,
+  DEFAULT_IMAGE_CLIP_MS,
+  DEFAULT_TEXT_CLIP_MS,
 } from "./constants";
-import type { Capability } from "./constants";
+import type { Capability, TransitionKind } from "./constants";
 import type {
   AssistantSession,
   CanvasDocument,
@@ -20,7 +23,12 @@ import type {
   NodeKind,
   PortDefinition,
   Rect,
+  ResourceEntry,
   ResourceRegistry,
+  TextClipStyle,
+  TimelineClip,
+  TimelineDocument,
+  TimelineTrack,
   WorkflowNode,
 } from "./types";
 
@@ -44,6 +52,153 @@ export function createCanvas(name: string): CanvasDocument {
 export function createSession(title: string): AssistantSession {
   const now = nowIso();
   return { id: newId(), title, messages: [], createdAt: now, updatedAt: now };
+}
+
+// ---------------------------------------------------------------------------
+// The cutting room
+// ---------------------------------------------------------------------------
+
+/** The three rows a new timeline starts with, named the way tabs read them. */
+export function defaultTimelineTracks(): TimelineTrack[] {
+  const now = nowIso();
+  const row = (kind: TimelineTrack["kind"], name: string): TimelineTrack => ({
+    id: newId(),
+    kind,
+    name,
+    muted: false,
+    hidden: false,
+    locked: false,
+    createdAt: now,
+  });
+  return [
+    row("video", "Video 1"),
+    row("audio", "Audio 1"),
+    row("text", "Text 1"),
+  ];
+}
+
+/**
+ * A timeline born empty but for its rows, named like a canvas is: one more
+ * than the count, and past any name already taken.
+ */
+export function createTimeline(name: string): TimelineDocument {
+  const now = nowIso();
+  return {
+    id: newId(),
+    name,
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    settings: { fps: 30, width: 1920, height: 1080, background: "#000000" },
+    tracks: defaultTimelineTracks(),
+    clips: [],
+    transitions: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function nextTimelineName(moka: MokaFile): string {
+  const used = new Set((moka.timelines ?? []).map((t) => t.name));
+  let n = (moka.timelines ?? []).length + 1;
+  while (used.has(`Timeline ${n}`)) n += 1;
+  return `Timeline ${n}`;
+}
+
+/**
+ * A clip of an asset's material, reading the whole of it.
+ *
+ * An image gets the duration nobody said otherwise for, since its material has
+ * no length of its own to read; audio and video get what the probe measured.
+ */
+export function createClipFromAsset(
+  asset: ResourceEntry,
+  trackId: string,
+  startMs: number,
+): TimelineClip {
+  const kind = asset.mime?.startsWith("video/")
+    ? "video"
+    : asset.mime?.startsWith("audio/")
+      ? "audio"
+      : "image";
+  const durationMs =
+    kind === "image"
+      ? DEFAULT_IMAGE_CLIP_MS
+      : (asset.probe?.durationMs ?? DEFAULT_IMAGE_CLIP_MS);
+  const now = nowIso();
+  return {
+    id: newId(),
+    trackId,
+    kind: kind === "image" ? "video" : kind,
+    label: asset.name,
+    assetId: asset.id,
+    startMs,
+    durationMs,
+    inPointMs: 0,
+    outPointMs: durationMs,
+    speed: 1,
+    volume: 1,
+    fadeInMs: 0,
+    fadeOutMs: 0,
+    muted: false,
+    opacity: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * The style a text clip is born with: plain white words on no plate and no
+ * outline. Black is the outline colour it would wear if one were asked for,
+ * so a reader who turns the width up sees words on a bright picture at once.
+ */
+export function defaultTextStyle(): TextClipStyle {
+  return {
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+    fontSize: 48,
+    color: "#ffffff",
+    bold: false,
+    italic: false,
+    align: "center",
+    position: "bottom",
+    background: null,
+    strokeWidth: 0,
+    strokeColor: "#000000",
+  };
+}
+
+export function createTextClip(
+  content: string,
+  trackId: string,
+  startMs: number,
+  durationMs: number = DEFAULT_TEXT_CLIP_MS,
+): TimelineClip {
+  const now = nowIso();
+  return {
+    id: newId(),
+    trackId,
+    kind: "text",
+    label: content.length > 24 ? `${content.slice(0, 24)}…` : content,
+    startMs,
+    durationMs,
+    inPointMs: 0,
+    outPointMs: durationMs,
+    speed: 1,
+    volume: 1,
+    fadeInMs: 0,
+    fadeOutMs: 0,
+    muted: false,
+    opacity: 1,
+    text: { content, style: defaultTextStyle() },
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function createTransition(
+  afterClipId: string,
+  kind: TransitionKind,
+  durationMs: number,
+): TimelineDocument["transitions"][number] {
+  return { id: newId(), afterClipId, kind, durationMs, createdAt: nowIso() };
 }
 
 export function createProject(name: string): MokaFile {

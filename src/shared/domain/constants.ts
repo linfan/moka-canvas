@@ -124,6 +124,81 @@ export const MAX_ASSET_TAGS = 24;
 /** How long one of those words may be. */
 export const MAX_ASSET_TAG_LENGTH = 32;
 export const MAX_ASSET_NOTE_LENGTH = 2_000;
+
+// ---------------------------------------------------------------------------
+// The cutting room
+// ---------------------------------------------------------------------------
+
+export const TIMELINE_SCHEMA_VERSION = 1;
+/** How many timelines one project's cutting room holds. */
+export const MAX_TIMELINES_PER_PROJECT = 12;
+/** How many tracks one timeline holds, video, audio, and text together. */
+export const MAX_TRACKS_PER_TIMELINE = 8;
+/** How many clips one timeline holds. */
+export const MAX_CLIPS_PER_TIMELINE = 400;
+/** How many transitions one timeline holds. */
+export const MAX_TRANSITIONS_PER_TIMELINE = 100;
+export const TIMELINE_NAME_MAX = 80;
+/** How long a clip's label may run, which is a name rather than a text. */
+export const CLIP_LABEL_MAX = 80;
+/** The most one text clip may say, kept to the size a card may hold. */
+export const MAX_TIMELINE_TEXT_CONTENT = 2_000;
+/** How many clips one command may land, which is one step of history. */
+export const MAX_CLIPS_PER_COMMAND = 50;
+/** Clip timing bounds: milliseconds are whole and positive, speed and volume
+ * live in their working ranges, and a clip shorter than this cannot be seen. */
+export const MIN_CLIP_DURATION_MS = 100;
+export const MIN_CLIP_SPEED = 0.25;
+export const MAX_CLIP_SPEED = 4;
+export const MAX_CLIP_VOLUME = 2;
+/** Transition bounds, in the window two clips share. */
+export const MIN_TRANSITION_MS = 200;
+export const MAX_TRANSITION_MS = 2_000;
+/** The timeline frame rates a document may be set to. */
+export const TIMELINE_FPS_CHOICES = [24, 25, 30, 60] as const;
+/** Resolution bounds for the timeline canvas, even numbers within these. */
+export const TIMELINE_WIDTH_MIN = 720;
+export const TIMELINE_WIDTH_MAX = 3840;
+export const TIMELINE_HEIGHT_MIN = 480;
+export const TIMELINE_HEIGHT_MAX = 2160;
+/** The presets the inspector and the new-timeline dialog offer. */
+export const TIMELINE_RESOLUTION_PRESETS = [
+  { label: "720p HD", width: 1280, height: 720 },
+  { label: "1080p Full HD", width: 1920, height: 1080 },
+  { label: "1440p QHD", width: 2560, height: 1440 },
+  { label: "4K UHD", width: 3840, height: 2160 },
+] as const;
+/** The eight ways two clips can meet. */
+export const TRANSITION_KINDS = [
+  "none",
+  "crossfade",
+  "dipToBlack",
+  "dipToWhite",
+  "slideLeft",
+  "slideUp",
+  "wipe",
+  "zoomIn",
+] as const;
+/** The six preset looks a video clip can wear. */
+export const CLIP_FILTER_PRESETS = [
+  "none",
+  "warm",
+  "cool",
+  "mono",
+  "fade",
+  "vivid",
+] as const;
+/** The duration an image clip gets when nobody says otherwise. */
+export const DEFAULT_IMAGE_CLIP_MS = 4_000;
+/** The duration a text clip gets when nobody says otherwise. */
+export const DEFAULT_TEXT_CLIP_MS = 2_000;
+/** The default transition offered by the seam between two clips. */
+export const DEFAULT_TRANSITION_KIND: Exclude<TransitionKind, "none"> =
+  "crossfade";
+export const DEFAULT_TRANSITION_MS = 500;
+
+export type TransitionKind = (typeof TRANSITION_KINDS)[number];
+export type ClipFilterPreset = (typeof CLIP_FILTER_PRESETS)[number];
 /**
  * What an asset is a picture of, in words — the summary a search reads.
  *
@@ -369,6 +444,13 @@ export const PROBLEM_CODES = [
   "EDGE_NOT_FOUND",
   "CANVAS_NOT_FOUND",
   "FOLDER_NOT_FOUND",
+  "TIMELINE_NOT_FOUND",
+  "TRACK_NOT_FOUND",
+  "TRACK_NOT_EMPTY",
+  "CLIP_NOT_FOUND",
+  "CLIP_OVERLAP",
+  "TRANSITION_NOT_FOUND",
+  "TRANSITION_SEAM",
   "GROUP_INVALID",
   "SESSION_NOT_FOUND",
   "MESSAGE_NOT_FOUND",
