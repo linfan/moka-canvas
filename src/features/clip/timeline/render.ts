@@ -5,6 +5,7 @@ import type {
   TimelineDocument,
   TransitionId,
 } from "../../../shared/domain";
+import { followerOf } from "../../../shared/domain/timeline";
 import { materialMoment } from "../preview/compositor";
 import type { DraftClip, TimelineDraft } from "../interactions/gestures";
 import {
@@ -60,6 +61,13 @@ export interface TimelineRenderModel {
    * the draft is read fresh every frame and never lives in a store.
    */
   draft?: TimelineDraft | null;
+  /**
+   * The butted seam the pointer is over, as the canvas read it: the ghost `+`
+   * is drawn for exactly this seam and nothing else. A hover is a reading of
+   * the pointer, not a fact about the cut, so it lives in the canvas's own
+   * state and never in a store.
+   */
+  hoverSeam?: { leader: TimelineClip; follower: TimelineClip } | null;
   palette?: TimelinePalette;
 }
 
@@ -68,6 +76,8 @@ const BADGE_FONT = "10px ui-sans-serif, system-ui, sans-serif";
 const CLIP_RADIUS = 6;
 /** How far apart a video block's pictures sit; one thumbnail's own width. */
 const FILMSTRIP_STEP_PX = 96;
+/** The `+` a hovered seam offers, square. */
+const SEAM_GHOST_PX = 16;
 
 /**
  * A whole screen of timeline: rows, clips, seams, the ruler and the playhead.
@@ -98,6 +108,9 @@ export function renderTimeline(
     if (model.timeline.clips.length > 0) {
       drawClips(ctx, model, rows, palette);
       drawTransitions(ctx, model, rows, palette);
+      // The hover is drawn over the badges but under the draft: it is an
+      // offer, while a draft is a gesture already in hand.
+      drawSeamGhost(ctx, model, rows, palette);
     }
   }
   drawDraft(ctx, model, rows, palette);
@@ -525,31 +538,111 @@ function drawTransitions(
     const centreY = row.top + row.height / 2 - scrollTopPx;
     if (centreX < -half || centreX > width + half) continue;
     if (centreY < -half || centreY > height + half) continue;
-    const selected = model.selection.transitionId === transition.id;
-    ctx.beginPath();
-    ctx.roundRect(
-      centreX - half,
-      centreY - half,
-      TRANSITION_BADGE_PX,
-      TRANSITION_BADGE_PX,
-      5,
+    drawSeamBadge(
+      ctx,
+      centreX,
+      centreY,
+      model.selection.transitionId === transition.id,
+      palette,
     );
-    ctx.fillStyle = palette.badgeFill;
-    ctx.fill();
-    ctx.lineWidth = selected ? 2 : 1;
-    ctx.strokeStyle = selected ? palette.selection : palette.badgeStroke;
-    ctx.stroke();
-    ctx.strokeStyle = palette.badgeGlyph;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(centreX - 5, centreY - 3.5);
-    ctx.lineTo(centreX + 0.5, centreY);
-    ctx.lineTo(centreX - 5, centreY + 3.5);
-    ctx.moveTo(centreX + 5, centreY - 3.5);
-    ctx.lineTo(centreX - 0.5, centreY);
-    ctx.lineTo(centreX + 5, centreY + 3.5);
-    ctx.stroke();
   }
+}
+
+/** One seam's badge: the plate, its stroke, and the crossfade glyph. */
+function drawSeamBadge(
+  ctx: CanvasRenderingContext2D,
+  centreX: number,
+  centreY: number,
+  selected: boolean,
+  palette: TimelinePalette,
+): void {
+  const half = TRANSITION_BADGE_PX / 2;
+  ctx.beginPath();
+  ctx.roundRect(
+    centreX - half,
+    centreY - half,
+    TRANSITION_BADGE_PX,
+    TRANSITION_BADGE_PX,
+    5,
+  );
+  ctx.fillStyle = palette.badgeFill;
+  ctx.fill();
+  ctx.lineWidth = selected ? 2 : 1;
+  ctx.strokeStyle = selected ? palette.selection : palette.badgeStroke;
+  ctx.stroke();
+  ctx.strokeStyle = palette.badgeGlyph;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(centreX - 5, centreY - 3.5);
+  ctx.lineTo(centreX + 0.5, centreY);
+  ctx.lineTo(centreX - 5, centreY + 3.5);
+  ctx.moveTo(centreX + 5, centreY - 3.5);
+  ctx.lineTo(centreX - 0.5, centreY);
+  ctx.lineTo(centreX + 5, centreY + 3.5);
+  ctx.stroke();
+}
+
+/**
+ * The `+` a butted seam offers under the pointer.
+ *
+ * Drawn only for the seam the canvas has hovered, and only while that seam is
+ * still butted in the document being drawn — a `+` under a pointer that no
+ * longer sits on an empty seam would be an offer the room cannot keep.
+ */
+function drawSeamGhost(
+  ctx: CanvasRenderingContext2D,
+  model: TimelineRenderModel,
+  rows: TrackRow[],
+  palette: TimelinePalette,
+): void {
+  const hover = model.hoverSeam;
+  if (!hover) return;
+  const leader = model.timeline.clips.find(
+    (clip) => clip.id === hover.leader.id,
+  );
+  const follower = model.timeline.clips.find(
+    (clip) => clip.id === hover.follower.id,
+  );
+  if (
+    !leader ||
+    !follower ||
+    follower.startMs !== leader.startMs + leader.durationMs
+  )
+    return;
+  const row = rows.find((candidate) => candidate.track.id === leader.trackId);
+  if (!row) return;
+  const { width, height, scrollTopPx } = model.viewport;
+  const x = xAt(follower.startMs, model.view);
+  const y = row.top + row.height / 2 - scrollTopPx;
+  const half = SEAM_GHOST_PX / 2;
+  if (x < -half || x > width + half) return;
+  if (y < -half || y > height + half) return;
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.beginPath();
+  ctx.roundRect(
+    x - half,
+    y - half,
+    SEAM_GHOST_PX,
+    SEAM_GHOST_PX,
+    SEAM_GHOST_PX / 4,
+  );
+  ctx.fillStyle = palette.badgeFill;
+  ctx.fill();
+  ctx.strokeStyle = palette.selection;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // The plus itself, drawn rather than set in type so it stays legible at
+  // whatever the device's pixel ratio is.
+  ctx.strokeStyle = palette.ink;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(x - 3.5, y);
+  ctx.lineTo(x + 3.5, y);
+  ctx.moveTo(x, y - 3.5);
+  ctx.lineTo(x, y + 3.5);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /**
@@ -570,6 +663,10 @@ function drawDraft(
   if (!draft || rows.length === 0) return;
   if (draft.kind === "marquee") {
     drawMarquee(ctx, model, draft.rect, palette);
+    return;
+  }
+  if (draft.kind === "seam") {
+    drawSeamDraft(ctx, model, rows, draft, palette);
     return;
   }
   if (draft.kind === "move" && draft.rowTrackId !== null) {
@@ -593,7 +690,77 @@ function drawDraft(
   for (const ghost of ghosts) drawGhost(ctx, model, rows, ghost, palette);
   if (draft.guideMs !== null)
     drawGuide(ctx, model, rows, draft.guideMs, ghosts, palette);
-  if (draft.kind === "trim") drawTrimBubble(ctx, model, rows, draft, palette);
+  if (draft.kind === "trim")
+    drawDurationBubble(
+      ctx,
+      model,
+      draft.clip.trackId,
+      draft.edge === "start"
+        ? draft.clip.startMs
+        : draft.clip.startMs + draft.clip.durationMs,
+      draft.clip.durationMs,
+      palette,
+    );
+}
+
+/**
+ * The window a seam drag would open, drawn before it is a command.
+ *
+ * The overlay is the overlap the release would leave — from the seam's tail
+ * back by the draft's length — with the badge at the seam it will keep and
+ * the length read out on the document's clock. Nothing here is a document:
+ * the follower moves when the command lands, not while the pointer is down.
+ */
+function drawSeamDraft(
+  ctx: CanvasRenderingContext2D,
+  model: TimelineRenderModel,
+  rows: TrackRow[],
+  draft: { transitionId: TransitionId; durationMs: number },
+  palette: TimelinePalette,
+): void {
+  const transition = model.timeline.transitions.find(
+    (each) => each.id === draft.transitionId,
+  );
+  if (!transition) return;
+  const leader = model.timeline.clips.find(
+    (clip) => clip.id === transition.afterClipId,
+  );
+  if (!leader) return;
+  const follower = followerOf(model.timeline, leader);
+  if (!follower) return;
+  const row = rows.find((each) => each.track.id === leader.trackId);
+  if (!row) return;
+  const { width, height, scrollTopPx } = model.viewport;
+  const y = row.top - scrollTopPx;
+  if (y > height || y + row.height < 0) return;
+  const seamMs = leader.startMs + leader.durationMs;
+  const startMs = seamMs - draft.durationMs;
+  const x = xAt(startMs, model.view);
+  const w = (draft.durationMs / 1_000) * model.view.pxPerSec;
+  if (x + w < 0 || x > width) return;
+  // The overlap the window would hold, washed across the row's middle so the
+  // blocks' own edges stay readable underneath it.
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = palette.selection;
+  ctx.beginPath();
+  ctx.roundRect(x, y + 3, w, row.height - 6, 4);
+  ctx.fill();
+  ctx.restore();
+  const centreY = y + row.height / 2;
+  if (
+    centreY >= -TRANSITION_BADGE_PX &&
+    centreY <= height + TRANSITION_BADGE_PX
+  )
+    drawSeamBadge(ctx, xAt(seamMs, model.view), centreY, true, palette);
+  drawDurationBubble(
+    ctx,
+    model,
+    leader.trackId,
+    seamMs,
+    draft.durationMs,
+    palette,
+  );
 }
 
 /** The rectangle a marquee covers, in content space, washed and outlined. */
@@ -682,27 +849,29 @@ function drawGuide(
   }
 }
 
-/** How long the trimmed block would run, read as the clock does. */
-function drawTrimBubble(
+/**
+ * How long the thing being dragged would run, read as the clock does.
+ *
+ * One bubble for the trim's new length and one for the seam's new window:
+ * `ms` is the moment the bubble centres on — a trimmed edge's own place, or
+ * the seam the window will keep — and `durationMs` is what it reads out.
+ */
+function drawDurationBubble(
   ctx: CanvasRenderingContext2D,
   model: TimelineRenderModel,
-  rows: TrackRow[],
-  draft: { clip: DraftClip; edge: "start" | "end" },
+  trackId: TrackRow["track"]["id"],
+  ms: number,
+  durationMs: number,
   palette: TimelinePalette,
 ): void {
-  const row = rows.find((each) => each.track.id === draft.clip.trackId);
+  const row = trackRows(model.timeline).find(
+    (each) => each.track.id === trackId,
+  );
   if (!row) return;
   const { width, height, scrollTopPx } = model.viewport;
   const y = row.top - scrollTopPx;
   if (y > height || y + row.height < 0) return;
-  const ms =
-    draft.edge === "start"
-      ? draft.clip.startMs
-      : draft.clip.startMs + draft.clip.durationMs;
-  const text = formatTimecode(
-    draft.clip.durationMs,
-    model.timeline.settings.fps,
-  );
+  const text = formatTimecode(durationMs, model.timeline.settings.fps);
   ctx.font = BADGE_FONT;
   const w = ctx.measureText(text).width + 12;
   const h = 16;

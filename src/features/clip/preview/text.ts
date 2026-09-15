@@ -138,8 +138,11 @@ export function drawTextClip(
   const layout = textLayout(ctx, data, frame, timelineWidth);
   // A clip with no words takes no room: a line of nothing is not a line.
   if (data.content.length === 0) return layout;
+  // Whatever the context already carries is part of the words' presence, so a
+  // seam blend scales them the same way it scales a picture's clip.
+  const carried = ctx.globalAlpha;
   ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha)) * carried;
   ctx.font = textFont(
     data.style,
     timelineWidth > 0 ? frame.width / timelineWidth : 1,

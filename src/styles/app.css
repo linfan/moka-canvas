@@ -4560,3 +4560,37 @@ body.is-dragging-split {
   font-size: 12px;
   padding: 3px 10px;
 }
+
+/* The seam card: the kinds as tiles of their own drawing, and the window. */
+.clip-seam-tiles {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+}
+
+.clip-seam-tile {
+  align-items: center;
+  background: var(--canvas);
+  display: grid;
+  font-size: 11px;
+  gap: 4px;
+  justify-items: center;
+  padding: 6px 4px;
+}
+
+.clip-seam-tile[aria-pressed="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.clip-seam-tile-canvas {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: block;
+  height: 30px;
+  width: 48px;
+}
+
+.clip-seam-window > span {
+  white-space: nowrap;
+}

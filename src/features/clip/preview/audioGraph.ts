@@ -8,6 +8,7 @@ import type {
 import { assetUrl } from "../../../api";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useClipStore } from "../stores/clipStore";
+import { seamAt, type SeamMoment } from "./blend";
 import { fadeFactor, materialMoment } from "./compositor";
 
 /**
@@ -19,7 +20,7 @@ import { fadeFactor, materialMoment } from "./compositor";
  * sound reads the same way — and the element's stream is voiced through a
  * short chain: the clip's level (volume × fades × mute) into its track's mute
  * into the master. At most four sound at once, the ones nearest the playhead;
- * a seam window's second clip waits for package 10 to cross the two.
+ * a seam window's two sides cross through the same one place (10 §4).
  *
  * The clock never waits on any of this. A browser that will not start audio
  * is a silent preview, not a stopped one, and a file it will not play is one
@@ -40,6 +41,35 @@ export function clipGainAt(
 ): number {
   if (clip.muted || track?.muted) return 0;
   return Math.max(0, clip.volume) * fadeFactor(clip, atMs);
+}
+
+/** Which side of a seam window a sounding clip is. */
+export type TransitionRole = "leader" | "follower";
+
+/**
+ * The share a seam window gives one of its sides at a moment, linear from end
+ * to end: the leader hands over as the follower takes up, both at full level
+ * exactly at the window's ends. A null progress is a moment outside every
+ * window, which leaves the level alone at 1.
+ *
+ * The same curve is reproduced in an export by one linear `afade` on each
+ * side (10 §8), so this is the one reading both sides of the cut share.
+ */
+export function transitionGain(
+  progress: number | null,
+  role: TransitionRole,
+): number {
+  if (progress === null) return 1;
+  return role === "leader" ? 1 - progress : progress;
+}
+
+/** The seam window a track has open at a moment, or null. */
+function seamWindowAt(
+  timeline: TimelineDocument | null,
+  trackId: string,
+  atMs: number,
+): SeamMoment | null {
+  return timeline ? seamAt(timeline, trackId, atMs) : null;
 }
 
 /**
@@ -75,13 +105,14 @@ export interface AudibleClip {
 }
 
 /**
- * The clips whose sound covers a moment, one per row, nearest the playhead
- * first, at most four of them.
+ * The clips whose sound covers a moment, nearest the playhead first, at most
+ * four of them.
  *
- * A row plays the same leader the picture shows: a seam window holds two
- * clips and the one the document orders first is the one heard, exactly as
- * the frame is drawn. Words are words, so text rows are left out, and a muted
- * clip or a muted row is left out whole rather than voiced at zero.
+ * A row sounds what it shows: outside a seam window that is its one clip,
+ * and inside one it is both — the window is exactly where the two sides cross
+ * (its own gains are applied when the voices are levelled). Words are words,
+ * so text rows are left out, and a muted clip or a muted row is left out
+ * whole rather than voiced at zero.
  */
 export function audibleClipsAt(
   timeline: TimelineDocument,
@@ -90,21 +121,14 @@ export function audibleClipsAt(
   const sounding: AudibleClip[] = [];
   for (const track of timeline.tracks) {
     if (track.muted) continue;
-    let leader: TimelineClip | null = null;
     for (const clip of timeline.clips) {
       if (clip.trackId !== track.id) continue;
       if (clip.kind === "text" || !clip.assetId) continue;
       if (clip.muted || clip.volume <= 0) continue;
       if (atMs < clip.startMs || atMs >= clip.startMs + clip.durationMs)
         continue;
-      if (
-        leader === null ||
-        clip.startMs < leader.startMs ||
-        (clip.startMs === leader.startMs && clip.id < leader.id)
-      )
-        leader = clip;
+      sounding.push({ clip, track });
     }
-    if (leader) sounding.push({ clip: leader, track });
   }
   // Nearest first: the clip the playhead walked into most recently is the one
   // whose voice matters, and the four nearest are all that sound.
@@ -212,6 +236,20 @@ function stopVoice(voice: Voice): void {
   voice.track = null;
 }
 
+/**
+ * The role a clip plays in the window its track has open at a moment, or null
+ * when the moment is outside every window.
+ */
+function roleInSeam(
+  seam: SeamMoment | null,
+  clip: TimelineClip,
+): TransitionRole | null {
+  if (!seam) return null;
+  if (seam.leader.id === clip.id) return "leader";
+  if (seam.follower.id === clip.id) return "follower";
+  return null;
+}
+
 /** The ramps that carry a clip's volume and fades, planned from where the clock stands. */
 function scheduleGain(
   ctx: AudioContext,
@@ -225,6 +263,46 @@ function scheduleGain(
   // An old plan must not argue with a new value: what was scheduled is taken
   // back before the new shape is laid down.
   param.cancelScheduledValues(now);
+  const seam = seamWindowAt(timeline, track.id, atMs);
+  const role = roleInSeam(seam, clip);
+  if (seam && role) {
+    // Inside a window the clip's own curve and the window's share multiply —
+    // the one place the transition touches the sound, so no second gain path
+    // exists (10 §4). The product is not a line, so it is anchored where the
+    // voice takes over and where the window ends, where the share is exactly
+    // 0 for the leader and 1 for the follower; a fade that outlives the
+    // window is ramped on after it.
+    const level = Math.max(0, clip.volume);
+    const windowEndMs = Math.min(
+      seam.follower.startMs + seam.transition.durationMs,
+      clip.startMs + clip.durationMs,
+    );
+    param.setValueAtTime(
+      clipGainAt(clip, track, atMs) * transitionGain(seam.progress, role),
+      now,
+    );
+    param.linearRampToValueAtTime(
+      role === "leader" ? 0 : clipGainAt(clip, track, windowEndMs),
+      now + (windowEndMs - atMs) / 1_000,
+    );
+    const intoClipMs = atMs - clip.startMs;
+    if (
+      clip.fadeInMs > 0 &&
+      clip.fadeInMs > intoClipMs + (windowEndMs - atMs)
+    ) {
+      // Linear, like the export's `afade`: the two sides trim the same curve.
+      param.linearRampToValueAtTime(
+        level,
+        now + (clip.fadeInMs - intoClipMs) / 1_000,
+      );
+    }
+    const untilEndMs = clip.startMs + clip.durationMs - atMs;
+    if (clip.fadeOutMs > 0 && untilEndMs > windowEndMs - atMs) {
+      param.linearRampToValueAtTime(0, now + untilEndMs / 1_000);
+    }
+    voice.trackGain.gain.value = track.muted ? 0 : 1;
+    return;
+  }
   param.setValueAtTime(clipGainAt(clip, track, atMs), now);
   const level = Math.max(0, clip.volume);
   const intoClipMs = atMs - clip.startMs;
@@ -367,17 +445,24 @@ function engine(): AudioEngine {
     tick(atMs) {
       if (!playing || !context) return;
       lastPlayhead = atMs;
+      // What should sound is the only reading that decides a rebuild: a clip
+      // boundary moves the set, and so does a seam window opening (the
+      // follower joins while the leader is still going) or closing.
+      const wanted = timeline ? audibleClipsAt(timeline, atMs) : [];
+      const sounding = new Set(
+        voices
+          .filter((voice) => voice.clipId !== null)
+          .map((voice) => voice.clipId),
+      );
+      const same =
+        wanted.length === sounding.size &&
+        wanted.every((entry) => sounding.has(entry.clip.id));
+      if (!same) {
+        rebuild(atMs);
+        return;
+      }
       for (const voice of voices) {
         if (voice.clipId === null) continue;
-        const clip = voice.clip;
-        if (!clip) continue;
-        // The moment has left the clip's span: the audible set is the only
-        // place boundaries are kept, so it is rebuilt rather than reasoned
-        // about here.
-        if (atMs >= clip.startMs + clip.durationMs || atMs < clip.startMs) {
-          rebuild(atMs);
-          return;
-        }
         if (Date.now() - voice.checkedAt >= RESYNC_INTERVAL_MS)
           checkDrift(voice, atMs);
       }

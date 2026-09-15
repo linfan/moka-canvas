@@ -5,6 +5,7 @@ import type {
   TimelineClip,
   TimelineDocument,
 } from "../../../shared/domain";
+import { drawTransition, seamAt, type SeamMoment } from "./blend";
 import { clipLook } from "./looks";
 import { drawTextClip } from "./text";
 
@@ -80,12 +81,11 @@ export interface FrameReport {
 }
 
 /**
- * The clip a track shows at a moment.
+ * The clip a track shows at a moment, outside any seam window.
  *
- * A seam window holds two clips at once — its leader's tail and its follower's
- * head — and this package shows the leader: the true blend is package 10's
- * business, and until it lands the cut reads as the hard cut it was. When two
- * clips start together, the one the document orders first is the leader.
+ * When two clips start together, the one the document orders first is the
+ * leader. A seam's own moment is `seamAt`'s business — this is the plain
+ * reading, and the fallback for a moment a window does not cover.
  */
 function leaderAt(
   timeline: TimelineDocument,
@@ -176,8 +176,12 @@ function drawPictureClip(
     frameWidth,
     frameHeight,
   );
+  // Whatever the context already carries is part of this clip's presence: a
+  // seam blend sets its factor on the context, so the two multiply where the
+  // clip's own opacity and fades are applied.
+  const carried = ctx.globalAlpha;
   ctx.save();
-  ctx.globalAlpha = alpha;
+  ctx.globalAlpha = alpha * carried;
   if (filter) ctx.filter = filter;
   if (picture.rotationDeg !== 0) {
     // The file asks for the turn and WebCodecs never applies it; package 12
@@ -196,7 +200,7 @@ function drawPictureClip(
   }
   if (filter) ctx.filter = "none";
   if (veil) {
-    ctx.globalAlpha = alpha * veil.alpha;
+    ctx.globalAlpha = alpha * veil.alpha * carried;
     ctx.globalCompositeOperation = "soft-light";
     ctx.fillStyle = veil.color;
     ctx.fillRect(box.x, box.y, box.width, box.height);
@@ -216,8 +220,10 @@ function drawWaiting(
   const alpha = Math.max(0, Math.min(1, clip.opacity)) * fadeFactor(clip, atMs);
   if (alpha <= 0) return;
   const inset = Math.min(frameWidth, frameHeight) * 0.06;
+  // Like the picture path, whatever the context carries is part of the blend.
+  const carried = ctx.globalAlpha;
   ctx.save();
-  ctx.globalAlpha = alpha * 0.5;
+  ctx.globalAlpha = alpha * 0.5 * carried;
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
   ctx.roundRect(
@@ -228,7 +234,7 @@ function drawWaiting(
     inset,
   );
   ctx.fill();
-  ctx.globalAlpha = alpha;
+  ctx.globalAlpha = alpha * carried;
   ctx.fillStyle = "#5b5b5b";
   ctx.font = `${Math.max(10, Math.round(frameHeight * 0.04))}px sans-serif`;
   ctx.textAlign = "center";
@@ -236,6 +242,20 @@ function drawWaiting(
   ctx.fillText("Loading", frameWidth / 2, frameHeight / 2);
   ctx.restore();
 }
+
+/**
+ * One track's contribution to a frame: the clip it shows, or a seam's two
+ * sides — both of which the track really is showing, so one cannot be dropped
+ * in favour of the other.
+ */
+type FrameLayer =
+  | { kind: "clip"; clip: TimelineClip; picture: FramePicture | null }
+  | {
+      kind: "seam";
+      seam: SeamMoment;
+      leaderPicture: FramePicture | null;
+      followerPicture: FramePicture | null;
+    };
 
 /**
  * Draws the frame under a moment, and reports what it drew.
@@ -249,22 +269,33 @@ export async function composeFrame(
   options: ComposeFrameOptions,
 ): Promise<FrameReport | null> {
   const { timeline, atMs, width, height } = options;
-  const chosen: { clip: TimelineClip; picture: FramePicture | null }[] = [];
+  /** The picture a clip reads at this moment; words carry no file. */
+  const pictureOf = (clip: TimelineClip): Promise<FramePicture | null> =>
+    clip.kind === "video"
+      ? options.sources.frameFor(clip, materialMoment(clip, atMs))
+      : Promise.resolve(null);
+
+  const chosen: FrameLayer[] = [];
   for (const track of timeline.tracks) {
     if (track.hidden) continue;
     // A row of sound is sound: it has no picture to put in the frame.
     if (track.kind === "audio") continue;
-    const clip = leaderAt(timeline, track.id, atMs);
-    if (!clip) continue;
-    if (clip.kind !== "video") {
-      // Words are drawn from the document itself, with no file behind them.
-      chosen.push({ clip, picture: null });
+    // A seam window holds two clips; both are read and drawn, each with its
+    // own material moment, so the blend is the same picture the clips would
+    // show alone. Outside a window the track shows its one leader.
+    const seam = seamAt(timeline, track.id, atMs);
+    if (seam) {
+      chosen.push({
+        kind: "seam",
+        seam,
+        leaderPicture: await pictureOf(seam.leader),
+        followerPicture: await pictureOf(seam.follower),
+      });
       continue;
     }
-    chosen.push({
-      clip,
-      picture: await options.sources.frameFor(clip, materialMoment(clip, atMs)),
-    });
+    const clip = leaderAt(timeline, track.id, atMs);
+    if (!clip) continue;
+    chosen.push({ kind: "clip", clip, picture: await pictureOf(clip) });
   }
   if (options.isCurrent && !options.isCurrent()) return null;
 
@@ -280,39 +311,73 @@ export async function composeFrame(
           adjust: options.adjustDraft.adjust,
         }
       : null;
-  for (const entry of chosen) {
-    const { clip } = entry;
+  /** Draws one clip as the track would show it alone; says if a grade was dropped. */
+  const drawOne = (
+    target: CanvasRenderingContext2D,
+    clip: TimelineClip,
+    picture: FramePicture | null,
+  ): boolean => {
+    if (clip.kind === "text") {
+      if (clip.text)
+        drawTextClip(
+          target,
+          clip.text,
+          { width, height },
+          timeline.settings.width,
+          Math.max(0, Math.min(1, clip.opacity)) * fadeFactor(clip, atMs),
+        );
+      return false;
+    }
+    if (picture?.kind === "picture")
+      return drawPictureClip(
+        target,
+        clip,
+        picture.picture,
+        atMs,
+        width,
+        height,
+        options.filter,
+        drafted?.ids.has(clip.id) ? drafted.adjust : undefined,
+      );
+    if (picture?.kind === "waiting")
+      drawWaiting(target, clip, atMs, width, height);
+    return false;
+  };
+  for (const layer of chosen) {
     try {
-      if (clip.kind === "text") {
-        if (clip.text)
-          drawTextClip(
-            ctx,
-            clip.text,
-            { width, height },
-            timeline.settings.width,
-            Math.max(0, Math.min(1, clip.opacity)) * fadeFactor(clip, atMs),
-          );
+      if (layer.kind === "clip") {
+        coloursSkipped =
+          drawOne(ctx, layer.clip, layer.picture) || coloursSkipped;
         continue;
       }
-      if (entry.picture?.kind === "picture")
-        coloursSkipped =
-          drawPictureClip(
-            ctx,
-            clip,
-            entry.picture.picture,
-            atMs,
-            width,
-            height,
-            options.filter,
-            drafted?.ids.has(clip.id) ? drafted.adjust : undefined,
-          ) || coloursSkipped;
-      else if (entry.picture?.kind === "waiting")
-        drawWaiting(ctx, clip, atMs, width, height);
+      // Both sides of the seam draw as regular clips, through the kind's own
+      // blend; what one side would report about a dropped grade is folded in.
+      let skipped = false;
+      const side =
+        (clip: TimelineClip, picture: FramePicture | null) =>
+        (target: CanvasRenderingContext2D) => {
+          skipped = drawOne(target, clip, picture) || skipped;
+        };
+      drawTransition(
+        ctx,
+        layer.seam.kind,
+        layer.seam.progress,
+        side(layer.seam.leader, layer.leaderPicture),
+        side(layer.seam.follower, layer.followerPicture),
+      );
+      coloursSkipped = skipped || coloursSkipped;
     } catch {
       // A picture that will not draw — a frame already let go of, an element
       // that never had data — leaves its layer out rather than taking the rest
       // of the frame down with it.
     }
   }
-  return { clips: chosen.map((entry) => entry.clip), coloursSkipped };
+  return {
+    clips: chosen.flatMap((layer) =>
+      layer.kind === "clip"
+        ? [layer.clip]
+        : [layer.seam.leader, layer.seam.follower],
+    ),
+    coloursSkipped,
+  };
 }

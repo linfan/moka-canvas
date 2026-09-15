@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { TimelineClip, TimelineTrack } from "../../../shared/domain";
-import { clipGainAt, needsResync } from "./audioGraph";
+import type {
+  TimelineClip,
+  TimelineDocument,
+  TimelineTrack,
+  TimelineTransition,
+} from "../../../shared/domain";
+import {
+  audibleClipsAt,
+  clipGainAt,
+  needsResync,
+  transitionGain,
+} from "./audioGraph";
 
 const T0 = "2024-01-01T00:00:00.000Z";
 
@@ -95,5 +105,76 @@ describe("when a source is pulled back to the clock", () => {
     expect(needsResync(1_000, 1_100)).toBe(true);
     expect(needsResync(1_000, 400)).toBe(true);
     expect(needsResync(1_000, 4_000)).toBe(true);
+  });
+});
+
+describe("the share a seam window gives each side", () => {
+  it("crosses linearly, meeting at the middle", () => {
+    expect(transitionGain(0.5, "leader")).toBe(0.5);
+    expect(transitionGain(0.5, "follower")).toBe(0.5);
+  });
+
+  it("sits at the ends: the leader whole at 0, the follower whole at 1", () => {
+    expect(transitionGain(0, "leader")).toBe(1);
+    expect(transitionGain(0, "follower")).toBe(0);
+    expect(transitionGain(1, "leader")).toBe(0);
+    expect(transitionGain(1, "follower")).toBe(1);
+  });
+
+  it("leaves a moment outside every window alone", () => {
+    expect(transitionGain(null, "leader")).toBe(1);
+    expect(transitionGain(null, "follower")).toBe(1);
+  });
+});
+
+describe("the clips that sound at a moment", () => {
+  /** One audio track whose A and B are joined by a 500ms seam. */
+  function seamed(): TimelineDocument {
+    return {
+      id: "timeline-1",
+      name: "Cut",
+      schemaVersion: 1,
+      settings: { fps: 30, width: 1920, height: 1080, background: "#000000" },
+      tracks: [track()],
+      clips: [
+        clip({ id: "a", startMs: 0, durationMs: 4_000 }),
+        clip({ id: "b", startMs: 3_500, durationMs: 2_000 }),
+      ],
+      transitions: [
+        {
+          id: "s1",
+          afterClipId: "a",
+          kind: "crossfade",
+          durationMs: 500,
+          createdAt: T0,
+        } satisfies TimelineTransition,
+      ],
+      createdAt: T0,
+      updatedAt: T0,
+    };
+  }
+
+  it("sounds the two sides of a window together, nearest first", () => {
+    // 3,700 is inside the window [3,500, 4,000): both sides are heard.
+    expect(
+      audibleClipsAt(seamed(), 3_700).map((entry) => entry.clip.id),
+    ).toEqual(["b", "a"]);
+    // Before the window only the leader sounds; after it, only the follower.
+    expect(
+      audibleClipsAt(seamed(), 1_000).map((entry) => entry.clip.id),
+    ).toEqual(["a"]);
+    expect(
+      audibleClipsAt(seamed(), 4_500).map((entry) => entry.clip.id),
+    ).toEqual(["b"]);
+  });
+
+  it("leaves a muted side out of the window's pair", () => {
+    const timeline = seamed();
+    timeline.clips = timeline.clips.map((entry) =>
+      entry.id === "b" ? { ...entry, muted: true } : entry,
+    );
+    expect(
+      audibleClipsAt(timeline, 3_700).map((entry) => entry.clip.id),
+    ).toEqual(["a"]);
   });
 });

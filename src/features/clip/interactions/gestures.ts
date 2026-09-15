@@ -6,6 +6,7 @@ import {
   type TimelineClip,
   type TimelineDocument,
   type TrackId,
+  type TransitionId,
 } from "../../../shared/domain";
 import { trackAccepts } from "../../../shared/domain/timeline";
 import {
@@ -46,7 +47,9 @@ export interface DraftClip {
  * A move carries every block the drag took; a trim carries the one block
  * being stretched, and its duration is what the bubble reads out. The guide
  * is the moment a snapped edge landed on, and `rowTrackId` is the row a
- * cross-track drag is landing on — null while it stays where it was.
+ * cross-track drag is landing on — null while it stays where it was. A seam
+ * drag carries the window it would give the transition it grabbed, which the
+ * canvas recomputes against the moment under the pointer.
  */
 export type TimelineDraft =
   | {
@@ -56,7 +59,8 @@ export type TimelineDraft =
       rowTrackId: TrackId | null;
     }
   | { kind: "trim"; clip: DraftClip; edge: ClipEdge; guideMs: number | null }
-  | { kind: "marquee"; rect: Rect };
+  | { kind: "marquee"; rect: Rect }
+  | { kind: "seam"; transitionId: TransitionId; durationMs: number };
 
 /** A point pair as the rectangle between them, in either direction. */
 export function marqueeRect(

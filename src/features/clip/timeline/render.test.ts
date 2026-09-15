@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createTimeline } from "../../../shared/domain";
-import type { TimelineDocument } from "../../../shared/domain";
-import { buildCutMokaFile } from "../../../shared/domain/fixtures";
+import type { TimelineClip, TimelineDocument } from "../../../shared/domain";
+import {
+  buildCutMokaFile,
+  cutFixtureIds,
+} from "../../../shared/domain/fixtures";
 import type { DraftClip } from "../interactions/gestures";
 import { TIMELINE_PALETTE } from "./palette";
 import { renderTimeline, type TimelineRenderModel } from "./render";
@@ -330,5 +333,106 @@ describe("drawing what a gesture has in hand", () => {
       ),
     ).toBe(false);
     expect(named(calls, "setLineDash")).toEqual([]);
+  });
+});
+
+describe("the ghost an empty seam shows under the pointer", () => {
+  /** The fixture with its transition taken out and its follower butted. */
+  function butted(): TimelineDocument {
+    const timeline = cut();
+    const ids = cutFixtureIds();
+    timeline.transitions = [];
+    timeline.clips = timeline.clips.map((clip) =>
+      clip.id === ids.clipB ? { ...clip, startMs: 4_000 } : clip,
+    );
+    return timeline;
+  }
+
+  function hoverSeam(): { leader: TimelineClip; follower: TimelineClip } {
+    const timeline = butted();
+    const ids = cutFixtureIds();
+    return {
+      leader: timeline.clips.find((clip) => clip.id === ids.clipA)!,
+      follower: timeline.clips.find((clip) => clip.id === ids.clipB)!,
+    };
+  }
+
+  it("draws a sixteen-pixel + at the boundary, on the row's middle", () => {
+    const { ctx, calls } = recordingContext();
+    renderTimeline(ctx, model({ timeline: butted(), hoverSeam: hoverSeam() }));
+    // The boundary is at 4,000ms: 240px at 60px/s, the video row's centre 152.
+    const ghost = named(calls, "roundRect").find(
+      (call) => Number(call.args[2]) === 16 && Number(call.args[3]) === 16,
+    );
+    expect(ghost).toBeDefined();
+    expect(Number(ghost!.args[0])).toBeCloseTo(232);
+    expect(Number(ghost!.args[1])).toBeCloseTo(144);
+  });
+
+  it("draws no ghost with nothing hovered", () => {
+    const { ctx, calls } = recordingContext();
+    renderTimeline(ctx, model({ timeline: butted() }));
+    expect(
+      named(calls, "roundRect").some(
+        (call) => Number(call.args[2]) === 16 && Number(call.args[3]) === 16,
+      ),
+    ).toBe(false);
+  });
+
+  it("draws no ghost once the document has pulled the seam back", () => {
+    const ids = cutFixtureIds();
+    const pulled = cut();
+    const { ctx, calls } = recordingContext();
+    renderTimeline(
+      ctx,
+      model({
+        timeline: pulled,
+        hoverSeam: {
+          leader: pulled.clips.find((clip) => clip.id === ids.clipA)!,
+          follower: pulled.clips.find((clip) => clip.id === ids.clipB)!,
+        },
+      }),
+    );
+    expect(
+      named(calls, "roundRect").some(
+        (call) => Number(call.args[2]) === 16 && Number(call.args[3]) === 16,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("the draft a seam drag draws", () => {
+  it("washes the window, keeps the badge, and reads the length out", () => {
+    const { ctx, calls } = recordingContext();
+    const ids = cutFixtureIds();
+    renderTimeline(
+      ctx,
+      model({
+        draft: {
+          kind: "seam",
+          transitionId: ids.transition,
+          durationMs: 800,
+        },
+      }),
+    );
+    // The window runs from 4,000 − 800 = 3,200ms (192px) to the seam (240px).
+    const wash = named(calls, "roundRect").find(
+      (call) => Number(call.args[2]) === 48 && Number(call.args[3]) === 58,
+    );
+    expect(wash).toBeDefined();
+    expect(Number(wash!.args[0])).toBeCloseTo(192);
+    // The badge stays at the seam the window will keep.
+    expect(
+      named(calls, "roundRect").some(
+        (call) =>
+          Number(call.args[2]) === 18 &&
+          Number(call.args[3]) === 18 &&
+          Math.round(Number(call.args[0])) === 231,
+      ),
+    ).toBe(true);
+    // The bubble reads the draft's own length on the document's clock.
+    expect(named(calls, "fillText").map((call) => call.args[0])).toContain(
+      "00:00:00:24",
+    );
   });
 });

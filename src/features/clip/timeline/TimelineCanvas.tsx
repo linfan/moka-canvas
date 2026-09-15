@@ -9,11 +9,16 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import type {
-  ClipPatch,
-  TimelineClip,
-  TimelineDocument,
+import {
+  DEFAULT_TRANSITION_KIND,
+  newId,
+  nowIso,
+  type ClipPatch,
+  type TimelineClip,
+  type TimelineDocument,
+  type TimelineTransition,
 } from "../../../shared/domain";
+import { followerOf } from "../../../shared/domain/timeline";
 import { execute } from "../../editor/commands/execute";
 import { ASSET_DRAG_MIME } from "../../editor/interactions/actions";
 import { useAppStore } from "../../editor/stores/appStore";
@@ -34,6 +39,12 @@ import {
   type TrimDraft,
 } from "../interactions/gestures";
 import { snapContext } from "../interactions/snapping";
+import {
+  SEAM_TOO_SHORT_MESSAGE,
+  clampSeamMs,
+  seamAddCommands,
+  seamEditCommands,
+} from "../interactions/transitions";
 import { useClipStore } from "../stores/clipStore";
 import {
   TimelineMenu,
@@ -104,6 +115,13 @@ type Gesture =
       downY: number;
       additive: boolean;
       rect: { x: number; y: number; width: number; height: number } | null;
+    }
+  | {
+      kind: "seam";
+      transition: TimelineTransition;
+      downX: number;
+      /** The window the drag would give the transition; never in the document. */
+      draft: Extract<TimelineDraft, { kind: "seam" }> | null;
     };
 
 /** How the canvas answers the pointer, as the class its edges wear. */
@@ -151,6 +169,15 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
   const [dropping, setDropping] = useState(false);
   const [cursor, setCursor] = useState<Cursor>("default");
   const [menu, setMenu] = useState<MenuState | null>(null);
+  // The seam under the pointer, held only while the pointer is over one. It
+  // is component state rather than a store's: a hover is a reading of the
+  // pointer, and only the canvas draws it. The key keeps it from being set
+  // again for every move that stays on the same seam.
+  const hoverKeyRef = useRef("");
+  const [hoverSeam, setHoverSeam] = useState<{
+    leader: TimelineClip;
+    follower: TimelineClip;
+  } | null>(null);
   const pxPerSec = useClipStore((state) => state.view.pxPerSec);
   const playheadMs = useClipStore((state) => state.playheadMs);
   const decor = useTimelineDecor();
@@ -188,6 +215,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       // Read at the frame rather than handed in: a draft lives only as long
       // as the pointer is down, and the drawing asks for it every frame.
       draft: draftRef.current,
+      hoverSeam,
     });
     // What is drawn is pixels, which nothing can read back: what changed is
     // written onto the room instead, a moment behind the frame that drew it.
@@ -208,6 +236,24 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
           )
           .join(";"),
       );
+      // Every transition as one line: which seam it sits on, where its window
+      // opens, how long it runs, and what kind it is. The window's start is
+      // the follower's own start, which is the pull-back the doc holds.
+      room.setAttribute(
+        "data-transitions",
+        timeline.transitions
+          .map((transition) => {
+            const leader = timeline.clips.find(
+              (clip) => clip.id === transition.afterClipId,
+            );
+            if (!leader) return "";
+            const follower = followerOf(timeline, leader);
+            if (!follower) return "";
+            return `${transition.id}@${leader.trackId}:${leader.id}:${follower.startMs}:${transition.durationMs}:${transition.kind}`;
+          })
+          .filter((entry) => entry.length > 0)
+          .join(";"),
+      );
       room.setAttribute(
         "data-selected-clip-ids",
         state.selection.clipIds.join(","),
@@ -217,7 +263,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
         state.selection.transitionId ?? "",
       );
     }
-  }, [timeline, decor]);
+  }, [timeline, decor, hoverSeam]);
 
   const schedule = useCallback(() => {
     if (frameRef.current !== null) return;
@@ -376,19 +422,33 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
   }, [cancelGesture]);
 
   /** What a pointer over the cut is about to do, as the cursor says. */
-  const cursorFor = (local: { x: number; y: number }): Cursor => {
-    const viewport = viewportRef.current;
-    if (!viewport) return "default";
-    if (inRuler(local.y, viewport.scrollTop)) return "default";
-    const hit = hitAt(local.x, local.y);
-    if (!hit) return "default";
-    if (hit.kind === "transition") return "pointer";
-    if (hit.kind !== "clip") return "default";
+  const cursorFor = (hit: TimelineHit | null, x: number): Cursor => {
+    // A seam badge and an empty seam's ghost are both things to drag or click
+    // along the line, so both wear the same left-right cursor.
+    if (hit?.kind === "transition" || hit?.kind === "seam") return "ew";
+    if (hit?.kind !== "clip") return "default";
     const track = timeline.tracks.find((row) => row.id === hit.clip.trackId);
     if (track?.locked) return "default";
-    const edge = edgeAt(hit.clip, trackRows(timeline), viewNow(), local.x);
+    const edge = edgeAt(hit.clip, trackRows(timeline), viewNow(), x);
     if (edge) return "ew";
     return "grab";
+  };
+
+  /** The hover the drawing reads: only a seam is worth holding onto. */
+  const showHover = (hit: TimelineHit | null) => {
+    const key =
+      hit?.kind === "seam"
+        ? `seam:${hit.leader.id}`
+        : hit?.kind === "transition"
+          ? `transition:${hit.transition.id}`
+          : (hit?.kind ?? "");
+    if (key === hoverKeyRef.current) return;
+    hoverKeyRef.current = key;
+    setHoverSeam(
+      hit?.kind === "seam"
+        ? { leader: hit.leader, follower: hit.follower }
+        : null,
+    );
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -427,6 +487,36 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       additive: event.shiftKey || event.ctrlKey || event.metaKey,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  /**
+   * Lays the default transition on a butted seam the pointer clicked.
+   *
+   * The window is the default clamped by the two clips, and the pull-back is
+   * the command's own doing — nothing here moves a clip. A pair too short for
+   * even the smallest window is the one refusal the UI says itself, because
+   * the command that would carry it cannot exist; everything else the command
+   * layer answers. A new transition is chosen on landing, so the inspector
+   * opens straight onto it.
+   */
+  const addSeamTransition = (seam: { leader: TimelineClip }) => {
+    const plan = seamAddCommands(
+      timeline,
+      seam.leader.id,
+      DEFAULT_TRANSITION_KIND,
+      newId(),
+      nowIso(),
+    );
+    if (!plan.ok) {
+      if (plan.reason === "too-short")
+        useAppStore.getState().pushToast("error", SEAM_TOO_SHORT_MESSAGE);
+      return;
+    }
+    if (!execute("Add transition", plan.commands)) return;
+    showHover(null);
+    useClipStore
+      .getState()
+      .select({ clipIds: [], transitionId: plan.transition.id });
   };
 
   /** Turns a wandering press into the gesture it has become. */
@@ -483,7 +573,18 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       };
       return;
     }
-    // A seam badge is 10's to move; a drag that starts on one goes nowhere.
+    if (candidate.hit.kind === "transition") {
+      // The badge is 10's to drag: the window it would give the seam is drawn
+      // from the moment under the pointer and committed in one command.
+      gestureRef.current = {
+        kind: "seam",
+        transition: candidate.hit.transition,
+        downX: candidate.x,
+        draft: null,
+      };
+      return;
+    }
+    // Nothing else below the ruler drags: an empty seam's `+` is a click.
     gestureRef.current = null;
   };
 
@@ -513,6 +614,26 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     const snapEnabled = store.snapEnabled && !event.shiftKey;
     const rows = trackRows(timeline);
     const deltaMs = msAt(local.x, view) - msAt(gesture.downX, view);
+    if (gesture.kind === "seam") {
+      // The window the seam would wear: the one it has, moved by the pointer's
+      // own distance in time and kept inside what the two clips allow. The
+      // document is not touched until the release.
+      const durationMs = clampSeamMs(
+        timeline,
+        gesture.transition.id,
+        Math.round(gesture.transition.durationMs + deltaMs),
+      );
+      const draft = {
+        kind: "seam" as const,
+        transitionId: gesture.transition.id,
+        durationMs,
+      };
+      gestureRef.current = { ...gesture, draft };
+      draftRef.current = draft;
+      setCursor("ew");
+      schedule();
+      return;
+    }
     if (gesture.kind === "move") {
       const pressed =
         gesture.members.find((member) => member.id === gesture.pressedId) ??
@@ -628,6 +749,18 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       ]);
       return;
     }
+    if (gesture.kind === "seam") {
+      const draft = gesture.draft;
+      if (!draft) return;
+      // The chain edit is one command array: the suffix comes down and is laid
+      // back with the new window, so one history step holds the whole change.
+      const commands = seamEditCommands(timeline, draft.transitionId, {
+        durationMs: draft.durationMs,
+      });
+      if (!commands) return;
+      execute("Change transition", commands);
+      return;
+    }
     if (gesture.kind !== "trim") return;
     const draft = gesture.draft;
     if (!draft) return;
@@ -658,7 +791,9 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     }
     const gesture = gestureRef.current;
     if (!gesture) {
-      setCursor(cursorFor(local));
+      const hit = hitAt(local.x, local.y);
+      showHover(hit);
+      setCursor(cursorFor(hit, local.x));
       return;
     }
     if (gesture.kind === "candidate") {
@@ -700,6 +835,12 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
         Math.abs(local.x - gesture.x) >= CLICK_SLOP_PX ||
         Math.abs(local.y - gesture.y) >= CLICK_SLOP_PX;
       if (wandered) return;
+      // An empty seam is a click and not a choice: it lays the default
+      // transition down and chooses it, so the card opens on the new seam.
+      if (gesture.hit.kind === "seam") {
+        addSeamTransition(gesture.hit);
+        return;
+      }
       const store = useClipStore.getState();
       const mode = event.shiftKey
         ? "add"
@@ -722,13 +863,20 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       return;
     }
     commitGesture(gesture);
-    setCursor(cursorFor(local));
+    const hit = hitAt(local.x, local.y);
+    showHover(hit);
+    setCursor(cursorFor(hit, local.x));
     schedule();
   };
 
   const onPointerCancel = () => {
     draggingRef.current = false;
     cancelGesture();
+  };
+
+  /** A pointer that leaves the screen takes its offer with it. */
+  const onPointerLeave = () => {
+    showHover(null);
   };
 
   /** A right-click opens the cut's own menu, over whichever piece it landed on. */
@@ -738,9 +886,14 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     if (!local) return;
     const hit = hitAt(local.x, local.y);
     if (!hit) return;
-    // A seam badge has no menu yet: adjusting a window is 10's to offer, and
-    // anything here would be half of that work.
-    if (hit.kind === "transition" || hit.kind === "ruler") return;
+    // A seam and its badge have no menu: the window is edited by the card or
+    // by dragging the badge itself, and a third surface would be one too many.
+    if (
+      hit.kind === "transition" ||
+      hit.kind === "seam" ||
+      hit.kind === "ruler"
+    )
+      return;
     if (hit.kind === "clip") {
       const store = useClipStore.getState();
       // The menu acts on the selection, so a piece it landed on that was not
@@ -794,9 +947,11 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
           ? (timeline.clips.find(
               (clip) => clip.id === hit.transition.afterClipId,
             )?.trackId ?? null)
-          : hit.kind === "empty"
-            ? hit.trackId
-            : null;
+          : hit.kind === "seam"
+            ? hit.leader.trackId
+            : hit.kind === "empty"
+              ? hit.trackId
+              : null;
     if (trackId === null) return;
     // The file lands on the frame the pointer's moment falls on: where a
     // piece sits is decided when it is laid down and nowhere else.
@@ -829,6 +984,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
         onDrop={onDrop}
         onPointerCancel={onPointerCancel}
         onPointerDown={onPointerDown}
+        onPointerLeave={onPointerLeave}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         ref={canvasRef}

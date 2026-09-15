@@ -227,6 +227,57 @@ describe("drawing the frame under the playhead", () => {
     expect(report?.clips.map((piece) => piece.id)).toEqual(["lower", "upper"]);
   });
 
+  it("draws both sides of a seam window and blends them", async () => {
+    const leader = clip({ id: "leader", trackId: "v1", durationMs: 4_000 });
+    const follower = clip({
+      id: "follower",
+      trackId: "v1",
+      startMs: 3_500,
+      durationMs: 2_000,
+      outPointMs: 2_000,
+    });
+    const timeline = cut([track("v1", "video")], [leader, follower]);
+    timeline.transitions = [
+      {
+        id: "s1",
+        afterClipId: "leader",
+        kind: "crossfade",
+        durationMs: 500,
+        createdAt: NOW,
+      },
+    ];
+    const { ctx, calls } = recordingContext();
+    const sources = sourcesFor((piece) =>
+      picture(piece.id === "leader" ? LOWER : UPPER, 400, 200),
+    );
+    // Halfway into the window: both frames are read, the follower at half alpha.
+    const report = await composeFrame(ctx, {
+      width: 1000,
+      height: 1000,
+      timeline,
+      atMs: 3_750,
+      sources,
+      filter: true,
+    });
+    expect(drawnSources(calls)).toEqual([LOWER, UPPER]);
+    expect(sources.asked.map((ask) => ask.clipId)).toEqual([
+      "leader",
+      "follower",
+    ]);
+    const alphas = calls
+      .filter((call) => call.name === "drawImage")
+      .map((call) => call.globalAlpha);
+    expect(alphas[0]).toBeCloseTo(1, 4);
+    expect(alphas[1]).toBeCloseTo(0.5, 4);
+    // Both sides are the clips the frame drew, in draw order.
+    expect(report?.clips.map((piece) => piece.id)).toEqual([
+      "leader",
+      "follower",
+    ]);
+    // The follower's own material clock is read through its pulled-back start.
+    expect(sources.asked[1].materialMs).toBe(250);
+  });
+
   it("multiplies a clip's opacity by its two fades", async () => {
     const timeline = cut(
       [track("v1", "video")],

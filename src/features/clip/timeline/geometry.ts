@@ -36,6 +36,8 @@ export const TAIL_MS = 4_000;
 export const TRANSITION_BADGE_PX = 18;
 /** How near a block's edge a pointer must be to be trimming rather than moving it. */
 export const CLIP_EDGE_PX = 6;
+/** How near a butted seam a pointer must be to be over its `+`. */
+export const SEAM_HIT_PX = 6;
 /** A major tick this far apart keeps its label off its neighbour's; a minor one reads at 48. */
 export const MAJOR_TICK_MIN_PX = 72;
 export const MINOR_TICK_MIN_PX = 48;
@@ -58,6 +60,8 @@ export interface TrackRow {
 export type TimelineHit =
   | { kind: "clip"; clip: TimelineClip }
   | { kind: "transition"; transition: TimelineTransition }
+  /** A butted seam with nothing on it, where a transition may be laid down. */
+  | { kind: "seam"; leader: TimelineClip; follower: TimelineClip }
   | { kind: "ruler" }
   | { kind: "empty"; trackId: TrackId | null };
 
@@ -245,10 +249,36 @@ function tickWidthPx(ms: number, pxPerSec: number): number {
 }
 
 /**
+ * The butted seam under an x on a row, or null.
+ *
+ * Two clips in track order whose head and tail meet exactly — a seam a
+ * transition could land on. A seam that already carries one is pulled back by
+ * its window and so is not butted; the badge is what that seam offers.
+ */
+export function buttedSeamAt(
+  onTrack: TimelineClip[],
+  view: TimelineView,
+  x: number,
+): { leader: TimelineClip; follower: TimelineClip } | null {
+  const sorted = [...onTrack].sort(
+    (a, b) => a.startMs - b.startMs || (a.id < b.id ? -1 : 1),
+  );
+  for (let i = 0; i + 1 < sorted.length; i += 1) {
+    const leader = sorted[i];
+    const follower = sorted[i + 1];
+    if (follower.startMs !== leader.startMs + leader.durationMs) continue;
+    if (Math.abs(x - xAt(follower.startMs, view)) <= SEAM_HIT_PX)
+      return { leader, follower };
+  }
+  return null;
+}
+
+/**
  * What a point lands on, topmost first.
  *
- * The badge is the smallest target and is asked first; the point then falls
- * to the last clip to draw over it, which within a row is the one that starts
+ * The badge is the smallest target and is asked first; then a butted seam's
+ * `+`, which sits over both blocks' edges and therefore beats them; then the
+ * last clip to draw over the point, which within a row is the one that starts
  * latest. The point is in canvas pixels across and content space down, which
  * is what the canvas hands in.
  */
@@ -280,6 +310,8 @@ export function hitTest(
       return { kind: "transition", transition };
     }
   }
+  const seam = buttedSeamAt(onTrack, view, point.x);
+  if (seam) return { kind: "seam", ...seam };
   const ms = msAt(point.x, view);
   const sorted = [...onTrack].sort((a, b) => a.startMs - b.startMs);
   for (let i = sorted.length - 1; i >= 0; i -= 1) {

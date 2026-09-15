@@ -236,6 +236,47 @@ describe("hit testing", () => {
     });
     expect(hit({ x: 60, y: 200 })).toEqual({ kind: "empty", trackId: null });
   });
+
+  describe("the seam an empty boundary offers", () => {
+    /** The fixture with its transition taken out and its follower butted. */
+    function butted(): TimelineDocument {
+      const timeline = cut();
+      const ids = cutFixtureIds();
+      timeline.transitions = [];
+      timeline.clips = timeline.clips.map((clip) =>
+        clip.id === ids.clipB ? { ...clip, startMs: 4_000 } : clip,
+      );
+      return timeline;
+    }
+
+    it("calls a butted boundary within the six pixels its + reaches", () => {
+      const ids = cutFixtureIds();
+      const timeline = butted();
+      // A runs 0–240 at 60px/s and B butts against it: the boundary is at 240.
+      for (const x of [234, 240, 246]) {
+        const seam = hitTest(timeline, VIEW, { x, y: 152 });
+        expect(seam).toMatchObject({ kind: "seam" });
+        if (seam.kind !== "seam") throw new Error("expected a seam");
+        expect(seam.leader.id).toBe(ids.clipA);
+        expect(seam.follower.id).toBe(ids.clipB);
+      }
+      // Outside the reach the blocks go back to being blocks.
+      expect(hitTest(timeline, VIEW, { x: 233, y: 152 })).toMatchObject({
+        kind: "clip",
+      });
+      expect(hitTest(timeline, VIEW, { x: 247, y: 152 })).toMatchObject({
+        kind: "clip",
+      });
+    });
+
+    it("leaves other rows and pulled-back seams alone", () => {
+      // The audio row's single clip has no neighbour to be butted against.
+      expect(hitTest(butted(), VIEW, { x: 240, y: 90 }).kind).toBe("clip");
+      // The cut fixture's seam carries a transition, so its clips are pulled
+      // back and there is no boundary left to lay anything on.
+      expect(hitTest(cut(), VIEW, { x: 240, y: 152 }).kind).toBe("transition");
+    });
+  });
 });
 
 describe("the edges a pointer can catch", () => {
