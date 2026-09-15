@@ -4,6 +4,7 @@ import {
   formatTimecode,
   frameAligned,
   nextFrameMs,
+  parseTimecode,
   prevFrameMs,
   stepFrames,
 } from "./timecode";
@@ -35,6 +36,44 @@ describe("formatTimecode", () => {
 
   it("holds a moment before the head at the head", () => {
     expect(formatTimecode(-500, 30)).toBe("00:00:00:00");
+  });
+});
+
+describe("parseTimecode", () => {
+  it("reads a full timecode back into a moment", () => {
+    expect(parseTimecode("00:00:00:00", 30)).toBe(0);
+    // One second and twelve frames at 30fps is a second and four hundred.
+    expect(parseTimecode("00:00:01:12", 30)).toBe(1_400);
+    expect(parseTimecode("01:02:03:00", 30)).toBe(3_723_000);
+    expect(parseTimecode("00:00:01:01", 60)).toBe(1_017);
+  });
+
+  it("fills the fields a shorter reading leaves off from the right", () => {
+    expect(parseTimecode("1:5", 30)).toBe(65_000);
+    expect(parseTimecode("5", 30)).toBe(5_000);
+    expect(parseTimecode("2:03:04", 30)).toBe(7_384_000);
+    expect(parseTimecode(" 00:00:02:00 ", 30)).toBe(2_000);
+  });
+
+  it("answers null for a reading that is not a timecode", () => {
+    expect(parseTimecode("", 30)).toBeNull();
+    expect(parseTimecode("abc", 30)).toBeNull();
+    expect(parseTimecode("1:2:3:4:5", 30)).toBeNull();
+    expect(parseTimecode("-1:05", 30)).toBeNull();
+    expect(parseTimecode("00:00:00:30", 30)).toBeNull();
+    expect(parseTimecode("00:60:00:00", 30)).toBeNull();
+    expect(parseTimecode("00:00:61:00", 30)).toBeNull();
+    expect(parseTimecode("1..2", 30)).toBeNull();
+  });
+
+  it("is the clock's own mirror: what a moment formats to parses back to its frame", () => {
+    for (const fps of [24, 25, 30, 60]) {
+      for (const ms of [0, 1, 17, 33, 500, 999, 1_016, 2_500, 7_333, 61_017]) {
+        expect(parseTimecode(formatTimecode(ms, fps), fps)).toBe(
+          frameAligned(ms, fps),
+        );
+      }
+    }
   });
 });
 

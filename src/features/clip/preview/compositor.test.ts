@@ -540,6 +540,70 @@ describe("the grade a clip wears", () => {
     );
     expect(report?.coloursSkipped).toBe(true);
   });
+
+  it("dresses the clip a dragged draft names in the draft's grade", async () => {
+    const timeline = cut(
+      [track("v1", "video"), track("v2", "video")],
+      [
+        clip({
+          id: "dragged",
+          trackId: "v1",
+          adjust: { brightness: 0.2, contrast: 0, saturation: 0 },
+        }),
+        clip({
+          id: "kept",
+          trackId: "v2",
+          adjust: { brightness: 0.2, contrast: 0, saturation: 0 },
+        }),
+      ],
+    );
+    const { ctx, calls } = recordingContext();
+    await composeFrame(ctx, {
+      width: 1000,
+      height: 1000,
+      timeline,
+      atMs: 100,
+      sources: sourcesFor(() => picture(LOWER, 400, 200)),
+      filter: true,
+      // The hand is on the lower clip only: the other keeps its own grade.
+      adjustDraft: {
+        clipIds: ["dragged"],
+        adjust: { brightness: -0.5, contrast: 0.25, saturation: 0 },
+      },
+    });
+    const drawn = calls.filter((call) => call.name === "drawImage");
+    expect(drawn[0].filter).toBe("brightness(0.5) contrast(1.25)");
+    expect(drawn[1].filter).toBe("brightness(1.2)");
+  });
+
+  it("leaves every clip on its own grade when the draft names none of them", async () => {
+    const timeline = cut(
+      [track("v1", "video")],
+      [
+        clip({
+          id: "graded",
+          trackId: "v1",
+          adjust: { brightness: 0.2, contrast: 0, saturation: 0 },
+        }),
+      ],
+    );
+    const { ctx, calls } = recordingContext();
+    await composeFrame(ctx, {
+      width: 1000,
+      height: 1000,
+      timeline,
+      atMs: 100,
+      sources: sourcesFor(() => picture(LOWER, 400, 200)),
+      filter: true,
+      adjustDraft: {
+        clipIds: [],
+        adjust: { brightness: -1, contrast: 0, saturation: 0 },
+      },
+    });
+    expect(calls.find((call) => call.name === "drawImage")!.filter).toBe(
+      "brightness(1.2)",
+    );
+  });
 });
 
 describe("words on the picture", () => {

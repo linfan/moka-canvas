@@ -50,6 +50,7 @@ beforeEach(() => {
     activeTimelineId: null,
     face: "local",
     selection: { clipIds: [], transitionId: null },
+    adjustDraft: null,
     mediaSelection: null,
     newTimelineOpen: false,
     view: { pxPerSec: 60, scrollLeftPx: 0 },
@@ -416,5 +417,48 @@ describe("the clock the cut is played by", () => {
     store().toggleLoop();
     expect(store().loop).toBe(true);
     expect(localStorage.getItem("moka-canvas:clip-loop")).toBeNull();
+  });
+});
+
+describe("the grade a hand is dragging", () => {
+  it("holds the draft apart from the document, clamped to what a grade is", () => {
+    store().setAdjustDraft({
+      clipIds: ["clip-1"],
+      adjust: { brightness: 4, contrast: -0.25, saturation: Number.NaN },
+    });
+    expect(store().adjustDraft).toEqual({
+      clipIds: ["clip-1"],
+      adjust: { brightness: 1, contrast: -0.25, saturation: 0 },
+    });
+  });
+
+  it("lets the draft go when nothing is written or nothing is named", () => {
+    store().setAdjustDraft({
+      clipIds: ["clip-1"],
+      adjust: { brightness: 0.5, contrast: 0, saturation: 0 },
+    });
+    store().setAdjustDraft(null);
+    expect(store().adjustDraft).toBeNull();
+    store().setAdjustDraft({
+      clipIds: [],
+      adjust: { brightness: 0.5, contrast: 0, saturation: 0 },
+    });
+    expect(store().adjustDraft).toBeNull();
+  });
+
+  it("drops a draft standing for clips that are no longer chosen", () => {
+    store().setAdjustDraft({
+      clipIds: ["clip-1"],
+      adjust: { brightness: 0.5, contrast: 0, saturation: 0 },
+    });
+    store().select({ clipIds: ["clip-2"] });
+    expect(store().adjustDraft).toBeNull();
+    // A write that says nothing about the clips is not a new choice.
+    store().setAdjustDraft({
+      clipIds: ["clip-2"],
+      adjust: { brightness: 0.5, contrast: 0, saturation: 0 },
+    });
+    store().select({ transitionId: null });
+    expect(store().adjustDraft).not.toBeNull();
   });
 });

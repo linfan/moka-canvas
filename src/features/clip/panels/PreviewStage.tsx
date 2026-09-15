@@ -64,6 +64,10 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
   const capabilities = previewCapabilities();
   const playheadMs = useClipStore((state) => state.playheadMs);
   const quality = useClipStore((state) => state.quality);
+  // A grade being dragged reaches the frame through the composition rather
+  // than through the document, which is what makes the picture answer the
+  // slider before any command has been sent.
+  const adjustDraft = useClipStore((state) => state.adjustDraft);
   const [engine, setEngine] = useState<PreviewEngine>("none");
   const [frameMs, setFrameMs] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -109,6 +113,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
         atMs,
         sources,
         filter: capabilities.filter,
+        adjustDraft,
         isCurrent: () => generation === generationRef.current,
       });
     } catch {
@@ -123,7 +128,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
     setEngine(drawn);
     setFrameMs(atMs);
     setNote(approximateReason(capabilities, drawn, report.coloursSkipped));
-  }, [timeline, sources, capabilities, quality]);
+  }, [timeline, sources, capabilities, quality, adjustDraft]);
 
   const schedule = useCallback(() => {
     if (rafRef.current !== null) return;

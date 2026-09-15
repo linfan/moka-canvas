@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   AssetId,
+  ClipAdjust,
   ClipId,
   MokaFile,
   TimelineDocument,
@@ -8,6 +9,7 @@ import type {
   TransitionId,
 } from "../../../shared/domain";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { clampAdjust } from "../inspector/clipFieldMath";
 import {
   DEFAULT_PX_PER_SEC,
   MIN_CONTENT_MS,
@@ -172,6 +174,21 @@ export interface ClipSelection {
 }
 
 /**
+ * A grade a reader is dragging, before it is a change to the cut.
+ *
+ * The Adjust page writes one of these while a slider is held: the compositor
+ * reads it in place of the document's own grade, so the picture answers the
+ * hand at once and no command is sent until the release. It is a reading
+ * rather than a fact about a cut, so it lives here and never reaches the
+ * document — the same shape package 11's text-style sliders will reuse.
+ */
+export interface AdjustDraft {
+  /** The clips the draft stands in for. */
+  clipIds: ClipId[];
+  adjust: ClipAdjust;
+}
+
+/**
  * How finely the preview composes: its own size, or a fraction of it.
  *
  * The tiers cap the backing store the frame is drawn into — 1920, 960, 480 —
@@ -243,6 +260,14 @@ interface ClipState {
   /** What is chosen on the timeline, which the inspector reads. */
   selection: ClipSelection;
   /**
+   * The grade being dragged on the Adjust page, or null when nothing is.
+   *
+   * Held here rather than in the page so the compositor can read it from the
+   * same store the rest of the room reads, and so a draft outliving its own
+   * panel is dropped by the store rather than drawn forever.
+   */
+  adjustDraft: AdjustDraft | null;
+  /**
    * The file chosen on the media shelf, which the inspector reads as material.
    *
    * Kept apart from the timeline's own choice: the two columns each hold their
@@ -289,6 +314,8 @@ interface ClipState {
   setActiveTimeline: (id: TimelineId | null) => void;
   setFace: (face: ClipFace) => void;
   select: (patch: Partial<ClipSelection>) => void;
+  /** Writes the grade being dragged, clamped to what a grade may be; null lets it go. */
+  setAdjustDraft: (draft: AdjustDraft | null) => void;
   selectMedia: (id: AssetId | null) => void;
   setNewTimelineOpen: (open: boolean) => void;
   setView: (patch: Partial<TimelineView>) => void;
@@ -378,6 +405,7 @@ export const useClipStore = create<ClipState>()((set, get) => {
     activeTimelineId: null,
     face: "local",
     selection: { clipIds: [], transitionId: null },
+    adjustDraft: null,
     mediaSelection: null,
     newTimelineOpen: false,
     view: { pxPerSec: DEFAULT_PX_PER_SEC, scrollLeftPx: 0 },
@@ -424,7 +452,27 @@ export const useClipStore = create<ClipState>()((set, get) => {
     },
 
     select(patch) {
-      set((state) => ({ selection: { ...state.selection, ...patch } }));
+      set((state) => ({
+        selection: { ...state.selection, ...patch },
+        // A draft stands in for the clips it named. Choosing other clips is
+        // therefore a draft that stands for nothing, and keeping it would
+        // leave the preview showing a grade no command ever carried.
+        adjustDraft: patch.clipIds === undefined ? state.adjustDraft : null,
+      }));
+    },
+
+    setAdjustDraft(draft) {
+      // The guard the drafter relies on: a grade is a fraction of each range,
+      // so nothing outside -1..1 and nothing that is not a number is written.
+      set({
+        adjustDraft:
+          draft === null || draft.clipIds.length === 0
+            ? null
+            : {
+                clipIds: [...draft.clipIds],
+                adjust: clampAdjust(draft.adjust),
+              },
+      });
     },
 
     selectMedia(id) {

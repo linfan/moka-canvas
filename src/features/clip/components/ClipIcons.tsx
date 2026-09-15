@@ -228,6 +228,28 @@ export function ExportIcon({ size = 18 }: IconProps) {
   );
 }
 
+/** A star: the file kept to hand, filled in once it is. */
+export function StarIcon({
+  filled = false,
+  size = 18,
+}: IconProps & { filled?: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill={filled ? "currentColor" : "none"}
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="m12 4.4 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 10l5.4-.8L12 4.4Z" />
+    </svg>
+  );
+}
+
 /** A pointer: what the inspector waits for. */
 export function SelectIcon({ size = 18 }: IconProps) {
   return (

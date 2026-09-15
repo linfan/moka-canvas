@@ -16,11 +16,13 @@ import {
 } from "../components/ClipIcons";
 import { addAssetAtPlayhead } from "../interactions/clipActions";
 import { useClipStore, type ClipFace } from "../stores/clipStore";
+import { AdjustPanel } from "./AdjustPanel";
 import {
   stopAudioPreview,
   toggleAudioPreview,
   useAudioPreview,
 } from "./audioPreview";
+import { FiltersPanel } from "./FiltersPanel";
 import { canvasHeldIds, faceShelf, isMediaFace } from "./mediaLenses";
 
 const FACES: Record<
@@ -99,10 +101,10 @@ function backToLocal() {
  *
  * Six of the nine faces read the project's shelf — the same shelf the canvas
  * column shows — through a lens apiece (mediaLenses says which), with the
- * audio face adding its own little way of hearing a row. The faces still to
- * arrive (text, filters, adjust) keep the placeholder they stand behind until
- * the packages that fill them come: a dead search box would be worse than an
- * empty drawer that says it is empty.
+ * audio face adding its own little way of hearing a row. Two more are the
+ * rooms's quick tools: the looks a clip can wear and the three sliders that
+ * grade it, both working on whatever the timeline holds chosen. The text face
+ * keeps its placeholder until the package that fills it comes.
  */
 export function MediaColumn() {
   const face = useClipStore((state) => state.face);
@@ -124,7 +126,16 @@ export function MediaColumn() {
   return (
     <aside aria-label={title} className="clip-column" id="clip-panel-left">
       <PanelFold side="left" />
-      {shelf ? (
+      {face === "filters" || face === "adjust" ? (
+        <>
+          <div className="clip-column-head">
+            <h2>{title}</h2>
+          </div>
+          <div className="clip-column-body">
+            {face === "filters" ? <FiltersPanel /> : <AdjustPanel />}
+          </div>
+        </>
+      ) : shelf ? (
         <>
           <div className="clip-media-head">
             <h2>{title}</h2>

@@ -32,6 +32,40 @@ export function formatTimecode(ms: number, fps: number): string {
 }
 
 /**
+ * A reading of the clock turned back into a moment.
+ *
+ * The mirror of `formatTimecode`, and the fields of a shorter reading are the
+ * ones on the right with the frames left off: `1:5` is a minute and five
+ * seconds, and frames are only read when all four fields are written, since a
+ * cut's clock is read from its seconds outwards. A reading that is not a
+ * timecode - letters, frames past the rate, a minute or second past the one
+ * above it - answers null rather than a guess, so a typist is shown the field
+ * going red instead of a clip jumping somewhere they did not ask for.
+ */
+export function parseTimecode(text: string, fps: number): number | null {
+  const rate = frameRate(fps);
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  const fields = trimmed.split(":");
+  if (fields.length > 4) return null;
+  const numbers: number[] = [];
+  for (const field of fields) {
+    if (!/^\d{1,4}$/.test(field)) return null;
+    numbers.push(Number(field));
+  }
+  if (numbers.length === 4) {
+    const [hh, mm, ss, ff] = numbers;
+    if (ff >= rate || ss >= 60 || mm >= 60) return null;
+    return ((hh * 60 + mm) * 60 + ss) * 1_000 + Math.round((ff / rate) * 1_000);
+  }
+  // Shorter readings carry no frames: the fields given are the seconds,
+  // minutes and hours, and the ones left off the left are zero.
+  const [ss = 0, mm = 0, hh = 0] = [...numbers].reverse();
+  if (ss >= 60 || mm >= 60) return null;
+  return ((hh * 60 + mm) * 60 + ss) * 1_000;
+}
+
+/**
  * The frame a moment falls on, by rounding, as whole milliseconds.
  *
  * The clock `formatTimecode` reads a moment with: rounding rather than

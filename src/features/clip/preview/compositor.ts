@@ -1,4 +1,6 @@
 import type {
+  ClipAdjust,
+  ClipId,
   Rect,
   TimelineClip,
   TimelineDocument,
@@ -54,6 +56,15 @@ export interface ComposeFrameOptions {
   sources: FrameSources;
   /** Whether the canvas takes a filter string; without it grades and looks are left off. */
   filter: boolean;
+  /**
+   * The grade a reader is dragging, standing in for the document's own.
+   *
+   * A clip the draft names wears the draft's adjust in this frame rather than
+   * the grade the document holds, so the picture answers a held slider before
+   * any command has been sent. Passed in rather than read from a store: the
+   * composition stays a pure reading of what it is handed.
+   */
+  adjustDraft?: { clipIds: readonly ClipId[]; adjust: ClipAdjust } | null;
   /**
    * Asked once the pictures are in hand and before anything is drawn: a frame
    * the reader has already moved past is dropped rather than painted.
@@ -141,10 +152,14 @@ function drawPictureClip(
   frameWidth: number,
   frameHeight: number,
   filterEnabled: boolean,
+  draftedAdjust: ClipAdjust | undefined,
 ): boolean {
   const alpha = Math.max(0, Math.min(1, clip.opacity)) * fadeFactor(clip, atMs);
   if (alpha <= 0) return false;
-  const look = clipLook(clip);
+  const look = clipLook({
+    adjust: draftedAdjust ?? clip.adjust,
+    filter: clip.filter,
+  });
   // Without a filter on the canvas the grade is dropped, and the caller is
   // told: a picture shown ungraded is a fact to put on the badge.
   const filter = filterEnabled ? look.filter : "";
@@ -257,6 +272,14 @@ export async function composeFrame(
   ctx.fillRect(0, 0, width, height);
 
   let coloursSkipped = false;
+  // The draft's named clips, looked up once per frame rather than per draw.
+  const drafted =
+    options.adjustDraft && options.adjustDraft.clipIds.length > 0
+      ? {
+          ids: new Set(options.adjustDraft.clipIds),
+          adjust: options.adjustDraft.adjust,
+        }
+      : null;
   for (const entry of chosen) {
     const { clip } = entry;
     try {
@@ -281,6 +304,7 @@ export async function composeFrame(
             width,
             height,
             options.filter,
+            drafted?.ids.has(clip.id) ? drafted.adjust : undefined,
           ) || coloursSkipped;
       else if (entry.picture?.kind === "waiting")
         drawWaiting(ctx, clip, atMs, width, height);

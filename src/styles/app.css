@@ -4337,3 +4337,226 @@ body.is-dragging-split {
     display: none;
   }
 }
+
+/* The inspector's own cards. The editor's form styles above carry most of it;
+   what is added here is the frame the four cards stand in, and the few pieces
+   — tiles, sliders, thumbnails — that only the cutting room has. */
+.clip-inspector-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.clip-inspector-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.clip-inspector-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.clip-inspector-field > span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.clip-inspector-field > input,
+.clip-inspector-field > select,
+.clip-inspector-field > textarea {
+  font-size: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.clip-inspector-field.is-invalid > input {
+  border-color: var(--danger);
+}
+
+.clip-inspector-pair {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.clip-inspector-speed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clip-inspector-speed button {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.clip-inspector-speed button[aria-pressed="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.clip-inspector-slider {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 42px;
+}
+
+.clip-inspector-slider > span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.clip-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clip-inspector-actions button {
+  align-items: center;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+  padding: 4px 8px;
+}
+
+.clip-inspector-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clip-inspector-presets button {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.clip-inspector-presets button[aria-pressed="true"],
+.clip-inspector-keeper[aria-pressed="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.clip-inspector-still,
+.clip-inspector-thumb {
+  background: #000;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: block;
+  height: auto;
+  max-width: 100%;
+}
+
+.clip-inspector-still {
+  max-height: 170px;
+  object-fit: contain;
+  width: 100%;
+}
+
+/* The Filters page: six tiles, each carrying its own wash rather than a
+   thumbnail, since a look is a decision about the whole cut. */
+.clip-filter-page,
+.clip-adjust-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.clip-filter-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.clip-filter-tile {
+  align-items: center;
+  background: var(--canvas);
+  display: grid;
+  font-size: 12px;
+  gap: 6px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.clip-filter-tile[aria-pressed="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.clip-filter-swatch {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: block;
+  height: 22px;
+  width: 34px;
+}
+
+.clip-filter-tile.is-none .clip-filter-swatch {
+  background: repeating-linear-gradient(
+    135deg,
+    #3a3a44 0 6px,
+    #26262e 6px 12px
+  );
+}
+
+.clip-filter-tile.is-warm .clip-filter-swatch {
+  background: linear-gradient(120deg, #b25b2a, #f0b46a);
+}
+
+.clip-filter-tile.is-cool .clip-filter-swatch {
+  background: linear-gradient(120deg, #2a5ab2, #6ac6f0);
+}
+
+.clip-filter-tile.is-mono .clip-filter-swatch {
+  background: linear-gradient(120deg, #1b1b1b, #cfcfcf);
+}
+
+.clip-filter-tile.is-fade .clip-filter-swatch {
+  background: linear-gradient(120deg, #6d6a63, #cfc7b6);
+}
+
+.clip-filter-tile.is-vivid .clip-filter-swatch {
+  background: linear-gradient(120deg, #d81f4a, #ffd21f);
+}
+
+.clip-filter-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+/* The Adjust page: a label, a slider, and where it stands. */
+.clip-adjust-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr) 34px;
+}
+
+.clip-adjust-row > span:first-child {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.clip-adjust-value {
+  color: var(--ink);
+  font-size: 12px;
+  text-align: right;
+}
+
+.clip-adjust-page > button {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 3px 10px;
+}
