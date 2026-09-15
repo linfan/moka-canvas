@@ -58,7 +58,15 @@ export async function addNode(page: Page, kind: string) {
       box!.x + box!.width * (0.55 + attempt * 0.08),
       box!.y + box!.height * 0.5,
     );
-    if (await menu.isVisible({ timeout: 1500 }).catch(() => false)) {
+    // Waited for rather than asked about at once: an instant visibility check
+    // races the render that brings the menu up, and the next attempt's double
+    // click closes the menu that was on its way — under load every attempt
+    // then reads "not open" and the helper gives up on a canvas that works.
+    const opened = await menu
+      .waitFor({ state: "visible", timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    if (opened) {
       await menu.getByRole("menuitem", { name: kind, exact: true }).click();
       return;
     }
