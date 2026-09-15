@@ -72,6 +72,38 @@ export function shelfWhere(entry: ResourceEntry): ShelfWhere {
   return "brought";
 }
 
+/**
+ * A question a shelf stands behind on its own.
+ *
+ * A lens is a preset of the reader's own filter — the origin a face is about,
+ * or the files a board is holding — applied under whatever the reader then
+ * asks. It is deliberately not part of `ShelfFilter`: a lens does not show up
+ * in the filter bar, does not light the Clear button, and is not the reader's
+ * to take off.
+ */
+export interface ShelfLens {
+  /** The origin the face reads, or null for a face that is open on origin. */
+  where?: ShelfWhere | null;
+  /** Anything else the face will not show. */
+  narrow?: (entry: ResourceEntry) => boolean;
+}
+
+/**
+ * The shelf's rows newest first, within each group.
+ *
+ * A cutting room reader reaches for what just arrived before what was filed
+ * long ago, and an import lands at the top of its group where the reader can
+ * see it without paging. The order is the shelf's own property rather than the
+ * filter's: it holds whether or not anything is being asked of the shelf.
+ */
+export function newestFirst(
+  entries: readonly ResourceEntry[],
+): ResourceEntry[] {
+  return [...entries].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+}
+
 export interface ShelfFilter {
   /** Words to find, matched against the name and everything said about it. */
   asked: string;

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  AssetId,
   ClipId,
   MokaFile,
   TimelineId,
@@ -95,11 +96,20 @@ interface ClipState {
   face: ClipFace;
   /** What is chosen on the timeline, which the inspector reads. */
   selection: ClipSelection;
+  /**
+   * The file chosen on the media shelf, which the inspector reads as material.
+   *
+   * Kept apart from the timeline's own choice: the two columns each hold their
+   * own highlight, and clearing one is not an answer about the other — the
+   * inspector decides what to show when both are held.
+   */
+  mediaSelection: AssetId | null;
   /** Whether the new-timeline question is up. */
   newTimelineOpen: boolean;
   setActiveTimeline: (id: TimelineId | null) => void;
   setFace: (face: ClipFace) => void;
   select: (patch: Partial<ClipSelection>) => void;
+  selectMedia: (id: AssetId | null) => void;
   setNewTimelineOpen: (open: boolean) => void;
 }
 
@@ -116,6 +126,7 @@ export const useClipStore = create<ClipState>()((set) => ({
   activeTimelineId: null,
   face: "local",
   selection: { clipIds: [], transitionId: null },
+  mediaSelection: null,
   newTimelineOpen: false,
 
   setActiveTimeline(id) {
@@ -133,6 +144,10 @@ export const useClipStore = create<ClipState>()((set) => ({
 
   select(patch) {
     set((state) => ({ selection: { ...state.selection, ...patch } }));
+  },
+
+  selectMedia(id) {
+    set({ mediaSelection: id });
   },
 
   setNewTimelineOpen(open) {

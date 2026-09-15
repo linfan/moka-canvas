@@ -3675,6 +3675,51 @@ button.danger:hover:not(:disabled) {
   margin: 0;
 }
 
+/* A media face's head, and the shelf filling what the head leaves. The shelf
+   itself is the canvas column's, styles and all; a face only says which
+   question it is reading, and gives the shelf the room the column has. */
+.clip-media-head {
+  padding-left: 10px;
+}
+
+.clip-media-head h2 {
+  margin: 0;
+}
+
+.clip-media-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* The drop covering stands inside this box, so it covers the room the face
+     is showing rather than the whole column's height of content. */
+  position: relative;
+}
+
+/* A row's own small offers wear the shelf's action shape; the one whose sound
+   is sounding is marked, rather than the row. */
+.clip-media-action.is-playing {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+/* A file dragged over the column is a file to import, and the covering says so
+   on whichever face the column is turned to. It does not take the pointer: the
+   drag underneath keeps saying where it is. */
+.clip-media-drop {
+  align-items: center;
+  background: var(--surface-glass);
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  display: flex;
+  font-size: 12px;
+  inset: 6px;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+}
+
 /* The stage: the preview over the timeline, split by an edge that is dragged. */
 .clip-stage {
   background: var(--canvas);

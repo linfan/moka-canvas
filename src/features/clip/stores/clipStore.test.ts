@@ -42,6 +42,7 @@ beforeEach(() => {
     activeTimelineId: null,
     face: "local",
     selection: { clipIds: [], transitionId: null },
+    mediaSelection: null,
     newTimelineOpen: false,
   });
 });
@@ -135,5 +136,15 @@ describe("what the cutting room is looking at", () => {
     expect(store().newTimelineOpen).toBe(true);
     store().setNewTimelineOpen(false);
     expect(store().newTimelineOpen).toBe(false);
+  });
+
+  it("keeps the shelf's chosen file apart from the timeline's own choice", () => {
+    store().selectMedia("asset-a");
+    store().select({ clipIds: ["clip-a"] });
+    expect(store().mediaSelection).toBe("asset-a");
+    expect(store().selection.clipIds).toEqual(["clip-a"]);
+    store().selectMedia(null);
+    expect(store().mediaSelection).toBeNull();
+    expect(store().selection.clipIds).toEqual(["clip-a"]);
   });
 });
