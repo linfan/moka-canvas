@@ -173,9 +173,9 @@ interface EditorState {
   /**
    * The generation panel open under a node, and whether it takes the keyboard.
    *
-   * Asked for by an entry the user chose (Enter, the right-click menu), it may
-   * take the keyboard; nothing brings it up on its own, so a selection is
-   * never more than a selection.
+   * Asked for by an entry the user chose (Enter, the right-click menu) it does;
+   * brought up because a node was selected it must not, or typing would land in
+   * the prompt and Delete would stop deleting the node.
    */
   promptPanel: { nodeId: NodeId; focus: boolean } | null;
   /** Inspector "replace input" pick mode: choosing a new source node. */

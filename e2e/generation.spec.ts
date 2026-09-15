@@ -388,9 +388,9 @@ test("a node is asked from the panel under it, and one of several answers shown"
   );
   await addNode(page, "Image");
 
-  // A node arrives from the quick-add menu selected and holding nothing, and
-  // Enter asks it for something, which is what brings the panel up: what it
-  // holds becomes the whole ask.
+  // A node arrives from the quick-add menu selected and holding nothing, which
+  // is the state its panel comes up in on its own: what it holds becomes the
+  // whole ask. Enter takes the keyboard for the prompt that is already up.
   await page.keyboard.press("Enter");
   const panel = page.getByTestId("prompt-panel");
   await expect(panel).toBeVisible({ timeout: 10_000 });

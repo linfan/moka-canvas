@@ -803,7 +803,8 @@ describe("editor shell integration", () => {
       useEditorStore
         .getState()
         .setSelection({ nodeIds: [ids.image], edgeIds: [] });
-      // The panel comes up from an entry chosen, not from the selection.
+      // The selection brings the panel up on its own; opened here as well so
+      // the test does not lean on the timing of that effect.
       useEditorStore.getState().openPromptPanel(ids.image);
     });
     const bar = await screen.findByTestId("reference-bar");

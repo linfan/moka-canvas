@@ -183,6 +183,7 @@ export function PromptPanel() {
   // node it is open on.
   const stepStatus = useNodeRunStatus(open?.nodeId ?? null);
   const areaRef = useRef<HTMLDivElement>(null);
+  const shownFor = useRef<NodeId | null>(null);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   /** Which of the panel's three tabs is being read. */
@@ -239,6 +240,29 @@ export function PromptPanel() {
   const canvasId = canvas?.id ?? null;
   /** The document's own word for "it moved", which is when an answer goes stale. */
   const revision = moka?.metadata.revision ?? 0;
+  const chosen =
+    selected.length === 1 && canvas ? findNode(canvas, selected[0]) : undefined;
+  const chosenId =
+    chosen && generationCapabilityFor(chosen.kind) !== null ? chosen.id : null;
+
+  /**
+   * Brings the panel up with the selected node, once per selection.
+   *
+   * Remembering which node it was shown for is what lets Escape close it: an
+   * effect that only asked whether the panel is open would put it straight back,
+   * and the key would look like it did nothing.
+   */
+  useEffect(() => {
+    if (shownFor.current === chosenId) return;
+    shownFor.current = chosenId;
+    // Already up on this node means an entry the user chose put it there, and
+    // may have asked for the keyboard with it: bringing it up again would take
+    // that request back without the panel ever having been closed.
+    const shown = useEditorStore.getState().promptPanel;
+    if (chosenId && shown?.nodeId !== chosenId) {
+      useEditorStore.getState().openPromptPanel(chosenId);
+    }
+  }, [chosenId]);
 
   // The panel is about a selected node, so a selection that has let go of that
   // node takes the panel with it.

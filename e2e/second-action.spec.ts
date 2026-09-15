@@ -156,6 +156,9 @@ test("the middle button chooses while the pan tool drags the canvas", async ({
     "Second Action Choose",
   );
   await addNode(page, "Text");
+  // The node arrives selected and its panel comes up with it: one Escape
+  // sends the panel away and a second lets go of the node.
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 
   // Nothing is chosen yet, so the fit-the-selection control has nothing to fit.
@@ -236,6 +239,9 @@ test("three fingers choose while the pan tool drags the canvas", async ({
     "Three Finger Choose",
   );
   await addNode(page, "Text");
+  // One Escape for the panel that came up with the selection, and a second
+  // for the selection itself.
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("zoom-selection")).toBeDisabled();
 

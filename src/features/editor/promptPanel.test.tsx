@@ -30,7 +30,6 @@ import { useRunStore } from "./stores/runStore";
 import { useModelStore } from "../settings/modelStore";
 import { undo } from "./commands/execute";
 import { enterIntent } from "./interactions/keyboard";
-import { generationCapabilityFor } from "../../shared/domain";
 
 const ids = goldenNodeIds();
 
@@ -263,22 +262,6 @@ async function openEditor() {
 function selectNode(nodeId: string) {
   act(() => {
     useEditorStore.getState().setSelection({ nodeIds: [nodeId], edgeIds: [] });
-    // The panel no longer comes up on a selection by itself; these tests ask
-    // for it the way a chosen entry does, so the node a test points at is the
-    // node the panel is open under.
-    const moka = useProjectStore.getState().moka;
-    const canvas = moka?.canvas.find((entry) => entry.id === ids.canvasMain);
-    const node = canvas?.nodes.find((entry) => entry.id === nodeId);
-    if (node && generationCapabilityFor(node.kind) !== null) {
-      useEditorStore.getState().openPromptPanel(nodeId);
-    }
-  });
-}
-
-/** A plain selection, which never brings the panel up on its own. */
-function selectOnly(nodeId: string) {
-  act(() => {
-    useEditorStore.getState().setSelection({ nodeIds: [nodeId], edgeIds: [] });
   });
 }
 
@@ -371,19 +354,20 @@ describe("what Enter asks for", () => {
 });
 
 describe("the generation panel", () => {
-  it("comes up when asked for, and a selection alone is just a selection", async () => {
+  it("comes up under a selected node, without taking the keyboard", async () => {
     await openEditor();
     expect(screen.queryByTestId("prompt-panel")).toBeNull();
 
-    // Nothing brings the panel up on its own any more.
-    selectOnly(ids.image);
-    await settle();
-    expect(screen.queryByTestId("prompt-panel")).toBeNull();
-
-    // An entry the reader chose is what opens it.
     selectNode(ids.image);
     await settle();
     expect(panel()).toBeTruthy();
+    // Coming up because a node was selected must not take the keyboard, or
+    // words would land in the prompt and Delete would stop deleting the node.
+    expect(document.activeElement).not.toBe(
+      within(panel()).getByRole("textbox", {
+        name: "Prompt for Reference image",
+      }),
+    );
   });
 
   it("does not come up for a node nothing can generate", async () => {
@@ -395,9 +379,15 @@ describe("the generation panel", () => {
 
   it("opens from Enter with the keyboard in the prompt", async () => {
     await openEditor();
-    selectOnly(ids.image);
+    selectNode(ids.image);
     await settle();
-    expect(screen.queryByTestId("prompt-panel")).toBeNull();
+    // The selection brings the panel up, but the keyboard stays where it was.
+    expect(panel()).toBeTruthy();
+    expect(document.activeElement).not.toBe(
+      within(panel()).getByRole("textbox", {
+        name: "Prompt for Reference image",
+      }),
+    );
 
     fireEvent.keyDown(window, { key: "Enter" });
     await settle();
