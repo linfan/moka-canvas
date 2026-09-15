@@ -164,6 +164,64 @@ describe("the asset picker", () => {
     expect(generationOf(ids.text)?.prompt).toBe("Adapt this.");
   });
 
+  it("reads a text file's opening on its row and the whole of it on a hover", async () => {
+    const moka = openProject(buildShelfMokaFile());
+    moka.resources.texts.push({
+      id: "brief-asset",
+      name: "brief.md",
+      path: "assets/texts/brief-00000000.md",
+      mime: "text/markdown",
+      bytes: 60,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const body = "LINE ONE\nline two of the brief, which goes on.";
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/assets/brief-asset")) {
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }
+      return Promise.resolve(json({}));
+    });
+    useEditorStore.getState().openAssetPicker({ mode: "nodes", at: null });
+    render(<AssetPickerModal />);
+
+    const excerpt = screen.getByTestId("asset-pick-excerpt-brief-asset");
+    // The row leads with the file's own opening, read out of the file.
+    await waitFor(() => expect(excerpt.textContent).toContain("LINE ONE"));
+
+    fireEvent.mouseEnter(excerpt);
+    const card = screen.getByTestId("asset-pick-words");
+    expect(card.textContent).toBe(body);
+    expect(card.getAttribute("role")).toBe("tooltip");
+
+    fireEvent.mouseLeave(excerpt);
+    expect(screen.queryByTestId("asset-pick-words")).toBeNull();
+  });
+
+  it("reads a sound's row by the words it came from, whole on a hover", () => {
+    const moka = openProject(buildShelfMokaFile());
+    moka.resources.music.push({
+      id: "tune-asset",
+      name: "tune.mp3",
+      path: "assets/music/tune-00000000.mp3",
+      mime: "audio/mpeg",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      keyword: "A slow tune for the opening credits.",
+    });
+    useEditorStore.getState().openAssetPicker({ mode: "nodes", at: null });
+    render(<AssetPickerModal />);
+
+    const excerpt = screen.getByTestId("asset-pick-excerpt-tune-asset");
+    expect(excerpt.textContent).toContain("A slow tune");
+
+    fireEvent.mouseEnter(excerpt);
+    expect(screen.getByTestId("asset-pick-words").textContent).toBe(
+      "A slow tune for the opening credits.",
+    );
+  });
+
   it("narrows the shelf by words, shelf, and what a file is filed under", () => {
     openProject(buildShelfMokaFile());
     useEditorStore.getState().openAssetPicker({ mode: "nodes", at: null });

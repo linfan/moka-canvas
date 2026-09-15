@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { assetUrl } from "../../../api";
 import {
   CAPABILITY_LABELS,
@@ -8,6 +8,7 @@ import {
   type ResourceEntry,
 } from "../../../shared/domain";
 import { addAssetNodes, attachAssetsToNode } from "../interactions/actions";
+import { useClampedMenuPosition } from "../panels/useClampedMenuPosition";
 import {
   OPEN_SHELF_FILTER,
   SHELF_GLYPHS,
@@ -49,6 +50,127 @@ function thumbOf(entry: ResourceEntry): string | null {
  */
 function excerptOf(entry: ResourceEntry): string {
   return entry.keyword?.trim() || entry.note?.trim() || "";
+}
+
+/**
+ * The words read out of text files, remembered per version of the file for as
+ * long as the app is open: the shelf is asked about often and a file is read
+ * once.
+ */
+const wordsCache = new Map<string, string>();
+
+function cacheKeyOf(entry: ResourceEntry): string {
+  return `${entry.id}@${entry.updatedAt}`;
+}
+
+/** How much of a file's words a row leads with. */
+const ROW_WORDS = 160;
+/** How much of a file's words the card a hover brings up reads, at most. */
+const HOVER_WORDS = 4000;
+
+/**
+ * The card a hover over a row's words brings up, with the whole of what the
+ * row leads with.
+ *
+ * Read out of a card of its own rather than the row: the list a picker shows
+ * scrolls, and words belonging to one row must not be cut by the row's box or
+ * pushed off the screen by the row's place in the list.
+ */
+function WordsCard({ words, x, y }: { words: string; x: number; y: number }) {
+  const { ref, pos } = useClampedMenuPosition(x, y);
+  return (
+    <div
+      className="asset-pick-words"
+      data-testid="asset-pick-words"
+      ref={ref}
+      role="tooltip"
+      style={{ left: pos.x, top: pos.y }}
+    >
+      {words}
+    </div>
+  );
+}
+
+/**
+ * The words a row of the shelf leads with, for the two kinds that are made of
+ * words: a text file is read out of itself (what the entry carries is a search
+ * phrase, and a file a reader imported carries nothing at all), and a sound
+ * leads with the ask it came from, since a sound holds no words to read.
+ *
+ * A hover over the words brings up a card with the whole of them, so a reader
+ * choosing between two texts is choosing by what they say rather than by an
+ * icon that looks the same on both.
+ */
+function RowWords({
+  entry,
+  kind,
+  glyph,
+}: {
+  entry: ResourceEntry;
+  kind: Capability;
+  glyph: string;
+}) {
+  const [fetched, setFetched] = useState<string | null>(
+    () => wordsCache.get(cacheKeyOf(entry)) ?? null,
+  );
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const boxRef = useRef<HTMLSpanElement>(null);
+
+  const cacheKey = cacheKeyOf(entry);
+  useEffect(() => {
+    if (kind !== "text") return;
+    const held = wordsCache.get(cacheKey);
+    if (held !== undefined) {
+      setFetched(held);
+      return;
+    }
+    let wanted = true;
+    fetch(assetUrl(entry.id))
+      .then((response) =>
+        response.ok
+          ? response.text()
+          : Promise.reject(new Error(response.statusText)),
+      )
+      .then((body) => {
+        const words = body.slice(0, HOVER_WORDS);
+        wordsCache.set(cacheKey, words);
+        if (wanted) setFetched(words);
+      })
+      .catch(() => {
+        // A file that cannot be read leads with whatever the entry says about
+        // it, which is what the row led with before the file was asked.
+        if (wanted) setFetched(null);
+      });
+    return () => {
+      wanted = false;
+    };
+  }, [entry.id, cacheKey, kind]);
+
+  const words =
+    kind === "text" ? fetched?.trim() || excerptOf(entry) : excerptOf(entry);
+  const shown = words.slice(0, ROW_WORDS);
+
+  return (
+    <>
+      <span
+        className="asset-pick-excerpt"
+        data-testid={`asset-pick-excerpt-${entry.id}`}
+        onMouseEnter={() => {
+          if (words === "") return;
+          const rect = boxRef.current?.getBoundingClientRect();
+          setAnchor({
+            x: (rect?.right ?? 0) + 8,
+            y: rect?.top ?? 0,
+          });
+        }}
+        onMouseLeave={() => setAnchor(null)}
+        ref={boxRef}
+      >
+        {shown || <span aria-hidden="true">{glyph}</span>}
+      </span>
+      {anchor !== null && <WordsCard words={words} x={anchor.x} y={anchor.y} />}
+    </>
+  );
 }
 
 /**
@@ -212,7 +334,6 @@ export function AssetPickerModal() {
             {entries.map((entry) => {
               const kind = kindOf(entry);
               const thumb = thumbOf(entry);
-              const excerpt = excerptOf(entry);
               const shelf = PROJECT_ASSET_CATEGORIES.find(
                 (name) => name === entry.path.split("/")[1],
               );
@@ -239,13 +360,11 @@ export function AssetPickerModal() {
                     {thumb ? (
                       <img alt="" className="asset-pick-thumb" src={thumb} />
                     ) : (
-                      <span className="asset-pick-excerpt" title={excerpt}>
-                        {excerpt || (
-                          <span aria-hidden="true">
-                            {shelf ? SHELF_GLYPHS[shelf] : "▪"}
-                          </span>
-                        )}
-                      </span>
+                      <RowWords
+                        entry={entry}
+                        glyph={shelf ? SHELF_GLYPHS[shelf] : "▪"}
+                        kind={kind}
+                      />
                     )}
                     <span className="asset-pick-name">{entry.name}</span>
                   </label>

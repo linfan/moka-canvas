@@ -2164,16 +2164,16 @@ body.is-dragging-panel {
 
 /* One row, four columns, read in one direction: the tick that takes the
    file stays in its place on the left whatever the name does, the kind wears
-   a label of its own, the taste of the file — a picture or a few words —
-   holds a box of its own so the names behind it line up, and the name takes
-   what is left. */
+   a label of its own, the taste of the file — a picture or its opening words
+   — holds a box of its own so the names behind it line up, and the name
+   takes what is left. */
 .asset-pick-row {
   align-items: center;
   border-radius: var(--radius-sm);
   cursor: pointer;
   display: grid;
   gap: 10px;
-  grid-template-columns: 16px 58px 52px minmax(0, 1fr);
+  grid-template-columns: 16px 58px 120px minmax(0, 1fr);
   padding: 4px 6px;
 }
 
@@ -2236,6 +2236,27 @@ body.is-dragging-panel {
   -webkit-line-clamp: 3;
   line-height: 1.3;
   overflow: hidden;
+}
+
+/* The whole of a row's words, brought up by a hover: fixed to the window
+   rather than to the row, so the scrolling list cannot cut it and the dialog
+   cannot crowd it. */
+.asset-pick-words {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 240px;
+  max-width: 320px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  position: fixed;
+  white-space: pre-wrap;
+  word-break: break-word;
+  z-index: 60;
 }
 
 .asset-pick-name {
