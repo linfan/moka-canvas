@@ -8,8 +8,10 @@ import {
   initialTimelineId,
   rememberTimelineId,
   rememberedTimelineId,
+  rememberedView,
   useClipStore,
 } from "./clipStore";
+import { msAt } from "../timeline/geometry";
 
 /** A project of its own name holding the given number of timelines. */
 function project(id: string, timelines: number): MokaFile {
@@ -44,6 +46,9 @@ beforeEach(() => {
     selection: { clipIds: [], transitionId: null },
     mediaSelection: null,
     newTimelineOpen: false,
+    view: { pxPerSec: 60, scrollLeftPx: 0 },
+    playheadMs: 0,
+    viewportPx: 0,
   });
 });
 
@@ -146,5 +151,130 @@ describe("what the cutting room is looking at", () => {
     store().selectMedia(null);
     expect(store().mediaSelection).toBeNull();
     expect(store().selection.clipIds).toEqual(["clip-a"]);
+  });
+});
+
+describe("how the timeline is looked at", () => {
+  /** A project with one timeline open on the store. */
+  function openOne(): MokaFile {
+    const moka = project("p1", 1);
+    open(moka);
+    store().setActiveTimeline(moka.timelines![0].id);
+    store().setViewportPx(800);
+    return moka;
+  }
+
+  it("zooms by a step of one and a half and stops at the limits", () => {
+    openOne();
+    expect(store().view.pxPerSec).toBe(60);
+
+    store().zoomBy(1.5);
+    expect(store().view.pxPerSec).toBe(90);
+    store().zoomBy(1 / 1.5);
+    expect(store().view.pxPerSec).toBe(60);
+
+    store().zoomTo(10_000);
+    expect(store().view.pxPerSec).toBe(960);
+    store().zoomTo(0.1);
+    expect(store().view.pxPerSec).toBe(4);
+  });
+
+  it("holds the playhead where it stands when it is on screen", () => {
+    openOne();
+    store().setPlayhead(5_000);
+    store().zoomTo(90);
+    expect(store().view).toEqual({ pxPerSec: 90, scrollLeftPx: 50 });
+    // The playhead sits exactly where it sat: 400px into an 800px screen.
+    expect(
+      (5_000 / 1_000) * store().view.pxPerSec - store().view.scrollLeftPx,
+    ).toBe(400);
+  });
+
+  it("zooms about the middle of the screen when the playhead is out of sight", () => {
+    openOne();
+    store().setView({ scrollLeftPx: 2_000 });
+    const anchor = msAt(400, { pxPerSec: 60, scrollLeftPx: 2_000 });
+    store().zoomTo(30);
+    // 40s of anchor at 30px/s wants an 800px offset; 34s of content stop it at 220.
+    expect(store().view).toEqual({ pxPerSec: 30, scrollLeftPx: 220 });
+    expect((anchor / 1_000) * 30 - 220).toBeCloseTo(980);
+  });
+
+  it("clamps what a hand sets on the view", () => {
+    openOne();
+    store().setView({ pxPerSec: 1, scrollLeftPx: -20 });
+    expect(store().view).toEqual({ pxPerSec: 4, scrollLeftPx: 0 });
+  });
+
+  it("fits the whole cut on screen", () => {
+    openOne();
+    store().fit(800, 30_000);
+    expect(store().view.pxPerSec).toBeCloseTo(800 / 30, 2);
+    expect(store().view.scrollLeftPx).toBe(0);
+    // Nothing to fit, nothing to do.
+    store().zoomTo(120);
+    store().fit(0, 30_000);
+    expect(store().view.pxPerSec).toBe(120);
+  });
+
+  it("remembers each timeline's own view and playhead, on this machine", () => {
+    const moka = project("p1", 2);
+    open(moka);
+    const [first, second] = moka.timelines!;
+
+    store().setActiveTimeline(first.id);
+    store().setPlayhead(4_321);
+    store().zoomTo(120);
+    store().setView({ scrollLeftPx: 90 });
+
+    store().setActiveTimeline(second.id);
+    expect(store().view).toEqual({ pxPerSec: 60, scrollLeftPx: 0 });
+    expect(store().playheadMs).toBe(0);
+    store().zoomTo(240);
+
+    store().setActiveTimeline(first.id);
+    expect(store().view).toEqual({ pxPerSec: 120, scrollLeftPx: 90 });
+    expect(store().playheadMs).toBe(4_321);
+
+    // Written down by id, and nothing about a view goes into the document.
+    expect(
+      JSON.parse(localStorage.getItem(`moka-canvas:clip-view:${first.id}`)!),
+    ).toEqual({ pxPerSec: 120, scrollLeftPx: 90, playheadMs: 4_321 });
+    expect(localStorage.getItem("moka-canvas:clip-view:p1")).toBeNull();
+  });
+
+  it("starts a timeline it has never seen at the default", () => {
+    openOne();
+    expect(rememberedView("fresh")).toBeNull();
+    expect(store().view).toEqual({ pxPerSec: 60, scrollLeftPx: 0 });
+  });
+
+  it("takes nothing from a view store holding something else", () => {
+    localStorage.setItem("moka-canvas:clip-view:t1", "{not json");
+    expect(rememberedView("t1")).toBeNull();
+    localStorage.setItem(
+      "moka-canvas:clip-view:t1",
+      JSON.stringify({ pxPerSec: "90", scrollLeftPx: -5, playheadMs: -2 }),
+    );
+    expect(rememberedView("t1")).toEqual({
+      view: { pxPerSec: 60, scrollLeftPx: 0 },
+      playheadMs: 0,
+    });
+    localStorage.setItem(
+      "moka-canvas:clip-view:t1",
+      JSON.stringify({ pxPerSec: 20_000, scrollLeftPx: 12 }),
+    );
+    expect(rememberedView("t1")).toEqual({
+      view: { pxPerSec: 960, scrollLeftPx: 12 },
+      playheadMs: 0,
+    });
+  });
+
+  it("holds the playhead at the head rather than before it", () => {
+    openOne();
+    store().setPlayhead(-25);
+    expect(store().playheadMs).toBe(0);
+    store().setPlayhead(Number.NaN);
+    expect(store().playheadMs).toBe(0);
   });
 });

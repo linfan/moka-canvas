@@ -246,3 +246,126 @@ export function SelectIcon({ size = 18 }: IconProps) {
     </svg>
   );
 }
+
+/** A glass with a minus: the timeline pulled further away. */
+export function ZoomOutIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <circle cx="11" cy="11" r="6.2" />
+      <path d="m15.6 15.6 4.4 4.4" />
+      <path d="M8.4 11h5.2" />
+    </svg>
+  );
+}
+
+/** The same glass with a plus. */
+export function ZoomInIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <circle cx="11" cy="11" r="6.2" />
+      <path d="m15.6 15.6 4.4 4.4" />
+      <path d="M8.4 11h5.2M11 8.4v5.2" />
+    </svg>
+  );
+}
+
+/** Arrows into the corners: the whole cut on screen. */
+export function FitIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15" />
+    </svg>
+  );
+}
+
+/** A padlock: the row that will not be moved. */
+export function LockIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <rect height="8.5" rx="2" width="12" y="10.5" x="6" />
+      <path d="M8.8 10.5V8a3.2 3.2 0 0 1 6.4 0v2.5" />
+    </svg>
+  );
+}
+
+/** An eye struck through: the row that keeps its sound but not its picture. */
+export function EyeOffIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="m4 4.8 16 14.4" />
+      <path d="M9.7 5.7A9.4 9.4 0 0 1 12 5.4c5 0 8.5 4.2 8.5 6.6a7.9 7.9 0 0 1-2.6 4" />
+      <path d="M6.2 7.5A9.7 9.7 0 0 0 3.5 12c0 2.4 3.5 6.6 8.5 6.6a9.3 9.3 0 0 0 4-.9" />
+      <path d="M10.2 10.2a2.5 2.5 0 0 0 3.5 3.5" />
+    </svg>
+  );
+}
+
+/** A speaker crossed out: the row that keeps its picture but not its sound. */
+export function MutedIcon({ size = 18 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M4.5 9.5h3l4-3.2v11.4l-4-3.2h-3z" />
+      <path d="m15.5 9.5 4 4M19.5 9.5l-4 4" />
+    </svg>
+  );
+}
