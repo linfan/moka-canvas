@@ -132,7 +132,9 @@ describe("app boot", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Clip" }));
     expect(useAppStore.getState().phase).toBe("clip");
     expect(screen.getByTestId("clip-page")).toBeTruthy();
-    expect(screen.getByText("Comming soon")).toBeTruthy();
+    // The board the project was holding no longer stands in for the room: the
+    // room itself does, asking for its first timeline.
+    expect(screen.getByText("No timelines yet")).toBeTruthy();
     // Stepping over to the cutting room is not a close: the project stands.
     expect(useProjectStore.getState().moka).not.toBeNull();
 

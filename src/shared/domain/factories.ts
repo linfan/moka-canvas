@@ -28,6 +28,7 @@ import type {
   TextClipStyle,
   TimelineClip,
   TimelineDocument,
+  TimelineSettings,
   TimelineTrack,
   WorkflowNode,
 } from "./types";
@@ -80,14 +81,27 @@ export function defaultTimelineTracks(): TimelineTrack[] {
 /**
  * A timeline born empty but for its rows, named like a canvas is: one more
  * than the count, and past any name already taken.
+ *
+ * The frame is the one 1080p30 working default unless the ask names its own,
+ * which is what the new-timeline dialog does: a cut being started for a
+ * particular screen says so then, and a cut made without being asked for gets
+ * the frame that suits most screens.
  */
-export function createTimeline(name: string): TimelineDocument {
+export function createTimeline(
+  name: string,
+  settings?: Partial<TimelineSettings>,
+): TimelineDocument {
   const now = nowIso();
   return {
     id: newId(),
     name,
     schemaVersion: TIMELINE_SCHEMA_VERSION,
-    settings: { fps: 30, width: 1920, height: 1080, background: "#000000" },
+    settings: {
+      fps: settings?.fps ?? 30,
+      width: settings?.width ?? 1920,
+      height: settings?.height ?? 1080,
+      background: settings?.background ?? "#000000",
+    },
     tracks: defaultTimelineTracks(),
     clips: [],
     transitions: [],

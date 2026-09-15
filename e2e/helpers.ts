@@ -94,6 +94,50 @@ export async function openRecent(page: Page, name: string) {
 }
 
 /**
+ * Step into the cutting room from whichever working page is open.
+ *
+ * The project stays open across the step: the coffee button is the way between
+ * the two pages, and the Clip row is where the reader arrives.
+ */
+export async function openClipRoom(page: Page) {
+  await page.getByRole("button", { name: "Home menu" }).click();
+  await page.getByRole("menuitem", { name: "Clip" }).click();
+  await expect(page.getByTestId("clip-page")).toBeVisible({ timeout: 10_000 });
+}
+
+/**
+ * Add a timeline through the dialog, whichever door stands open: the first-run
+ * empty state's own button, or the + at the end of the strip once there is one.
+ */
+export async function newTimeline(page: Page, name: string) {
+  const first = page.getByRole("button", { name: "New timeline", exact: true });
+  if ((await first.count()) > 0) {
+    await first.click();
+  } else {
+    await page.getByRole("button", { name: "Add timeline" }).click();
+  }
+  const dialog = page.getByRole("dialog", { name: "New timeline" });
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
+  await dialog.getByLabel("Name").fill(name);
+  await dialog.getByRole("button", { name: "Create timeline" }).click();
+  await expect(dialog).toBeHidden({ timeout: 10_000 });
+  await expect(
+    page.getByRole("tablist", { name: "Timelines" }).getByRole("tab", { name }),
+  ).toBeVisible({ timeout: 10_000 });
+}
+
+/** The timeline names as the server has them written down, in document order. */
+export async function persistedTimelineNames(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/v1/projects/current");
+    const body = (await response.json()) as {
+      moka?: { timelines?: { name?: string }[] };
+    };
+    return (body.moka?.timelines ?? []).map((timeline) => timeline.name ?? "");
+  });
+}
+
+/**
  * Turn the column beside the canvas over to its assets face.
  *
  * The column holds two faces — the project's canvases and the files it is made

@@ -1,21 +1,80 @@
-import { HomeMenu } from "../editor/components/HomeMenu";
+import { useEffect, type CSSProperties } from "react";
+import { historyBoundary } from "../editor/commands/execute";
+import { PanelUnfold } from "../editor/components/PanelFold";
+import { PanelResizer } from "../editor/components/PanelResizer";
+import { panelWidthStyle } from "../editor/components/panelWidthVars";
 import { useAppStore } from "../editor/stores/appStore";
+import { usePanelFolds } from "../editor/stores/panelFolds";
+import { usePanelWidths } from "../editor/stores/panelWidths";
 import { useProjectStore } from "../editor/stores/projectStore";
 import { useRunStore } from "../editor/stores/runStore";
+import { ClipTopBar } from "./components/ClipTopBar";
+import { TimelineIcon } from "./components/ClipIcons";
+import { StageSplit } from "./components/StageSplit";
+import { TimelineDialog } from "./components/TimelineDialog";
+import { ClipInspector } from "./panels/ClipInspector";
+import { ClipRail } from "./panels/ClipRail";
+import { MediaColumn } from "./panels/MediaColumn";
+import { PreviewStage } from "./panels/PreviewStage";
+import { TimelineArea } from "./panels/TimelineArea";
+import { initialTimelineId, useClipStore } from "./stores/clipStore";
+import { useStageSplit } from "./stores/stageSplit";
 
 /**
- * The cutting room, which is not built yet.
+ * The cutting room.
  *
- * A page of its own rather than a corner of the editor: the menu in the
- * corner marks it as a place the app has, and a place the app has is a page
- * the reader stands on even while it has nothing to show but the saying so.
+ * A page of its own beside the board rather than a corner of it: a project is
+ * cut here, the material its boards made lies on the left, and the two pages
+ * stand under the same bar and the same corner menu so stepping between them
+ * is stepping between rooms of one workshop rather than between applications.
+ *
+ * The room holds no document of its own. Which timeline is being looked at is
+ * a reader's place (clipStore, remembered on this machine), and everything
+ * that changes a cut goes through the command pipeline — entering a room and
+ * moving between its timelines pushes history seams, so undoing here never
+ * reaches back onto a board.
  */
 export function ClipPage() {
+  const moka = useProjectStore((state) => state.moka);
+  const activeTimelineId = useClipStore((state) => state.activeTimelineId);
+  const newTimelineOpen = useClipStore((state) => state.newTimelineOpen);
+  const leftWidth = usePanelWidths((state) => state.left);
+  const rightWidth = usePanelWidths((state) => state.right);
+  // A column folded away is not rendered at all, and the corner it stood in
+  // keeps the triangle that brings it back — the same two columns as the
+  // canvas, with the same widths and the same folds.
+  const leftFolded = usePanelFolds((state) => state.left);
+  const rightFolded = usePanelFolds((state) => state.right);
+  const previewShare = useStageSplit((state) => state.share);
+  const projectId = moka?.metadata.id ?? null;
+
+  // Entering the room is a seam in the history: the board's undos stop at the
+  // door, and what is undone here is not undone on a canvas. Which timeline
+  // the room opens onto is the one this machine left the project on, falling
+  // back to the first the document holds.
+  useEffect(() => {
+    if (!projectId) return;
+    const opened = useProjectStore.getState().moka;
+    if (!opened) return;
+    useClipStore.getState().setActiveTimeline(initialTimelineId(opened));
+    historyBoundary("Clip room");
+  }, [projectId]);
+
+  // A timeline the document no longer holds — deleted here, or by an undo of
+  // the command that made it — is not what the room can be looking at: the
+  // first timeline takes its place, and a document with none clears it.
+  useEffect(() => {
+    const timelines = moka?.timelines ?? [];
+    const active = useClipStore.getState().activeTimelineId;
+    if (timelines.some((timeline) => timeline.id === active)) return;
+    useClipStore.getState().setActiveTimeline(timelines[0]?.id ?? null);
+  }, [moka]);
+
   /**
    * Going home from here puts the project down first.
    *
    * There is no dialog about unsaved work on this page, since nothing on it
-   * can leave work unsaved: what the board held when the reader stepped over
+   * can leave work unsaved: what the room holds when the reader steps over
    * is flushed, and a flush that cannot land says so and keeps the reader
    * here rather than walking away from the work.
    */
@@ -46,12 +105,54 @@ export function ClipPage() {
     useAppStore.getState().setPhase("launcher");
   };
 
+  const timelines = moka?.timelines ?? [];
+  const activeTimeline =
+    timelines.find((timeline) => timeline.id === activeTimelineId) ?? null;
+
   return (
     <div className="clip-page" data-testid="clip-page">
-      <header className="clip-head">
-        <HomeMenu current="clip" onHome={() => void goHome()} />
-      </header>
-      <p className="clip-coming">Comming soon</p>
+      <ClipTopBar onHome={() => void goHome()} />
+      <div className="clip-body" style={panelWidthStyle(leftWidth, rightWidth)}>
+        <ClipRail />
+        {leftFolded ? <PanelUnfold side="left" /> : <MediaColumn />}
+        {!leftFolded && <PanelResizer side="left" />}
+        <main
+          className="clip-stage"
+          // The share the splitter was dragged to, read by the preview's own
+          // stylesheet: the two panes divide the room they are given rather
+          // than being told how tall the window is.
+          style={
+            { "--clip-preview-share": String(previewShare) } as CSSProperties
+          }
+        >
+          {timelines.length === 0 ? (
+            // A project without a timeline is a project with nowhere to cut:
+            // the room offers the one thing there is to do rather than opening
+            // onto a preview and a track area with nothing behind either.
+            <div className="clip-empty clip-empty-first">
+              <TimelineIcon size={30} />
+              <h2>No timelines yet</h2>
+              <p>Create a timeline to start cutting.</p>
+              <button
+                className="primary"
+                onClick={() => useClipStore.getState().setNewTimelineOpen(true)}
+                type="button"
+              >
+                New timeline
+              </button>
+            </div>
+          ) : (
+            <>
+              <PreviewStage timeline={activeTimeline} />
+              <StageSplit />
+              <TimelineArea timeline={activeTimeline} />
+            </>
+          )}
+        </main>
+        {!rightFolded && <PanelResizer side="right" />}
+        {rightFolded ? <PanelUnfold side="right" /> : <ClipInspector />}
+      </div>
+      {newTimelineOpen && <TimelineDialog />}
     </div>
   );
 }

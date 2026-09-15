@@ -1,0 +1,258 @@
+import { useEffect, useState } from "react";
+import {
+  TIMELINE_NAME_MAX,
+  type TimelineDocument,
+  type TimelineId,
+} from "../../../shared/domain";
+import { execute, historyBoundary } from "../../editor/commands/execute";
+import { useProjectStore } from "../../editor/stores/projectStore";
+import { useClipStore } from "../stores/clipStore";
+
+/** The tab being renamed, and the words it is being renamed with. */
+interface Rename {
+  id: TimelineId;
+  draft: string;
+  /** What is wrong with the draft; null while it reads as a name. */
+  error: string | null;
+}
+
+/**
+ * The strip of every timeline the project holds.
+ *
+ * All of them, in the order the document keeps them, rather than the open
+ * ones a board strip shows: a project holds a handful of cuts and they are all
+ * worth a tab, so the strip is the list itself and there is no second memory
+ * of what is open to keep. A tab is turned over by a click, renamed by a
+ * double-click, and taken away by the small × beside it.
+ */
+export function TimelineTabs() {
+  const moka = useProjectStore((state) => state.moka);
+  const activeTimelineId = useClipStore((state) => state.activeTimelineId);
+  const setActiveTimeline = useClipStore((state) => state.setActiveTimeline);
+  const setNewTimelineOpen = useClipStore((state) => state.setNewTimelineOpen);
+  const [renaming, setRenaming] = useState<Rename | null>(null);
+  const [removing, setRemoving] = useState<TimelineId | null>(null);
+  const timelines = moka?.timelines ?? [];
+
+  const switchTo = (timeline: TimelineDocument) => {
+    if (timeline.id === activeTimelineId) return;
+    setActiveTimeline(timeline.id);
+    // Undoing a cut on one timeline is not undoing a cut on another: the seam
+    // between them is the name of the timeline the reader stepped onto.
+    historyBoundary(timeline.name);
+  };
+
+  const commitRename = () => {
+    if (!renaming) return;
+    const timeline = timelines.find((t) => t.id === renaming.id);
+    const name = renaming.draft.trim();
+    if (!timeline || name === timeline.name) {
+      setRenaming(null);
+      return;
+    }
+    // Checked here as well as in the command so the reader is told beside the
+    // field rather than by a toast across the room; the command still has the
+    // last word, and a name it refuses keeps this input standing.
+    if (name.length === 0 || name.length > TIMELINE_NAME_MAX) {
+      setRenaming({
+        ...renaming,
+        error:
+          name.length === 0
+            ? "A timeline needs a name"
+            : `Names run to ${TIMELINE_NAME_MAX} characters`,
+      });
+      return;
+    }
+    const done = execute("Rename timeline", [
+      { type: "renameTimeline", timelineId: timeline.id, name },
+    ]);
+    if (done) setRenaming(null);
+  };
+
+  const removeTimeline = (timelineId: TimelineId) => {
+    const index = timelines.findIndex((t) => t.id === timelineId);
+    const done = execute("Remove timeline", [
+      { type: "removeTimeline", timelineId },
+    ]);
+    if (!done) return;
+    if (timelineId === activeTimelineId) {
+      // The room moves to the tab beside the one that left, as a strip of tabs
+      // does anywhere else in the app. No history boundary on the way: a seam
+      // pushed here would stand between the deletion and its own undo.
+      const rest = timelines.filter((t) => t.id !== timelineId);
+      const next = rest[Math.min(index, rest.length - 1)] ?? rest[0] ?? null;
+      setActiveTimeline(next?.id ?? null);
+    }
+  };
+
+  const askToRemove = (timeline: TimelineDocument) => {
+    // A timeline with clips on it asks first — the whole of it leaves, and undo
+    // is a thing a reader should not have to be told about afterwards. An
+    // empty one is just a tab, and a tab is taken away in one click.
+    if (timeline.clips.length > 0) {
+      setRemoving(timeline.id);
+      return;
+    }
+    removeTimeline(timeline.id);
+  };
+
+  const asked = timelines.find((t) => t.id === removing) ?? null;
+
+  return (
+    <>
+      <div aria-label="Timelines" className="timeline-tabs" role="tablist">
+        {timelines.map((timeline) => {
+          const active = timeline.id === activeTimelineId;
+          const editing = renaming?.id === timeline.id ? renaming : null;
+          return (
+            <span
+              className={active ? "timeline-tab is-active" : "timeline-tab"}
+              key={timeline.id}
+            >
+              {editing ? (
+                <>
+                  <input
+                    aria-invalid={editing.error !== null}
+                    aria-label={`Rename ${timeline.name}`}
+                    autoFocus
+                    maxLength={TIMELINE_NAME_MAX}
+                    onBlur={commitRename}
+                    onChange={(event) =>
+                      setRenaming({
+                        ...editing,
+                        draft: event.target.value,
+                        error: null,
+                      })
+                    }
+                    onFocus={(event) => event.target.select()}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitRename();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        setRenaming(null);
+                      }
+                    }}
+                    value={editing.draft}
+                  />
+                  {editing.error !== null && (
+                    <span className="timeline-tab-error" role="alert">
+                      {editing.error}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <button
+                  aria-selected={active}
+                  data-testid={`timeline-tab-${timeline.name}`}
+                  onClick={() => switchTo(timeline)}
+                  onDoubleClick={() =>
+                    setRenaming({
+                      id: timeline.id,
+                      draft: timeline.name,
+                      error: null,
+                    })
+                  }
+                  role="tab"
+                  title="Double-click to rename"
+                  type="button"
+                >
+                  {timeline.name}
+                </button>
+              )}
+              <button
+                aria-label={`Delete ${timeline.name}`}
+                className="timeline-tab-close"
+                data-testid={`timeline-tab-close-${timeline.name}`}
+                onClick={() => askToRemove(timeline)}
+                title="Delete this timeline"
+                type="button"
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
+        <button
+          aria-label="Add timeline"
+          className="timeline-tab-add"
+          data-testid="timeline-tab-add"
+          onClick={() => setNewTimelineOpen(true)}
+          title="Add a timeline"
+          type="button"
+        >
+          +
+        </button>
+      </div>
+      {asked && (
+        <RemoveTimelineDialog
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => {
+            setRemoving(null);
+            removeTimeline(asked.id);
+          }}
+          timeline={asked}
+        />
+      )}
+    </>
+  );
+}
+
+/** The light question a timeline with clips on it is deleted under. */
+function RemoveTimelineDialog({
+  timeline,
+  onCancel,
+  onConfirm,
+}: {
+  timeline: TimelineDocument;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const count = timeline.clips.length;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+      role="presentation"
+    >
+      <div
+        aria-labelledby="remove-timeline-title"
+        aria-modal="true"
+        className="dialog"
+        role="alertdialog"
+      >
+        <h2 id="remove-timeline-title">Delete timeline?</h2>
+        <p>
+          “{timeline.name}” leaves the project with its {count}{" "}
+          {count === 1 ? "clip" : "clips"} — the whole timeline goes together.
+          Undo brings it back.
+        </p>
+        <div className="dialog-actions">
+          <button onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button
+            autoFocus
+            className="primary"
+            onClick={onConfirm}
+            type="button"
+          >
+            Delete timeline
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

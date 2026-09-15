@@ -741,35 +741,6 @@ h2 {
   flex: none;
 }
 
-/* The cutting room while it is being built. */
-.clip-page {
-  background: var(--canvas);
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.clip-head {
-  align-items: center;
-  backdrop-filter: blur(16px) saturate(1.2);
-  background: var(--surface-glass);
-  border-bottom: 1px solid var(--stroke);
-  display: flex;
-  flex: none;
-  padding: 8px 12px;
-}
-
-.clip-coming {
-  align-self: center;
-  color: var(--muted);
-  display: grid;
-  flex: 1;
-  font-size: 20px;
-  letter-spacing: 0.06em;
-  margin: 0;
-  place-content: center;
-}
-
 .editor-project-name {
   font-size: 14px;
   overflow: hidden;
@@ -3586,7 +3557,384 @@ button.danger:hover:not(:disabled) {
   text-align: center;
 }
 
+/* The cutting room: a rail, a column, the stage and the inspector beside it.
+
+   The same shape as the row beside the canvas — two columns that fold and are
+   dragged, a middle that takes the rest — with one more column on the left of
+   the pair, since the cutting room has nine drawers' worth of material and the
+   canvas has two. */
+
+.clip-page {
+  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.clip-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  /* One layer under the bar, like the row beside the canvas: the corners that
+     fold the columns away stand above what they stand beside. */
+  z-index: 0;
+}
+
+/* The rail: nine faces of the column beside it, sources above tools. */
+.clip-rail {
+  align-items: center;
+  background: var(--surface);
+  border-right: 1px solid var(--stroke);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 12px 8px;
+  width: 56px;
+}
+
+.clip-rail-group {
+  display: grid;
+  gap: 4px;
+}
+
+.clip-rail-item {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  padding: 0;
+  width: 40px;
+}
+
+.clip-rail-item:hover:not(:disabled) {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+  color: var(--ink);
+}
+
+.clip-rail-item.is-active {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+  color: var(--ink);
+}
+
+/* The column the rail turns over: the same column the canvas has, with the
+   width property the dragged edge writes into. */
+.clip-column {
+  background: var(--surface);
+  border-right: 1px solid var(--stroke);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  padding: 16px;
+  position: relative;
+  width: var(--panel-left-width, 260px);
+}
+
+/* The head keeps clear of the triangle folded into the corner. */
+.clip-column-head {
+  padding-left: 10px;
+}
+
+.clip-column-head h2 {
+  margin: 0;
+}
+
+.clip-column-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A face whose shelf has not arrived yet says so once, in the column's own
+   voice, rather than showing the head of a search nobody can use. */
+.clip-placeholder {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 22px 16px;
+  text-align: center;
+}
+
+.clip-placeholder p {
+  font-size: 12px;
+  margin: 0;
+}
+
+/* The stage: the preview over the timeline, split by an edge that is dragged. */
+.clip-stage {
+  background: var(--canvas);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.clip-preview {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 10px;
+  /* The share of the stage the preview takes, written by the splitter on the
+     stage itself; a stage nobody has split is a 60/40 one. */
+  height: calc(var(--clip-preview-share, 0.6) * 100%);
+  min-height: 140px;
+  padding: 14px 16px 0;
+}
+
+.clip-preview-frame {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  flex: 1;
+  min-height: 0;
+}
+
+.clip-preview-bar {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 0 2px 10px;
+}
+
+.clip-timecode {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.clip-preview-badge {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 9px;
+}
+
+/* The edge the preview and the timeline are dragged apart by: the column edge,
+   turned on its side. */
+.clip-split {
+  background: transparent;
+  border: none;
+  cursor: row-resize;
+  flex: none;
+  height: 10px;
+  margin: 0;
+  position: relative;
+  touch-action: none;
+  z-index: 2;
+}
+
+.clip-split::after {
+  background: var(--stroke);
+  content: "";
+  height: 1px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: background 120ms ease;
+}
+
+.clip-split:hover::after,
+.clip-split.is-dragging::after {
+  background: var(--primary);
+}
+
+.clip-split:focus-visible {
+  outline: none;
+}
+
+.clip-split:focus-visible::after {
+  background: var(--primary);
+  box-shadow: 0 0 0 1px var(--surface);
+}
+
+/* While the splitter is being dragged nothing under the pointer should read
+   the crossing as a choice of its own, or select words on the way past. */
+body.is-dragging-split {
+  cursor: row-resize;
+  user-select: none;
+}
+
+.clip-timeline {
+  background: var(--surface);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 110px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The column on the right of the cutting room. */
+.clip-inspector {
+  background: var(--surface);
+  border-left: 1px solid var(--stroke);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px;
+  position: relative;
+  width: var(--panel-right-width, 300px);
+}
+
+/* The one container every empty state stands in: a mark, something to read,
+   and — where there is something to do — something to do it with. */
+.clip-empty {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.clip-empty svg {
+  opacity: 0.65;
+}
+
+.clip-empty h2,
+.clip-empty h3,
+.clip-empty p {
+  margin: 0;
+}
+
+.clip-empty h2 {
+  color: var(--ink);
+  font-size: 18px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.clip-empty h3 {
+  color: var(--ink);
+  font-size: 14px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.clip-empty p {
+  font-size: 12px;
+}
+
+.clip-empty button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.clip-empty-inspector {
+  padding: 16px 8px;
+}
+
+/* The strip of timelines in the bar: the same strip the boards get, with the
+   × always standing since a timeline is taken away rather than put down. */
+.timeline-tabs {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.timeline-tab {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  position: relative;
+}
+
+.timeline-tab > button:first-child,
+.timeline-tab > input {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.timeline-tab > button:first-child {
+  background: transparent;
+}
+
+.timeline-tab > input {
+  background: var(--canvas);
+  width: 140px;
+}
+
+.timeline-tab.is-active > button:first-child {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+  color: var(--ink);
+}
+
+.timeline-tab-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 2px 6px;
+}
+
+.timeline-tab-close:hover:not(:disabled) {
+  color: var(--coral);
+}
+
+/* The reason a rename was not taken, said beside the tab it belongs to. */
+.timeline-tab-error {
+  color: var(--coral);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.timeline-tab-add {
+  background: transparent;
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  flex: none;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.timeline-tab-add:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
 @media (max-width: 900px) {
+  .clip-column,
+  .clip-inspector,
+  .clip-rail,
   .editor-side,
   .editor-right,
   .panel-resizer,

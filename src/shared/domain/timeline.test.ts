@@ -82,6 +82,23 @@ function imageAsset(): ResourceEntry {
 }
 
 describe("timeline lifecycle commands", () => {
+  it("is born at the frame it is asked for, and 1080p30 when asked for nothing", () => {
+    expect(createTimeline("Cutting room").settings).toEqual({
+      fps: 30,
+      width: 1920,
+      height: 1080,
+      background: "#000000",
+    });
+    expect(
+      createTimeline("Vertical", {
+        fps: 60,
+        width: 3840,
+        height: 2160,
+        background: "#000000",
+      }).settings,
+    ).toEqual({ fps: 60, width: 3840, height: 2160, background: "#000000" });
+  });
+
   it("adds a timeline and takes it back out whole", () => {
     const moka = buildGoldenMokaFile();
     expect(moka.timelines).toBeUndefined();
