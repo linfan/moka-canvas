@@ -1319,6 +1319,11 @@ export class LeaferEditorController {
   }
 
   private handleMenu(event: IPointerEvent) {
+    // A click that carries Ctrl is not the right button, however a Mac reads
+    // it: Ctrl is held to borrow the other tool, and the menu that pops under
+    // a hand in the middle of panning is a menu nobody asked for. A real
+    // right button still brings the menu, Ctrl held over it or not.
+    if (event.ctrlKey && !event.right) return;
     const target = this.hitTarget(event);
     this.callbacks?.onContextMenu({ x: event.x, y: event.y }, target);
   }
