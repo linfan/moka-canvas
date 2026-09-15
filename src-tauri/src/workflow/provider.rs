@@ -229,6 +229,10 @@ fn issue(code: &str, message: impl Into<String>, node_id: &str) -> ValidationIss
         node_id: Some(node_id.to_string()),
         port_id: None,
         edge_id: None,
+        timeline_id: None,
+        track_id: None,
+        clip_id: None,
+        transition_id: None,
     }
 }
 

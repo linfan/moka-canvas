@@ -119,6 +119,36 @@ fn shelf_words_are_held_to_their_sizes_and_their_vocabulary() {
     assert!(validate_moka_file(&shelf_from_json()).is_empty());
 }
 
+/// The cutting room's golden fixture, as the other language wrote it: every
+/// timeline shape the document may hold, one per field and enum branch.
+fn cut_from_json() -> MokaFile {
+    let raw = std::fs::read_to_string(fixture_path("cut.moka.json")).unwrap();
+    serde_json::from_str(&raw).unwrap()
+}
+
+#[test]
+fn cut_binary_decodes_to_cut_json_model() {
+    let bytes = std::fs::read(fixture_path("cut.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(decoded, cut_from_json());
+}
+
+#[test]
+fn cut_re_encode_is_byte_canonical() {
+    let bytes = std::fs::read(fixture_path("cut.canvas.moka")).unwrap();
+    let decoded = decode_moka_file(&bytes).unwrap();
+    assert_eq!(
+        bytes,
+        encode_moka_file(&decoded, None).unwrap(),
+        "a timeline is written the same bytes whichever language writes it"
+    );
+}
+
+#[test]
+fn cut_fixture_validates_clean() {
+    assert!(validate_moka_file(&cut_from_json()).is_empty());
+}
+
 #[test]
 fn rejects_bad_magic() {
     let mut bytes = std::fs::read(fixture_path("minimal.canvas.moka")).unwrap();

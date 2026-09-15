@@ -56,6 +56,10 @@ fn param_issue(message: impl Into<String>, node_id: &str) -> ValidationIssue {
         node_id: Some(node_id.to_string()),
         port_id: None,
         edge_id: None,
+        timeline_id: None,
+        track_id: None,
+        clip_id: None,
+        transition_id: None,
     }
 }
 
@@ -154,6 +158,10 @@ impl WorkflowExecutor for DeterministicExecutor {
                 node_id: Some(request.node_id.clone()),
                 port_id: Some("text".to_string()),
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
         if issues.is_empty() {

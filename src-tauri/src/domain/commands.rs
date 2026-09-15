@@ -12,7 +12,7 @@ use super::validate::{
     MAX_TITLE_LENGTH, ZOOM_MAX, ZOOM_MIN,
 };
 use super::{
-    AssistantMessage, AssistantSession, CanvasDocument, CanvasFolder, DocumentCommand,
+    timeline, AssistantMessage, AssistantSession, CanvasDocument, CanvasFolder, DocumentCommand,
     GroupMembership, MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue, SettingsPatch,
     WorkflowNode,
 };
@@ -1274,6 +1274,25 @@ fn apply_one(
                     index: previous_index,
                 }],
             ))
+        }
+
+        // The cutting room's commands live in `timeline.rs`, which holds the
+        // same rules the document validator reads so a command and a
+        // validation cannot disagree.
+        command @ (DocumentCommand::AddTimeline { .. }
+        | DocumentCommand::RemoveTimeline { .. }
+        | DocumentCommand::RenameTimeline { .. }
+        | DocumentCommand::UpdateTimelineSettings { .. }
+        | DocumentCommand::AddTrack { .. }
+        | DocumentCommand::RemoveTrack { .. }
+        | DocumentCommand::UpdateTrack { .. }
+        | DocumentCommand::AddClips { .. }
+        | DocumentCommand::RemoveClips { .. }
+        | DocumentCommand::UpdateClips { .. }
+        | DocumentCommand::MoveClips { .. }
+        | DocumentCommand::AddTransitions { .. }
+        | DocumentCommand::RemoveTransitions { .. }) => {
+            timeline::apply_timeline_command(moka, command)
         }
     }
 }

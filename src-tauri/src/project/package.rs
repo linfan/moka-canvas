@@ -870,6 +870,7 @@ mod tests {
                 ..ResourceRegistry::default()
             },
             folders: None,
+            timelines: None,
             canvas: vec![canvas],
         }
     }

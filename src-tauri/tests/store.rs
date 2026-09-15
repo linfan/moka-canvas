@@ -4,7 +4,8 @@ use moka_canvas::domain::validate::{MAX_ASSET_TAGS, MAX_ASSISTANT_MESSAGES_PER_S
 use moka_canvas::domain::{
     new_id, AssistantMessage, AssistantReference, AssistantRole, AssistantSession,
     AssistantToolCall, CanvasDocument, Capability, DocumentCommand, GenerationInputMode,
-    GenerationMode, GenerationSpec, NodeKind, PointValue,
+    GenerationMode, GenerationSpec, NodeKind, PointValue, TimelineDocument, TimelineSettings,
+    TimelineTrack, TrackKind,
 };
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{AssetShelfEdit, CreateProject, ProjectStore, StagedAsset};
@@ -89,6 +90,69 @@ async fn canvas_moka_round_trips_through_disk() {
     assert_eq!(reopened.moka.canvas[0].nodes.len(), 1);
     assert_eq!(reopened.moka.canvas[0].nodes[0].id, node.id);
     assert_eq!(reopened.moka.metadata.revision, 1);
+}
+
+/// A timeline born empty but for its three rows, as the cutting room makes one.
+fn empty_timeline(id: &str, name: &str) -> TimelineDocument {
+    let now = moka_canvas::domain::now_iso();
+    let row = |kind: TrackKind, name: &str| TimelineTrack {
+        id: new_id(),
+        kind,
+        name: name.into(),
+        muted: false,
+        hidden: false,
+        locked: false,
+        created_at: now.clone(),
+    };
+    TimelineDocument {
+        id: id.into(),
+        name: name.into(),
+        schema_version: 1,
+        settings: TimelineSettings {
+            fps: 30,
+            width: 1920,
+            height: 1080,
+            background: "#000000".into(),
+        },
+        tracks: vec![
+            row(TrackKind::Video, "Video 1"),
+            row(TrackKind::Audio, "Audio 1"),
+            row(TrackKind::Text, "Text 1"),
+        ],
+        clips: Vec::new(),
+        transitions: Vec::new(),
+        created_at: now.clone(),
+        updated_at: now,
+    }
+}
+
+#[tokio::test]
+async fn a_timeline_lands_through_the_pipeline_and_reads_back() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let current = store.current().await.unwrap().unwrap();
+    assert!(current.moka.timelines.is_none());
+
+    let timeline = empty_timeline("timeline-1", "Timeline 1");
+    let saved = store
+        .apply_commands(
+            0,
+            vec![DocumentCommand::AddTimeline {
+                timeline: timeline.clone(),
+                index: None,
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved.revision, 1);
+
+    // Re-open from disk and verify the timeline survived whole.
+    let reopened = store.open_project(&root).await.unwrap();
+    let held = reopened.moka.timelines.as_ref().unwrap();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].id, timeline.id);
+    assert_eq!(held[0].tracks.len(), 3);
+    assert_eq!(held[0].settings.fps, 30);
 }
 
 #[tokio::test]

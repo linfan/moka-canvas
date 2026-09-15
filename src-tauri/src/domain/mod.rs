@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod folders;
+pub mod timeline;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,10 @@ pub type AssetId = String;
 pub type RunId = String;
 pub type SessionId = String;
 pub type MessageId = String;
+pub type TimelineId = String;
+pub type TrackId = String;
+pub type ClipId = String;
+pub type TransitionId = String;
 pub type IsoTimestamp = String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -766,6 +771,201 @@ impl CanvasDocument {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The cutting room: one project's timelines
+// ---------------------------------------------------------------------------
+
+/// What a track holds, which is also what a clip of that kind may land on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackKind {
+    Video,
+    Audio,
+    Text,
+}
+
+impl TrackKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TrackKind::Video => "video",
+            TrackKind::Audio => "audio",
+            TrackKind::Text => "text",
+        }
+    }
+}
+
+/// Clip kinds are the same set: a clip is a track's content.
+pub type ClipKind = TrackKind;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransitionKind {
+    None,
+    Crossfade,
+    DipToBlack,
+    DipToWhite,
+    SlideLeft,
+    SlideUp,
+    Wipe,
+    ZoomIn,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextPosition {
+    Top,
+    Center,
+    Bottom,
+}
+
+/// One row of a timeline.
+///
+/// The order of the list is the order the rows draw in: an upper video track
+/// draws over a lower one. Muting is sound and hiding is picture, and the two
+/// say nothing about each other: a hidden track's sound still mixes in, and a
+/// muted one's picture still draws. Locking is neither — it only keeps the
+/// editor from moving the row's clips, and the document itself holds no rule
+/// about it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineTrack {
+    pub id: TrackId,
+    pub kind: TrackKind,
+    pub name: String,
+    pub muted: bool,
+    pub hidden: bool,
+    pub locked: bool,
+    pub created_at: IsoTimestamp,
+}
+
+/// The visual grade a video clip wears. Absent means untouched; each axis is a
+/// fraction of the range the picture allows.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipAdjust {
+    pub brightness: f64,
+    pub contrast: f64,
+    pub saturation: f64,
+}
+
+/// How a text clip is written, in pixels on the timeline's own canvas.
+///
+/// Field declaration order must match the TypeScript codec key order so both
+/// languages produce byte-identical BSON. `background` deliberately carries no
+/// skip: a null plate must be written, not left off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextClipStyle {
+    pub font_family: String,
+    pub font_size: i32,
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub align: TextAlign,
+    pub position: TextPosition,
+    /// #rrggbb, or null for no backing plate.
+    pub background: Option<String>,
+    /// Outline width in timeline pixels; 0 is no outline.
+    pub stroke_width: i32,
+    /// #rrggbb; always present, harmless at zero width.
+    pub stroke_color: String,
+}
+
+/// What a text clip says and how it is set.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextClipData {
+    pub content: String,
+    pub style: TextClipStyle,
+}
+
+/// A piece of material placed on a timeline; field declaration order must match
+/// the TypeScript codec key order so both languages produce byte-identical
+/// BSON. The four optional fields are declared at the tail, where `encodeClip`
+/// writes them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineClip {
+    pub id: ClipId,
+    pub track_id: TrackId,
+    pub kind: ClipKind,
+    /// What the timeline reads on the clip; the asset's name by default.
+    pub label: String,
+    pub start_ms: i64,
+    pub duration_ms: i64,
+    pub in_point_ms: i64,
+    pub out_point_ms: i64,
+    /// 0.25..4, 1 being the material's own pace.
+    pub speed: f64,
+    /// 0..2, 1 being the material's own level.
+    pub volume: f64,
+    pub fade_in_ms: i64,
+    pub fade_out_ms: i64,
+    pub muted: bool,
+    /// 0..1, for a clip on an upper video track drawing over the one below.
+    pub opacity: f64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    /// The material the clip reads; a text clip names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<AssetId>,
+    /// Visual grade; absent means the clip is untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjust: Option<ClipAdjust>,
+    /// Preset look; absent and "none" mean the same untouched thing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    /// Present exactly on text clips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<TextClipData>,
+}
+
+/// How two neighbouring clips meet: the window after `after_clip_id` that the
+/// follower is pulled back into, stored as geometry (R1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineTransition {
+    pub id: TransitionId,
+    pub after_clip_id: ClipId,
+    pub kind: TransitionKind,
+    pub duration_ms: i64,
+    pub created_at: IsoTimestamp,
+}
+
+/// The frame the cutting room works at and the colour it cuts to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineSettings {
+    pub fps: i32,
+    pub width: i32,
+    pub height: i32,
+    pub background: String,
+}
+
+/// One timeline: the tracks, the clips on them, and the transitions on their
+/// seams.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineDocument {
+    pub id: TimelineId,
+    pub name: String,
+    pub schema_version: i32,
+    pub settings: TimelineSettings,
+    pub tracks: Vec<TimelineTrack>,
+    pub clips: Vec<TimelineClip>,
+    pub transitions: Vec<TimelineTransition>,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MokaFile {
     pub version: String,
@@ -777,6 +977,13 @@ pub struct MokaFile {
     /// is every document written before they existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folders: Option<Vec<CanvasFolder>>,
+    /// The project's timelines, in the order the cutting room's tabs read them.
+    ///
+    /// Left off rather than left empty on a document that has no timelines,
+    /// which is every document written before the cutting room existed: a
+    /// project that has cut nothing says so by carrying nothing here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timelines: Option<Vec<TimelineDocument>>,
     pub canvas: Vec<CanvasDocument>,
 }
 
@@ -793,7 +1000,11 @@ impl MokaFile {
         self.canvas.iter_mut().find(|canvas| canvas.id == canvas_id)
     }
 
-    /// Asset id → referencing node ids, across every canvas.
+    /// Asset id → the ids referencing it, across every canvas and timeline.
+    ///
+    /// A reference is a canvas node id or a timeline clip id: both halves of a
+    /// document hold assets, and whether an asset is still in use is a question
+    /// about the project rather than about one board.
     pub fn asset_references(&self) -> BTreeMap<AssetId, Vec<NodeId>> {
         let mut refs: BTreeMap<AssetId, Vec<NodeId>> = BTreeMap::new();
         let mut add = |asset_id: &Option<AssetId>, node_id: &NodeId| {
@@ -814,6 +1025,11 @@ impl MokaFile {
                 }
             }
         }
+        for timeline in self.timelines.iter().flatten() {
+            for clip in &timeline.clips {
+                add(&clip.asset_id, &clip.id);
+            }
+        }
         refs
     }
 }
@@ -827,6 +1043,133 @@ pub struct NodePatch {
     pub z_index: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<NodeData>,
+}
+
+/// A change to a timeline's own frame; only what is named moves, so a reader
+/// changing the frame rate leaves the resolution where it was.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineSettingsPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fps: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
+}
+
+/// A change to a track; only what is named moves, so renaming a track leaves
+/// its mute where it was.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
+}
+
+/// Reads a field that must tell "left off" from "carried as null".
+///
+/// A plain `Option<Option<T>>` cannot tell the two apart: serde reads a null
+/// and a missing key as the same `None`. This reads any present key — null
+/// included — as `Some(...)`, so `Some(None)` is the null that clears the
+/// field while a missing key stays `None` and leaves it alone.
+fn deserialize_double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
+}
+
+/// The fields a caller may move on a clip.
+///
+/// A field left off is not touched; `adjust: null` is how a grade is cleared,
+/// since JSON cannot spell "this key goes away" any other way. `filter` is
+/// double-layered for the same reason: an undo that takes a preset back out
+/// sends `filter: null`, and a single layer would read it as "leave it". Every
+/// patch that arrives through the document pipeline is JSON, so the merge rule
+/// and the undo rule are one rule: what a patch carries moves, what a patch
+/// carries as null goes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<ClipId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_id: Option<TrackId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ClipKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<AssetId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_point_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_in_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_out_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// Absent leaves the grade, null clears it, a value sets it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_double_option"
+    )]
+    pub adjust: Option<Option<ClipAdjust>>,
+    /// Absent leaves the preset, null clears it, a value sets it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_double_option"
+    )]
+    pub filter: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<TextClipData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<IsoTimestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<IsoTimestamp>,
+}
+
+/// A change to one clip, named by id, for `updateClips`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipPatchEntry {
+    pub clip_id: ClipId,
+    pub patch: ClipPatch,
+}
+
+/// Where a clip goes for `moveClips`: `track_id` names the row it lands on,
+/// left off when it stays where it is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipMove {
+    pub clip_id: ClipId,
+    pub start_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_id: Option<TrackId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -968,6 +1311,93 @@ pub enum DocumentCommand {
         folder_id: Option<String>,
         index: usize,
     },
+    // -------------------------------------------------------------------------
+    // The cutting room. Every command names the timeline it works on, and none
+    // of them reaches into the canvases: the two halves of a document do not
+    // borrow each other's geometry.
+    // -------------------------------------------------------------------------
+    /// A timeline is added whole — its tracks, clips, and transitions included.
+    #[serde(rename_all = "camelCase")]
+    AddTimeline {
+        timeline: TimelineDocument,
+        index: Option<usize>,
+    },
+    #[serde(rename_all = "camelCase")]
+    RemoveTimeline { timeline_id: TimelineId },
+    #[serde(rename_all = "camelCase")]
+    RenameTimeline {
+        timeline_id: TimelineId,
+        name: String,
+    },
+    /// A change to the timeline's own frame: only what is named moves.
+    #[serde(rename_all = "camelCase")]
+    UpdateTimelineSettings {
+        timeline_id: TimelineId,
+        settings: TimelineSettingsPatch,
+    },
+    /// A track is added empty; its clips arrive by `addClips` naming it.
+    #[serde(rename_all = "camelCase")]
+    AddTrack {
+        timeline_id: TimelineId,
+        track: TimelineTrack,
+        index: Option<usize>,
+    },
+    /// Takes a track out only when it holds nothing: taking a track and its
+    /// clips in one go is a deletion the reader did not watch.
+    #[serde(rename_all = "camelCase")]
+    RemoveTrack {
+        timeline_id: TimelineId,
+        track_id: TrackId,
+    },
+    #[serde(rename_all = "camelCase")]
+    UpdateTrack {
+        timeline_id: TimelineId,
+        track_id: TrackId,
+        patch: TrackPatch,
+    },
+    /// Clips land together — a division or a paste arrives as many clips in one
+    /// step of history. `seams` restores transitions together with the clips
+    /// they join, read as already in place: nothing is pulled back, while
+    /// `addTransitions` is the command that makes a seam.
+    #[serde(rename_all = "camelCase")]
+    AddClips {
+        timeline_id: TimelineId,
+        clips: Vec<TimelineClip>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seams: Option<Vec<TimelineTransition>>,
+    },
+    #[serde(rename_all = "camelCase")]
+    RemoveClips {
+        timeline_id: TimelineId,
+        clip_ids: Vec<ClipId>,
+    },
+    #[serde(rename_all = "camelCase")]
+    UpdateClips {
+        timeline_id: TimelineId,
+        patches: Vec<ClipPatchEntry>,
+    },
+    /// Only where a clip sits: `start_ms` on the timeline's clock and, when the
+    /// clip lands on another row, the `track_id` it lands on.
+    #[serde(rename_all = "camelCase")]
+    MoveClips {
+        timeline_id: TimelineId,
+        moves: Vec<ClipMove>,
+    },
+    /// A transition lands on a butted seam, and the command pulls the follower
+    /// back by the window's length itself. A batch is listed left to right.
+    #[serde(rename_all = "camelCase")]
+    AddTransitions {
+        timeline_id: TimelineId,
+        transitions: Vec<TimelineTransition>,
+    },
+    /// Transitions come off their seams and the followers take their places
+    /// back. A batch is listed left to right, and seams this batch itself
+    /// undoes do not count against it.
+    #[serde(rename_all = "camelCase")]
+    RemoveTransitions {
+        timeline_id: TimelineId,
+        transition_ids: Vec<TransitionId>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -1009,7 +1439,7 @@ pub struct SelfCheckReport {
     pub issues: Vec<SelfCheckIssue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidationIssue {
     pub code: String,
@@ -1022,6 +1452,14 @@ pub struct ValidationIssue {
     pub port_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_id: Option<EdgeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_id: Option<TimelineId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_id: Option<TrackId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_id: Option<ClipId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_id: Option<TransitionId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

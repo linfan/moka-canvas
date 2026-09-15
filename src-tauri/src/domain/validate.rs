@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::folders::{folder_depth, folders_of, holds_itself};
 use super::{
-    generation_capability_for, CanvasDocument, Capability, Cardinality, DataType, MokaFile, NodeId,
-    NodeKind, PortDirection, ResourceEntry, ValidationIssue, WorkflowEdge, WorkflowNode,
-    ASSET_CATEGORIES, ASSET_ORIGINS,
+    generation_capability_for, timeline, CanvasDocument, Capability, Cardinality, DataType,
+    MokaFile, NodeId, NodeKind, PortDirection, ResourceEntry, ValidationIssue, WorkflowEdge,
+    WorkflowNode, ASSET_CATEGORIES, ASSET_ORIGINS,
 };
 
 pub const COORDINATE_LIMIT: f64 = 1_000_000.0;
@@ -339,6 +339,10 @@ fn generation_issues(
         node_id: Some(node.id.clone()),
         port_id: None,
         edge_id: None,
+        timeline_id: None,
+        track_id: None,
+        clip_id: None,
+        transition_id: None,
     };
 
     let slots = node.data.result_slots.as_deref().unwrap_or(&[]);
@@ -444,6 +448,10 @@ fn session_issues(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
         node_id: None,
         port_id: None,
         edge_id: None,
+        timeline_id: None,
+        track_id: None,
+        clip_id: None,
+        transition_id: None,
     };
 
     let sessions = canvas.sessions.as_deref().unwrap_or(&[]);
@@ -481,6 +489,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
             node_id: None,
             port_id: None,
             edge_id: None,
+            timeline_id: None,
+            track_id: None,
+            clip_id: None,
+            transition_id: None,
         });
     }
     if canvas.edges.len() > MAX_EDGES_PER_CANVAS {
@@ -491,6 +503,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
             node_id: None,
             port_id: None,
             edge_id: None,
+            timeline_id: None,
+            track_id: None,
+            clip_id: None,
+            transition_id: None,
         });
     }
     issues.extend(session_issues(canvas));
@@ -505,6 +521,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                 node_id: Some(node.id.clone()),
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
         if !bounds_valid(&node.bounds) {
@@ -515,6 +535,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                 node_id: Some(node.id.clone()),
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
         let mut port_ids = HashSet::new();
@@ -527,6 +551,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                     node_id: Some(node.id.clone()),
                     port_id: Some(port.id.clone()),
                     edge_id: None,
+                    timeline_id: None,
+                    track_id: None,
+                    clip_id: None,
+                    transition_id: None,
                 });
             }
         }
@@ -546,6 +574,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                 node_id: None,
                 port_id: None,
                 edge_id: Some(edge.id.clone()),
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
         let remaining: Vec<WorkflowEdge> = canvas
@@ -565,6 +597,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                 node_id: Some(edge.target.node_id.clone()),
                 port_id: Some(edge.target.port_id.clone()),
                 edge_id: Some(edge.id.clone()),
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
     }
@@ -580,6 +616,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                 node_id: Some(group.group_id.clone()),
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
             continue;
         }
@@ -593,6 +633,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                     node_id: Some(group.group_id.clone()),
                     port_id: None,
                     edge_id: None,
+                    timeline_id: None,
+                    track_id: None,
+                    clip_id: None,
+                    transition_id: None,
                 });
             }
             if !seen.insert(child_id.as_str()) {
@@ -603,6 +647,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                     node_id: Some(child_id.clone()),
                     port_id: None,
                     edge_id: None,
+                    timeline_id: None,
+                    track_id: None,
+                    clip_id: None,
+                    transition_id: None,
                 });
             }
             if !node_ids.contains(child_id.as_str()) {
@@ -613,6 +661,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                     node_id: Some(child_id.clone()),
                     port_id: None,
                     edge_id: None,
+                    timeline_id: None,
+                    track_id: None,
+                    clip_id: None,
+                    transition_id: None,
                 });
             }
             if group_of
@@ -626,6 +678,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                     node_id: Some(child_id.clone()),
                     port_id: None,
                     edge_id: None,
+                    timeline_id: None,
+                    track_id: None,
+                    clip_id: None,
+                    transition_id: None,
                 });
             }
         }
@@ -637,6 +693,10 @@ pub fn validate_canvas(canvas: &CanvasDocument) -> Vec<ValidationIssue> {
                 node_id: Some(group.group_id.clone()),
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
     }
@@ -657,6 +717,10 @@ fn shelf_issues(entry: &ResourceEntry) -> Vec<ValidationIssue> {
         node_id: None,
         port_id: None,
         edge_id: None,
+        timeline_id: None,
+        track_id: None,
+        clip_id: None,
+        transition_id: None,
     };
     let over = |text: &str, limit: usize| text.chars().count() > limit;
     let mut issues = Vec::new();
@@ -720,6 +784,10 @@ fn folder_issues(moka: &MokaFile) -> Vec<ValidationIssue> {
         node_id: None,
         port_id: None,
         edge_id: None,
+        timeline_id: None,
+        track_id: None,
+        clip_id: None,
+        transition_id: None,
     };
     let mut issues = Vec::new();
     let folders = folders_of(moka);
@@ -775,6 +843,10 @@ fn folder_issues(moka: &MokaFile) -> Vec<ValidationIssue> {
                     node_id: None,
                     port_id: None,
                     edge_id: None,
+                    timeline_id: None,
+                    track_id: None,
+                    clip_id: None,
+                    transition_id: None,
                 });
             }
         }
@@ -794,6 +866,10 @@ pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
                 node_id: None,
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
         issues.extend(validate_canvas(canvas));
@@ -809,6 +885,10 @@ pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
                 node_id: None,
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
         if !resource_path_valid(&entry.path) {
@@ -819,20 +899,36 @@ pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
                 node_id: None,
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
         issues.extend(shelf_issues(entry));
     }
 
-    for (asset_id, node_ids) in moka.asset_references() {
+    for timeline in moka.timelines.iter().flatten() {
+        issues.extend(timeline::validate_timeline(timeline, moka));
+    }
+
+    // The references a document's two halves hold are read together: a timeline
+    // clip is as much a use of an asset as a canvas node is.
+    for asset_id in moka.asset_references().keys() {
         if !resource_ids.contains(asset_id.as_str()) {
             issues.push(ValidationIssue {
                 code: "ASSET_MISSING".into(),
-                message: format!("Node references unregistered asset {asset_id}"),
+                message: format!(
+                    "Something in the project references unregistered asset {asset_id}"
+                ),
                 canvas_id: None,
-                node_id: node_ids.first().cloned(),
+                node_id: None,
                 port_id: None,
                 edge_id: None,
+                timeline_id: None,
+                track_id: None,
+                clip_id: None,
+                transition_id: None,
             });
         }
     }

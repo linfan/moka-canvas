@@ -164,6 +164,10 @@ fn issue(
         node_id,
         port_id,
         edge_id: None,
+        timeline_id: None,
+        track_id: None,
+        clip_id: None,
+        transition_id: None,
     }
 }
 
@@ -633,6 +637,7 @@ mod tests {
             },
             resources: ResourceRegistry::default(),
             folders: None,
+            timelines: None,
             canvas: vec![canvas],
         }
     }
