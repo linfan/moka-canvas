@@ -65,6 +65,13 @@ log(`server log: ${serverLog}`);
 const metadataKey = randomBytes(32).toString("base64");
 log("metadata key: generated for this boot");
 
+// The renderer is pointed at a path that is never there, so the export's
+// "no ffmpeg" path is the same on every machine: the suite asserts the
+// unavailable dialog, and a developer whose PATH happens to carry ffmpeg
+// does not get a different test than CI does.
+const ffmpegPath = process.env.MOKA_FFMPEG ?? "/nonexistent/ffmpeg";
+log(`ffmpeg: pointed at ${ffmpegPath}`);
+
 const child = spawn(
   "cargo",
   [
@@ -80,7 +87,11 @@ const child = spawn(
   {
     cwd: repoRoot,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, MOKA_METADATA_KEY: metadataKey },
+    env: {
+      ...process.env,
+      MOKA_METADATA_KEY: metadataKey,
+      MOKA_FFMPEG: ffmpegPath,
+    },
   },
 );
 const logStream = createWriteStream(serverLog);

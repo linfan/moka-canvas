@@ -65,6 +65,14 @@ generate:
   # See docs/security.md.
   # debug:
   #   enabled: false
+clip:
+  # Where the timeline exporter finds ffmpeg. Left out, the search goes to
+  # MOKA_FFMPEG and then to the platform search path. A machine with no ffmpeg
+  # is not a machine that fails to start: export reports itself unavailable and
+  # everything else works as before. Never a setting a request can name.
+  # ffmpegPath: "/usr/local/bin/ffmpeg"
+  # How long one render may run before it is stopped and reported failed.
+  timeoutSeconds: 3600
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

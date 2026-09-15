@@ -225,6 +225,42 @@ impl GenerateConfig {
     }
 }
 
+/// Where the timeline exporter finds its renderer, and how long it may take.
+///
+/// The path is the only place a program is named, and it is read from the
+/// configuration file rather than from a request: an export body names a
+/// timeline and nothing else. Left out, the locator walks the environment and
+/// then the platform search path, and a machine with no ffmpeg is a machine
+/// whose export is unavailable rather than one that fails to start.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipConfig {
+    /// An explicit ffmpeg, ahead of the environment and the search path.
+    #[serde(default)]
+    pub ffmpeg_path: Option<PathBuf>,
+    /// How long one render may run before it is stopped and reported failed.
+    #[serde(default = "default_clip_timeout_seconds")]
+    pub timeout_seconds: u64,
+}
+
+impl Default for ClipConfig {
+    fn default() -> Self {
+        Self {
+            ffmpeg_path: None,
+            timeout_seconds: default_clip_timeout_seconds(),
+        }
+    }
+}
+
+impl ClipConfig {
+    /// The budget one render gets. Never zero: a ceiling of none would stop
+    /// every export the moment it started, and a mistyped number should not be
+    /// able to ask for one.
+    pub fn timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.timeout_seconds.max(1))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicConfig {
@@ -371,6 +407,9 @@ fn default_max_output_items() -> usize {
 fn default_video_max_polls() -> u32 {
     120
 }
+fn default_clip_timeout_seconds() -> u64 {
+    3_600
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -384,6 +423,8 @@ pub struct AppConfig {
     pub workflow: WorkflowConfig,
     #[serde(default)]
     pub generate: GenerateConfig,
+    #[serde(default)]
+    pub clip: ClipConfig,
     pub public: PublicConfig,
     #[serde(default)]
     pub limits: LimitsConfig,
@@ -402,6 +443,7 @@ impl Default for AppConfig {
             metadata: MetadataConfig::default(),
             workflow: WorkflowConfig::default(),
             generate: GenerateConfig::default(),
+            clip: ClipConfig::default(),
             public: PublicConfig::default(),
             limits: LimitsConfig::default(),
         }
@@ -613,6 +655,7 @@ pub fn parse_test_config(root: &Path) -> AppConfig {
         },
         workflow: WorkflowConfig::default(),
         generate: GenerateConfig::default(),
+        clip: ClipConfig::default(),
         public: PublicConfig {
             product_name: "Moka Canvas".into(),
             max_upload_bytes: default_max_upload_bytes(),
@@ -943,6 +986,57 @@ generate:
         assert_eq!(config.timeout_for(Capability::Video).as_secs(), 60);
         assert_eq!(config.input_cap_for(Capability::Image), 20 * 1024 * 1024);
         assert_eq!(config.input_cap_for(Capability::Video), 200 * 1024 * 1024);
+    }
+
+    #[test]
+    fn clip_section_is_optional() {
+        let legacy = r#"
+version: 1
+server:
+  bind: "127.0.0.1:3000"
+  staticDir: "./dist"
+projects:
+  maxMokaFileBytes: 33554432
+public:
+  productName: "Moka Canvas"
+"#;
+        let config = parse_config(legacy).expect("legacy config must parse");
+        assert_eq!(config.clip, ClipConfig::default());
+        assert_eq!(config.clip.ffmpeg_path, None);
+        assert_eq!(config.clip.timeout_seconds, 3600);
+        assert_eq!(config.clip.timeout().as_secs(), 3600);
+    }
+
+    #[test]
+    fn a_render_budget_of_none_is_read_as_one_second() {
+        let config = ClipConfig {
+            ffmpeg_path: None,
+            timeout_seconds: 0,
+        };
+        assert_eq!(
+            config.timeout().as_secs(),
+            1,
+            "a ceiling of none would stop every export the moment it started"
+        );
+    }
+
+    #[test]
+    fn one_clip_key_does_not_disturb_the_others() {
+        let tuned = r#"
+version: 1
+server:
+  bind: "127.0.0.1:3000"
+  staticDir: "./dist"
+projects:
+  maxMokaFileBytes: 33554432
+public:
+  productName: "Moka Canvas"
+clip:
+  ffmpegPath: "/opt/ffmpeg"
+"#;
+        let config = parse_config(tuned).expect("tuned config must parse");
+        assert_eq!(config.clip.ffmpeg_path, Some(PathBuf::from("/opt/ffmpeg")));
+        assert_eq!(config.clip.timeout_seconds, default_clip_timeout_seconds());
     }
 
     #[test]

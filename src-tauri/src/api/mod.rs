@@ -1,3 +1,5 @@
+use crate::clip::jobs::ExportRegistry;
+use crate::clip::locate::{CapabilityProbe, ClipCapabilities};
 use crate::config::{AppConfig, RuntimeMode};
 use crate::generate::{Gateway, ModelRepo};
 use crate::metadata::{self, MetadataStore};
@@ -24,6 +26,12 @@ pub struct ApiState {
     pub models: Arc<ModelRepo>,
     pub gateway: Arc<Gateway>,
     pub runs: Arc<RunManager>,
+    /// Where the timeline exporter finds ffmpeg, and what it can do. Resolved
+    /// once per process; a machine without one is not a failure to start.
+    clip_probe: Arc<CapabilityProbe>,
+    /// The one render this process may be running, and the handles it is
+    /// polled with.
+    pub exports: Arc<ExportRegistry>,
     /// Root directory for converter scripts (meta.json is here).
     converter_root: PathBuf,
 }
@@ -70,6 +78,7 @@ impl ApiState {
             config.active_executors(),
             config.generate.concurrent_runs(),
         );
+        let clip_probe = Arc::new(CapabilityProbe::new(&config.clip));
         Self {
             mode,
             store,
@@ -78,8 +87,15 @@ impl ApiState {
             gateway,
             config,
             runs,
+            clip_probe,
+            exports: Arc::new(ExportRegistry::new()),
             converter_root,
         }
+    }
+
+    /// What the machine's renderer can do, probed once and remembered.
+    pub fn clip_capabilities(&self) -> ClipCapabilities {
+        self.clip_probe.capabilities()
     }
 
     /// The directory where converter scripts live. Used during startup to deploy
@@ -169,6 +185,7 @@ pub fn router() -> axum::Router<ApiState> {
         )
         .merge(model_router())
         .merge(generate_router())
+        .merge(clip_router())
         .route(
             "/api/v1/converter/protocols",
             get(routes::converter_protocols),
@@ -195,6 +212,28 @@ fn generate_router() -> axum::Router<ApiState> {
         )
         .route("/api/v1/generate/stream", get(routes::stream_run_events))
         .route_layer(DefaultBodyLimit::max(MAX_GENERATE_BODY_BYTES))
+}
+
+/// Rendering a timeline to a video file.
+///
+/// Its own family of routes rather than one under the project: an export has a
+/// handle of its own, is polled by it, and is cancelled by it, which is the
+/// same shape the generation tasks answer with. The body is a timeline id and
+/// nothing else — how to reach a renderer is never something a request says.
+fn clip_router() -> axum::Router<ApiState> {
+    use axum::extract::DefaultBodyLimit;
+    use axum::routing::{get, post};
+
+    const MAX_CLIP_BODY_BYTES: usize = 64 * 1024;
+
+    axum::Router::new()
+        .route("/api/v1/clip/capabilities", get(routes::clip_capabilities))
+        .route("/api/v1/clip/export", post(routes::start_clip_export))
+        .route(
+            "/api/v1/clip/export/{id}",
+            get(routes::get_clip_export).delete(routes::cancel_clip_export),
+        )
+        .route_layer(DefaultBodyLimit::max(MAX_CLIP_BODY_BYTES))
 }
 
 /// Model configuration carries a credential in the request body, and a model

@@ -45,6 +45,16 @@ pub struct StartRunRequest {
     pub assistant_session_id: Option<String>,
 }
 
+/// What a render is asked for: which timeline, and nothing else.
+///
+/// Where the renderer is, what it is asked with, and where its artifact goes
+/// are all facts about this machine, never about a request.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipExportRequest {
+    pub timeline_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationPreviewRequest {

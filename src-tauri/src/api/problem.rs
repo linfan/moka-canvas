@@ -47,7 +47,7 @@ impl Problem {
 pub fn status_for_code(code: &str) -> StatusCode {
     match code {
         "NOT_FOUND" | "PROJECT_NOT_FOUND" | "RUN_NOT_FOUND" | "ASSET_MISSING"
-        | "TASK_NOT_FOUND" => StatusCode::NOT_FOUND,
+        | "TASK_NOT_FOUND" | "EXPORT_NOT_FOUND" | "TIMELINE_NOT_FOUND" => StatusCode::NOT_FOUND,
         "PROJECT_NOT_OPEN"
         | "REVISION_CONFLICT"
         | "METADATA_CONFLICT"
@@ -66,6 +66,9 @@ pub fn status_for_code(code: &str) -> StatusCode {
         | "CONFIG_METADATA_KEY_MISSING"
         | "CONFIG_METADATA_DIR_INVALID"
         | "CONFIG_METADATA_STORE_UNSUPPORTED" => StatusCode::SERVICE_UNAVAILABLE,
+        // The work was asked for on a machine that cannot do it, and no retry
+        // of this request changes that: what has to change is the machine.
+        "FFMPEG_UNAVAILABLE" => StatusCode::SERVICE_UNAVAILABLE,
         // The server is the gateway here, so the status mirrors what the
         // provider's own answer meant. The code is what tells a client that
         // the failure was upstream rather than in its request.
@@ -137,6 +140,29 @@ impl From<crate::generate::ProviderError> for Problem {
 
 impl From<super::filesystem::BrowseError> for Problem {
     fn from(error: super::filesystem::BrowseError) -> Self {
+        Problem::new(
+            status_for_code(error.code()),
+            error.code(),
+            error.to_string(),
+        )
+    }
+}
+
+impl From<crate::clip::ClipError> for Problem {
+    fn from(error: crate::clip::ClipError) -> Self {
+        Problem::new(
+            status_for_code(error.code()),
+            error.code(),
+            error.to_string(),
+        )
+    }
+}
+
+/// A timeline that cannot be rendered says why in the document's own terms:
+/// the code is what a client branches on, and the message is what the dialog
+/// shows.
+impl From<crate::clip::plan::PlanError> for Problem {
+    fn from(error: crate::clip::plan::PlanError) -> Self {
         Problem::new(
             status_for_code(error.code()),
             error.code(),

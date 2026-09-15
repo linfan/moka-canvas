@@ -4806,3 +4806,51 @@ body.is-dragging-split {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The export dialog: one line about the machine, one about the render. */
+.clip-export-capability {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.clip-export-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.clip-export-bar {
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.clip-export-bar > span {
+  background: var(--primary);
+  display: block;
+  height: 100%;
+  transition: width 0.2s ease;
+}
+
+.clip-export-percent {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  text-align: right;
+}
+
+.clip-export-done {
+  font-size: 13px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.clip-export-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}

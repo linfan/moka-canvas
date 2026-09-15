@@ -27,6 +27,8 @@ generate:
   maxOutputBytes: 268435456
   maxOutputItems: 16
   videoMaxPolls: 120
+clip:
+  timeoutSeconds: 3600
 public:
   productName: "Moka Canvas"
   maxUploadBytes: 2147483648

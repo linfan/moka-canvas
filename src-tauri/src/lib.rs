@@ -1,5 +1,6 @@
 pub mod api;
 pub mod assets;
+pub mod clip;
 pub mod config;
 pub mod converter;
 pub mod domain;

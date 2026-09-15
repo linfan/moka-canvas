@@ -1,4 +1,5 @@
 import { PageTopBar } from "../../editor/panels/PageTopBar";
+import { useExportStore } from "../stores/exportStore";
 import { TimelineTabs } from "./TimelineTabs";
 
 interface ClipTopBarProps {
@@ -8,12 +9,13 @@ interface ClipTopBarProps {
 
 /**
  * The cutting room's bar: the shared one, with the timeline tabs where the
- * board tabs stand and one export under the button.
+ * board tabs stand and two exports under the button.
  *
- * Video export runs on the backend's ffmpeg and the pipeline to it is not here
- * yet, so the item is offered and says why it cannot be chosen rather than
- * being left out: a reader looking for it learns where it will be, and package
- * 12 turns the disabled row into the real dialog.
+ * "Export video…" renders the cut through the machine's own ffmpeg and files
+ * the file into the project; "Export project" packs the whole project up and
+ * belongs to the editor's own export. The first opens the dialog whether or
+ * not a renderer was found — a machine without one is told so in the dialog,
+ * rather than being left to guess why the item does nothing.
  */
 export function ClipTopBar({ onHome }: ClipTopBarProps) {
   return (
@@ -21,9 +23,8 @@ export function ClipTopBar({ onHome }: ClipTopBarProps) {
       current="clip"
       exportItems={
         <button
-          disabled
+          onClick={() => useExportStore.getState().setOpen(true)}
           role="menuitem"
-          title="Video export runs through the backend's ffmpeg — not available until that pipeline arrives"
           type="button"
         >
           Export video…

@@ -16,11 +16,13 @@ import { TimelineDialog } from "./components/TimelineDialog";
 import { useClipShortcuts } from "./interactions/clipShortcuts";
 import { ClipInspector } from "./panels/ClipInspector";
 import { ClipRail } from "./panels/ClipRail";
+import { ExportDialog } from "./panels/ExportDialog";
 import { MediaColumn } from "./panels/MediaColumn";
 import { PreviewStage } from "./panels/PreviewStage";
 import { TimelineArea } from "./panels/TimelineArea";
 import { useTransport } from "./preview/transport";
 import { initialTimelineId, useClipStore } from "./stores/clipStore";
+import { useExportStore } from "./stores/exportStore";
 import { useStageSplit } from "./stores/stageSplit";
 
 /**
@@ -49,6 +51,7 @@ export function ClipPage() {
   const leftFolded = usePanelFolds((state) => state.left);
   const rightFolded = usePanelFolds((state) => state.right);
   const previewShare = useStageSplit((state) => state.share);
+  const exportOpen = useExportStore((state) => state.open);
   const projectId = moka?.metadata.id ?? null;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -56,7 +59,10 @@ export function ClipPage() {
   // is standing — the new-timeline question, or this list itself — keeps its
   // own keys: what it answers is not also answered behind it.
   useClipShortcuts({
-    isBlocked: () => shortcutsOpen || useClipStore.getState().newTimelineOpen,
+    isBlocked: () =>
+      shortcutsOpen ||
+      useClipStore.getState().newTimelineOpen ||
+      useExportStore.getState().open,
     onShowHelp: () => setShortcutsOpen(true),
   });
 
@@ -169,6 +175,7 @@ export function ClipPage() {
         {rightFolded ? <PanelUnfold side="right" /> : <ClipInspector />}
       </div>
       {newTimelineOpen && <TimelineDialog />}
+      {exportOpen && <ExportDialog />}
       {shortcutsOpen && (
         <ClipShortcutsDialog onClose={() => setShortcutsOpen(false)} />
       )}

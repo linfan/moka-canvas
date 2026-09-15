@@ -1,14 +1,17 @@
 use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, AssetShelfRequest, CapabilitiesResponse,
-    CreateProjectRequest, DefaultsPatch, ExportRequest, FileNodeRequest, FileNodeResponse,
-    FilesystemListing, FilesystemQuery, GenerateResponse, GenerationPreviewRequest,
-    GenerationPreviewResponse, ImportProjectRequest, ModelKeyRequest, OpenProjectRequest,
-    OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput, PublicConfigResponse,
-    RevisionQuery, RunStreamQuery, SaveResponse, SecretStorageRequest, StartRunRequest,
-    UpsertModelRequest,
+    ClipExportRequest, CreateProjectRequest, DefaultsPatch, ExportRequest, FileNodeRequest,
+    FileNodeResponse, FilesystemListing, FilesystemQuery, GenerateResponse,
+    GenerationPreviewRequest, GenerationPreviewResponse, ImportProjectRequest, ModelKeyRequest,
+    OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput,
+    PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse, SecretStorageRequest,
+    StartRunRequest, UpsertModelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::{filesystem, ApiState};
+use crate::clip::jobs::{drive, ArtifactSink, ExportRun, ExportTask, ProjectSink};
+use crate::clip::locate::ClipCapabilities;
+use crate::clip::plan::build_plan;
 use crate::config::RuntimeMode;
 use crate::domain::{now_iso, DocumentCommand, ResourceRegistry, RunRecord, RunStatus};
 use crate::generate::models::ModelsView;
@@ -31,6 +34,7 @@ use axum::{
 };
 use std::path::Path as FsPath;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc};
@@ -1381,4 +1385,109 @@ pub async fn converter_protocols(
     let registry = ConverterRegistry::load(state.converter_root()).await;
     let protocols = registry.protocols();
     Ok(Json(serde_json::json!({ "protocols": protocols })))
+}
+
+// ---------------------------------------------------------------------------
+// The export pipeline: what the machine can do, and the three calls one
+// render is asked for, polled with, and stopped by.
+// ---------------------------------------------------------------------------
+
+/// What the machine's renderer can do. Never an error: a machine without one
+/// answers that it has none, with the note a reader needs to fix that.
+pub async fn clip_capabilities(State(state): State<ApiState>) -> Json<ClipCapabilities> {
+    Json(state.clip_capabilities())
+}
+
+/// Starts one render.
+///
+/// Answers with a handle at once — a render takes minutes — and the plan is
+/// built before the handle is handed out, so a timeline that cannot be
+/// rendered is refused here rather than inside a task nobody is watching.
+pub async fn start_clip_export(
+    State(state): State<ApiState>,
+    json: Result<Json<ClipExportRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<ExportTask>), Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let timeline_id = request.timeline_id.trim().to_string();
+    if timeline_id.is_empty() {
+        return Err(Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+            "A timeline id is required",
+        ));
+    }
+
+    let capabilities = state.clip_capabilities();
+    if !capabilities.available {
+        return Err(Problem::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "FFMPEG_UNAVAILABLE",
+            capabilities
+                .reason
+                .unwrap_or_else(|| crate::clip::locate::UNAVAILABLE_REASON.to_string()),
+        ));
+    }
+    let opened = state.store.current().await?.ok_or_else(project_not_open)?;
+    let timeline = opened
+        .moka
+        .timelines
+        .as_ref()
+        .and_then(|timelines| timelines.iter().find(|timeline| timeline.id == timeline_id))
+        .cloned()
+        .ok_or_else(|| {
+            Problem::new(
+                StatusCode::NOT_FOUND,
+                "TIMELINE_NOT_FOUND",
+                "Timeline not found",
+            )
+        })?;
+
+    let sources = crate::clip::sources_for(&opened.root, &opened.moka, &timeline);
+    let plan = build_plan(&sources, &timeline, &opened.moka, &capabilities)?;
+    let reservation = state.exports.begin(&timeline_id)?;
+    let Some(program) = capabilities.path.clone() else {
+        // An available capability always names its program; this keeps the
+        // refusal where a missing one is refused rather than unwrapping.
+        return Err(Problem::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "FFMPEG_UNAVAILABLE",
+            crate::clip::locate::UNAVAILABLE_REASON,
+        ));
+    };
+    let run = ExportRun {
+        id: reservation.task.id.clone(),
+        timeline_id: timeline_id.clone(),
+        plan,
+        program,
+        encoder: capabilities
+            .video_encoder
+            .unwrap_or_else(|| "libx264".to_string()),
+        temp_root: opened.root.join("tmp"),
+        timeout: state.config.clip.timeout(),
+    };
+    let registry = Arc::clone(&state.exports);
+    let sink: Arc<dyn ArtifactSink> = Arc::new(ProjectSink(
+        Arc::clone(&state.store) as Arc<dyn ProjectStore>
+    ));
+    tokio::spawn(async move {
+        drive(registry, sink, run, reservation.cancel).await;
+    });
+    Ok((StatusCode::ACCEPTED, Json(reservation.task)))
+}
+
+/// What has become of a render.
+pub async fn get_clip_export(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<ExportTask>, Problem> {
+    Ok(Json(state.exports.snapshot(&id)?))
+}
+
+/// Stops a render. A handle whose render already ended is answered with how
+/// it ended, since a stop request and a finish can cross in flight.
+pub async fn cancel_clip_export(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<ExportTask>, Problem> {
+    Ok(Json(state.exports.cancel(&id)?))
 }
