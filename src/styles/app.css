@@ -938,9 +938,11 @@ body.is-dragging-panel {
 
    A half triangle flush with the corner rather than a button hung on the head:
    the head is already given over to the choice of what the column shows, and a
-   fold is about the column as a whole. The one left in the page corner is the
-   same triangle turned the other way round, so the way back is offered where
-   the column stood and points the way it would come back. */
+   fold is about the column as a whole. A column is folded by the corner it
+   keeps beside the canvas and comes back from the corner of the page it stood
+   in, so its triangle fills the corner it stands in — its straight edges along
+   the edges of the window or the column — with its mark pointing the way the
+   column goes. */
 .panel-fold,
 .panel-unfold {
   background: var(--stroke);
@@ -976,37 +978,38 @@ body.is-dragging-panel {
   line-height: 1;
 }
 
-/* Which corner each stands in, and which way its half is cut: the mark sits in
-   the corner that is filled, pointing the way the column goes. */
-.panel-fold-left,
-.panel-unfold-right {
+/* Which corner each stands in, and which way its half is cut: a fold keeps the
+   corner beside the canvas, the way back keeps the page corner the column
+   stood against, and the mark sits in the corner that is filled. */
+.panel-unfold-left,
+.panel-fold-right {
   clip-path: polygon(0 0, 100% 0, 0 100%);
   justify-items: start;
 }
 
-.panel-fold-right,
-.panel-unfold-left {
+.panel-fold-left,
+.panel-unfold-right {
   clip-path: polygon(0 0, 100% 0, 100% 100%);
   justify-items: end;
 }
 
-.panel-fold-left,
+.panel-fold-right,
 .panel-unfold-left {
   left: 0;
 }
 
-.panel-fold-right,
+.panel-fold-left,
 .panel-unfold-right {
   right: 0;
 }
 
 /* The head of a column keeps clear of the triangle standing in its corner. */
 .editor-side > .side-panel-tabs {
-  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .editor-right > .side-panel-tabs {
-  padding-right: 10px;
+  padding-left: 10px;
 }
 
 .editor-side > .side-resources {
@@ -3589,6 +3592,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .clip-body {
+  /* The rail's width, which the way back from a folded column stands beside. */
+  --clip-rail-width: 56px;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -3596,6 +3601,13 @@ button.danger:hover:not(:disabled) {
   /* One layer under the bar, like the row beside the canvas: the corners that
      fold the columns away stand above what they stand beside. */
   z-index: 0;
+}
+
+/* The corner a folded column leaves in the cutting room: the rail holds the
+   page's left edge, so the way back stands at the rail's right edge — where
+   the column stood — rather than over the faces the rail carries. */
+.clip-body > .panel-unfold-left {
+  left: var(--clip-rail-width);
 }
 
 /* The rail: nine faces of the column beside it, sources above tools. */
@@ -3609,7 +3621,7 @@ button.danger:hover:not(:disabled) {
   gap: 18px;
   overflow-y: auto;
   padding: 12px 8px;
-  width: 56px;
+  width: var(--clip-rail-width);
 }
 
 .clip-rail-group {
@@ -3659,7 +3671,7 @@ button.danger:hover:not(:disabled) {
 
 /* The head keeps clear of the triangle folded into the corner. */
 .clip-column-head {
-  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .clip-column-head h2 {
@@ -3696,7 +3708,7 @@ button.danger:hover:not(:disabled) {
    itself is the canvas column's, styles and all; a face only says which
    question it is reading, and gives the shelf the room the column has. */
 .clip-media-head {
-  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .clip-media-head h2 {
