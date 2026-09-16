@@ -1,4 +1,5 @@
 import type { ProblemCode } from "../shared/domain";
+import { problemMessage, type ProblemValues } from "../shared/i18n/problems";
 
 export interface ProblemBody {
   code: ProblemCode | string;
@@ -12,16 +13,35 @@ export class ApiError extends Error {
   readonly status: number;
   readonly details?: Record<string, unknown>;
 
-  constructor(problem: ProblemBody) {
-    super(problem.message);
+  /**
+   * `values` are the fields a Chinese message may read that the problem body
+   * itself does not carry, as when a transport failure knows the reason under
+   * it; they are used for interpolation alone and never stored.
+   */
+  constructor(problem: ProblemBody, values?: ProblemValues) {
+    super(
+      problemMessage(problem.code, problem.message, {
+        ...problem.details,
+        status: problem.status,
+        ...values,
+      }),
+    );
     this.name = "ApiError";
     this.code = problem.code;
     this.status = problem.status;
     this.details = problem.details;
   }
 
-  static transport(message: string): ApiError {
-    return new ApiError({ code: "TRANSPORT", message, status: 0 });
+  /**
+   * A failure that never reached the local process. `message` is the sentence
+   * this layer has always shown; `cause` is the reason underneath it when the
+   * transport gave one, which is the part a Chinese message finishes with.
+   */
+  static transport(message: string, cause?: string): ApiError {
+    return new ApiError(
+      { code: "TRANSPORT", message, status: 0 },
+      cause === undefined ? undefined : { message: cause },
+    );
   }
 
   static parse(status: number): ApiError {
@@ -75,9 +95,8 @@ async function request<T>(
     });
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
-    throw ApiError.transport(
-      `Cannot reach the local process: ${(error as Error).message}`,
-    );
+    const cause = (error as Error).message;
+    throw ApiError.transport(`Cannot reach the local process: ${cause}`, cause);
   }
 
   if (!response.ok) {

@@ -145,9 +145,8 @@ async function streamText(
     });
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
-    throw ApiError.transport(
-      `Cannot reach the local process: ${(error as Error).message}`,
-    );
+    const cause = (error as Error).message;
+    throw ApiError.transport(`Cannot reach the local process: ${cause}`, cause);
   }
 
   if (!response.ok || !response.body) {
