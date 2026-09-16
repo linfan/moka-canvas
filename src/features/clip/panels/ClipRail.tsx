@@ -3,13 +3,9 @@ import { useTranslation } from "react-i18next";
 import { useClipStore, type ClipFace } from "../stores/clipStore";
 import {
   AdjustIcon,
-  AudioIcon,
-  ClipCanvasIcon,
   FiltersIcon,
-  LibraryIcon,
   LocalIcon,
   ProjectIcon,
-  RunsIcon,
   TextIcon,
 } from "../components/ClipIcons";
 
@@ -23,16 +19,10 @@ interface RailFace {
 }
 
 /**
- * Where the material comes from. Four places a clip can be found rather than
- * made: this machine, the project's own shelf, what a run made, and the boards.
+ * Where the material comes from. Two places a clip can be found rather than
+ * made: the project's own shelf, and this machine.
  */
 const SOURCES: RailFace[] = [
-  {
-    face: "local",
-    label: "clip:rail.local",
-    hint: "clip:rail.localHint",
-    icon: LocalIcon,
-  },
   {
     face: "project",
     label: "clip:rail.project",
@@ -40,36 +30,18 @@ const SOURCES: RailFace[] = [
     icon: ProjectIcon,
   },
   {
-    face: "runs",
-    label: "clip:rail.runs",
-    hint: "clip:rail.runsHint",
-    icon: RunsIcon,
-  },
-  {
-    face: "canvas",
-    label: "clip:rail.canvas",
-    hint: "clip:rail.canvasHint",
-    icon: ClipCanvasIcon,
+    face: "local",
+    label: "clip:rail.local",
+    hint: "clip:rail.localHint",
+    icon: LocalIcon,
   },
 ];
 
 /**
- * What can be laid over the material. Five tools that work on the cut rather
+ * What can be laid over the material. Three tools that work on the cut rather
  * than on where its pieces came from.
  */
 const TOOLS: RailFace[] = [
-  {
-    face: "library",
-    label: "clip:rail.library",
-    hint: "clip:rail.libraryHint",
-    icon: LibraryIcon,
-  },
-  {
-    face: "audio",
-    label: "clip:rail.audio",
-    hint: "clip:rail.audioHint",
-    icon: AudioIcon,
-  },
   {
     face: "text",
     label: "clip:rail.text",
@@ -93,7 +65,7 @@ const TOOLS: RailFace[] = [
 /**
  * The rail down the left of the cutting room.
  *
- * Nine faces of one column rather than nine panels: sources above, tools
+ * Five faces of one column rather than five panels: sources above, tools
  * below, and the one being read is marked. The rail says what each face is
  * with its mark and its title, since a rail is a row of drawers and a drawer
  * that only shows a glyph is a drawer to be opened to be known.

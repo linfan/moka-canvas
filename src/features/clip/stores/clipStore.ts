@@ -23,17 +23,8 @@ import {
   type TimelineView,
 } from "../timeline/geometry";
 
-/** The nine faces the left column turns over between. */
-export type ClipFace =
-  | "local"
-  | "project"
-  | "runs"
-  | "canvas"
-  | "library"
-  | "audio"
-  | "text"
-  | "filters"
-  | "adjust";
+/** The five faces the left column turns over between. */
+export type ClipFace = "project" | "local" | "text" | "filters" | "adjust";
 
 /**
  * Which timeline a project was last left looking at, kept on this machine
