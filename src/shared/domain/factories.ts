@@ -73,9 +73,9 @@ export function defaultTimelineTracks(): TimelineTrack[] {
     createdAt: now,
   });
   return [
-    row("video", "Video 1"),
-    row("audio", "Audio 1"),
-    row("text", "Text 1"),
+    row("video", i18n.t("clip:defaults.trackVideo", { n: 1 })),
+    row("audio", i18n.t("clip:defaults.trackAudio", { n: 1 })),
+    row("text", i18n.t("clip:defaults.trackText", { n: 1 })),
   ];
 }
 
@@ -113,9 +113,10 @@ export function createTimeline(
 
 export function nextTimelineName(moka: MokaFile): string {
   const used = new Set((moka.timelines ?? []).map((t) => t.name));
+  const name = (n: number) => i18n.t("clip:defaults.timelineName", { n });
   let n = (moka.timelines ?? []).length + 1;
-  while (used.has(`Timeline ${n}`)) n += 1;
-  return `Timeline ${n}`;
+  while (used.has(name(n))) n += 1;
+  return name(n);
 }
 
 /**

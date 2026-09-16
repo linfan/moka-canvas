@@ -22,6 +22,7 @@ import { followerOf } from "../../../shared/domain/timeline";
 import { execute } from "../../editor/commands/execute";
 import { ASSET_DRAG_MIME } from "../../editor/interactions/actions";
 import { useAppStore } from "../../editor/stores/appStore";
+import { i18n } from "../../../shared/i18n";
 import {
   clickSelection,
   dropAssetOnTrack,
@@ -509,10 +510,12 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     );
     if (!plan.ok) {
       if (plan.reason === "too-short")
-        useAppStore.getState().pushToast("error", SEAM_TOO_SHORT_MESSAGE);
+        useAppStore
+          .getState()
+          .pushToast("error", i18n.t(SEAM_TOO_SHORT_MESSAGE));
       return;
     }
-    if (!execute("Add transition", plan.commands)) return;
+    if (!execute(i18n.t("clip:history.addTransition"), plan.commands)) return;
     showHover(null);
     useClipStore
       .getState()
@@ -529,10 +532,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
         // bounded by it; the reader is told once rather than stopped.
         useAppStore
           .getState()
-          .pushToast(
-            "info",
-            "Duration unknown — the clip runs 4s; trim it to fit.",
-          );
+          .pushToast("info", i18n.t("clip:actions.durationUnknown"));
       }
       gestureRef.current = {
         kind: "trim",
@@ -744,9 +744,12 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
               };
         });
       if (moves.length === 0) return;
-      execute(moves.length > 1 ? "Move clips" : "Move clip", [
-        { type: "moveClips", timelineId: timeline.id, moves },
-      ]);
+      execute(
+        i18n.t(
+          moves.length > 1 ? "clip:history.moveClips" : "clip:history.moveClip",
+        ),
+        [{ type: "moveClips", timelineId: timeline.id, moves }],
+      );
       return;
     }
     if (gesture.kind === "seam") {
@@ -758,7 +761,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
         durationMs: draft.durationMs,
       });
       if (!commands) return;
-      execute("Change transition", commands);
+      execute(i18n.t("clip:history.changeTransition"), commands);
       return;
     }
     if (gesture.kind !== "trim") return;
@@ -773,7 +776,7 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     if (draft.outPointMs !== gesture.clip.outPointMs)
       patch.outPointMs = draft.outPointMs;
     if (Object.keys(patch).length === 0) return;
-    execute("Trim clip", [
+    execute(i18n.t("clip:history.trimClip"), [
       {
         type: "updateClips",
         timelineId: timeline.id,
@@ -804,7 +807,9 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
       if (gesture.hit.kind === "clip" && gesture.locked) {
         // The press is over: a drag on a locked row is refused where it
         // starts, with the reason, and the clip never even becomes a draft.
-        useAppStore.getState().pushToast("error", "That track is locked.");
+        useAppStore
+          .getState()
+          .pushToast("error", i18n.t("clip:actions.trackLocked"));
         gestureRef.current = null;
         setCursor("default");
         return;

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { assetsApi } from "../../../api/assets";
 import { findResource, type TimelineDocument } from "../../../shared/domain";
 import { formatBytes, formatDuration } from "../../editor/canvas/mediaCards";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { i18n } from "../../../shared/i18n";
 import { clipApi } from "../api";
 import type { ClipCapabilities } from "../api";
 import { useClipStore } from "../stores/clipStore";
@@ -24,6 +26,7 @@ const POLL_MS = 700;
  * so and offers nothing to press.
  */
 export function ExportDialog() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const task = useExportStore((state) => state.task);
@@ -111,12 +114,11 @@ export function ExportDialog() {
   );
   // Three ways the one button cannot be pressed, each with its own reason.
   const blocked = !capabilities?.available
-    ? (capabilities?.reason ??
-      "The renderer is not available on this machine yet.")
+    ? (capabilities?.reason ?? t("clip:exportDialog.notAvailable"))
     : timeline.clips.length === 0
-      ? "This timeline has nothing to render."
+      ? t("clip:exportDialog.nothingToRender")
       : worded && !capabilities.ass
-        ? "Text cannot be burned in without an ffmpeg built with libass."
+        ? t("clip:exportDialog.noAss")
         : null;
 
   const start = async () => {
@@ -158,7 +160,7 @@ export function ExportDialog() {
 
   return (
     <div
-      aria-label="Export video"
+      aria-label={t("clip:exportDialog.title")}
       aria-modal="true"
       className="dialog-backdrop"
       onClick={(event) => {
@@ -167,24 +169,23 @@ export function ExportDialog() {
       role="dialog"
     >
       <div className="dialog clip-export-dialog">
-        <h2>Export video</h2>
+        <h2>{t("clip:exportDialog.title")}</h2>
         <p className="dialog-note">{states}</p>
         <p
           className="clip-export-capability"
           data-testid="clip-export-capability"
         >
           {capabilities === null
-            ? "Looking for a renderer…"
+            ? t("clip:exportDialog.looking")
             : capabilities.available
-              ? `ffmpeg ${capabilities.version ?? "unknown"} · ${capabilities.path ?? ""}`
-              : (capabilities.reason ??
-                "The renderer is not available on this machine yet.")}
+              ? `ffmpeg ${capabilities.version ?? t("clip:exportDialog.unknown")} · ${capabilities.path ?? ""}`
+              : (capabilities.reason ?? t("clip:exportDialog.notAvailable"))}
         </p>
 
         {live && task ? (
           <div className="clip-export-progress">
             <div
-              aria-label="Export progress"
+              aria-label={t("clip:exportDialog.progress")}
               aria-valuemax={100}
               aria-valuemin={0}
               aria-valuenow={Math.round(task.progress01 * 100)}
@@ -203,11 +204,15 @@ export function ExportDialog() {
 
         {task?.status === "done" ? (
           <p className="clip-export-done">
-            {`Exported ${artifact?.name ?? task.assetId ?? "the video"}${
-              artifact?.bytes !== undefined
+            {t("clip:exportDialog.exported", {
+              name:
+                artifact?.name ??
+                task.assetId ??
+                t("clip:exportDialog.theVideo"),
+            }) +
+              (artifact?.bytes !== undefined
                 ? ` (${formatBytes(artifact.bytes)})`
-                : ""
-            }`}
+                : "")}
           </p>
         ) : null}
 
@@ -220,16 +225,18 @@ export function ExportDialog() {
         <div className="dialog-actions">
           {live ? (
             <button disabled={busy} onClick={() => void cancel()} type="button">
-              Cancel
+              {t("clip:common.cancel")}
             </button>
           ) : (
             <button onClick={close} type="button">
-              {task?.status === "done" ? "Done" : "Close"}
+              {task?.status === "done"
+                ? t("clip:exportDialog.done")
+                : t("clip:exportDialog.close")}
             </button>
           )}
           {task?.status === "done" && assetId ? (
             <button onClick={() => void reveal(assetId)} type="button">
-              Reveal in folder
+              {t("clip:exportDialog.reveal")}
             </button>
           ) : null}
           {!live && task?.status !== "done" ? (
@@ -241,8 +248,8 @@ export function ExportDialog() {
               type="button"
             >
               {task?.status === "failed" || task?.status === "cancelled"
-                ? "Try again"
-                : "Export video"}
+                ? t("clip:exportDialog.tryAgain")
+                : t("clip:exportDialog.title")}
             </button>
           ) : null}
         </div>
@@ -269,7 +276,10 @@ async function reveal(assetId: string) {
 function summary(timeline: TimelineDocument, totalMs: number): string {
   const { width, height, fps } = timeline.settings;
   const clips = timeline.clips.length;
+  const noun = i18n.t(
+    clips === 1 ? "clip:common.clipOne" : "clip:common.clipMany",
+  );
   return `${timeline.name} · ${width}×${height} · ${fps} fps · ${formatDuration(
     totalMs,
-  )} · ${clips} ${clips === 1 ? "clip" : "clips"}`;
+  )} · ${clips} ${noun}`;
 }

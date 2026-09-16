@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { CLIP_SHORTCUT_GROUPS } from "../interactions/clipShortcuts";
 
 interface ClipShortcutsDialogProps {
@@ -13,6 +14,7 @@ interface ClipShortcutsDialogProps {
  * is added to the table and appears here, rather than being promised ahead.
  */
 export function ClipShortcutsDialog({ onClose }: ClipShortcutsDialogProps) {
+  const { t } = useTranslation();
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -23,7 +25,7 @@ export function ClipShortcutsDialog({ onClose }: ClipShortcutsDialogProps) {
 
   return (
     <div
-      aria-label="Keyboard shortcuts"
+      aria-label={t("clip:shortcuts.title")}
       aria-modal="true"
       className="dialog-backdrop"
       onClick={(event) => {
@@ -33,22 +35,26 @@ export function ClipShortcutsDialog({ onClose }: ClipShortcutsDialogProps) {
     >
       <div className="dialog shortcuts-dialog">
         <header className="dialog-head">
-          <h2>Keyboard shortcuts</h2>
-          <button aria-label="Close shortcuts" onClick={onClose} type="button">
+          <h2>{t("clip:shortcuts.title")}</h2>
+          <button
+            aria-label={t("clip:shortcuts.close")}
+            onClick={onClose}
+            type="button"
+          >
             ✕
           </button>
         </header>
         <div className="shortcut-groups">
           {CLIP_SHORTCUT_GROUPS.map((group) => (
             <section className="shortcut-group" key={group.title}>
-              <h3>{group.title}</h3>
+              <h3>{t(group.title)}</h3>
               <ul>
                 {group.rows.map((row) => (
                   <li key={row.label}>
-                    <span>{row.label}</span>
+                    <span>{t(row.label)}</span>
                     <span className="shortcut-keys">
                       {row.chords.map((chord) => (
-                        <kbd key={chord}>{chord}</kbd>
+                        <kbd key={chord}>{t(chord)}</kbd>
                       ))}
                     </span>
                   </li>

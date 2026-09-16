@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import {
   TIMELINE_FPS_CHOICES,
   TIMELINE_NAME_MAX,
@@ -27,6 +28,7 @@ const DEFAULT_PRESET = TIMELINE_RESOLUTION_PRESETS.findIndex(
  * pieces that were laid on it.
  */
 export function TimelineDialog() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const [name, setName] = useState(() => (moka ? nextTimelineName(moka) : ""));
   const [preset, setPreset] = useState(DEFAULT_PRESET);
@@ -56,7 +58,9 @@ export function TimelineDialog() {
     // A command the document refuses — the timeline limit, a conflict — toasts
     // its reason and leaves the dialog standing, since the ask is still the
     // reader's and throwing it away would be losing their words for them.
-    const done = execute("Add timeline", [{ type: "addTimeline", timeline }]);
+    const done = execute(t("clip:history.addTimeline"), [
+      { type: "addTimeline", timeline },
+    ]);
     if (!done) return;
     useClipStore.getState().setActiveTimeline(timeline.id);
     close();
@@ -64,7 +68,7 @@ export function TimelineDialog() {
 
   return (
     <div
-      aria-label="New timeline"
+      aria-label={t("clip:timelineDialog.title")}
       aria-modal="true"
       className="dialog-backdrop"
       onClick={(event) => {
@@ -73,9 +77,9 @@ export function TimelineDialog() {
       role="dialog"
     >
       <form className="dialog" onSubmit={submit}>
-        <h2>New timeline</h2>
+        <h2>{t("clip:timelineDialog.title")}</h2>
         <label className="dialog-field">
-          <span>Name</span>
+          <span>{t("clip:timelineDialog.name")}</span>
           <input
             autoFocus
             maxLength={TIMELINE_NAME_MAX}
@@ -84,7 +88,7 @@ export function TimelineDialog() {
           />
         </label>
         <label className="dialog-field">
-          <span>Resolution</span>
+          <span>{t("clip:timelineDialog.resolution")}</span>
           <select
             onChange={(event) => setPreset(Number(event.target.value))}
             value={preset}
@@ -97,7 +101,7 @@ export function TimelineDialog() {
           </select>
         </label>
         <label className="dialog-field">
-          <span>Frame rate</span>
+          <span>{t("clip:timelineDialog.frameRate")}</span>
           <select
             onChange={(event) => setFps(Number(event.target.value))}
             value={fps}
@@ -111,10 +115,10 @@ export function TimelineDialog() {
         </label>
         <div className="dialog-actions">
           <button onClick={close} type="button">
-            Cancel
+            {t("clip:common.cancel")}
           </button>
           <button disabled={name.trim().length === 0} type="submit">
-            Create timeline
+            {t("clip:timelineDialog.create")}
           </button>
         </div>
       </form>

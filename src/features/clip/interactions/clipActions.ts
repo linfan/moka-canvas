@@ -29,6 +29,7 @@ import { execute } from "../../editor/commands/execute";
 import { shelfOf } from "../../editor/panels/canvasAssets";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { i18n } from "../../../shared/i18n";
 import { useClipStore, type ClipSelection } from "../stores/clipStore";
 import type { TimelineHit } from "../timeline/geometry";
 import { frameAligned } from "../timeline/timecode";
@@ -252,8 +253,8 @@ function clipKindFor(entry: ResourceEntry): ClipKind | null {
 /** What the room says when an asset's kind is not the row's. */
 function kindMismatch(kind: ClipKind): string {
   return kind === "audio"
-    ? "An audio file goes on an audio track."
-    : "A video or an image goes on a video track.";
+    ? i18n.t("clip:actions.audioOnAudioTrack")
+    : i18n.t("clip:actions.videoOnVideoTrack");
 }
 
 /**
@@ -279,11 +280,11 @@ function landOnTrack(
 ): TimelineClip | null {
   const kind = clipKindFor(entry);
   if (kind === null) {
-    toast("info", "Text clips are made on the Text page.");
+    toast("info", i18n.t("clip:actions.textClipsOnTextPage"));
     return null;
   }
   if (track.locked) {
-    toast("error", "That track is locked.");
+    toast("error", i18n.t("clip:actions.trackLocked"));
     return null;
   }
   if (!trackAccepts(track, kind)) {
@@ -291,10 +292,10 @@ function landOnTrack(
     return null;
   }
   if (durationIsUnknown(entry)) {
-    toast("info", "Duration unknown — the clip runs 4s; trim it to fit.");
+    toast("info", i18n.t("clip:actions.durationUnknown"));
   }
   const clip = createClipFromAsset(entry, track.id, startMs);
-  const done = execute("Add clip", [
+  const done = execute(i18n.t("clip:history.addClip"), [
     { type: "addClips", timelineId: timeline.id, clips: [clip] },
   ]);
   return done ? clip : null;
@@ -360,13 +361,16 @@ export function addAssetAtPlayhead(assetId: AssetId): void {
   if (!entry) return;
   const kind = clipKindFor(entry);
   if (kind === null) {
-    toast("info", "Text clips are made on the Text page.");
+    toast("info", i18n.t("clip:actions.textClipsOnTextPage"));
     return;
   }
   const track = firstAcceptingTrack(timeline, kind);
   if (!track) {
     const takesKind = timeline.tracks.some((row) => trackAccepts(row, kind));
-    toast("error", takesKind ? "That track is locked." : kindMismatch(kind));
+    toast(
+      "error",
+      takesKind ? i18n.t("clip:actions.trackLocked") : kindMismatch(kind),
+    );
     return;
   }
   const startMs = frameAligned(
@@ -376,7 +380,7 @@ export function addAssetAtPlayhead(assetId: AssetId): void {
   const clip = landOnTrack(timeline, entry, track, startMs);
   if (!clip) return;
   useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
-  toast("success", `Added ${entry.name}.`);
+  toast("success", i18n.t("clip:actions.added", { name: entry.name }));
 }
 
 // ---------------------------------------------------------------------------
@@ -513,11 +517,11 @@ export function splitSelectionAtPlayhead(): void {
   const p = frameAligned(playheadMs, timeline.settings.fps);
   const crossings = crossingsToSplit(timeline, selection, p);
   if (crossings.length === 0) {
-    toast("info", "The playhead is not over the selected clip.");
+    toast("info", i18n.t("clip:actions.playheadNotOverClip"));
     return;
   }
   if (crossings.some((clip) => isLocked(timeline, clip))) {
-    toast("error", "That track is locked.");
+    toast("error", i18n.t("clip:actions.trackLocked"));
     return;
   }
   if (
@@ -527,7 +531,7 @@ export function splitSelectionAtPlayhead(): void {
         clip.startMs + clip.durationMs - p < MIN_CLIP_DURATION_MS,
     )
   ) {
-    toast("error", "Too short to split at the playhead.");
+    toast("error", i18n.t("clip:actions.tooShortToSplit"));
     return;
   }
 
@@ -574,7 +578,7 @@ export function splitSelectionAtPlayhead(): void {
       }),
     });
   }
-  const done = execute("Split clip(s)", commands);
+  const done = execute(i18n.t("clip:history.splitClips"), commands);
   if (!done) return;
   // The right-hand pieces stay selected: cutting the tail further is the move
   // that usually follows cutting a clip in two.
@@ -605,7 +609,7 @@ export function deleteSelection(): void {
     null;
   if (clips.length === 0 && !seam) return;
   if (clips.some((clip) => isLocked(timeline, clip))) {
-    toast("error", "That track is locked.");
+    toast("error", i18n.t("clip:actions.trackLocked"));
     return;
   }
   const commands: DocumentCommand[] = [];
@@ -629,7 +633,7 @@ export function deleteSelection(): void {
       transitionIds: [seam.id],
     });
   }
-  const done = execute("Delete clips", commands);
+  const done = execute(i18n.t("clip:history.deleteClips"), commands);
   if (done) {
     useClipStore.getState().select({ clipIds: [], transitionId: null });
   }
@@ -649,7 +653,7 @@ export function duplicateSelection(): void {
   const clips = selectedClips(timeline, selection);
   if (clips.length === 0) return;
   if (clips.some((clip) => isLocked(timeline, clip))) {
-    toast("error", "That track is locked.");
+    toast("error", i18n.t("clip:actions.trackLocked"));
     return;
   }
   const copies = clips.map((clip) => ({
@@ -661,7 +665,7 @@ export function duplicateSelection(): void {
   for (const batch of inBatches(copies)) {
     commands.push({ type: "addClips", timelineId: timeline.id, clips: batch });
   }
-  execute("Duplicate clips", commands);
+  execute(i18n.t("clip:history.duplicateClips"), commands);
 }
 
 /** The name a row wears: the next number past the ones already taken. */
@@ -669,12 +673,17 @@ export function nextTrackName(
   timeline: TimelineDocument,
   kind: ClipKind,
 ): string {
-  const label =
-    kind === "video" ? "Video" : kind === "audio" ? "Audio" : "Text";
+  const template =
+    kind === "video"
+      ? "clip:defaults.trackVideo"
+      : kind === "audio"
+        ? "clip:defaults.trackAudio"
+        : "clip:defaults.trackText";
+  const name = (n: number) => i18n.t(template, { n });
   const used = new Set(timeline.tracks.map((track) => track.name));
   let n = timeline.tracks.filter((track) => track.kind === kind).length + 1;
-  while (used.has(`${label} ${n}`)) n += 1;
-  return `${label} ${n}`;
+  while (used.has(name(n))) n += 1;
+  return name(n);
 }
 
 /**
@@ -694,7 +703,7 @@ export function detachAudio(): void {
   );
   if (clips.length === 0) return;
   if (clips.some((clip) => isLocked(timeline, clip))) {
-    toast("error", "That track is locked.");
+    toast("error", i18n.t("clip:actions.trackLocked"));
     return;
   }
   const commands: DocumentCommand[] = [];
@@ -730,7 +739,7 @@ export function detachAudio(): void {
       })),
     });
   }
-  execute("Detach audio", commands);
+  execute(i18n.t("clip:history.detachAudio"), commands);
 }
 
 // ---------------------------------------------------------------------------
@@ -772,9 +781,9 @@ export function materialOf(clip: TimelineClip): ClipMaterial {
 export type TrackFlag = "muted" | "hidden" | "locked";
 
 const FLAG_TITLES: Record<TrackFlag, [string, string]> = {
-  muted: ["Unmute track", "Mute track"],
-  hidden: ["Show track", "Hide track"],
-  locked: ["Unlock track", "Lock track"],
+  muted: ["clip:history.unmuteTrack", "clip:history.muteTrack"],
+  hidden: ["clip:history.showTrack", "clip:history.hideTrack"],
+  locked: ["clip:history.unlockTrack", "clip:history.lockTrack"],
 };
 
 export function setTrackFlag(
@@ -789,7 +798,7 @@ export function setTrackFlag(
       : flag === "hidden"
         ? { hidden: value }
         : { locked: value };
-  execute(FLAG_TITLES[flag][value ? 1 : 0], [
+  execute(i18n.t(FLAG_TITLES[flag][value ? 1 : 0]), [
     {
       type: "updateTrack",
       timelineId: timeline.id,
@@ -807,7 +816,7 @@ export function renameTrack(
 ): void {
   const trimmed = name.trim();
   if (trimmed.length === 0 || trimmed.length > TIMELINE_NAME_MAX) return;
-  execute("Rename track", [
+  execute(i18n.t("clip:history.renameTrack"), [
     {
       type: "updateTrack",
       timelineId: timeline.id,
@@ -838,7 +847,7 @@ export function addTrackOfKind(
     locked: false,
     createdAt: nowIso(),
   };
-  execute("Add track", [
+  execute(i18n.t("clip:history.addTrack"), [
     {
       type: "addTrack",
       timelineId: timeline.id,
@@ -853,7 +862,7 @@ export function removeTrack(
   timeline: TimelineDocument,
   trackId: TrackId,
 ): void {
-  execute("Remove track", [
+  execute(i18n.t("clip:history.removeTrack"), [
     { type: "removeTrack", timelineId: timeline.id, trackId },
   ]);
 }
@@ -871,17 +880,17 @@ export function alignSelection(mode: AlignMode): void {
   if (!timeline) return;
   const clips = selectedClips(timeline, useClipStore.getState().selection);
   if (clips.some((clip) => isLocked(timeline, clip))) {
-    toast("error", "That track is locked.");
+    toast("error", i18n.t("clip:actions.trackLocked"));
     return;
   }
   const moves = alignMoves(clips, mode);
   if (moves.length === 0) return;
   const labels: Record<AlignMode, string> = {
-    left: "Align left",
-    distribute: "Distribute evenly",
-    butted: "Join butted",
+    left: "clip:history.alignLeft",
+    distribute: "clip:history.distributeEvenly",
+    butted: "clip:history.joinButted",
   };
-  execute(labels[mode], [
+  execute(i18n.t(labels[mode]), [
     { type: "moveClips", timelineId: timeline.id, moves },
   ]);
 }

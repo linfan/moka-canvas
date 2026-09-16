@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   TIMELINE_FPS_CHOICES,
   TIMELINE_NAME_MAX,
@@ -24,6 +25,7 @@ export interface TimelineCardProps {
 }
 
 export function TimelineCard({ timeline }: TimelineCardProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(timeline.name);
   const nameFocused = useRef(false);
   const settings = timeline.settings;
@@ -42,7 +44,7 @@ export function TimelineCard({ timeline }: TimelineCardProps) {
       setName(timeline.name);
       return;
     }
-    execute("Rename timeline", [
+    execute(t("clip:history.renameTimeline"), [
       { type: "renameTimeline", timelineId: timeline.id, name: trimmed },
     ]);
   };
@@ -63,9 +65,9 @@ export function TimelineCard({ timeline }: TimelineCardProps) {
   return (
     <div className="clip-inspector-body" data-testid="clip-timeline-card">
       <section className="inspector-section">
-        <h3>Timeline</h3>
+        <h3>{t("clip:timelineCard.title")}</h3>
         <label className="clip-inspector-field">
-          <span>Name</span>
+          <span>{t("clip:timelineCard.name")}</span>
           <input
             maxLength={TIMELINE_NAME_MAX}
             onBlur={() => {
@@ -83,12 +85,12 @@ export function TimelineCard({ timeline }: TimelineCardProps) {
           />
         </label>
         <label className="clip-inspector-field">
-          <span>Frame rate</span>
+          <span>{t("clip:timelineCard.frameRate")}</span>
           <select
             onChange={(event) =>
               setSettings(
                 { fps: Number(event.target.value) },
-                "Change frame rate",
+                t("clip:history.changeFrameRate"),
               )
             }
             value={settings.fps}
@@ -100,9 +102,7 @@ export function TimelineCard({ timeline }: TimelineCardProps) {
             ))}
           </select>
         </label>
-        <p className="inspector-note">
-          Frame times of existing clips stay as they are
-        </p>
+        <p className="inspector-note">{t("clip:timelineCard.frameNote")}</p>
         <div className="clip-inspector-presets">
           {TIMELINE_RESOLUTION_PRESETS.map((preset) => (
             <button
@@ -114,7 +114,7 @@ export function TimelineCard({ timeline }: TimelineCardProps) {
               onClick={() =>
                 setSettings(
                   { width: preset.width, height: preset.height },
-                  "Change resolution",
+                  t("clip:history.changeResolution"),
                 )
               }
               type="button"
@@ -124,12 +124,15 @@ export function TimelineCard({ timeline }: TimelineCardProps) {
           ))}
         </div>
         <label className="clip-inspector-field">
-          <span>Background</span>
+          <span>{t("clip:timelineCard.background")}</span>
           <input
             onChange={(event) => {
               const next = event.target.value.toLowerCase();
               if (next !== settings.background.toLowerCase())
-                setSettings({ background: next }, "Change background");
+                setSettings(
+                  { background: next },
+                  t("clip:history.changeBackground"),
+                );
             }}
             type="color"
             value={settings.background}
@@ -138,22 +141,22 @@ export function TimelineCard({ timeline }: TimelineCardProps) {
       </section>
 
       <section className="inspector-section">
-        <h3>Cut</h3>
+        <h3>{t("clip:timelineCard.cut")}</h3>
         <div className="inspector-row">
-          <span>Length</span>
+          <span>{t("clip:timelineCard.length")}</span>
           <span>{formatTimecode(cutEndMs(timeline), settings.fps)}</span>
         </div>
         <div className="inspector-row">
-          <span>Clips</span>
+          <span>{t("clip:timelineCard.clips")}</span>
           <span>{timeline.clips.length}</span>
         </div>
         <div className="inspector-row">
-          <span>Tracks</span>
+          <span>{t("clip:timelineCard.tracks")}</span>
           <span>{timeline.tracks.length}</span>
         </div>
       </section>
 
-      <p className="inspector-note">Select a clip to edit how it plays.</p>
+      <p className="inspector-note">{t("clip:timelineCard.selectHint")}</p>
     </div>
   );
 }

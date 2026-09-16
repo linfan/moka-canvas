@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { AssetId, MokaFile, ResourceEntry } from "../../../shared/domain";
 import { PanelFold } from "../../editor/components/PanelFold";
 import { useProjectStore } from "../../editor/stores/projectStore";
@@ -33,6 +34,7 @@ function findEntry(
 }
 
 export function ClipInspector() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const selection = useClipStore((state) => state.selection);
@@ -53,7 +55,7 @@ export function ClipInspector() {
 
   return (
     <aside
-      aria-label="Inspector"
+      aria-label={t("clip:inspector.label")}
       className="clip-inspector"
       id="clip-panel-right"
     >
@@ -69,7 +71,7 @@ export function ClipInspector() {
       ) : (
         <div className="clip-empty clip-empty-inspector">
           <SelectIcon size={26} />
-          <p>Select a clip, a file, or a seam.</p>
+          <p>{t("clip:inspector.empty")}</p>
         </div>
       )}
     </aside>

@@ -17,6 +17,7 @@ import {
 } from "../../../shared/domain";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
+import { i18n } from "../../../shared/i18n";
 import { useClipStore } from "../stores/clipStore";
 import { firstOverlap, parseSrt, type SrtCue } from "../subtitles/srt";
 import { sameStyle } from "../textStyles";
@@ -181,7 +182,7 @@ export function addTextClipAtPlayhead(
     style,
   );
   commands.push({ type: "addClips", timelineId: timeline.id, clips: [clip] });
-  const done = execute("Add text clip", commands);
+  const done = execute(i18n.t("clip:history.addTextClip"), commands);
   if (!done) return null;
   useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
   return clip;
@@ -235,17 +236,19 @@ export function srtImportPlan(
   if (aligned.length === 0) {
     return {
       ok: false,
-      message: "No cues were long enough to import.",
+      message: i18n.t("clip:subtitles.noCuesLongEnough"),
     };
   }
   const clash = firstOverlap(aligned);
   if (clash) {
     return {
       ok: false,
-      message: `The subtitles overlap each other at ${formatTimecode(
-        Math.max(clash[0].startMs, clash[1].startMs),
-        fps,
-      )}.`,
+      message: i18n.t("clip:subtitles.overlapEachOther", {
+        timecode: formatTimecode(
+          Math.max(clash[0].startMs, clash[1].startMs),
+          fps,
+        ),
+      }),
     };
   }
   const target = timeline.tracks.find((track) => track.kind === "text") ?? null;
@@ -260,7 +263,7 @@ export function srtImportPlan(
       if (collision) {
         return {
           ok: false,
-          message: `The subtitles overlap a clip already on ${target.name}.`,
+          message: i18n.t("clip:subtitles.overlapClip", { name: target.name }),
         };
       }
     }
@@ -269,9 +272,10 @@ export function srtImportPlan(
   if (total > MAX_CLIPS_PER_TIMELINE) {
     return {
       ok: false,
-      message: `The timeline holds at most ${MAX_CLIPS_PER_TIMELINE} clips — delete ${
-        total - MAX_CLIPS_PER_TIMELINE
-      } first.`,
+      message: i18n.t("clip:subtitles.clipLimit", {
+        max: MAX_CLIPS_PER_TIMELINE,
+        extra: total - MAX_CLIPS_PER_TIMELINE,
+      }),
     };
   }
 
@@ -326,14 +330,14 @@ export function importSrt(text: string, style: TextClipStyle): void {
     toast("error", plan.message);
     return;
   }
-  const done = execute("Import subtitles", plan.commands);
+  const done = execute(i18n.t("clip:history.importSubtitles"), plan.commands);
   if (!done) return;
   const skipped = parsed.skipped + plan.skipped;
   const cues = plan.clips.length;
   toast(
     "success",
     skipped > 0
-      ? `Imported ${cues} cues (${skipped} skipped as too short).`
-      : `Imported ${cues} cues.`,
+      ? i18n.t("clip:subtitles.importedWithSkipped", { cues, skipped })
+      : i18n.t("clip:subtitles.imported", { cues }),
   );
 }

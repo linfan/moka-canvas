@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { PageTopBar } from "../../editor/panels/PageTopBar";
 import { useExportStore } from "../stores/exportStore";
 import { TimelineTabs } from "./TimelineTabs";
@@ -18,6 +19,7 @@ interface ClipTopBarProps {
  * rather than being left to guess why the item does nothing.
  */
 export function ClipTopBar({ onHome }: ClipTopBarProps) {
+  const { t } = useTranslation();
   return (
     <PageTopBar
       current="clip"
@@ -27,7 +29,7 @@ export function ClipTopBar({ onHome }: ClipTopBarProps) {
           role="menuitem"
           type="button"
         >
-          Export video…
+          {t("clip:topBar.exportVideo")}
         </button>
       }
       onHome={onHome}

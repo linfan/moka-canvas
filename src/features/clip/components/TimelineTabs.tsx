@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   TIMELINE_NAME_MAX,
   type TimelineDocument,
@@ -26,6 +27,7 @@ interface Rename {
  * double-click, and taken away by the small × beside it.
  */
 export function TimelineTabs() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const setActiveTimeline = useClipStore((state) => state.setActiveTimeline);
@@ -44,7 +46,7 @@ export function TimelineTabs() {
 
   const commitRename = () => {
     if (!renaming) return;
-    const timeline = timelines.find((t) => t.id === renaming.id);
+    const timeline = timelines.find((each) => each.id === renaming.id);
     const name = renaming.draft.trim();
     if (!timeline || name === timeline.name) {
       setRenaming(null);
@@ -58,20 +60,20 @@ export function TimelineTabs() {
         ...renaming,
         error:
           name.length === 0
-            ? "A timeline needs a name"
-            : `Names run to ${TIMELINE_NAME_MAX} characters`,
+            ? t("clip:tabs.needsName")
+            : t("clip:tabs.nameTooLong", { max: TIMELINE_NAME_MAX }),
       });
       return;
     }
-    const done = execute("Rename timeline", [
+    const done = execute(t("clip:history.renameTimeline"), [
       { type: "renameTimeline", timelineId: timeline.id, name },
     ]);
     if (done) setRenaming(null);
   };
 
   const removeTimeline = (timelineId: TimelineId) => {
-    const index = timelines.findIndex((t) => t.id === timelineId);
-    const done = execute("Remove timeline", [
+    const index = timelines.findIndex((each) => each.id === timelineId);
+    const done = execute(t("clip:history.removeTimeline"), [
       { type: "removeTimeline", timelineId },
     ]);
     if (!done) return;
@@ -79,7 +81,7 @@ export function TimelineTabs() {
       // The room moves to the tab beside the one that left, as a strip of tabs
       // does anywhere else in the app. No history boundary on the way: a seam
       // pushed here would stand between the deletion and its own undo.
-      const rest = timelines.filter((t) => t.id !== timelineId);
+      const rest = timelines.filter((each) => each.id !== timelineId);
       const next = rest[Math.min(index, rest.length - 1)] ?? rest[0] ?? null;
       setActiveTimeline(next?.id ?? null);
     }
@@ -96,11 +98,15 @@ export function TimelineTabs() {
     removeTimeline(timeline.id);
   };
 
-  const asked = timelines.find((t) => t.id === removing) ?? null;
+  const asked = timelines.find((each) => each.id === removing) ?? null;
 
   return (
     <>
-      <div aria-label="Timelines" className="timeline-tabs" role="tablist">
+      <div
+        aria-label={t("clip:tabs.list")}
+        className="timeline-tabs"
+        role="tablist"
+      >
         {timelines.map((timeline) => {
           const active = timeline.id === activeTimelineId;
           const editing = renaming?.id === timeline.id ? renaming : null;
@@ -113,7 +119,7 @@ export function TimelineTabs() {
                 <>
                   <input
                     aria-invalid={editing.error !== null}
-                    aria-label={`Rename ${timeline.name}`}
+                    aria-label={t("clip:tabs.rename", { name: timeline.name })}
                     autoFocus
                     maxLength={TIMELINE_NAME_MAX}
                     onBlur={commitRename}
@@ -155,18 +161,18 @@ export function TimelineTabs() {
                     })
                   }
                   role="tab"
-                  title="Double-click to rename"
+                  title={t("clip:tabs.renameHint")}
                   type="button"
                 >
                   {timeline.name}
                 </button>
               )}
               <button
-                aria-label={`Delete ${timeline.name}`}
+                aria-label={t("clip:tabs.delete", { name: timeline.name })}
                 className="timeline-tab-close"
                 data-testid={`timeline-tab-close-${timeline.name}`}
                 onClick={() => askToRemove(timeline)}
-                title="Delete this timeline"
+                title={t("clip:tabs.deleteHint")}
                 type="button"
               >
                 ×
@@ -175,11 +181,11 @@ export function TimelineTabs() {
           );
         })}
         <button
-          aria-label="Add timeline"
+          aria-label={t("clip:tabs.add")}
           className="timeline-tab-add"
           data-testid="timeline-tab-add"
           onClick={() => setNewTimelineOpen(true)}
-          title="Add a timeline"
+          title={t("clip:tabs.addHint")}
           type="button"
         >
           +
@@ -209,6 +215,7 @@ function RemoveTimelineDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
   const count = timeline.clips.length;
 
   useEffect(() => {
@@ -233,15 +240,19 @@ function RemoveTimelineDialog({
         className="dialog"
         role="alertdialog"
       >
-        <h2 id="remove-timeline-title">Delete timeline?</h2>
+        <h2 id="remove-timeline-title">{t("clip:tabs.deleteTitle")}</h2>
         <p>
-          “{timeline.name}” leaves the project with its {count}{" "}
-          {count === 1 ? "clip" : "clips"} — the whole timeline goes together.
-          Undo brings it back.
+          {t("clip:tabs.deleteBody", {
+            name: timeline.name,
+            total: count,
+            noun: t(
+              count === 1 ? "clip:common.clipOne" : "clip:common.clipMany",
+            ),
+          })}
         </p>
         <div className="dialog-actions">
           <button onClick={onCancel} type="button">
-            Cancel
+            {t("clip:common.cancel")}
           </button>
           <button
             autoFocus
@@ -249,7 +260,7 @@ function RemoveTimelineDialog({
             onClick={onConfirm}
             type="button"
           >
-            Delete timeline
+            {t("clip:tabs.deleteConfirm")}
           </button>
         </div>
       </div>

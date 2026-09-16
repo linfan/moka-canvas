@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { useTranslation } from "react-i18next";
 import { useClipStore, type ClipFace } from "../stores/clipStore";
 import {
   AdjustIcon,
@@ -14,7 +15,9 @@ import {
 
 interface RailFace {
   face: ClipFace;
+  /** The name the face is read under, as a translation key. */
   label: string;
+  /** What the face is for, as a translation key. */
   hint: string;
   icon: ComponentType<{ size?: number }>;
 }
@@ -26,26 +29,26 @@ interface RailFace {
 const SOURCES: RailFace[] = [
   {
     face: "local",
-    label: "Local",
-    hint: "Files on this machine",
+    label: "clip:rail.local",
+    hint: "clip:rail.localHint",
     icon: LocalIcon,
   },
   {
     face: "project",
-    label: "Project",
-    hint: "Everything the project holds",
+    label: "clip:rail.project",
+    hint: "clip:rail.projectHint",
     icon: ProjectIcon,
   },
   {
     face: "runs",
-    label: "Runs",
-    hint: "What generations made",
+    label: "clip:rail.runs",
+    hint: "clip:rail.runsHint",
     icon: RunsIcon,
   },
   {
     face: "canvas",
-    label: "Canvas",
-    hint: "Pictures from the boards",
+    label: "clip:rail.canvas",
+    hint: "clip:rail.canvasHint",
     icon: ClipCanvasIcon,
   },
 ];
@@ -57,27 +60,32 @@ const SOURCES: RailFace[] = [
 const TOOLS: RailFace[] = [
   {
     face: "library",
-    label: "Library",
-    hint: "Titles, overlays and pieces the app brings",
+    label: "clip:rail.library",
+    hint: "clip:rail.libraryHint",
     icon: LibraryIcon,
   },
   {
     face: "audio",
-    label: "Audio",
-    hint: "Music, voice and effects",
+    label: "clip:rail.audio",
+    hint: "clip:rail.audioHint",
     icon: AudioIcon,
   },
-  { face: "text", label: "Text", hint: "Words on the cut", icon: TextIcon },
+  {
+    face: "text",
+    label: "clip:rail.text",
+    hint: "clip:rail.textHint",
+    icon: TextIcon,
+  },
   {
     face: "filters",
-    label: "Filters",
-    hint: "The look a clip wears",
+    label: "clip:rail.filters",
+    hint: "clip:rail.filtersHint",
     icon: FiltersIcon,
   },
   {
     face: "adjust",
-    label: "Adjust",
-    hint: "Speed, volume and opacity",
+    label: "clip:rail.adjust",
+    hint: "clip:rail.adjustHint",
     icon: AdjustIcon,
   },
 ];
@@ -91,19 +99,20 @@ const TOOLS: RailFace[] = [
  * that only shows a glyph is a drawer to be opened to be known.
  */
 export function ClipRail() {
+  const { t } = useTranslation();
   const face = useClipStore((state) => state.face);
   const setFace = useClipStore((state) => state.setFace);
 
   const item = ({ face: id, label, hint, icon: Icon }: RailFace) => (
     <button
-      aria-label={label}
+      aria-label={t(label)}
       aria-selected={face === id}
       className={face === id ? "clip-rail-item is-active" : "clip-rail-item"}
       data-testid={`clip-face-${id}`}
       key={id}
       onClick={() => setFace(id)}
       role="tab"
-      title={hint}
+      title={t(hint)}
       type="button"
     >
       <Icon />
@@ -111,7 +120,11 @@ export function ClipRail() {
   );
 
   return (
-    <aside aria-label="Clip panels" className="clip-rail" role="tablist">
+    <aside
+      aria-label={t("clip:rail.label")}
+      className="clip-rail"
+      role="tablist"
+    >
       <div className="clip-rail-group">{SOURCES.map(item)}</div>
       <div className="clip-rail-group">{TOOLS.map(item)}</div>
     </aside>

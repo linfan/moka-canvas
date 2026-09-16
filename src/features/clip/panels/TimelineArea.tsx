@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { TimelineDocument } from "../../../shared/domain";
 import { AddTrackButton } from "../components/TimelineMenu";
 import { TimelineIcon } from "../components/ClipIcons";
@@ -21,17 +22,21 @@ interface TimelineAreaProps {
  * ruler or the scroll underneath it.
  */
 export function TimelineArea({ timeline }: TimelineAreaProps) {
+  const { t } = useTranslation();
   const headersRef = useRef<HTMLDivElement>(null);
   const pxPerSec = useClipStore((state) => state.view.pxPerSec);
   const playheadMs = useClipStore((state) => state.playheadMs);
 
   if (!timeline) {
     return (
-      <section aria-label="Timeline" className="clip-timeline">
+      <section
+        aria-label={t("clip:timelineArea.label")}
+        className="clip-timeline"
+      >
         <div className="clip-empty clip-empty-timeline">
           <TimelineIcon size={26} />
-          <h3>Nothing here yet</h3>
-          <p>Drop media on a track to build the cut.</p>
+          <h3>{t("clip:timelineArea.emptyTitle")}</h3>
+          <p>{t("clip:timelineArea.emptyHint")}</p>
         </div>
       </section>
     );
@@ -39,7 +44,7 @@ export function TimelineArea({ timeline }: TimelineAreaProps) {
 
   return (
     <section
-      aria-label="Timeline"
+      aria-label={t("clip:timelineArea.label")}
       className="clip-timeline"
       data-playhead-ms={playheadMs}
       data-px-per-sec={pxPerSec}
@@ -55,8 +60,8 @@ export function TimelineArea({ timeline }: TimelineAreaProps) {
       {timeline.clips.length === 0 && (
         <div className="clip-empty clip-empty-timeline clip-tl-empty">
           <TimelineIcon size={26} />
-          <h3>Nothing here yet</h3>
-          <p>Drop media on a track to build the cut.</p>
+          <h3>{t("clip:timelineArea.emptyTitle")}</h3>
+          <p>{t("clip:timelineArea.emptyHint")}</p>
         </div>
       )}
     </section>

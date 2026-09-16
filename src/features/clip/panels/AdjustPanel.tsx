@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ClipAdjust } from "../../../shared/domain";
 import { execute } from "../../editor/commands/execute";
 import { useProjectStore } from "../../editor/stores/projectStore";
@@ -26,14 +27,15 @@ import { useClipStore } from "../stores/clipStore";
  */
 
 const AXES = [
-  { key: "brightness", label: "Brightness" },
-  { key: "contrast", label: "Contrast" },
-  { key: "saturation", label: "Saturation" },
+  { key: "brightness", labelKey: "clip:adjust.brightness" },
+  { key: "contrast", labelKey: "clip:adjust.contrast" },
+  { key: "saturation", labelKey: "clip:adjust.saturation" },
 ] as const;
 
 type Axis = (typeof AXES)[number]["key"];
 
 export function AdjustPanel() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const clipIds = useClipStore((state) => state.selection.clipIds);
@@ -84,7 +86,7 @@ export function AdjustPanel() {
       return same ? [] : [{ clipId: clip.id, patch: { adjust: after } }];
     });
     if (patches.length === 0) return;
-    execute("Adjust clip", patchCommands(timeline.id, patches));
+    execute(t("clip:history.adjustClip"), patchCommands(timeline.id, patches));
   };
 
   const apply = (axis: Axis, slider: number) => {
@@ -93,7 +95,8 @@ export function AdjustPanel() {
 
   return (
     <div className="clip-adjust-page" data-testid="clip-adjust-panel">
-      {AXES.map(({ key, label }) => {
+      {AXES.map(({ key, labelKey }) => {
+        const label = t(labelKey);
         const slider = sliderFromAdjust(shown[key]);
         return (
           <label className="clip-adjust-row" key={key}>
@@ -123,10 +126,10 @@ export function AdjustPanel() {
         onClick={() => commit({ brightness: 0, contrast: 0, saturation: 0 })}
         type="button"
       >
-        Reset
+        {t("clip:common.reset")}
       </button>
       {clips.length === 0 && (
-        <p className="clip-filter-hint">Select a clip to adjust.</p>
+        <p className="clip-filter-hint">{t("clip:adjust.selectHint")}</p>
       )}
     </div>
   );

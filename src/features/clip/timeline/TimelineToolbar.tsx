@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { TimelineDocument } from "../../../shared/domain";
 import { redo, undo } from "../../editor/commands/execute";
 import { useCanUndo } from "../../editor/panels/PageTopBar";
@@ -39,6 +40,7 @@ interface TimelineToolbarProps {
  * nothing to undo are each said by going quiet rather than by refusing.
  */
 export function TimelineToolbar({ timeline }: TimelineToolbarProps) {
+  const { t } = useTranslation();
   const pxPerSec = useClipStore((state) => state.view.pxPerSec);
   const viewportPx = useClipStore((state) => state.viewportPx);
   const playheadMs = useClipStore((state) => state.playheadMs);
@@ -59,67 +61,67 @@ export function TimelineToolbar({ timeline }: TimelineToolbarProps) {
     <div className="clip-tl-toolbar">
       <div className="clip-tl-toolbar-actions">
         <button
-          aria-label="Split at the playhead"
+          aria-label={t("clip:common.splitAtThePlayhead")}
           className="clip-tl-button"
           data-testid="clip-split"
           disabled={!splitsHere}
           onClick={() => splitSelectionAtPlayhead()}
-          title="Split at the playhead"
+          title={t("clip:common.splitAtThePlayhead")}
           type="button"
         >
           <ScissorsIcon size={16} />
         </button>
         <button
-          aria-label="Duplicate the selection"
+          aria-label={t("clip:common.duplicateSelection")}
           className="clip-tl-button"
           data-testid="clip-duplicate"
           disabled={!hasClips}
           onClick={() => duplicateSelection()}
-          title="Duplicate the selection"
+          title={t("clip:common.duplicateSelection")}
           type="button"
         >
           <DuplicateIcon size={16} />
         </button>
         <button
-          aria-label="Delete the selection"
+          aria-label={t("clip:common.deleteSelection")}
           className="clip-tl-button"
           data-testid="clip-delete"
           disabled={!hasSelection}
           onClick={() => deleteSelection()}
-          title="Delete the selection"
+          title={t("clip:common.deleteSelection")}
           type="button"
         >
           <TrashIcon size={16} />
         </button>
         <button
-          aria-label="Undo"
+          aria-label={t("clip:common.undo")}
           className="clip-tl-button"
           data-testid="clip-undo"
           disabled={!canUndo}
           onClick={() => undo()}
-          title="Undo"
+          title={t("clip:common.undo")}
           type="button"
         >
           <UndoIcon size={16} />
         </button>
         <button
-          aria-label="Redo"
+          aria-label={t("clip:common.redo")}
           className="clip-tl-button"
           data-testid="clip-redo"
           disabled={!canRedo}
           onClick={() => redo()}
-          title="Redo"
+          title={t("clip:common.redo")}
           type="button"
         >
           <RedoIcon size={16} />
         </button>
         <button
-          aria-label="Snapping"
+          aria-label={t("clip:toolbar.snapping")}
           aria-pressed={snapEnabled}
           className="clip-tl-button"
           data-testid="clip-snap"
           onClick={() => setSnapEnabled(!snapEnabled)}
-          title="Snap edges together — hold Shift to drag freely"
+          title={t("clip:toolbar.snapHint")}
           type="button"
         >
           <MagnetIcon size={16} />
@@ -127,18 +129,18 @@ export function TimelineToolbar({ timeline }: TimelineToolbarProps) {
       </div>
       <div className="clip-tl-toolbar-view">
         <button
-          aria-label="Zoom out"
+          aria-label={t("clip:common.zoomOut")}
           className="clip-tl-button"
           data-testid="clip-zoom-out"
           disabled={pxPerSec <= MIN_PX_PER_SEC}
           onClick={() => zoomBy(1 / ZOOM_STEP)}
-          title="Zoom out"
+          title={t("clip:common.zoomOut")}
           type="button"
         >
           <ZoomOutIcon size={16} />
         </button>
         <input
-          aria-label="Zoom"
+          aria-label={t("clip:toolbar.zoom")}
           className="clip-tl-slider"
           data-testid="clip-zoom-slider"
           max={Math.log(MAX_PX_PER_SEC)}
@@ -149,22 +151,22 @@ export function TimelineToolbar({ timeline }: TimelineToolbarProps) {
           value={Math.log(pxPerSec)}
         />
         <button
-          aria-label="Zoom in"
+          aria-label={t("clip:common.zoomIn")}
           className="clip-tl-button"
           data-testid="clip-zoom-in"
           disabled={pxPerSec >= MAX_PX_PER_SEC}
           onClick={() => zoomBy(ZOOM_STEP)}
-          title="Zoom in"
+          title={t("clip:common.zoomIn")}
           type="button"
         >
           <ZoomInIcon size={16} />
         </button>
         <button
-          aria-label="Fit to window"
+          aria-label={t("clip:toolbar.fitToWindow")}
           className="clip-tl-button"
           data-testid="clip-zoom-fit"
           onClick={() => fit(viewportPx, contentMs(timeline, playheadMs))}
-          title="Fit to window"
+          title={t("clip:toolbar.fitToWindow")}
           type="button"
         >
           <FitIcon size={16} />

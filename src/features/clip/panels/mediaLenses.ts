@@ -65,12 +65,12 @@ export { newestFirst } from "../../editor/panels/shelfFilter";
 
 /** What a face has the shelf say when the face itself holds nothing. */
 const EMPTY_TEXT: Record<MediaFace, string> = {
-  local: "Nothing brought in yet — import files, or drop them here.",
-  project: "No media in this project yet.",
-  runs: "Nothing made by the models yet.",
-  canvas: "No canvas is holding a file yet.",
-  library: "No files yet — import media to fill the shelf.",
-  audio: "No sound yet — import audio to build the mix.",
+  local: "clip:mediaLenses.local",
+  project: "clip:mediaLenses.project",
+  runs: "clip:mediaLenses.runs",
+  canvas: "clip:mediaLenses.canvas",
+  library: "clip:mediaLenses.library",
+  audio: "clip:mediaLenses.audio",
 };
 
 /** Everything a face passes to the shelf, apart from its own row actions. */
@@ -79,7 +79,7 @@ export interface FaceShelfProps {
   kinds: readonly Capability[];
   /** The question the face stands behind, if it stands behind one. */
   lens?: ShelfLens;
-  /** What the face says when it holds nothing. */
+  /** What the face says when it holds nothing, as a translation key. */
   emptyText: string;
   /** A cutting room shelf reads newest first: what just arrived is what to use. */
   order: "newest";

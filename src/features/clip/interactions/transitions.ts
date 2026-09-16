@@ -104,8 +104,7 @@ export function clampSeamMs(
 }
 
 /** What the room says when even the smallest window will not fit the seam. */
-export const SEAM_TOO_SHORT_MESSAGE =
-  "These clips are too short for a transition.";
+export const SEAM_TOO_SHORT_MESSAGE = "clip:actions.seamTooShort";
 
 /** What laying the default transition on a butted seam works out to. */
 export type SeamAddPlan =

@@ -2,6 +2,7 @@ import type { AssetId, ClipId, TimelineClip } from "../../../shared/domain";
 import { assetUrl } from "../../../api";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { i18n } from "../../../shared/i18n";
 import { useClipStore } from "../stores/clipStore";
 import {
   decodeFrameAt,
@@ -100,8 +101,11 @@ export function createFrameSources(): PreviewFrameSources {
   const reportMissing = (assetId: AssetId): void => {
     if (reported.has(assetId)) return;
     reported.add(assetId);
-    const name = entryFor(assetId)?.name ?? "A file";
-    useAppStore.getState().pushToast("error", `${name} cannot be read.`);
+    const name =
+      entryFor(assetId)?.name ?? i18n.t("clip:preview.filePlaceholder");
+    useAppStore
+      .getState()
+      .pushToast("error", i18n.t("clip:preview.cannotBeRead", { name }));
   };
 
   // A file the browser could not play is one to say so about, exactly once.

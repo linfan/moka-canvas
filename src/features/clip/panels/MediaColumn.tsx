@@ -1,4 +1,5 @@
 import { useEffect, useMemo, type ComponentType } from "react";
+import { useTranslation } from "react-i18next";
 import type { AssetId, ResourceEntry } from "../../../shared/domain";
 import { PanelFold } from "../../editor/components/PanelFold";
 import { AssetShelf } from "../../editor/panels/AssetShelf";
@@ -28,32 +29,42 @@ import { TextPanel } from "./TextPanel";
 
 const FACES: Record<
   ClipFace,
-  { title: string; icon: ComponentType<{ size?: number }> }
+  { titleKey: string; icon: ComponentType<{ size?: number }> }
 > = {
-  local: { title: "Local media", icon: LocalIcon },
-  project: { title: "Project media", icon: ProjectIcon },
-  runs: { title: "Runs", icon: RunsIcon },
-  canvas: { title: "On canvas", icon: ClipCanvasIcon },
-  library: { title: "Library", icon: LibraryIcon },
-  audio: { title: "Audio", icon: AudioIcon },
-  text: { title: "Text", icon: TextIcon },
-  filters: { title: "Filters", icon: FiltersIcon },
-  adjust: { title: "Adjust", icon: AdjustIcon },
+  local: { titleKey: "clip:mediaColumn.local", icon: LocalIcon },
+  project: { titleKey: "clip:mediaColumn.project", icon: ProjectIcon },
+  runs: { titleKey: "clip:mediaColumn.runs", icon: RunsIcon },
+  canvas: { titleKey: "clip:mediaColumn.canvas", icon: ClipCanvasIcon },
+  library: { titleKey: "clip:mediaColumn.library", icon: LibraryIcon },
+  audio: { titleKey: "clip:mediaColumn.audio", icon: AudioIcon },
+  text: { titleKey: "clip:mediaColumn.text", icon: TextIcon },
+  filters: { titleKey: "clip:mediaColumn.filters", icon: FiltersIcon },
+  adjust: { titleKey: "clip:mediaColumn.adjust", icon: AdjustIcon },
 };
 
 /** The sound's own small offer on its row: hear it before it is laid down. */
 function AudioPreviewAction({ entry }: { entry: ResourceEntry }) {
+  const { t } = useTranslation();
   const preview = useAudioPreview();
   const playing = preview.assetId === entry.id && preview.playing;
   return (
     <button
-      aria-label={`${playing ? "Pause" : "Play"} ${entry.name}`}
+      aria-label={t(
+        playing ? "clip:mediaColumn.pauseAria" : "clip:mediaColumn.playAria",
+        {
+          name: entry.name,
+        },
+      )}
       aria-pressed={playing}
       className={`resource-action clip-media-action${
         playing ? " is-playing" : ""
       }`}
       onClick={() => toggleAudioPreview(entry.id)}
-      title={playing ? "Pause the preview" : "Preview this sound"}
+      title={
+        playing
+          ? t("clip:mediaColumn.pausePreview")
+          : t("clip:mediaColumn.previewSound")
+      }
       type="button"
     >
       {playing ? "⏸" : "▶"}
@@ -63,13 +74,14 @@ function AudioPreviewAction({ entry }: { entry: ResourceEntry }) {
 
 /** The row's own small offer on every face: the file lands where the playhead is. */
 function AddAtPlayheadAction({ entry }: { entry: ResourceEntry }) {
+  const { t } = useTranslation();
   return (
     <button
-      aria-label={`Add ${entry.name} at the playhead`}
+      aria-label={t("clip:mediaColumn.addAria", { name: entry.name })}
       className="resource-action clip-media-action"
       data-testid="clip-media-add"
       onClick={() => addAssetAtPlayhead(entry.id)}
-      title="Add at the playhead"
+      title={t("clip:common.addAtPlayhead")}
       type="button"
     >
       ＋
@@ -109,6 +121,7 @@ function backToLocal() {
  * of its own rather than a shelf, so it stands where the placeholders used to.
  */
 export function MediaColumn() {
+  const { t } = useTranslation();
   const face = useClipStore((state) => state.face);
   const moka = useProjectStore((state) => state.moka);
   const mediaSelection = useClipStore((state) => state.mediaSelection);
@@ -123,7 +136,8 @@ export function MediaColumn() {
   // sound behind rather than having it follow the reader to another face.
   useEffect(() => () => stopAudioPreview(), [face]);
 
-  const { title, icon: Icon } = FACES[face];
+  const { titleKey, icon: Icon } = FACES[face];
+  const title = t(titleKey);
 
   return (
     <aside aria-label={title} className="clip-column" id="clip-panel-left">
@@ -155,6 +169,7 @@ export function MediaColumn() {
             <AssetShelf
               key={face}
               {...shelf}
+              emptyText={t(shelf.emptyText)}
               onImported={backToLocal}
               onSelect={chooseMedia}
               rowExtras={mediaRowExtras(face)}
@@ -170,7 +185,7 @@ export function MediaColumn() {
           <div className="clip-column-body">
             <div className="clip-placeholder">
               <Icon size={26} />
-              <p>This panel arrives with the media work.</p>
+              <p>{t("clip:mediaColumn.placeholder")}</p>
             </div>
           </div>
         </>

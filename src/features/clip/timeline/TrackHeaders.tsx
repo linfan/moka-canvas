@@ -1,4 +1,5 @@
 import { useState, type MouseEvent as ReactMouseEvent, type Ref } from "react";
+import { useTranslation } from "react-i18next";
 import type { TimelineDocument, TrackKind } from "../../../shared/domain";
 import {
   AudioIcon,
@@ -45,6 +46,7 @@ function kindGlyph(kind: TrackKind) {
  * hand, since the scroller is the only place a scroll happens.
  */
 export function TrackHeaders({ timeline, ref }: TrackHeadersProps) {
+  const { t } = useTranslation();
   const rows = trackRows(timeline);
   const [menu, setMenu] = useState<HeaderMenu | null>(null);
 
@@ -78,7 +80,12 @@ export function TrackHeaders({ timeline, ref }: TrackHeadersProps) {
           <span className="clip-tl-track-flags">
             {row.track.kind !== "text" && (
               <button
-                aria-label={`${row.track.muted ? "Unmute" : "Mute"} ${row.track.name}`}
+                aria-label={t(
+                  row.track.muted
+                    ? "clip:trackHeaders.unmuteTrack"
+                    : "clip:trackHeaders.muteTrack",
+                  { name: row.track.name },
+                )}
                 aria-pressed={row.track.muted}
                 className="clip-tl-track-toggle"
                 data-testid="track-mute"
@@ -90,7 +97,12 @@ export function TrackHeaders({ timeline, ref }: TrackHeadersProps) {
                     !row.track.muted,
                   )
                 }
-                title={`${row.track.muted ? "Unmute" : "Mute"} ${row.track.name}`}
+                title={t(
+                  row.track.muted
+                    ? "clip:trackHeaders.unmuteTrack"
+                    : "clip:trackHeaders.muteTrack",
+                  { name: row.track.name },
+                )}
                 type="button"
               >
                 {row.track.muted ? (
@@ -101,7 +113,12 @@ export function TrackHeaders({ timeline, ref }: TrackHeadersProps) {
               </button>
             )}
             <button
-              aria-label={`${row.track.hidden ? "Show" : "Hide"} ${row.track.name}`}
+              aria-label={t(
+                row.track.hidden
+                  ? "clip:trackHeaders.showTrack"
+                  : "clip:trackHeaders.hideTrack",
+                { name: row.track.name },
+              )}
               aria-pressed={row.track.hidden}
               className="clip-tl-track-toggle"
               data-testid="track-hide"
@@ -113,7 +130,12 @@ export function TrackHeaders({ timeline, ref }: TrackHeadersProps) {
                   !row.track.hidden,
                 )
               }
-              title={`${row.track.hidden ? "Show" : "Hide"} ${row.track.name}`}
+              title={t(
+                row.track.hidden
+                  ? "clip:trackHeaders.showTrack"
+                  : "clip:trackHeaders.hideTrack",
+                { name: row.track.name },
+              )}
               type="button"
             >
               {row.track.hidden ? (
@@ -123,7 +145,12 @@ export function TrackHeaders({ timeline, ref }: TrackHeadersProps) {
               )}
             </button>
             <button
-              aria-label={`${row.track.locked ? "Unlock" : "Lock"} ${row.track.name}`}
+              aria-label={t(
+                row.track.locked
+                  ? "clip:trackHeaders.unlockTrack"
+                  : "clip:trackHeaders.lockTrack",
+                { name: row.track.name },
+              )}
               aria-pressed={row.track.locked}
               className="clip-tl-track-toggle"
               data-testid="track-lock"
@@ -135,7 +162,12 @@ export function TrackHeaders({ timeline, ref }: TrackHeadersProps) {
                   !row.track.locked,
                 )
               }
-              title={`${row.track.locked ? "Unlock" : "Lock"} ${row.track.name}`}
+              title={t(
+                row.track.locked
+                  ? "clip:trackHeaders.unlockTrack"
+                  : "clip:trackHeaders.lockTrack",
+                { name: row.track.name },
+              )}
               type="button"
             >
               {row.track.locked ? (

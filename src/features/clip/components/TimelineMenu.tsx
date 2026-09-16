@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   TimelineDocument,
   TimelineTrack,
@@ -61,13 +62,14 @@ export function TimelineMenu({
   y,
   onClose,
 }: TimelineMenuProps) {
+  const { t } = useTranslation();
   const selection = useClipStore((state) => state.selection);
   const playheadMs = useClipStore((state) => state.playheadMs);
   if (target.kind === "track") {
     const track = timeline.tracks.find((row) => row.id === target.trackId);
     if (!track) return null;
     return (
-      <MenuPanel label="Track menu" onClose={onClose} x={x} y={y}>
+      <MenuPanel label={t("clip:menu.trackMenu")} onClose={onClose} x={x} y={y}>
         <TrackItems onClose={onClose} timeline={timeline} track={track} />
       </MenuPanel>
     );
@@ -75,12 +77,17 @@ export function TimelineMenu({
   const chosen = selectedClips(timeline, selection);
   const crosses = clipsCrossingPlayhead(timeline, playheadMs).length > 0;
   return (
-    <MenuPanel label="Timeline menu" onClose={onClose} x={x} y={y}>
+    <MenuPanel
+      label={t("clip:menu.timelineMenu")}
+      onClose={onClose}
+      x={x}
+      y={y}
+    >
       {target.onClip ? (
         <>
           <MenuItem
             disabled={!crosses}
-            label="Split at playhead"
+            label={t("clip:common.splitAtPlayhead")}
             onSelect={() => {
               onClose();
               splitSelectionAtPlayhead();
@@ -88,7 +95,7 @@ export function TimelineMenu({
           />
           <MenuItem
             disabled={chosen.length === 0}
-            label="Duplicate"
+            label={t("clip:common.duplicate")}
             onSelect={() => {
               onClose();
               duplicateSelection();
@@ -96,7 +103,7 @@ export function TimelineMenu({
           />
           <MenuItem
             disabled={chosen.length === 0 && selection.transitionId === null}
-            label="Delete"
+            label={t("clip:common.delete")}
             onSelect={() => {
               onClose();
               deleteSelection();
@@ -105,9 +112,9 @@ export function TimelineMenu({
           {chosen.length >= 2 && (
             <>
               <div className="menu-sep" />
-              <p className="menu-title">Align</p>
+              <p className="menu-title">{t("clip:menu.align")}</p>
               <MenuItem
-                label="Align left"
+                label={t("clip:menu.alignLeft")}
                 onSelect={() => {
                   onClose();
                   alignSelection("left");
@@ -115,14 +122,14 @@ export function TimelineMenu({
               />
               <MenuItem
                 disabled={chosen.length < 3}
-                label="Distribute evenly"
+                label={t("clip:menu.distributeEvenly")}
                 onSelect={() => {
                   onClose();
                   alignSelection("distribute");
                 }}
               />
               <MenuItem
-                label="Join butted"
+                label={t("clip:menu.joinButted")}
                 onSelect={() => {
                   onClose();
                   alignSelection("butted");
@@ -134,7 +141,7 @@ export function TimelineMenu({
       ) : (
         <MenuItem
           disabled={timeline.clips.length === 0}
-          label="Select all"
+          label={t("clip:common.selectAll")}
           onSelect={() => {
             onClose();
             selectAll();
@@ -155,6 +162,7 @@ function TrackItems({
   track: TimelineTrack;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(track.name);
   const [renaming, setRenaming] = useState(false);
   const index = timeline.tracks.findIndex((row) => row.id === track.id);
@@ -167,7 +175,7 @@ function TrackItems({
     };
     return (
       <input
-        aria-label="Track name"
+        aria-label={t("clip:menu.trackName")}
         autoFocus
         className="menu-input"
         maxLength={80}
@@ -190,9 +198,12 @@ function TrackItems({
 
   return (
     <>
-      <MenuItem label="Rename…" onSelect={() => setRenaming(true)} />
       <MenuItem
-        label="Add track above"
+        label={t("clip:menu.rename")}
+        onSelect={() => setRenaming(true)}
+      />
+      <MenuItem
+        label={t("clip:menu.addTrackAbove")}
         onSelect={() => {
           onClose();
           // The list's tail is the top of the stack, so one row higher on
@@ -201,7 +212,7 @@ function TrackItems({
         }}
       />
       <MenuItem
-        label="Add track below"
+        label={t("clip:menu.addTrackBelow")}
         onSelect={() => {
           onClose();
           addTrackOfKind(timeline, track.kind, index);
@@ -210,7 +221,7 @@ function TrackItems({
       <div className="menu-sep" />
       <MenuItem
         disabled={holdsClips}
-        label="Remove track"
+        label={t("clip:menu.removeTrack")}
         onSelect={() => {
           onClose();
           removeTrack(timeline, track.id);
@@ -222,31 +233,32 @@ function TrackItems({
 
 /** The corner's plus: the three kinds of row a cut can grow. */
 export function AddTrackButton({ timeline }: { timeline: TimelineDocument }) {
+  const { t } = useTranslation();
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const kinds: { kind: TrackKind; label: string }[] = [
-    { kind: "video", label: "Video track" },
-    { kind: "audio", label: "Audio track" },
-    { kind: "text", label: "Text track" },
+    { kind: "video", label: t("clip:menu.trackVideo") },
+    { kind: "audio", label: t("clip:menu.trackAudio") },
+    { kind: "text", label: t("clip:menu.trackText") },
   ];
   return (
     <>
       <button
         aria-haspopup="menu"
-        aria-label="Add track"
+        aria-label={t("clip:menu.addTrack")}
         className="clip-tl-button"
         data-testid="track-add"
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           setAnchor({ x: rect.left, y: rect.bottom + 4 });
         }}
-        title="Add track"
+        title={t("clip:menu.addTrack")}
         type="button"
       >
         <PlusIcon size={15} />
       </button>
       {anchor && (
         <MenuPanel
-          label="Add track"
+          label={t("clip:menu.addTrack")}
           onClose={() => setAnchor(null)}
           x={anchor.x}
           y={anchor.y}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   MAX_TRANSITION_MS,
   MIN_TRANSITION_MS,
@@ -32,13 +33,13 @@ import { formatTimecode } from "../timeline/timecode";
  */
 
 const KIND_LABELS: Record<SeamKind, string> = {
-  crossfade: "Crossfade",
-  dipToBlack: "Dip to black",
-  dipToWhite: "Dip to white",
-  slideLeft: "Slide left",
-  slideUp: "Slide up",
-  wipe: "Wipe",
-  zoomIn: "Zoom in",
+  crossfade: "clip:transitionCard.kindCrossfade",
+  dipToBlack: "clip:transitionCard.kindDipToBlack",
+  dipToWhite: "clip:transitionCard.kindDipToWhite",
+  slideLeft: "clip:transitionCard.kindSlideLeft",
+  slideUp: "clip:transitionCard.kindSlideUp",
+  wipe: "clip:transitionCard.kindWipe",
+  zoomIn: "clip:transitionCard.kindZoomIn",
 };
 
 const SEAM_KINDS: SeamKind[] = [
@@ -92,6 +93,7 @@ function KindTile({
   current: boolean;
   onPick: () => void;
 }) {
+  const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -137,7 +139,7 @@ function KindTile({
       onClick={onPick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      title={KIND_LABELS[kind]}
+      title={t(KIND_LABELS[kind])}
       type="button"
     >
       <canvas
@@ -147,7 +149,7 @@ function KindTile({
         ref={canvasRef}
         width={48}
       />
-      <span>{KIND_LABELS[kind]}</span>
+      <span>{t(KIND_LABELS[kind])}</span>
     </button>
   );
 }
@@ -158,6 +160,7 @@ export interface TransitionCardProps {
 }
 
 export function TransitionCard({ timeline, transition }: TransitionCardProps) {
+  const { t } = useTranslation();
   const leader =
     timeline.clips.find((clip) => clip.id === transition.afterClipId) ?? null;
   const follower = leader ? followerOf(timeline, leader) : null;
@@ -174,19 +177,19 @@ export function TransitionCard({ timeline, transition }: TransitionCardProps) {
   const commitWindow = (durationMs: number) => {
     if (durationMs === transition.durationMs) return;
     const commands = seamEditCommands(timeline, transition.id, { durationMs });
-    if (commands) execute("Change transition", commands);
+    if (commands) execute(t("clip:history.changeTransition"), commands);
   };
 
   const pickKind = (kind: SeamKind) => {
     if (kind === transition.kind) return;
     const commands = seamEditCommands(timeline, transition.id, { kind });
-    if (commands) execute("Change transition", commands);
+    if (commands) execute(t("clip:history.changeTransition"), commands);
   };
 
   const remove = () => {
     const commands = seamRemoveCommands(timeline, transition.id);
     if (commands.length === 0) return;
-    if (!execute("Remove transition", commands)) return;
+    if (!execute(t("clip:history.removeTransition"), commands)) return;
     // With the seam gone there is nothing for the card to be about.
     useClipStore.getState().select({ clipIds: [], transitionId: null });
   };
@@ -194,24 +197,24 @@ export function TransitionCard({ timeline, transition }: TransitionCardProps) {
   return (
     <div className="clip-inspector-body" data-testid="clip-transition-card">
       <section className="inspector-section">
-        <h3>Transition</h3>
+        <h3>{t("clip:transitionCard.title")}</h3>
         <div className="inspector-row">
-          <span>Between</span>
+          <span>{t("clip:transitionCard.between")}</span>
           <span>
-            {leader?.label ?? "A clip that is gone"} →{" "}
-            {follower?.label ?? "nothing"}
+            {leader?.label ?? t("clip:transitionCard.goneClip")} →{" "}
+            {follower?.label ?? t("clip:transitionCard.nothing")}
           </span>
         </div>
         {seamMs !== null && (
           <div className="inspector-row">
-            <span>Seam</span>
+            <span>{t("clip:transitionCard.seam")}</span>
             <span>{formatTimecode(seamMs, timeline.settings.fps)}</span>
           </div>
         )}
       </section>
 
       <section className="inspector-section">
-        <h3>Kind</h3>
+        <h3>{t("clip:transitionCard.kind")}</h3>
         <div className="clip-seam-tiles">
           {SEAM_KINDS.map((kind) => (
             <KindTile
@@ -225,10 +228,10 @@ export function TransitionCard({ timeline, transition }: TransitionCardProps) {
       </section>
 
       <section className="inspector-section">
-        <h3>Window</h3>
+        <h3>{t("clip:transitionCard.window")}</h3>
         <div className="clip-inspector-slider clip-seam-window">
           <input
-            aria-label="Window"
+            aria-label={t("clip:transitionCard.window")}
             max={upperMs}
             min={MIN_TRANSITION_MS}
             onBlur={() => {
@@ -244,7 +247,7 @@ export function TransitionCard({ timeline, transition }: TransitionCardProps) {
             type="range"
             value={shownWindow}
           />
-          <span>{shownWindow} ms</span>
+          <span>{t("clip:transitionCard.ms", { ms: shownWindow })}</span>
         </div>
       </section>
 
@@ -256,7 +259,7 @@ export function TransitionCard({ timeline, transition }: TransitionCardProps) {
             onClick={remove}
             type="button"
           >
-            Remove transition
+            {t("clip:transitionCard.remove")}
           </button>
         </div>
       </section>

@@ -5,9 +5,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import type { TimelineDocument } from "../../../shared/domain";
 import {
-  APPROXIMATE_BADGE,
   approximateReason,
   previewCapabilities,
   type PreviewEngine,
@@ -54,6 +54,7 @@ const QUALITY_BACKING_WIDTH: Record<PreviewQuality, number> = {
  * the reader back.
  */
 export function PreviewStage({ timeline }: PreviewStageProps) {
+  const { t } = useTranslation();
   const sectionRef = useRef<HTMLElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -194,7 +195,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
 
   return (
     <section
-      aria-label="Preview"
+      aria-label={t("clip:preview.label")}
       className="clip-preview"
       data-engine={timeline ? engine : "none"}
       data-frame-ms={frameMs ?? undefined}
@@ -204,7 +205,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
       <div className="clip-preview-stage" ref={stageRef}>
         <div className="clip-preview-frame" ref={frameRef}>
           {timeline === null ? (
-            <p className="clip-preview-empty">No timeline to preview.</p>
+            <p className="clip-preview-empty">{t("clip:preview.empty")}</p>
           ) : (
             <>
               <canvas className="clip-preview-canvas" ref={canvasRef} />
@@ -216,7 +217,7 @@ export function PreviewStage({ timeline }: PreviewStageProps) {
               </span>
               {note !== null && (
                 <span className="clip-preview-badge" title={note}>
-                  {APPROXIMATE_BADGE}
+                  {t("clip:preview.approximateBadge")}
                 </span>
               )}
             </>

@@ -16,12 +16,14 @@ import {
 
 /** One line of the room's shortcuts list: the keys that work and what they do. */
 export interface ClipShortcutRow {
+  /** The words the line is read under, as a translation key. */
   label: string;
   /** Alternate ways to press it, as a reader of either platform would say them. */
   chords: string[];
 }
 
 export interface ClipShortcutGroup {
+  /** The words the group is read under, as a translation key. */
   title: string;
   rows: ClipShortcutRow[];
 }
@@ -31,44 +33,109 @@ export interface ClipShortcutGroup {
  *
  * Written here under the handler so the two are read together: a key that
  * moves in one and not the other is caught between neighbours rather than
- * between files. Nothing is listed that the room cannot do today.
+ * between files. Nothing is listed that the room cannot do today. The groups,
+ * the lines and the keys every line names are held as translation keys and
+ * read into the current language by the dialog; a key is a name rather than a
+ * word, so its lines read the same in either language.
  */
 export const CLIP_SHORTCUT_GROUPS: ClipShortcutGroup[] = [
   {
-    title: "Editing",
+    title: "clip:shortcuts.group.editing",
     rows: [
-      { label: "Undo", chords: ["Ctrl/Cmd + Z"] },
-      { label: "Redo", chords: ["Ctrl/Cmd + Shift + Z", "Ctrl + Y"] },
-      { label: "Split at the playhead", chords: ["Ctrl/Cmd + B"] },
-      { label: "Duplicate the selection", chords: ["Ctrl/Cmd + D"] },
-      { label: "Delete the selection", chords: ["Delete", "Backspace"] },
-      { label: "Select all", chords: ["Ctrl/Cmd + A"] },
-      { label: "Clear the selection", chords: ["Escape"] },
+      {
+        label: "clip:common.undo",
+        chords: ["clip:shortcuts.chord.ctrlCmdZ"],
+      },
+      {
+        label: "clip:common.redo",
+        chords: [
+          "clip:shortcuts.chord.ctrlCmdShiftZ",
+          "clip:shortcuts.chord.ctrlY",
+        ],
+      },
+      {
+        label: "clip:common.splitAtThePlayhead",
+        chords: ["clip:shortcuts.chord.ctrlCmdB"],
+      },
+      {
+        label: "clip:common.duplicateSelection",
+        chords: ["clip:shortcuts.chord.ctrlCmdD"],
+      },
+      {
+        label: "clip:common.deleteSelection",
+        chords: [
+          "clip:shortcuts.chord.delete",
+          "clip:shortcuts.chord.backspace",
+        ],
+      },
+      {
+        label: "clip:common.selectAll",
+        chords: ["clip:shortcuts.chord.ctrlCmdA"],
+      },
+      {
+        label: "clip:shortcuts.label.clearSelection",
+        chords: ["clip:shortcuts.chord.escape"],
+      },
     ],
   },
   {
-    title: "Moving the playhead",
+    title: "clip:shortcuts.group.playhead",
     rows: [
-      { label: "Play / pause", chords: ["Space"] },
-      { label: "Back to the head", chords: ["Home"] },
-      { label: "To the end of the cut", chords: ["End"] },
-      { label: "Back one frame", chords: ["←"] },
-      { label: "Forward one frame", chords: ["→"] },
-      { label: "Back one second", chords: ["Shift + ←"] },
-      { label: "Forward one second", chords: ["Shift + →"] },
-      { label: "To the clip edge above or below", chords: ["↑", "↓"] },
+      {
+        label: "clip:shortcuts.label.playPause",
+        chords: ["clip:shortcuts.chord.space"],
+      },
+      {
+        label: "clip:shortcuts.label.backToHead",
+        chords: ["clip:shortcuts.chord.home"],
+      },
+      {
+        label: "clip:shortcuts.label.toEnd",
+        chords: ["clip:shortcuts.chord.end"],
+      },
+      {
+        label: "clip:shortcuts.label.backFrame",
+        chords: ["clip:shortcuts.chord.left"],
+      },
+      {
+        label: "clip:shortcuts.label.forwardFrame",
+        chords: ["clip:shortcuts.chord.right"],
+      },
+      {
+        label: "clip:shortcuts.label.backSecond",
+        chords: ["clip:shortcuts.chord.shiftLeft"],
+      },
+      {
+        label: "clip:shortcuts.label.forwardSecond",
+        chords: ["clip:shortcuts.chord.shiftRight"],
+      },
+      {
+        label: "clip:shortcuts.label.toEdge",
+        chords: ["clip:shortcuts.chord.up", "clip:shortcuts.chord.down"],
+      },
     ],
   },
   {
-    title: "View",
+    title: "clip:shortcuts.group.view",
     rows: [
-      { label: "Zoom in", chords: ["+"] },
-      { label: "Zoom out", chords: ["-"] },
+      {
+        label: "clip:common.zoomIn",
+        chords: ["clip:shortcuts.chord.plus"],
+      },
+      {
+        label: "clip:common.zoomOut",
+        chords: ["clip:shortcuts.chord.minus"],
+      },
     ],
   },
   {
-    title: "Help",
-    rows: [{ label: "Keyboard shortcuts", chords: ["?"] }],
+    title: "clip:shortcuts.group.help",
+    rows: [
+      {
+        label: "clip:shortcuts.title",
+        chords: ["clip:shortcuts.chord.question"],
+      },
+    ],
   },
 ];
 

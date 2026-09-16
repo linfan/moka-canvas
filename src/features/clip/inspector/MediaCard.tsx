@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   MAX_ASSET_NOTE_LENGTH,
   MAX_ASSET_TAGS,
@@ -72,6 +73,7 @@ export interface MediaCardProps {
 }
 
 export function MediaCard({ entry, timeline }: MediaCardProps) {
+  const { t } = useTranslation();
   const still = stillUrl(entry);
   const [tags, setTags] = useState(() => (entry.tags ?? []).join(", "));
   const [note, setNote] = useState(entry.note ?? "");
@@ -105,10 +107,10 @@ export function MediaCard({ entry, timeline }: MediaCardProps) {
       </section>
 
       <section className="inspector-section">
-        <h3>File</h3>
+        <h3>{t("clip:mediaCard.file")}</h3>
         {probe?.width !== undefined && probe.height !== undefined && (
           <div className="inspector-row">
-            <span>Size</span>
+            <span>{t("clip:mediaCard.size")}</span>
             <span>
               {probe.width} × {probe.height}
             </span>
@@ -116,84 +118,85 @@ export function MediaCard({ entry, timeline }: MediaCardProps) {
         )}
         {probe?.durationMs !== undefined && (
           <div className="inspector-row">
-            <span>Length</span>
+            <span>{t("clip:mediaCard.length")}</span>
             <span>{formatDuration(probe.durationMs)}</span>
           </div>
         )}
         {entry.bytes !== undefined && (
           <div className="inspector-row">
-            <span>Bytes</span>
+            <span>{t("clip:mediaCard.bytes")}</span>
             <span>{formatBytes(entry.bytes)}</span>
           </div>
         )}
         {(probe?.mime ?? entry.mime) !== undefined && (
           <div className="inspector-row">
-            <span>Format</span>
+            <span>{t("clip:mediaCard.format")}</span>
             <span>{probe?.mime ?? entry.mime}</span>
           </div>
         )}
         {probe?.codecSummary !== undefined && (
           <div className="inspector-row">
-            <span>Codec</span>
+            <span>{t("clip:mediaCard.codec")}</span>
             <span>{probe.codecSummary}</span>
           </div>
         )}
       </section>
 
       <section className="inspector-section">
-        <h3>Words</h3>
+        <h3>{t("clip:mediaCard.words")}</h3>
         <label className="clip-inspector-field">
-          <span>Tags</span>
+          <span>{t("clip:mediaCard.tags")}</span>
           <input
             onChange={(event) => setTags(event.target.value)}
-            placeholder="Words, comma separated"
+            placeholder={t("clip:mediaCard.tagsHint")}
             value={tags}
           />
         </label>
         <label className="clip-inspector-field">
-          <span>Note</span>
+          <span>{t("clip:mediaCard.note")}</span>
           <textarea
             onChange={(event) => setNote(event.target.value)}
-            placeholder="What is worth remembering"
+            placeholder={t("clip:mediaCard.noteHint")}
             rows={2}
             value={note}
           />
         </label>
         <button onClick={save} type="button">
-          Save words
+          {t("clip:mediaCard.saveWords")}
         </button>
       </section>
 
       <section className="inspector-section">
-        <h3>Actions</h3>
+        <h3>{t("clip:mediaCard.actions")}</h3>
         <div className="clip-inspector-actions">
           <button
-            aria-label="Keep to hand"
+            aria-label={t("clip:mediaCard.keeperAria")}
             aria-pressed={entry.favorite === true}
             className="clip-inspector-keeper"
             onClick={() => void markAssetKeeper(entry, entry.favorite !== true)}
             type="button"
           >
-            <StarIcon filled={entry.favorite === true} size={14} /> Keeper
+            <StarIcon filled={entry.favorite === true} size={14} />{" "}
+            {t("clip:mediaCard.keeper")}
           </button>
           <button
             disabled={timeline === null}
             onClick={() => addAssetAtPlayhead(entry.id)}
             title={
               timeline === null
-                ? "This project has no timeline yet"
-                : "Add at the playhead"
+                ? t("clip:mediaCard.noTimeline")
+                : t("clip:common.addAtPlayhead")
             }
             type="button"
           >
-            Add at the playhead
+            {t("clip:common.addAtPlayhead")}
           </button>
           <button
             className="danger"
             onClick={() => void requestDeleteAsset(entry.id)}
             type="button"
           >
-            <TrashIcon size={14} /> Delete
+            <TrashIcon size={14} /> {t("clip:common.delete")}
           </button>
         </div>
       </section>

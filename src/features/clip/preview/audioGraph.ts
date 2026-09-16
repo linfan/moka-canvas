@@ -7,6 +7,7 @@ import type {
 } from "../../../shared/domain";
 import { assetUrl } from "../../../api";
 import { useAppStore } from "../../editor/stores/appStore";
+import { i18n } from "../../../shared/i18n";
 import { useClipStore } from "../stores/clipStore";
 import { seamAt, type SeamMoment } from "./blend";
 import { fadeFactor, materialMoment } from "./compositor";
@@ -180,9 +181,7 @@ function audioContext(): AudioContext | null {
 function reportSilent(): void {
   if (silentReported) return;
   silentReported = true;
-  useAppStore
-    .getState()
-    .pushToast("info", "Playback is silent: audio could not start.");
+  useAppStore.getState().pushToast("info", i18n.t("clip:preview.silent"));
 }
 
 function makeVoice(ctx: AudioContext): Voice | null {

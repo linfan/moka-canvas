@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ClipFilterPreset } from "../../../shared/domain";
 import { execute } from "../../editor/commands/execute";
 import { useProjectStore } from "../../editor/stores/projectStore";
@@ -17,15 +18,16 @@ import { patchCommands } from "../inspector/clipFieldMath";
 
 /** The name and the wash each preset wears on its tile. */
 const TILES: { preset: ClipFilterPreset; label: string }[] = [
-  { preset: "none", label: "None" },
-  { preset: "warm", label: "Warm" },
-  { preset: "cool", label: "Cool" },
-  { preset: "mono", label: "Mono" },
-  { preset: "fade", label: "Fade" },
-  { preset: "vivid", label: "Vivid" },
+  { preset: "none", label: "clip:filters.none" },
+  { preset: "warm", label: "clip:filters.warm" },
+  { preset: "cool", label: "clip:filters.cool" },
+  { preset: "mono", label: "clip:filters.mono" },
+  { preset: "fade", label: "clip:filters.fade" },
+  { preset: "vivid", label: "clip:filters.vivid" },
 ];
 
 export function FiltersPanel() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const clipIds = useClipStore((state) => state.selection.clipIds);
@@ -46,7 +48,7 @@ export function FiltersPanel() {
       .map((clip) => ({ clipId: clip.id, patch: { filter: next } }));
     if (patches.length === 0) return;
     execute(
-      next === "none" ? "Clear look" : "Apply look",
+      t(next === "none" ? "clip:history.clearLook" : "clip:history.applyLook"),
       patchCommands(timeline.id, patches),
     );
   };
@@ -58,7 +60,7 @@ export function FiltersPanel() {
       <div className="clip-filter-grid">
         {TILES.map(({ preset, label }) => (
           <button
-            aria-label={label}
+            aria-label={t(label)}
             aria-pressed={
               preset === "none"
                 ? clips.length > 0 && onNone
@@ -73,16 +75,14 @@ export function FiltersPanel() {
             type="button"
           >
             <span aria-hidden="true" className="clip-filter-swatch" />
-            <span>{label}</span>
+            <span>{t(label)}</span>
           </button>
         ))}
       </div>
       {clips.length === 0 ? (
-        <p className="clip-filter-hint">Select a clip to give it a look.</p>
+        <p className="clip-filter-hint">{t("clip:filters.selectHint")}</p>
       ) : (
-        <p className="clip-filter-hint">
-          Press the look a clip already wears to take it off again.
-        </p>
+        <p className="clip-filter-hint">{t("clip:filters.toggleHint")}</p>
       )}
     </div>
   );

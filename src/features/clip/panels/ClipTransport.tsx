@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { TimelineDocument } from "../../../shared/domain";
 import {
   ExitFullscreenIcon,
@@ -21,9 +22,9 @@ interface ClipTransportProps {
 
 /** What the player reads, in the reference's order: skips, clock, sound, then the pane. */
 const QUALITY_LABELS: { value: PreviewQuality; label: string }[] = [
-  { value: "full", label: "Full" },
-  { value: "half", label: "Half" },
-  { value: "quarter", label: "Quarter" },
+  { value: "full", label: "clip:transport.qualityFull" },
+  { value: "half", label: "clip:transport.qualityHalf" },
+  { value: "quarter", label: "clip:transport.qualityQuarter" },
 ];
 
 /** A timeline's name as a file name: a cut is never a path. */
@@ -47,6 +48,7 @@ function safeFileName(name: string): string {
  * back round to leave.
  */
 export function ClipTransport({ timeline }: ClipTransportProps) {
+  const { t } = useTranslation();
   const playing = useClipStore((state) => state.playing);
   const playheadMs = useClipStore((state) => state.playheadMs);
   const quality = useClipStore((state) => state.quality);
@@ -100,31 +102,33 @@ export function ClipTransport({ timeline }: ClipTransportProps) {
     <div className="clip-transport">
       <div className="clip-transport-group">
         <button
-          aria-label="Back to start"
+          aria-label={t("clip:transport.backToStart")}
           className="clip-transport-button"
           disabled={empty}
           onClick={() => useClipStore.getState().setPlayhead(0)}
-          title="Back to start"
+          title={t("clip:transport.backToStart")}
           type="button"
         >
           <SkipStartIcon size={16} />
         </button>
         <button
-          aria-label={playing ? "Pause" : "Play"}
+          aria-label={
+            playing ? t("clip:transport.pause") : t("clip:transport.play")
+          }
           className="clip-transport-button is-play"
           disabled={empty}
           onClick={() => useClipStore.getState().togglePlay()}
-          title={playing ? "Pause" : "Play"}
+          title={playing ? t("clip:transport.pause") : t("clip:transport.play")}
           type="button"
         >
           {playing ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
         </button>
         <button
-          aria-label="To the end"
+          aria-label={t("clip:transport.toEnd")}
           className="clip-transport-button"
           disabled={empty}
           onClick={() => useClipStore.getState().setPlayhead(endMs)}
-          title="To the end"
+          title={t("clip:transport.toEnd")}
           type="button"
         >
           <SkipEndIcon size={16} />
@@ -134,7 +138,7 @@ export function ClipTransport({ timeline }: ClipTransportProps) {
       <span
         className="clip-transport-time"
         data-testid="transport-timecode"
-        title="The playhead and the end of the cut"
+        title={t("clip:transport.clockHint")}
       >
         {formatTimecode(playheadMs, fps)} /{" "}
         {formatTimecode(empty ? 0 : endMs, fps)}
@@ -142,14 +146,14 @@ export function ClipTransport({ timeline }: ClipTransportProps) {
 
       <div className="clip-transport-group">
         <button
-          aria-label="Repeat the cut"
+          aria-label={t("clip:transport.repeat")}
           aria-pressed={loop}
           className={
             loop ? "clip-transport-button is-on" : "clip-transport-button"
           }
           disabled={empty}
           onClick={() => useClipStore.getState().toggleLoop()}
-          title="Repeat the cut"
+          title={t("clip:transport.repeat")}
           type="button"
         >
           <LoopIcon size={16} />
@@ -157,7 +161,7 @@ export function ClipTransport({ timeline }: ClipTransportProps) {
         <span className="clip-transport-volume">
           <VolumeIcon size={15} />
           <input
-            aria-label="Master volume"
+            aria-label={t("clip:transport.masterVolume")}
             className="clip-transport-slider"
             max={1}
             min={0}
@@ -167,51 +171,59 @@ export function ClipTransport({ timeline }: ClipTransportProps) {
                 .setMasterVolume(Number(event.target.value))
             }
             step={0.01}
-            title="Master volume"
+            title={t("clip:transport.masterVolume")}
             type="range"
             value={masterVolume}
           />
         </span>
       </div>
 
-      <span className="clip-transport-fps" title="The cut's own frame rate">
+      <span className="clip-transport-fps" title={t("clip:transport.fpsHint")}>
         {fps}fps
       </span>
 
       <select
-        aria-label="Preview quality"
+        aria-label={t("clip:transport.quality")}
         className="clip-transport-quality"
         onChange={(event) =>
           useClipStore
             .getState()
             .setQuality(event.target.value as PreviewQuality)
         }
-        title="Preview quality"
+        title={t("clip:transport.quality")}
         value={quality}
       >
         {QUALITY_LABELS.map((tier) => (
           <option key={tier.value} value={tier.value}>
-            {tier.label}
+            {t(tier.label)}
           </option>
         ))}
       </select>
 
       <div className="clip-transport-group clip-transport-end">
         <button
-          aria-label="Save snapshot"
+          aria-label={t("clip:transport.snapshot")}
           className="clip-transport-button"
           disabled={empty}
           onClick={() => void saveSnapshot()}
-          title="Save snapshot"
+          title={t("clip:transport.snapshot")}
           type="button"
         >
           <SnapshotIcon size={16} />
         </button>
         <button
-          aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          aria-label={
+            fullscreen
+              ? t("clip:transport.exitFullscreen")
+              : t("clip:transport.fullscreen")
+          }
           className="clip-transport-button"
           onClick={toggleFullscreen}
-          title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          title={
+            fullscreen
+              ? t("clip:transport.exitFullscreen")
+              : t("clip:transport.fullscreen")
+          }
           type="button"
         >
           {fullscreen ? (

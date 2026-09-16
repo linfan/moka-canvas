@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useTranslation } from "react-i18next";
 import {
   defaultTextStyle,
   type TextClipData,
@@ -16,7 +17,11 @@ import {
 } from "../interactions/textActions";
 import { useClipStore } from "../stores/clipStore";
 import { cueOfClip, serializeSrt } from "../subtitles/srt";
-import { TEXT_STYLE_PRESETS, presetById } from "../textStyles";
+import {
+  TEXT_STYLE_PRESETS,
+  presetById,
+  type TextStylePresetId,
+} from "../textStyles";
 import { formatTimecode } from "../timeline/timecode";
 
 /**
@@ -44,11 +49,20 @@ function safeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|]+/g, "-");
 }
 
+/** What the picker calls each preset of the four the page offers. */
+const PRESET_LABELS: Record<TextStylePresetId, string> = {
+  basic: "clip:textPresets.basic",
+  title: "clip:textPresets.title",
+  lowerThird: "clip:textPresets.lowerThird",
+  caption: "clip:textPresets.caption",
+};
+
 function toast(kind: "info" | "success" | "error", message: string): void {
   useAppStore.getState().pushToast(kind, message);
 }
 
 export function TextPanel() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const clipIds = useClipStore((state) => state.selection.clipIds);
@@ -99,7 +113,7 @@ export function TextPanel() {
     event.target.value = "";
     if (!file || !timeline) return;
     if (file.size > MAX_SUBTITLE_FILE_BYTES) {
-      toast("error", "That subtitles file is larger than 2MB.");
+      toast("error", t("clip:textPanel.fileTooLarge"));
       return;
     }
     const text = await file.text();
@@ -132,15 +146,15 @@ export function TextPanel() {
   return (
     <div className="clip-text-page" data-testid="clip-text-panel">
       <label className="clip-text-field">
-        <span className="clip-text-label">Preset</span>
+        <span className="clip-text-label">{t("clip:textPanel.preset")}</span>
         <select
-          aria-label="Preset"
+          aria-label={t("clip:textPanel.preset")}
           onChange={(event) => applyPreset(event.target.value)}
           value={presetId}
         >
           {TEXT_STYLE_PRESETS.map((preset) => (
             <option key={preset.id} value={preset.id}>
-              {preset.label}
+              {t(PRESET_LABELS[preset.id])}
             </option>
           ))}
         </select>
@@ -158,39 +172,39 @@ export function TextPanel() {
         onClick={add}
         type="button"
       >
-        Add at the playhead
+        {t("clip:common.addAtPlayhead")}
       </button>
 
       <section className="clip-text-subtitles">
         <div className="clip-text-subtitle-head">
-          <h3>Subtitles</h3>
+          <h3>{t("clip:textPanel.subtitles")}</h3>
           <div className="clip-text-subtitle-actions">
             <button
               disabled={!timeline}
               onClick={() => fileRef.current?.click()}
               type="button"
             >
-              Import .srt
+              {t("clip:textPanel.importSrt")}
             </button>
             <button
               disabled={cues.length === 0}
               onClick={exportSrt}
               type="button"
             >
-              Export .srt
+              {t("clip:textPanel.exportSrt")}
             </button>
           </div>
         </div>
         <input
           accept=".srt,.txt"
-          aria-label="Import subtitles"
+          aria-label={t("clip:textPanel.importSubtitles")}
           className="clip-text-file"
           onChange={(event) => void onFile(event)}
           ref={fileRef}
           type="file"
         />
         {cues.length === 0 ? (
-          <p className="clip-text-hint">No text clips yet.</p>
+          <p className="clip-text-hint">{t("clip:textPanel.noClips")}</p>
         ) : (
           <div className="clip-subtitle-list">
             {cues.map((clip) => (

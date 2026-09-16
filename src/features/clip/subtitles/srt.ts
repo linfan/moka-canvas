@@ -1,3 +1,5 @@
+import { i18n } from "../../../shared/i18n";
+
 /**
  * SRT as pure data: a subtitle file read in, written back out, and asked
  * where its cues collide.
@@ -28,7 +30,7 @@ export type SrtParseResult =
   | { ok: false; message: string };
 
 /** What a file with nothing to say is told. */
-export const NO_CUES_MESSAGE = "No subtitles found in the file.";
+export const NO_CUES_MESSAGE = "clip:subtitles.noCuesFound";
 
 /** `HH:MM:SS,mmm`, with dotted milliseconds accepted for the comma. */
 const TIME_LINE =
@@ -119,7 +121,9 @@ export function parseSrt(text: string): SrtParseResult {
   }
   readBlock();
 
-  if (cues.length === 0) return { ok: false, message: NO_CUES_MESSAGE };
+  if (cues.length === 0) {
+    return { ok: false, message: i18n.t(NO_CUES_MESSAGE) };
+  }
   return { ok: true, cues, skipped };
 }
 

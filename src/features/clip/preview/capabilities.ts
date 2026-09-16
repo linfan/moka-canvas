@@ -1,3 +1,5 @@
+import { i18n } from "../../../shared/i18n";
+
 /**
  * What this browser will and will not do, asked once.
  *
@@ -82,17 +84,12 @@ export function approximateReason(
   if (engine === "element") {
     reasons.push(
       capabilities.webCodecs
-        ? "This file cannot be decoded frame by frame here, so its pictures come from a seeked video element and can be a frame or two out."
-        : "This browser has no WebCodecs, so pictures come from a seeked video element and can be a frame or two out.",
+        ? i18n.t("clip:preview.elementFramesOut")
+        : i18n.t("clip:preview.noWebCodecs"),
     );
   }
   if (coloursSkipped) {
-    reasons.push(
-      "This canvas cannot apply colour filters, so grades and preset looks are not shown.",
-    );
+    reasons.push(i18n.t("clip:preview.noColourFilters"));
   }
   return reasons.length > 0 ? reasons.join(" ") : null;
 }
-
-/** The word on the badge whenever anything above is true. */
-export const APPROXIMATE_BADGE = "Approximate preview";

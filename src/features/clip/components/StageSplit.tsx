@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useTranslation } from "react-i18next";
 import {
   SPLIT_BIG_STEP,
   SPLIT_MAX,
@@ -6,9 +7,6 @@ import {
   SPLIT_STEP,
   useStageSplit,
 } from "../stores/stageSplit";
-
-const HINT =
-  "Drag to give the preview more or less room — double-click for 60/40";
 
 /**
  * The edge the preview and the timeline are dragged apart by.
@@ -20,6 +18,7 @@ const HINT =
  * window has left, and the share is what the reader chose about it.
  */
 export function StageSplit() {
+  const { t } = useTranslation();
   const share = useStageSplit((state) => state.share);
   const setShare = useStageSplit((state) => state.setShare);
   const resetShare = useStageSplit((state) => state.resetShare);
@@ -80,7 +79,7 @@ export function StageSplit() {
 
   return (
     <div
-      aria-label="Height of the preview"
+      aria-label={t("clip:stage.splitLabel")}
       aria-orientation="horizontal"
       aria-valuemax={Math.round(SPLIT_MAX * 100)}
       aria-valuemin={Math.round(SPLIT_MIN * 100)}
@@ -96,7 +95,7 @@ export function StageSplit() {
       ref={grip}
       role="separator"
       tabIndex={0}
-      title={HINT}
+      title={t("clip:stage.splitHint")}
     />
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   CLIP_LABEL_MAX,
   MAX_CLIP_SPEED,
@@ -92,6 +93,7 @@ function TimecodeField({
   ms: number | null;
   onCommit: (ms: number) => void;
 }) {
+  const { t } = useTranslation();
   const shown = ms === null ? "" : formatTimecode(ms, fps);
   const { text, setText, focused } = useTypedText(shown);
   const [bad, setBad] = useState(false);
@@ -131,8 +133,8 @@ function TimecodeField({
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
         }}
-        placeholder={ms === null ? "Mixed" : "hh:mm:ss:ff"}
-        title={bad ? "Not a timecode" : undefined}
+        placeholder={ms === null ? t("clip:common.mixed") : "hh:mm:ss:ff"}
+        title={bad ? t("clip:clipFields.notATimecode") : undefined}
         value={text}
       />
     </label>
@@ -154,6 +156,7 @@ function NumberField({
   value: number | null;
   onCommit: (value: number) => void;
 }) {
+  const { t } = useTranslation();
   const shown = value === null ? "" : String(value);
   const { text, setText, focused } = useTypedText(shown);
   const [bad, setBad] = useState(false);
@@ -191,7 +194,7 @@ function NumberField({
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
         }}
-        placeholder={value === null ? "Mixed" : undefined}
+        placeholder={value === null ? t("clip:common.mixed") : undefined}
         value={text}
       />
     </label>
@@ -215,6 +218,7 @@ export interface ClipFieldsProps {
 }
 
 export function ClipFields({ timeline, clips }: ClipFieldsProps) {
+  const { t } = useTranslation();
   const fps = timeline.settings.fps;
   const playheadMs = useClipStore((state) => state.playheadMs);
   const many = clips.length > 1;
@@ -234,7 +238,7 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
     );
     if (filled.length === 0) return;
     execute(
-      many ? "Edit clips" : "Edit clip",
+      t(many ? "clip:history.editClips" : "clip:history.editClip"),
       patchCommands(timeline.id, filled),
     );
   };
@@ -251,7 +255,7 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
       patch: speedPatch(clip, next, materials[index].ownClock),
     }));
     if (built.some((entry) => entry.patch === null)) {
-      toast("error", "Too short to run that fast.");
+      toast("error", t("clip:clipFields.tooFastToast"));
       return;
     }
     commit(
@@ -423,7 +427,11 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
       : styleApplyPatches(textClips, text.style);
     if (patches.length === 0) return;
     execute(
-      wordsEditable ? "Edit text clip" : "Edit text clips",
+      t(
+        wordsEditable
+          ? "clip:history.editTextClip"
+          : "clip:history.editTextClips",
+      ),
       patchCommands(timeline.id, patches),
     );
   };
@@ -432,7 +440,7 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
     <div className="clip-inspector-body" data-testid="clip-fields">
       {textClips.length > 0 && (
         <section className="inspector-section">
-          <h3>Text</h3>
+          <h3>{t("clip:clipFields.textSection")}</h3>
           <TextFields
             mixed={mixedStyle}
             onChange={changeText}
@@ -443,34 +451,47 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
         </section>
       )}
       <section className="inspector-section">
-        <h3>{many ? `${clips.length} clips` : (single?.label ?? "Clip")}</h3>
+        <h3>
+          {many
+            ? t("clip:clipFields.manyClips", { count: clips.length })
+            : (single?.label ?? t("clip:common.clip"))}
+        </h3>
         <div className="clip-inspector-pair">
           <TimecodeField
             fps={fps}
-            label="Start"
+            label={t("clip:clipFields.start")}
             ms={start}
             onCommit={applyStart}
           />
           <TimecodeField
             fps={fps}
-            label="Duration"
+            label={t("clip:clipFields.duration")}
             ms={duration}
             onCommit={applyDuration}
           />
         </div>
         {start !== null && duration !== null && (
-          <Row label="End" value={formatTimecode(start + duration, fps)} />
+          <Row
+            label={t("clip:clipFields.end")}
+            value={formatTimecode(start + duration, fps)}
+          />
         )}
         {single && single.kind !== "text" && single.assetId && (
           <>
-            <Row label="In" value={formatTimecode(single.inPointMs, fps)} />
-            <Row label="Out" value={formatTimecode(single.outPointMs, fps)} />
+            <Row
+              label={t("clip:clipFields.in")}
+              value={formatTimecode(single.inPointMs, fps)}
+            />
+            <Row
+              label={t("clip:clipFields.out")}
+              value={formatTimecode(single.outPointMs, fps)}
+            />
           </>
         )}
       </section>
 
       <section className="inspector-section">
-        <h3>Speed</h3>
+        <h3>{t("clip:clipFields.speedSection")}</h3>
         <div className="clip-inspector-speed">
           {SPEED_PRESETS.map((preset) => (
             <button
@@ -486,24 +507,22 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
           ))}
         </div>
         <NumberField
-          label="Speed ×"
+          label={t("clip:clipFields.speedLabel")}
           max={MAX_CLIP_SPEED}
           min={MIN_CLIP_SPEED}
           onCommit={applySpeed}
           value={speed}
         />
         {speedLocked && (
-          <p className="inspector-note">
-            A still runs its own length, so it has no pace to change.
-          </p>
+          <p className="inspector-note">{t("clip:clipFields.speedLocked")}</p>
         )}
       </section>
 
       <section className="inspector-section">
-        <h3>Sound</h3>
+        <h3>{t("clip:clipFields.soundSection")}</h3>
         <div className="clip-inspector-slider">
           <input
-            aria-label="Volume"
+            aria-label={t("clip:clipFields.volumeLabel")}
             max={MAX_CLIP_VOLUME}
             min={0}
             onChange={(event) => setHeldVolume(Number(event.target.value))}
@@ -535,14 +554,14 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
         </div>
         <div className="clip-inspector-pair">
           <NumberField
-            label="Fade in ms"
+            label={t("clip:clipFields.fadeIn")}
             max={longest}
             min={0}
             onCommit={(value) => applyFade("in", value)}
             value={fadeIn}
           />
           <NumberField
-            label="Fade out ms"
+            label={t("clip:clipFields.fadeOut")}
             max={longest}
             min={0}
             onCommit={(value) => applyFade("out", value)}
@@ -550,7 +569,7 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
           />
         </div>
         <button
-          aria-label="Mute"
+          aria-label={t("clip:clipFields.mute")}
           aria-pressed={muted === true}
           onClick={() =>
             commit(
@@ -562,16 +581,16 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
           }
           type="button"
         >
-          Mute
+          {t("clip:clipFields.mute")}
         </button>
       </section>
 
       {opacityClips.length > 0 && (
         <section className="inspector-section">
-          <h3>Opacity</h3>
+          <h3>{t("clip:clipFields.opacitySection")}</h3>
           <div className="clip-inspector-slider">
             <input
-              aria-label="Opacity"
+              aria-label={t("clip:clipFields.opacityLabel")}
               max={1}
               min={0}
               onChange={(event) => setHeldOpacity(Number(event.target.value))}
@@ -596,9 +615,9 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
 
       {single && (
         <section className="inspector-section">
-          <h3>Name</h3>
+          <h3>{t("clip:clipFields.nameSection")}</h3>
           <label className="clip-inspector-field">
-            <span>Label</span>
+            <span>{t("clip:clipFields.labelField")}</span>
             <input
               defaultValue={single.label}
               key={single.id}
@@ -617,21 +636,21 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
       )}
 
       <section className="inspector-section">
-        <h3>Actions</h3>
+        <h3>{t("clip:clipFields.actionsSection")}</h3>
         <div className="clip-inspector-actions">
           <button
             disabled={crossing === 0}
             onClick={() => splitSelectionAtPlayhead()}
             type="button"
           >
-            <ScissorsIcon size={14} /> Split at playhead
+            <ScissorsIcon size={14} /> {t("clip:common.splitAtPlayhead")}
           </button>
           <button onClick={() => duplicateSelection()} type="button">
-            <DuplicateIcon size={14} /> Duplicate
+            <DuplicateIcon size={14} /> {t("clip:common.duplicate")}
           </button>
           {clips.some((clip) => clip.kind === "video") && (
             <button onClick={() => detachAudio()} type="button">
-              Detach audio
+              {t("clip:clipFields.detachAudio")}
             </button>
           )}
           <button
@@ -639,7 +658,7 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
             onClick={() => deleteSelection()}
             type="button"
           >
-            <TrashIcon size={14} /> Delete
+            <TrashIcon size={14} /> {t("clip:common.delete")}
           </button>
         </div>
       </section>

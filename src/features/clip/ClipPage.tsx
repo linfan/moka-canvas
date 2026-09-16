@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { historyBoundary } from "../editor/commands/execute";
 import { PanelUnfold } from "../editor/components/PanelFold";
 import { PanelResizer } from "../editor/components/PanelResizer";
@@ -8,6 +9,7 @@ import { usePanelFolds } from "../editor/stores/panelFolds";
 import { usePanelWidths } from "../editor/stores/panelWidths";
 import { useProjectStore } from "../editor/stores/projectStore";
 import { useRunStore } from "../editor/stores/runStore";
+import { i18n } from "../../shared/i18n";
 import { ClipShortcutsDialog } from "./components/ClipShortcutsDialog";
 import { ClipTopBar } from "./components/ClipTopBar";
 import { TimelineIcon } from "./components/ClipIcons";
@@ -40,6 +42,7 @@ import { useStageSplit } from "./stores/stageSplit";
  * reaches back onto a board.
  */
 export function ClipPage() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const newTimelineOpen = useClipStore((state) => state.newTimelineOpen);
@@ -79,7 +82,9 @@ export function ClipPage() {
     const opened = useProjectStore.getState().moka;
     if (!opened) return;
     useClipStore.getState().setActiveTimeline(initialTimelineId(opened));
-    historyBoundary("Clip room");
+    // The seam is a moment rather than a render, so its words are read where
+    // it is made rather than taken from the render's own language.
+    historyBoundary(i18n.t("clip:page.historyBoundary"));
   }, [projectId]);
 
   // A timeline the document no longer holds — deleted here, or by an undo of
@@ -115,9 +120,8 @@ export function ClipPage() {
           .pushToast(
             "error",
             after.saveStatus === "conflicted"
-              ? "Saving is blocked by a revision conflict — go back to the canvas to resolve it."
-              : (after.saveError ??
-                  "Saving failed — go back to the canvas to try again."),
+              ? t("clip:page.saveConflict")
+              : (after.saveError ?? t("clip:page.saveFailed")),
           );
         return;
       }
@@ -153,14 +157,14 @@ export function ClipPage() {
             // onto a preview and a track area with nothing behind either.
             <div className="clip-empty clip-empty-first">
               <TimelineIcon size={30} />
-              <h2>No timelines yet</h2>
-              <p>Create a timeline to start cutting.</p>
+              <h2>{t("clip:page.emptyTitle")}</h2>
+              <p>{t("clip:page.emptyHint")}</p>
               <button
                 className="primary"
                 onClick={() => useClipStore.getState().setNewTimelineOpen(true)}
                 type="button"
               >
-                New timeline
+                {t("clip:page.newTimeline")}
               </button>
             </div>
           ) : (

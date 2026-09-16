@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   MAX_TIMELINE_TEXT_CONTENT,
   type TextClipData,
@@ -42,7 +43,8 @@ function useTypedText(value: string) {
 
 /** The word a field wears when the chosen clips do not agree about it. */
 function Mixed() {
-  return <em className="clip-text-mixed">Mixed</em>;
+  const { t } = useTranslation();
+  return <em className="clip-text-mixed">{t("clip:common.mixed")}</em>;
 }
 
 function Label({ children, mixed }: { children: string; mixed?: boolean }) {
@@ -54,16 +56,46 @@ function Label({ children, mixed }: { children: string; mixed?: boolean }) {
   );
 }
 
+/** Which words each alignment wears, and how the switch is named to a reader. */
+const ALIGN_KEYS = {
+  left: { word: "clip:textFields.left", aria: "clip:textFields.alignLeftAria" },
+  center: {
+    word: "clip:textFields.center",
+    aria: "clip:textFields.alignCenterAria",
+  },
+  right: {
+    word: "clip:textFields.right",
+    aria: "clip:textFields.alignRightAria",
+  },
+} as const;
+
+/** Which words each placement wears, and how the switch is named to a reader. */
+const POSITION_KEYS = {
+  top: {
+    word: "clip:textFields.top",
+    aria: "clip:textFields.positionTopAria",
+  },
+  center: {
+    word: "clip:textFields.center",
+    aria: "clip:textFields.positionCenterAria",
+  },
+  bottom: {
+    word: "clip:textFields.bottom",
+    aria: "clip:textFields.positionBottomAria",
+  },
+} as const;
+
 /** A whole-number field with a step down and a step up beside it. */
 function NumberStepper({
-  label,
+  labelKey,
   max,
   min,
   mixed,
   onCommit,
   value,
 }: {
-  label: string;
+  /** What the field is called, as a translation key. */
+  labelKey: string;
   min: number;
   max: number;
   /** The number the field stands for; null on a set that disagrees. */
@@ -71,6 +103,8 @@ function NumberStepper({
   mixed: boolean;
   onCommit: (value: number) => void;
 }) {
+  const { t } = useTranslation();
+  const label = t(labelKey);
   const shown = mixed || value === null ? "" : String(value);
   const { text, setText, focused } = useTypedText(shown);
   const commit = () => {
@@ -100,7 +134,7 @@ function NumberStepper({
       <Label mixed={mixed}>{label}</Label>
       <span className="clip-text-stepper">
         <button
-          aria-label={`Smaller ${name}`}
+          aria-label={t("clip:textFields.smaller", { name })}
           onClick={() => nudge(-1)}
           type="button"
         >
@@ -120,11 +154,11 @@ function NumberStepper({
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
-          placeholder={mixed ? "Mixed" : undefined}
+          placeholder={mixed ? t("clip:common.mixed") : undefined}
           value={text}
         />
         <button
-          aria-label={`Larger ${name}`}
+          aria-label={t("clip:textFields.larger", { name })}
           onClick={() => nudge(1)}
           type="button"
         >
@@ -158,6 +192,7 @@ export function TextFields({
   words = true,
   onEscape,
 }: TextFieldsProps) {
+  const { t } = useTranslation();
   const style = value.style;
   const isMixed = (key: keyof TextClipStyle): boolean =>
     mixed?.has(key) === true;
@@ -168,9 +203,11 @@ export function TextFields({
     <div className="clip-text-fields" data-testid="clip-text-fields">
       {words ? (
         <label className="clip-text-field">
-          <span className="clip-text-label">Content</span>
+          <span className="clip-text-label">
+            {t("clip:textFields.content")}
+          </span>
           <textarea
-            aria-label="Content"
+            aria-label={t("clip:textFields.content")}
             data-testid="clip-text-content"
             maxLength={MAX_TIMELINE_TEXT_CONTENT}
             onBlur={() => onChange(value, true)}
@@ -195,21 +232,25 @@ export function TextFields({
         </label>
       ) : (
         <p className="clip-text-hint">
-          Select one text clip to edit its words.
+          {t("clip:textFields.selectOneTextClip")}
         </p>
       )}
 
       <div className="clip-text-row">
         <label className="clip-text-field clip-text-grow">
-          <Label mixed={isMixed("fontFamily")}>Font</Label>
+          <Label mixed={isMixed("fontFamily")}>
+            {t("clip:textFields.font")}
+          </Label>
           <select
-            aria-label="Font"
+            aria-label={t("clip:textFields.font")}
             onChange={(event) =>
               setStyle({ fontFamily: event.target.value }, true)
             }
             value={isMixed("fontFamily") ? "" : style.fontFamily}
           >
-            {isMixed("fontFamily") && <option value="">Mixed</option>}
+            {isMixed("fontFamily") && (
+              <option value="">{t("clip:common.mixed")}</option>
+            )}
             {CLIP_FONTS.map((font) => (
               <option key={font.label} value={font.stack}>
                 {font.label}
@@ -218,7 +259,7 @@ export function TextFields({
           </select>
         </label>
         <NumberStepper
-          label="Size"
+          labelKey="clip:textFields.size"
           max={FONT_SIZE_MAX}
           min={FONT_SIZE_MIN}
           mixed={isMixed("fontSize")}
@@ -229,18 +270,20 @@ export function TextFields({
 
       <div className="clip-text-row">
         <label className="clip-text-field">
-          <Label mixed={isMixed("color")}>Color</Label>
+          <Label mixed={isMixed("color")}>{t("clip:textFields.color")}</Label>
           <input
-            aria-label="Color"
+            aria-label={t("clip:textFields.color")}
             onChange={(event) => setStyle({ color: event.target.value }, true)}
             type="color"
             value={style.color}
           />
         </label>
         <label className="clip-text-field">
-          <Label mixed={isMixed("strokeColor")}>Stroke</Label>
+          <Label mixed={isMixed("strokeColor")}>
+            {t("clip:textFields.stroke")}
+          </Label>
           <input
-            aria-label="Stroke color"
+            aria-label={t("clip:textFields.strokeColor")}
             onChange={(event) =>
               setStyle({ strokeColor: event.target.value }, true)
             }
@@ -249,7 +292,7 @@ export function TextFields({
           />
         </label>
         <NumberStepper
-          label="Stroke width"
+          labelKey="clip:textFields.strokeWidth"
           max={STROKE_WIDTH_MAX}
           min={0}
           mixed={isMixed("strokeWidth")}
@@ -258,7 +301,7 @@ export function TextFields({
         />
         <div className="clip-text-toggles">
           <button
-            aria-label="Bold"
+            aria-label={t("clip:textFields.bold")}
             aria-pressed={isMixed("bold") ? false : style.bold}
             className={
               isMixed("bold") || !style.bold
@@ -271,7 +314,7 @@ export function TextFields({
             B
           </button>
           <button
-            aria-label="Italic"
+            aria-label={t("clip:textFields.italic")}
             aria-pressed={isMixed("italic") ? false : style.italic}
             className={
               isMixed("italic") || !style.italic
@@ -288,11 +331,11 @@ export function TextFields({
 
       <div className="clip-text-row">
         <div className="clip-text-group">
-          <Label mixed={isMixed("align")}>Align</Label>
+          <Label mixed={isMixed("align")}>{t("clip:textFields.align")}</Label>
           <div className="clip-text-toggles">
             {(["left", "center", "right"] as const).map((align) => (
               <button
-                aria-label={`Align ${align}`}
+                aria-label={t(ALIGN_KEYS[align].aria)}
                 aria-pressed={isMixed("align") ? false : style.align === align}
                 className={
                   isMixed("align") || style.align !== align
@@ -303,21 +346,19 @@ export function TextFields({
                 onClick={() => setStyle({ align }, true)}
                 type="button"
               >
-                {align === "left"
-                  ? "Left"
-                  : align === "center"
-                    ? "Center"
-                    : "Right"}
+                {t(ALIGN_KEYS[align].word)}
               </button>
             ))}
           </div>
         </div>
         <div className="clip-text-group">
-          <Label mixed={isMixed("position")}>Position</Label>
+          <Label mixed={isMixed("position")}>
+            {t("clip:textFields.position")}
+          </Label>
           <div className="clip-text-toggles">
             {(["top", "center", "bottom"] as const).map((position) => (
               <button
-                aria-label={`Position ${position}`}
+                aria-label={t(POSITION_KEYS[position].aria)}
                 aria-pressed={
                   isMixed("position") ? false : style.position === position
                 }
@@ -330,11 +371,7 @@ export function TextFields({
                 onClick={() => setStyle({ position }, true)}
                 type="button"
               >
-                {position === "top"
-                  ? "Top"
-                  : position === "center"
-                    ? "Center"
-                    : "Bottom"}
+                {t(POSITION_KEYS[position].word)}
               </button>
             ))}
           </div>
@@ -343,10 +380,12 @@ export function TextFields({
 
       <div className="clip-text-row">
         <div className="clip-text-group">
-          <Label mixed={isMixed("background")}>Plate</Label>
+          <Label mixed={isMixed("background")}>
+            {t("clip:textFields.plate")}
+          </Label>
           <div className="clip-text-toggles">
             <input
-              aria-label="Plate color"
+              aria-label={t("clip:textFields.plateColor")}
               onChange={(event) =>
                 setStyle({ background: event.target.value }, true)
               }
@@ -354,7 +393,7 @@ export function TextFields({
               value={style.background ?? "#000000"}
             />
             <button
-              aria-label="No plate"
+              aria-label={t("clip:textFields.noPlate")}
               aria-pressed={style.background === null}
               className={
                 style.background === null
@@ -364,7 +403,7 @@ export function TextFields({
               onClick={() => setStyle({ background: null }, true)}
               type="button"
             >
-              None
+              {t("clip:textFields.none")}
             </button>
           </div>
         </div>

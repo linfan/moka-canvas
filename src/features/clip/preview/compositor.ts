@@ -6,6 +6,7 @@ import type {
   TimelineClip,
   TimelineDocument,
 } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { drawTransition, seamAt, type SeamMoment } from "./blend";
 import { clipLook } from "./looks";
 import { drawTextClip } from "./text";
@@ -250,7 +251,7 @@ function drawWaiting(
   ctx.font = `${Math.max(10, Math.round(frameHeight * 0.04))}px sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("Loading", frameWidth / 2, frameHeight / 2);
+  ctx.fillText(i18n.t("clip:preview.loading"), frameWidth / 2, frameHeight / 2);
   ctx.restore();
 }
 
