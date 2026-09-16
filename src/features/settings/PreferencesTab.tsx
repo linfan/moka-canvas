@@ -7,7 +7,6 @@ import type {
   PreferencesPatch,
   VideoPreferences,
 } from "../../api";
-import { useLocale, type LocaleMode } from "../../shared/i18n";
 import {
   MAX_AUDIO_SPEED,
   MAX_IMAGES_PER_RUN,
@@ -387,44 +386,9 @@ function NodeToolChoices() {
   );
 }
 
-/**
- * Which language the interface is drawn in.
- *
- * Following the machine is the start; picking a language outright keeps it
- * through restarts and outranks the machine's own choice. The choice is kept
- * on this machine rather than in the document, like the other preferences
- * that are about the reader rather than about the work.
- */
-function LanguageChoice() {
-  const { t } = useTranslation();
-  const mode = useLocale((state) => state.mode);
-  return (
-    <section
-      aria-label={t("settings:language.title")}
-      className="settings-section"
-    >
-      <h3 className="settings-heading">{t("settings:language.title")}</h3>
-      <label className="dialog-field">
-        <span>{t("settings:language.label")}</span>
-        <select
-          onChange={(event) =>
-            useLocale.getState().setMode(event.target.value as LocaleMode)
-          }
-          value={mode}
-        >
-          <option value="system">{t("settings:language.system")}</option>
-          <option value="en">{t("settings:language.english")}</option>
-          <option value="zh">{t("settings:language.chinese")}</option>
-        </select>
-      </label>
-    </section>
-  );
-}
-
 export function PreferencesTab() {
   return (
     <div className="settings-section">
-      <LanguageChoice />
       <NodeToolChoices />
       <GenerationDefaults />
     </div>

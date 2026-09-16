@@ -28,8 +28,8 @@ const TOP_TABS: { id: SettingsTopTab; label: string }[] = [
  * be set up before any project exists for it to be used from. The Model
  * section keeps a tab per category — the models that serve one kind of node
  * are listed, added, copied, tested, and defaulted together — and the System
- * section holds what is global: where the master key lives, and which
- * credentials it protects.
+ * section holds what is global: the language the interface is drawn in, where
+ * the master key lives, and which credentials it protects.
  */
 export function SettingsDialog() {
   const { t } = useTranslation();

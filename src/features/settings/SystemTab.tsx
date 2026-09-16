@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { SecretStorageChoice } from "../../api";
 import { CAPABILITY_LABELS } from "../../shared/domain";
+import { useLocale, type LocaleMode } from "../../shared/i18n";
 import { useModelStore } from "./modelStore";
 import { SecretStorageNote } from "./SecretStorageNote";
 
@@ -11,8 +12,42 @@ const CHOICE_LABELS: Record<SecretStorageChoice, string> = {
 };
 
 /**
- * What is global: where the master key protecting the stored credentials
- * lives, and which credentials exist.
+ * Which language the interface is drawn in.
+ *
+ * Following the machine is the start; picking a language outright keeps it
+ * through restarts and outranks the machine's own choice. The choice is kept
+ * on this machine rather than in the document, like the other choices that are
+ * about the reader rather than about the work.
+ */
+function LanguageChoice() {
+  const { t } = useTranslation();
+  const mode = useLocale((state) => state.mode);
+  return (
+    <section
+      aria-label={t("settings:language.title")}
+      className="settings-section"
+    >
+      <h3 className="settings-heading">{t("settings:language.title")}</h3>
+      <label className="dialog-field">
+        <span>{t("settings:language.label")}</span>
+        <select
+          onChange={(event) =>
+            useLocale.getState().setMode(event.target.value as LocaleMode)
+          }
+          value={mode}
+        >
+          <option value="system">{t("settings:language.system")}</option>
+          <option value="en">{t("settings:language.english")}</option>
+          <option value="zh">{t("settings:language.chinese")}</option>
+        </select>
+      </label>
+    </section>
+  );
+}
+
+/**
+ * What is global: the language the interface is drawn in, where the master key
+ * protecting the stored credentials lives, and which credentials exist.
  *
  * The tier is a choice only desktop macOS and Windows builds can make — a
  * server has no keychain to ask, so it keeps the file tier (or the exported
@@ -65,6 +100,8 @@ export function SystemTab() {
 
   return (
     <div className="settings-section">
+      <LanguageChoice />
+
       <h3 className="settings-heading">{t("settings:system.storage")}</h3>
       <SecretStorageNote tier={current} />
       {options.map((choice) => (

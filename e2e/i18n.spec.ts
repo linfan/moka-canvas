@@ -17,7 +17,7 @@ test("the interface follows the language chosen in settings", async ({
   // Pick Chinese in the interface's own settings screen.
   await page.getByTestId("launcher-settings").click();
   const settings = page.getByRole("dialog");
-  await settings.locator("#settings-tab-preferences").click();
+  await settings.locator("#settings-toptab-system").click();
   await settings.getByLabel("Interface language").selectOption("zh");
 
   // The tab's title and the page's name change with the language.
@@ -27,7 +27,7 @@ test("the interface follows the language chosen in settings", async ({
 
   // And back: a language picked outright is not a trap.
   await page.getByTestId("launcher-settings").click();
-  await settings.locator("#settings-tab-preferences").click();
+  await settings.locator("#settings-toptab-system").click();
   await settings.getByLabel("界面语言").selectOption("en");
   await page.keyboard.press("Escape");
   await expect(

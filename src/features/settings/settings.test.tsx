@@ -802,6 +802,26 @@ describe("model settings", () => {
     confirm.mockRestore();
   });
 
+  it("draws the interface in the language chosen on the system page", async () => {
+    await openSettings("System");
+
+    fireEvent.change(await screen.findByLabelText("Interface language"), {
+      target: { value: "zh" },
+    });
+
+    // The dialog says its own name in the language that was chosen.
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeTruthy();
+    expect(screen.getByLabelText("界面语言")).toBeTruthy();
+
+    // And back, so the cases after this one start in English again.
+    fireEvent.change(screen.getByLabelText("界面语言"), {
+      target: { value: "en" },
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Settings" }),
+    ).toBeTruthy();
+  });
+
   it("lists the stored keys masked, and deletes one on request", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     await openSettings();
