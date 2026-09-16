@@ -318,8 +318,18 @@ export async function decodeFrameAt(
 
 /** How far ahead of the consumer the pump fetches, so the next second is in hand. */
 const STREAM_PREFETCH_MS = 2_000;
-/** The most frames the pump keeps queued; a consumer that falls behind drops the oldest. */
-const STREAM_QUEUE_LIMIT = 3;
+/**
+ * How far past the consumer's moment a run may decode before it waits.
+ *
+ * A decoder handed a whole window bursts through it in a frame's time, and
+ * frames arriving ahead of the picture are frames the paints in between will
+ * need; the run is held to a short lead instead of racing to the window's end.
+ */
+const STREAM_LEAD_MS = 500;
+/** The most frames a run keeps for the consumer; a ceiling the lead stays far under. */
+const STREAM_QUEUE_LIMIT = 32;
+/** How long a run waits for the consumer before it looks again. */
+const STREAM_WAIT_MS = 100;
 
 interface QueuedFrame {
   ctsUs: number;
@@ -341,10 +351,13 @@ interface StreamWindow {
  * Random access re-decodes a whole GOP for every frame asked for, which at
  * thirty frames a second is the same group decoded thirty times over; a
  * playing clip instead starts at the keyframe its moment sits behind and is
- * fed sample after sample, one small fetch per couple of seconds. The frames
- * it has decoded wait in a queue of at most three, a consumer that falls
- * behind drops the ones the moment has passed, and an empty queue reuses the
- * frame last drawn rather than blocking the compositor on a decode.
+ * fed sample after sample, one small fetch per couple of seconds. The run
+ * decodes only a short lead past the moment the consumer last asked about —
+ * the pumps' own doing, not a decoder's pace, since a burst would otherwise
+ * run through a window's frames and leave the queue holding moments the
+ * picture has not reached while the moments in between are let go of — and an
+ * empty queue reuses the frame last drawn rather than blocking the compositor
+ * on a decode.
  *
  * The stream owns its decoder for as long as it runs: a decoder handed back
  * between windows would have to start over from a keyframe every time, which
@@ -379,7 +392,15 @@ class SequentialStream implements FrameStream {
   private queue: QueuedFrame[] = [];
   /** Frames already drawn with, newest last; two deep, so a paint is never cut short. */
   private handed: QueuedFrame[] = [];
-  /** Woken when the consumer drains a frame, which is the pump's room to make more. */
+  /**
+   * The moment the consumer last asked about, in microseconds.
+   *
+   * This is the anchor the lead is measured from: the pump decodes ahead of
+   * the picture, not of the run's own head, so a paint always finds the frame
+   * covering its moment waiting rather than already let go of.
+   */
+  private lastTargetUs = 0;
+  /** Woken when the consumer moves, which is the pump's room to make more. */
   private room: (() => void) | null = null;
   private closed = false;
   private gaveUp = false;
@@ -387,6 +408,7 @@ class SequentialStream implements FrameStream {
   constructor(assetId: AssetId, fromMs: number) {
     this.assetId = assetId;
     this.fromMs = fromMs;
+    this.lastTargetUs = Math.round(fromMs * 1_000);
   }
 
   get failed(): boolean {
@@ -401,6 +423,9 @@ class SequentialStream implements FrameStream {
   frameAt(materialMs: number): DecodedPicture | null {
     if (this.closed) return null;
     const targetUs = Math.round(materialMs * 1_000);
+    // Where the picture stands is where the lead is measured from, so the
+    // moving moment reaches the pump through this one write.
+    this.lastTargetUs = targetUs;
     // The covering frame is the last whose presentation time has arrived;
     // frames behind it are let go of, and those ahead keep waiting.
     let covered: QueuedFrame | null = null;
@@ -409,10 +434,10 @@ class SequentialStream implements FrameStream {
       if (covered) covered.frame.close();
       covered = arriving;
     }
-    if (covered) {
-      this.keep(covered);
-      this.wake();
-    }
+    if (covered) this.keep(covered);
+    // A moved moment is what a waiting pump is waiting for, whether or not a
+    // frame was ready for it: the lead runs on behind the picture.
+    this.wake();
     const shown = this.handed[this.handed.length - 1];
     // An empty queue reuses the frame last drawn: a decode in flight is a
     // reason to hold a picture, not a reason to go black.
@@ -447,6 +472,29 @@ class SequentialStream implements FrameStream {
     const resolve = this.room;
     this.room = null;
     resolve?.();
+  }
+
+  /**
+   * Waits until the consumer has moved, or briefly, so the loop can look again.
+   *
+   * The wait is what holds the run's lead: a paint at every frame moves the
+   * moment and wakes it, and the check after each wait is what decides how
+   * much more there is room for. The short fallback exists so a consumer that
+   * has stopped asking — a stall, a paint dropped for a newer one — cannot
+   * leave the pump waiting on news that will not come while it holds frames
+   * the picture may already be owed.
+   */
+  private async waitForConsumer(): Promise<void> {
+    const moved = new Promise<void>((resolve) => {
+      this.room = resolve;
+    });
+    await Promise.race([
+      moved,
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, STREAM_WAIT_MS);
+      }),
+    ]);
+    this.room = null;
   }
 
   /** A file this run cannot read is one the still path owns from here on. */
@@ -511,8 +559,9 @@ class SequentialStream implements FrameStream {
     let at = this.queue.length;
     while (at > 0 && this.queue[at - 1].ctsUs > frame.timestamp) at -= 1;
     this.queue.splice(at, 0, { ctsUs: frame.timestamp, frame });
-    // Decoding outruns the consumer only by what is already in flight; the
-    // queue is held to three, dropping from behind.
+    // A ceiling rather than the working size: the lead keeps the queue far
+    // under it, and a run past it has outpaced the picture entirely, so the
+    // frames nearest the run's own head go first.
     while (this.queue.length > STREAM_QUEUE_LIMIT) {
       (this.queue.shift() as QueuedFrame).frame.close();
     }
@@ -521,12 +570,16 @@ class SequentialStream implements FrameStream {
 
   private async pump(): Promise<void> {
     while (!this.closed && this.decoder) {
-      if (this.queue.length >= STREAM_QUEUE_LIMIT) {
-        // The consumer is behind: waiting is what keeps the queue at three
-        // and the decoder from racing ahead of the picture.
-        await new Promise<void>((resolve) => {
-          this.room = resolve;
-        });
+      // Nothing is handed over while the run already holds more than the lead
+      // past the picture allows. Checking here, before each frame, is what
+      // keeps a fast decoder from bursting through a window: the frames it
+      // would make are the ones the next paints need, and a queue that raced
+      // ahead of them would be holding only the window's tail.
+      const next = this.nextMomentUs();
+      const ahead =
+        next !== null && next - this.lastTargetUs > STREAM_LEAD_MS * 1_000;
+      if (this.queue.length >= STREAM_QUEUE_LIMIT || ahead) {
+        await this.waitForConsumer();
         continue;
       }
       let chunk: EncodedVideoChunk | null;
@@ -555,6 +608,21 @@ class SequentialStream implements FrameStream {
         return;
       }
     }
+  }
+
+  /**
+   * The presentation time of the chunk the run would hand over next, or null
+   * at the file's end.
+   *
+   * Read where the next chunk really is — the window in hand comes before the
+   * samples still to fetch — so the lead is measured from the frame about to
+   * be decoded rather than from somewhere past a window's worth of it.
+   */
+  private nextMomentUs(): number | null {
+    if (this.window && this.window.index < this.window.chunks.length)
+      return this.window.chunks[this.window.index].ctsUs;
+    const sample = this.samples[this.next];
+    return sample ? sample.ctsUs : null;
   }
 
   /** The next chunk to hand over, fetching the next window when the one in hand runs out. */
