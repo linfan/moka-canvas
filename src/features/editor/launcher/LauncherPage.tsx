@@ -53,11 +53,11 @@ export function LauncherPage() {
           .getState()
           .pushToast(
             "error",
-            error instanceof Error ? error.message : "Open failed",
+            error instanceof Error ? error.message : t("app:openFailed"),
           );
       }
     },
-    [enterProject],
+    [enterProject, t],
   );
 
   const removeRecent = useCallback(
@@ -85,19 +85,18 @@ export function LauncherPage() {
           src="/favicon.png"
         />
         <h1>{t("app:name")}</h1>
-        <p>
-          Local-first video workflow boards, saved as plain project folders.
-        </p>
+        <p>{t("app:tagline")}</p>
       </header>
 
-      <section aria-label="Recent projects" className="launcher-recents">
-        <h2>Recent projects</h2>
+      <section
+        aria-label={t("app:recentProjects")}
+        className="launcher-recents"
+      >
+        <h2>{t("app:recentProjects")}</h2>
         {recents === null ? (
-          <p className="launcher-empty">Loading…</p>
+          <p className="launcher-empty">{t("app:loading")}</p>
         ) : recents.length === 0 ? (
-          <p className="launcher-empty">
-            No projects yet. Create one to get started.
-          </p>
+          <p className="launcher-empty">{t("app:noProjects")}</p>
         ) : (
           <ul>
             {recents.map((project) => (
@@ -112,7 +111,7 @@ export function LauncherPage() {
                   <span>{project.path}</span>
                 </button>
                 <button
-                  aria-label={`Remove ${project.name} from recent projects`}
+                  aria-label={t("app:removeRecent", { name: project.name })}
                   className="launcher-recent-remove"
                   onClick={() => void removeRecent(project.id)}
                   type="button"
@@ -131,17 +130,17 @@ export function LauncherPage() {
           onClick={() => setDialog("create")}
           type="button"
         >
-          New project
+          {t("app:newProject")}
         </button>
         <button disabled={busy} onClick={() => setDialog("open")} type="button">
-          Open project
+          {t("app:openProject")}
         </button>
         <button
           disabled={busy}
           onClick={() => setDialog("import")}
           type="button"
         >
-          Import project
+          {t("app:importProject")}
         </button>
         <button
           data-testid="launcher-settings"
@@ -149,11 +148,11 @@ export function LauncherPage() {
           onClick={() => useModelStore.getState().openSettings()}
           type="button"
         >
-          Settings
+          {t("app:settings")}
         </button>
       </div>
 
-      {busy && <p className="launcher-busy">Opening project…</p>}
+      {busy && <p className="launcher-busy">{t("app:opening")}</p>}
 
       {dialog && (
         <ProjectDialog

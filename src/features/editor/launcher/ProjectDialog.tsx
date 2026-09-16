@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type { SelfCheckReport } from "../../../shared/domain";
 import { useProjectStore } from "../stores/projectStore";
 import { PathBrowserDialog } from "./PathBrowserDialog";
@@ -21,12 +22,13 @@ interface Props {
 }
 
 const TITLES: Record<DialogMode, string> = {
-  create: "New project",
-  open: "Open project",
-  import: "Import project package",
+  create: "app:newProject",
+  open: "app:openProject",
+  import: "app:importProjectPackage",
 };
 
 export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
+  const { t } = useTranslation();
   const [directory, setDirectory] = useState("");
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
@@ -47,9 +49,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
       if (picked) apply(picked);
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : "The file dialog could not open",
+        cause instanceof Error ? cause.message : t("app:dialog.dialogFailed"),
       );
     }
   };
@@ -69,8 +69,8 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
     }
     void pick(
       field === "folder"
-        ? () => pickDirectory("Choose project folder")
-        : () => pickFile("Open project", ["moka"]),
+        ? () => pickDirectory(t("app:chooseProjectFolder"))
+        : () => pickFile(t("app:openProject"), ["moka"]),
       field === "folder" ? setDirectory : setPath,
     );
   };
@@ -99,7 +99,9 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
                 );
       onDone(selfCheck);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Request failed");
+      setError(
+        cause instanceof Error ? cause.message : t("app:dialog.requestFailed"),
+      );
       setBusy(false);
     }
   };
@@ -123,11 +125,11 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
       role="dialog"
     >
       <form className="dialog" onSubmit={(event) => void submit(event)}>
-        <h2>{TITLES[mode]}</h2>
+        <h2>{t(TITLES[mode])}</h2>
 
         {mode !== "open" && (
           <div className="dialog-field">
-            <span id="project-folder-label">Folder</span>
+            <span id="project-folder-label">{t("app:dialog.folder")}</span>
             <div className="dialog-path">
               <input
                 aria-labelledby="project-folder-label"
@@ -140,7 +142,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
                 onClick={() => browse("folder")}
                 type="button"
               >
-                Browse…
+                {t("app:dialog.browse")}
               </button>
             </div>
           </div>
@@ -149,12 +151,16 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
         {mode !== "open" && (
           <label className="dialog-field">
             <span>
-              {mode === "create" ? "Project name" : "Name (optional)"}
+              {mode === "create"
+                ? t("app:dialog.projectName")
+                : t("app:dialog.nameOptional")}
             </span>
             <input
               onChange={(event) => setName(event.target.value)}
               placeholder={
-                mode === "create" ? "Launch teaser" : "Derived from the package"
+                mode === "create"
+                  ? "Launch teaser"
+                  : t("app:dialog.namePlaceholder")
               }
               value={name}
             />
@@ -163,7 +169,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
 
         {mode === "open" && (
           <div className="dialog-field">
-            <span id="project-path-label">Project folder or .moka file</span>
+            <span id="project-path-label">{t("app:dialog.projectPath")}</span>
             <div className="dialog-path">
               <input
                 aria-labelledby="project-path-label"
@@ -176,7 +182,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
                 onClick={() => browse("project")}
                 type="button"
               >
-                Browse…
+                {t("app:dialog.browse")}
               </button>
             </div>
           </div>
@@ -185,7 +191,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
         {mode === "import" &&
           (nativePickers ? (
             <div className="dialog-field">
-              <span id="package-path-label">Package file</span>
+              <span id="package-path-label">{t("app:dialog.packageFile")}</span>
               <div className="dialog-path">
                 <input
                   aria-labelledby="package-path-label"
@@ -197,19 +203,22 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
                   onClick={() =>
                     void pick(
                       () =>
-                        pickFile("Import project package", ["zip", "mokapkg"]),
+                        pickFile(t("app:importProjectPackage"), [
+                          "zip",
+                          "mokapkg",
+                        ]),
                       setPath,
                     )
                   }
                   type="button"
                 >
-                  Browse…
+                  {t("app:dialog.browse")}
                 </button>
               </div>
             </div>
           ) : (
             <label className="dialog-field">
-              <span>Package file</span>
+              <span>{t("app:dialog.packageFile")}</span>
               <input
                 accept=".zip,.mokapkg,application/zip"
                 onChange={(event) =>
@@ -228,10 +237,10 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
 
         <div className="dialog-actions">
           <button disabled={busy} onClick={onClose} type="button">
-            Cancel
+            {t("app:cancel")}
           </button>
           <button disabled={!ready} type="submit">
-            {busy ? "Working…" : TITLES[mode]}
+            {busy ? t("app:dialog.working") : t(TITLES[mode])}
           </button>
         </div>
       </form>
@@ -240,7 +249,9 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
           HTML, and the listing's own path bar submits. */}
       {browsing !== null && (
         <PathBrowserDialog
-          chooseLabel={browsing === "folder" ? "Choose folder" : "Open"}
+          chooseLabel={
+            browsing === "folder" ? t("app:chooseFolder") : t("app:choose")
+          }
           extensions={browsing === "folder" ? undefined : ["moka"]}
           onClose={() => setBrowsing(null)}
           onChoose={(chosen) => {
@@ -251,8 +262,8 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
           start={browsing === "folder" ? directory : path}
           title={
             browsing === "folder"
-              ? "Choose a folder for the project"
-              : "Open a project"
+              ? t("app:dialog.chooseFolderTitle")
+              : t("app:dialog.openTitle")
           }
         />
       )}

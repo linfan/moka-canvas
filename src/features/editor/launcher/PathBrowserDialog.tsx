@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   filesystemApi,
   type FilesystemEntry,
@@ -50,6 +51,7 @@ export function PathBrowserDialog({
   onClose,
   onChoose,
 }: Props) {
+  const { t } = useTranslation();
   const kinds = (extensions ?? []).join(",");
   const [listing, setListing] = useState<FilesystemListing | null>(null);
   const [typed, setTypedState] = useState("");
@@ -103,7 +105,7 @@ export function PathBrowserDialog({
         setError(
           cause instanceof Error
             ? cause.message
-            : "The folder could not be listed",
+            : t("app:browser.couldNotList"),
         );
       } finally {
         // Left to whichever listing was asked for last, since clearing it here
@@ -111,7 +113,7 @@ export function PathBrowserDialog({
         if (mine === asked.current) setBusy(false);
       }
     },
-    [kinds, setTyped],
+    [kinds, setTyped, t],
   );
 
   useEffect(() => {
@@ -127,6 +129,7 @@ export function PathBrowserDialog({
   }, [onClose]);
 
   const entries = listing?.entries ?? [];
+  const kindWords = kinds.split(",").join(t("app:browser.joinOr"));
   // The file that was picked, or the folder being looked at when no file was: a
   // project is opened from either, and a folder to put one in is only ever the
   // second.
@@ -159,7 +162,7 @@ export function PathBrowserDialog({
         <header className="preview-dialog-head">
           <h2>{title}</h2>
           <button
-            aria-label="Close the file browser"
+            aria-label={t("app:browser.close")}
             onClick={onClose}
             type="button"
           >
@@ -175,23 +178,23 @@ export function PathBrowserDialog({
           }}
         >
           <button
-            aria-label="Up one folder"
+            aria-label={t("app:browser.up")}
             disabled={busy || up === null}
             onClick={() => up !== null && void load(up)}
-            title={up === null ? "This is the top of the filesystem" : up}
+            title={up === null ? t("app:browser.top") : up}
             type="button"
           >
             ↑
           </button>
           <input
-            aria-label="Folder to list"
+            aria-label={t("app:browser.folderToList")}
             data-testid="path-browser-typed"
             onChange={(event) => setTyped(event.target.value)}
             placeholder="/Users/you/Movies"
             value={typed}
           />
           <button disabled={busy} type="submit">
-            List
+            {t("app:browser.list")}
           </button>
         </form>
 
@@ -207,11 +210,11 @@ export function PathBrowserDialog({
 
         {busy && listing === null ? (
           <p className="settings-hint" data-testid="path-browser-busy">
-            Reading the folder…
+            {t("app:browser.reading")}
           </p>
         ) : (
           <ul
-            aria-label="What the folder holds"
+            aria-label={t("app:browser.holds")}
             className="path-browser-list"
             data-testid="path-browser-list"
           >
@@ -246,8 +249,8 @@ export function PathBrowserDialog({
             {entries.length === 0 && (
               <li className="path-browser-none" data-testid="path-browser-none">
                 {kinds === ""
-                  ? "No folders in here."
-                  : `No folders, and no ${kinds.split(",").join(" or ")} file.`}
+                  ? t("app:browser.empty")
+                  : t("app:browser.emptyOfKind", { kinds: kindWords })}
               </li>
             )}
           </ul>
@@ -255,7 +258,7 @@ export function PathBrowserDialog({
 
         {listing?.truncated && (
           <p className="settings-hint" data-testid="path-browser-truncated">
-            Only the first {entries.length} of them are listed.
+            {t("app:browser.truncated", { count: entries.length })}
           </p>
         )}
 
@@ -267,12 +270,12 @@ export function PathBrowserDialog({
             data-testid="path-browser-choice"
             title={choice}
           >
-            {taken ? chosen?.name : "This folder"}
+            {taken ? chosen?.name : t("app:browser.thisFolder")}
             <em>{choice}</em>
           </span>
           <div className="dialog-actions">
             <button disabled={busy} onClick={onClose} type="button">
-              Cancel
+              {t("app:cancel")}
             </button>
             <button
               className="primary"

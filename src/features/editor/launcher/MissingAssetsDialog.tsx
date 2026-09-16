@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { assetsApi } from "../../../api";
 import type { AssetId, SelfCheckReport } from "../../../shared/domain";
 import { useProjectStore } from "../stores/projectStore";
 
 const REASON_LABEL: Record<string, string> = {
-  missing: "Missing",
-  changed: "Changed on disk",
-  empty: "Empty file",
+  missing: "app:missingAssets.reasonMissing",
+  changed: "app:missingAssets.reasonChanged",
+  empty: "app:missingAssets.reasonEmpty",
 };
 
 /**
@@ -25,6 +26,7 @@ export function MissingAssetsDialog({
   onOpenAnyway: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const fileInput = useRef<HTMLInputElement>(null);
   const [locating, setLocating] = useState<AssetId | null>(null);
   const [restored, setRestored] = useState<string[]>([]);
@@ -66,7 +68,9 @@ export function MissingAssetsDialog({
       onReportChange(next);
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "Could not replace the asset",
+        cause instanceof Error
+          ? cause.message
+          : t("app:missingAssets.replaceFailed"),
       );
     } finally {
       setBusy(false);
@@ -81,15 +85,17 @@ export function MissingAssetsDialog({
         className="dialog"
         role="alertdialog"
       >
-        <h2 id="missing-assets-title">Missing or changed assets</h2>
+        <h2 id="missing-assets-title">{t("app:missingAssets.title")}</h2>
         {report.ok ? (
-          <p>All referenced assets are accounted for.</p>
+          <p>{t("app:missingAssets.allAccounted")}</p>
         ) : (
           <p>
-            {report.issues.length} referenced asset
-            {report.issues.length === 1 ? " is" : "s are"} missing or changed on
-            disk. Locate the moved files, or open the project and restore them
-            later — affected nodes render broken until then.
+            {t(
+              report.issues.length === 1
+                ? "app:missingAssets.issuesOne"
+                : "app:missingAssets.issuesMany",
+              { count: report.issues.length },
+            )}
           </p>
         )}
         <ul className="missing-asset-list">
@@ -97,13 +103,18 @@ export function MissingAssetsDialog({
             <li key={issue.assetId}>
               <strong>{issue.name}</strong>
               <span>
-                {REASON_LABEL[issue.reason] ?? issue.reason} ·{" "}
-                {issue.expectedPath}
+                {REASON_LABEL[issue.reason]
+                  ? t(REASON_LABEL[issue.reason])
+                  : issue.reason}{" "}
+                · {issue.expectedPath}
               </span>
               {issue.referencingNodes.length > 0 && (
                 <span>
-                  Used by{" "}
-                  {issue.referencingNodes.map((node) => node.title).join(", ")}
+                  {t("app:missingAssets.usedBy", {
+                    nodes: issue.referencingNodes
+                      .map((node) => node.title)
+                      .join(", "),
+                  })}
                 </span>
               )}
               <button
@@ -111,14 +122,14 @@ export function MissingAssetsDialog({
                 onClick={() => locate(issue.assetId)}
                 type="button"
               >
-                Locate…
+                {t("app:missingAssets.locate")}
               </button>
             </li>
           ))}
           {restored.map((name) => (
             <li className="missing-asset-restored" key={name}>
               <strong>{name}</strong>
-              <span>Restored</span>
+              <span>{t("app:missingAssets.restored")}</span>
             </li>
           ))}
         </ul>
@@ -140,7 +151,7 @@ export function MissingAssetsDialog({
         />
         <div className="dialog-actions">
           <button disabled={busy} onClick={onCancel} type="button">
-            Back to launcher
+            {t("app:missingAssets.back")}
           </button>
           <button
             autoFocus
@@ -149,7 +160,9 @@ export function MissingAssetsDialog({
             onClick={onOpenAnyway}
             type="button"
           >
-            {report.ok ? "Open project" : "Open with missing assets"}
+            {report.ok
+              ? t("app:openProject")
+              : t("app:missingAssets.openWithMissing")}
           </button>
         </div>
       </div>
