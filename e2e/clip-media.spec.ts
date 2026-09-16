@@ -1,5 +1,6 @@
-import { rmSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
@@ -8,11 +9,38 @@ import {
   projectHome,
 } from "./helpers";
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+
 // A tiny valid PNG (1x1 transparent pixel), as the assets shelf spec uses.
 const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   "base64",
 );
+
+/**
+ * A small valid WAV: a header, then a few seconds of silence, so a preview
+ * has something long enough to be seen playing and stopping.
+ */
+function tinyWav(seconds = 5): Buffer {
+  const rate = 8000;
+  const samples = rate * seconds;
+  const dataBytes = samples * 2;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20); // PCM
+  wav.writeUInt16LE(1, 22); // mono
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(dataBytes, 40);
+  return wav;
+}
 
 /**
  * The browser's drag data, as much of it as these tests use.
@@ -219,6 +247,59 @@ test("files dropped over the column are imported, and the column turns to Local"
     "true",
   );
   await expect(rowFor(page, "dropped.png")).toBeVisible({ timeout: 10_000 });
+
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("a sound on a row is tried before it is used, one at a time", async ({
+  page,
+}) => {
+  const home = await clipRoom(page, "Media Sound");
+  // A shelf opens on pictures, so the arriving sound is waited for under the
+  // audio tab of the face it lands on.
+  await page.getByLabel("Import files", { exact: true }).setInputFiles({
+    name: "tiny.wav",
+    mimeType: "audio/wav",
+    buffer: tinyWav(),
+  });
+  await page.getByTestId("asset-kind-audio").click();
+  await expect(rowFor(page, "tiny.wav")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Play tiny.wav" }).click();
+  const pause = page.getByRole("button", { name: "Pause tiny.wav" });
+  await expect(pause).toHaveClass(/is-playing/);
+
+  // The same button stops it again.
+  await pause.click();
+  await expect(
+    page.getByRole("button", { name: "Play tiny.wav" }),
+  ).not.toHaveClass(/is-playing/);
+
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("a video row opens its player in the card beside the shelf", async ({
+  page,
+}) => {
+  const home = await clipRoom(page, "Media Video");
+  await page.getByLabel("Import files", { exact: true }).setInputFiles({
+    name: "tiny.mp4",
+    mimeType: "video/mp4",
+    buffer: readFileSync(join(HERE, "..", "fixtures", "tiny.mp4")),
+  });
+  await page.getByTestId("asset-kind-video").click();
+  await expect(rowFor(page, "tiny.mp4")).toBeVisible({ timeout: 10_000 });
+
+  // The row's play asks for the file, and the card shows it playing in place.
+  await page.getByRole("button", { name: "Play tiny.mp4" }).click();
+  await expect(page.getByRole("heading", { name: "tiny.mp4" })).toBeVisible();
+  const player = page.getByTestId("clip-media-preview-video");
+  await expect(player).toBeVisible();
+  await expect(player).toHaveAttribute("controls", "");
+  await expect(player).toHaveAttribute(
+    "src",
+    /\/api\/v1\/projects\/current\/assets\//,
+  );
 
   rmSync(home, { recursive: true, force: true });
 });

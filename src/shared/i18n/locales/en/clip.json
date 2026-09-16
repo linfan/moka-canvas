@@ -161,6 +161,11 @@
     "filterMade": "Made",
     "filters": "Filters",
     "local": "Local media",
+    "pauseAria": "Pause {{name}}",
+    "pausePreview": "Pause the preview",
+    "playAria": "Play {{name}}",
+    "previewSound": "Preview this sound",
+    "previewVideo": "Preview this video",
     "project": "Project media",
     "text": "Text"
   },

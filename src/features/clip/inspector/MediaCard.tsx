@@ -4,7 +4,6 @@ import {
   MAX_ASSET_NOTE_LENGTH,
   MAX_ASSET_TAGS,
   MAX_ASSET_TAG_LENGTH,
-  type AssetId,
   type ResourceEntry,
   type TimelineDocument,
 } from "../../../shared/domain";
@@ -18,11 +17,13 @@ import {
 import { StarIcon, TrashIcon } from "../components/ClipIcons";
 import { addAssetAtPlayhead } from "../interactions/clipActions";
 import {
-  firstFrameThumb,
-  onFirstFrame,
-  THUMB_HEIGHT,
-  THUMB_WIDTH,
-} from "../preview/thumbs";
+  noteVideoPaused,
+  noteVideoPlaying,
+  previewKindOf,
+  stopMediaPreview,
+  stopMediaPreviewFor,
+  useMediaPreview,
+} from "../panels/mediaPreview";
 
 /**
  * A file read on its own: what it is, and what can be done with it.
@@ -32,31 +33,11 @@ import {
  * picture, how long the sound runs, the words it is filed under, the star
  * that keeps it to hand, and the two things worth doing with it now — adding
  * it at the playhead and letting it go.
+ *
+ * The card leads with the file itself: a video plays here on its own
+ * controls, following the shelf row's play mark and keeping it true, and a
+ * sound draws its own shape where the picture would be.
  */
-
-/** The picture a video leads with: its own first frame, once one has been made. */
-function FirstFrame({ assetId }: { assetId: AssetId }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [version, setVersion] = useState(0);
-  useEffect(() => onFirstFrame(() => setVersion((current) => current + 1)), []);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, THUMB_WIDTH, THUMB_HEIGHT);
-    const frame = firstFrameThumb(assetId);
-    if (frame) ctx.drawImage(frame, 0, 0);
-  }, [assetId, version]);
-  return (
-    <canvas
-      className="clip-inspector-thumb"
-      height={THUMB_HEIGHT}
-      ref={canvasRef}
-      width={THUMB_WIDTH}
-    />
-  );
-}
 
 /** The still picture a file leads with, when the file is one. */
 function stillUrl(entry: ResourceEntry): string | null {
@@ -64,6 +45,49 @@ function stillUrl(entry: ResourceEntry): string | null {
     return assetUrl(entry.id);
   const poster = entry.probe?.posterAssetId;
   return entry.mime === "video/mp4" && poster ? assetUrl(poster) : null;
+}
+
+/**
+ * A video, played where the card leads.
+ *
+ * The element is the card's own, but whose turn it is to play is not: the
+ * row's play mark, the transport starting and another card arriving all move
+ * the one preview state, and this element follows it — while its own
+ * controls move the state back, so the row's mark stays true whichever side
+ * asked. Leaving the card, or the file failing to play, puts the sound away.
+ */
+function PreviewVideo({ entry }: { entry: ResourceEntry }) {
+  const elementRef = useRef<HTMLVideoElement | null>(null);
+  const preview = useMediaPreview();
+  const playing =
+    preview.assetId === entry.id && preview.kind === "video" && preview.playing;
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) return;
+    if (playing) {
+      void element.play().catch(() => stopMediaPreview());
+    } else {
+      element.pause();
+    }
+  }, [playing, entry.id]);
+
+  useEffect(() => () => stopMediaPreviewFor(entry.id), [entry.id]);
+
+  return (
+    <video
+      className="clip-inspector-video"
+      controls
+      data-testid="clip-media-preview-video"
+      onEnded={stopMediaPreview}
+      onError={stopMediaPreview}
+      onPause={() => noteVideoPaused(entry.id)}
+      onPlay={() => noteVideoPlaying(entry.id)}
+      poster={stillUrl(entry) ?? undefined}
+      ref={elementRef}
+      src={assetUrl(entry.id)}
+    />
+  );
 }
 
 export interface MediaCardProps {
@@ -75,6 +99,7 @@ export interface MediaCardProps {
 export function MediaCard({ entry, timeline }: MediaCardProps) {
   const { t } = useTranslation();
   const still = stillUrl(entry);
+  const previewKind = previewKindOf(entry);
   const [tags, setTags] = useState(() => (entry.tags ?? []).join(", "));
   const [note, setNote] = useState(entry.note ?? "");
   const probe = entry.probe;
@@ -99,10 +124,12 @@ export function MediaCard({ entry, timeline }: MediaCardProps) {
     <div className="clip-inspector-body" data-testid="clip-media-card">
       <section className="inspector-section">
         <h3 className="inspector-asset-name">{entry.name}</h3>
-        {still ? (
-          <img alt="" className="clip-inspector-still" src={still} />
+        {previewKind === "video" ? (
+          <PreviewVideo entry={entry} />
         ) : (
-          entry.mime?.startsWith("video/") && <FirstFrame assetId={entry.id} />
+          still !== null && (
+            <img alt="" className="clip-inspector-still" src={still} />
+          )
         )}
       </section>
 

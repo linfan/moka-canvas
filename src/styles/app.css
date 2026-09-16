@@ -4485,17 +4485,14 @@ body.is-dragging-split {
 }
 
 .clip-inspector-still,
-.clip-inspector-thumb {
+.clip-inspector-video {
   background: #000;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
   display: block;
   height: auto;
-  max-width: 100%;
-}
-
-.clip-inspector-still {
   max-height: 170px;
+  max-width: 100%;
   object-fit: contain;
   width: 100%;
 }
