@@ -51,6 +51,14 @@ pub fn run() {
                 .title("Moka Canvas")
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(960.0, 640.0)
+                // Every drag in the app is the page's own: a file comes off
+                // the shelf and lands on the timeline. Tauri's native drag
+                // handler takes that session away from the webview — macOS
+                // answers internal drags itself and never delivers the drop,
+                // and Windows turns HTML5 drag and drop off outright — so it
+                // is left unset and files dropped in from the desktop are the
+                // page's own file drops again.
+                .disable_drag_drop_handler()
                 .build()?;
             app.manage(server);
             Ok(())
