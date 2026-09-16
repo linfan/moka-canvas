@@ -81,7 +81,9 @@ export function PageTopBar({
   return (
     <header className="editor-topbar">
       <HomeMenu current={current} onHome={onHome} />
-      <strong className="editor-project-name">{projectName}</strong>
+      <strong className="editor-project-name" title={projectName}>
+        {projectName}
+      </strong>
       {tabs}
       <span
         className={`save-status save-status-${saveStatus}`}

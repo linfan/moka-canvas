@@ -94,6 +94,14 @@ describe("app boot", () => {
     expect(screen.getByRole("button", { name: "Open project" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Import project" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Import package" })).toBeNull();
+    // A row wears an ellipsis when its name or path is long, so each half
+    // carries the whole of its text where the pointer can ask for it.
+    expect(screen.getByText("Golden Fixture").getAttribute("title")).toBe(
+      "Golden Fixture",
+    );
+    expect(screen.getByText("/tmp/golden").getAttribute("title")).toBe(
+      "/tmp/golden",
+    );
   });
 
   it("opens a project into the editor shell", async () => {

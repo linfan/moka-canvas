@@ -119,6 +119,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("top bar", () => {
+  it("keeps the whole project name on the tooltip the bar wears it with", async () => {
+    await openGolden();
+
+    // The name is held to a share of the bar and wears an ellipsis when it
+    // outgrows it, so the whole of it stands on the tooltip.
+    const name = within(screen.getByRole("banner")).getByText("Golden Fixture");
+    expect(name.classList.contains("editor-project-name")).toBe(true);
+    expect(name.getAttribute("title")).toBe("Golden Fixture");
+  });
+
   it("offers the two exports under one button", async () => {
     await openGolden();
 

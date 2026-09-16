@@ -107,8 +107,8 @@ export function LauncherPage() {
                   onClick={() => void openRecent(project.path)}
                   type="button"
                 >
-                  <strong>{project.name}</strong>
-                  <span>{project.path}</span>
+                  <strong title={project.name}>{project.name}</strong>
+                  <span title={project.path}>{project.path}</span>
                 </button>
                 <button
                   aria-label={t("app:removeRecent", { name: project.name })}

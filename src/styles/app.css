@@ -141,6 +141,9 @@ h2 {
 .launcher-recents ul {
   display: grid;
   gap: 8px;
+  /* A floor of zero, so a long name or path wears an ellipsis in its row
+     instead of widening the track past the page it stands on. */
+  grid-template-columns: minmax(0, 1fr);
   list-style: none;
   padding: 0;
 }
@@ -159,6 +162,17 @@ h2 {
   min-width: 0;
   padding: 12px 14px;
   text-align: left;
+}
+
+/* A long name or path is worn rather than shown, and the path is the half
+   that gives way: the name keeps the room it asks for up to most of the row,
+   and both halves carry the whole of their text on the tooltip. */
+.launcher-recent strong {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .launcher-recent span {
@@ -741,8 +755,12 @@ h2 {
   flex: none;
 }
 
+/* The name is given a bounded share of the bar: a long one wears an ellipsis
+   with the whole of it on the tooltip, rather than crowding out the tabs and
+   the rest of what stands beside it. */
 .editor-project-name {
   font-size: 14px;
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
