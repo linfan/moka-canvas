@@ -1,0 +1,6 @@
+{
+  "name": "摩卡画布",
+  "starting": "正在启动 {{name}}…",
+  "bootFailed": "{{name}} 无法启动",
+  "unknownError": "未知错误"
+}

@@ -14,7 +14,9 @@ export default defineConfig({
   // server and must not interleave.
   workers: 1,
   fullyParallel: false,
-  use: { baseURL },
+  // The interface follows the browser's language; the assertions are English,
+  // so the browser is asked for English.
+  use: { baseURL, locale: "en-US" },
   webServer: {
     command: "node scripts/e2e-server.mjs",
     url: `${baseURL}/api/health`,

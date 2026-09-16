@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { recentApi, type RecentProject } from "../../../api";
 import type { SelfCheckReport } from "../../../shared/domain";
 import { useModelStore } from "../../settings/modelStore";
@@ -8,6 +9,7 @@ import { MissingAssetsDialog } from "./MissingAssetsDialog";
 import { ProjectDialog, type DialogMode } from "./ProjectDialog";
 
 export function LauncherPage() {
+  const { t } = useTranslation();
   const mode = useAppStore((state) => state.config?.capabilities.mode ?? "web");
   const phase = useAppStore((state) => state.phase);
   const [recents, setRecents] = useState<RecentProject[] | null>(null);
@@ -82,7 +84,7 @@ export function LauncherPage() {
           className="brand-mark"
           src="/favicon.png"
         />
-        <h1>Moka Canvas</h1>
+        <h1>{t("app:name")}</h1>
         <p>
           Local-first video workflow boards, saved as plain project folders.
         </p>
@@ -142,6 +144,7 @@ export function LauncherPage() {
           Import project
         </button>
         <button
+          data-testid="launcher-settings"
           disabled={busy}
           onClick={() => useModelStore.getState().openSettings()}
           type="button"

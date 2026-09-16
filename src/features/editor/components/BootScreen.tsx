@@ -1,6 +1,8 @@
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../stores/appStore";
 
 export function BootScreen() {
+  const { t } = useTranslation();
   return (
     <div className="boot-screen">
       <img
@@ -9,12 +11,13 @@ export function BootScreen() {
         className="brand-mark"
         src="/favicon.png"
       />
-      <p>Starting Moka Canvas…</p>
+      <p>{t("app:starting", { name: t("app:name") })}</p>
     </div>
   );
 }
 
 export function BootErrorScreen() {
+  const { t } = useTranslation();
   const bootError = useAppStore((state) => state.bootError);
   return (
     <div className="boot-screen">
@@ -24,10 +27,10 @@ export function BootErrorScreen() {
         className="brand-mark"
         src="/favicon.png"
       />
-      <h1>Moka Canvas could not start</h1>
-      <p role="alert">{bootError ?? "Unknown error"}</p>
+      <h1>{t("app:bootFailed", { name: t("app:name") })}</h1>
+      <p role="alert">{bootError ?? t("app:unknownError")}</p>
       <button onClick={() => void useAppStore.getState().boot()} type="button">
-        Retry
+        {t("common:retry")}
       </button>
     </div>
   );

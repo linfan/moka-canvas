@@ -22,10 +22,12 @@
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "bson": "^7.3.2",
+    "i18next": "^26.4.2",
     "leafer-ui": "^1.9.0",
     "nunjucks": "^3.2.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-i18next": "^17.0.14",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

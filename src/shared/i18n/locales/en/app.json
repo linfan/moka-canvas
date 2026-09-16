@@ -1,0 +1,6 @@
+{
+  "name": "Moka Canvas",
+  "starting": "Starting {{name}}…",
+  "bootFailed": "{{name}} could not start",
+  "unknownError": "Unknown error"
+}
