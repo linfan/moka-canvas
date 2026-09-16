@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { assetUrl } from "../../../api";
 import { buildResourceIndex, formatBytes } from "../canvas/mediaCards";
 import { useEditorStore } from "../stores/editorStore";
@@ -6,6 +7,7 @@ import { useProjectStore } from "../stores/projectStore";
 
 /** Full-size preview dialog for image/video/audio assets. */
 export function AssetPreviewDialog() {
+  const { t } = useTranslation();
   const assetId = useEditorStore((state) => state.previewAssetId);
   const moka = useProjectStore((state) => state.moka);
 
@@ -36,7 +38,11 @@ export function AssetPreviewDialog() {
       >
         <header className="preview-dialog-head">
           <h2>{entry.name}</h2>
-          <button aria-label="Close preview" onClick={close} type="button">
+          <button
+            aria-label={t("editor:dialogs.preview.close")}
+            onClick={close}
+            type="button"
+          >
             ✕
           </button>
         </header>
@@ -51,7 +57,7 @@ export function AssetPreviewDialog() {
           <p>
             {formatBytes(entry.bytes)} —{" "}
             <a download={entry.name} href={url}>
-              Download
+              {t("editor:action.download")}
             </a>
           </p>
         )}

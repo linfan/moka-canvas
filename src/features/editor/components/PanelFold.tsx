@@ -1,10 +1,23 @@
+import { useTranslation } from "react-i18next";
 import { usePanelFolds } from "../stores/panelFolds";
 import type { PanelSide } from "../stores/panelWidths";
 
-/** What each column is called to a reader who cannot see it. */
-const NAMES: Record<PanelSide, string> = {
-  left: "the project column",
-  right: "the column beside the canvas",
+/** How each column is named on the control that folds it away. */
+const FOLD_LABELS: Record<PanelSide, string> = {
+  left: "editor:stores.foldProjectColumn",
+  right: "editor:stores.foldRightColumn",
+};
+
+/** The same, said as the place the column goes to rather than as the act. */
+const FOLD_AWAY_LABELS: Record<PanelSide, string> = {
+  left: "editor:stores.foldProjectColumnAway",
+  right: "editor:stores.foldRightColumnAway",
+};
+
+/** What each column is called on the control that opens it again. */
+const UNFOLD_LABELS: Record<PanelSide, string> = {
+  left: "editor:stores.unfoldProjectColumn",
+  right: "editor:stores.unfoldRightColumn",
 };
 
 /** Which way the mark on the triangle points: a column folds away from the canvas. */
@@ -26,16 +39,17 @@ interface FoldProps {
  * would go, which is away from the canvas.
  */
 export function PanelFold({ side }: FoldProps) {
+  const { t } = useTranslation();
   const toggle = usePanelFolds((state) => state.toggle);
   return (
     <button
       aria-controls={`panel-${side}`}
       aria-expanded
-      aria-label={`Fold ${NAMES[side]}`}
+      aria-label={t(FOLD_LABELS[side])}
       className={`panel-fold panel-fold-${side}`}
       data-testid={`panel-fold-${side}`}
       onClick={() => toggle(side)}
-      title={`Fold ${NAMES[side]} away`}
+      title={t(FOLD_AWAY_LABELS[side])}
       type="button"
     >
       <span aria-hidden="true">{FOLD_MARK[side]}</span>
@@ -52,16 +66,17 @@ export function PanelFold({ side }: FoldProps) {
  * rather than somewhere to be looked for.
  */
 export function PanelUnfold({ side }: FoldProps) {
+  const { t } = useTranslation();
   const toggle = usePanelFolds((state) => state.toggle);
   return (
     <button
       aria-controls={`panel-${side}`}
       aria-expanded={false}
-      aria-label={`Open ${NAMES[side]}`}
+      aria-label={t(UNFOLD_LABELS[side])}
       className={`panel-unfold panel-unfold-${side}`}
       data-testid={`panel-unfold-${side}`}
       onClick={() => toggle(side)}
-      title={`Open ${NAMES[side]}`}
+      title={t(UNFOLD_LABELS[side])}
       type="button"
     >
       <span aria-hidden="true">{UNFOLD_MARK[side]}</span>

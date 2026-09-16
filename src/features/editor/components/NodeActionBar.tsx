@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { findNode, type AssetId } from "../../../shared/domain";
 import { worldToClient } from "../canvas/canvasControl";
 import {
@@ -19,15 +20,12 @@ const BAR_WIDTH = 470;
 
 /** What each tool does, said where it is offered rather than after it is used. */
 const TOOL_HINTS: Record<BarEntry, string> = {
-  crop: "Cut a region out as a picture of its own",
-  split: "Divide into pieces, and make a node for each",
-  resize:
-    "Resample these pixels to another size. Nothing is invented here: a model is what adds detail.",
-  tilt: "Turn it in perspective, as a plate to show a model",
-  repaint:
-    "Mark the part that may change and say what it should become. A model does the repainting, so it costs what an ask costs.",
-  describe:
-    "Ask a model to read this picture back as the words that would make it. The words become a text node wired into its prompt, so it costs what an ask costs.",
+  crop: "editor:nodeBar.hintCrop",
+  split: "editor:nodeBar.hintSplit",
+  resize: "editor:nodeBar.hintResize",
+  tilt: "editor:nodeBar.hintTilt",
+  repaint: "editor:nodeBar.hintRepaint",
+  describe: "editor:nodeBar.hintDescribe",
 };
 
 /**
@@ -38,9 +36,9 @@ const TOOL_HINTS: Record<BarEntry, string> = {
  * breaking, and the fix is not the tool's.
  */
 const BROKEN: Record<Exclude<MediaState, "ready">, string> = {
-  missing: "The file is not in the project any more",
-  changed: "The file on disk is not the one that was filed",
-  empty: "There is nothing in the file to work on",
+  missing: "editor:nodeBar.brokenMissing",
+  changed: "editor:nodeBar.brokenChanged",
+  empty: "editor:nodeBar.brokenEmpty",
 };
 
 /**
@@ -57,6 +55,7 @@ const BROKEN: Record<Exclude<MediaState, "ready">, string> = {
  * the tidying travelling to whoever opens the project next.
  */
 export function NodeActionBar() {
+  const { t } = useTranslation();
   const selected = useEditorStore((state) => state.selection.nodeIds);
   const gesture = useEditorStore((state) => state.gesture);
   const camera = useEditorStore((state) => state.camera);
@@ -120,23 +119,23 @@ export function NodeActionBar() {
 
   return (
     <div
-      aria-label={`Picture tools for ${node.title}`}
+      aria-label={t("editor:nodeBar.aria", { name: node.title })}
       className="node-bar"
       data-testid="node-action-bar"
       role="toolbar"
       style={style}
     >
       {broken ? (
-        <span className="node-bar-blocked">{BROKEN[broken]}</span>
+        <span className="node-bar-blocked">{t(BROKEN[broken])}</span>
       ) : (
         shown.map((tool) => (
           <button
             key={tool}
             onClick={() => ask(tool)}
-            title={TOOL_HINTS[tool]}
+            title={t(TOOL_HINTS[tool])}
             type="button"
           >
-            {TOOL_LABELS[tool]}
+            {t(TOOL_LABELS[tool])}
           </button>
         ))
       )}

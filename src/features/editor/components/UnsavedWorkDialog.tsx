@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { SaveStatus } from "../stores/projectStore";
 
 export type CloseAction = "save" | "export" | "discard";
@@ -26,6 +27,7 @@ export function UnsavedWorkDialog({
   onAction: (action: CloseAction) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const conflicted = saveStatus === "conflicted";
   const nothingToLose = pendingCount === 0 && !conflicted;
   // A run still going is a reason to ask with nothing to lose: offering to
@@ -45,33 +47,41 @@ export function UnsavedWorkDialog({
         role="alertdialog"
       >
         <h2 id="unsaved-work-title">
-          {onlyRunning ? "Still running" : "Unsaved changes"}
+          {t(
+            onlyRunning
+              ? "editor:dialogs.unsaved.stillRunning"
+              : "editor:dialogs.unsaved.unsavedChanges",
+          )}
         </h2>
         {conflicted ? (
           <p>
-            Saving is blocked by a revision conflict — your{" "}
-            {pendingCount === 1 ? "change" : "changes"} cannot be written until
-            you reload the project. Exporting keeps a package of the last saved
-            revision (without your unsaved changes); discarding drops them.
+            {t(
+              pendingCount === 1
+                ? "editor:dialogs.unsaved.conflictOne"
+                : "editor:dialogs.unsaved.conflictMany",
+            )}
           </p>
         ) : savedWhileAsked ? (
-          <p>Your changes were saved while this was open.</p>
+          <p>{t("editor:dialogs.unsaved.savedWhileAsked")}</p>
         ) : (
           !nothingToLose && (
             <p>
               {pendingCount > 0
-                ? `${pendingCount} unsaved change${pendingCount === 1 ? "" : "s"} will`
-                : "Your changes will"}{" "}
-              be lost if you leave without saving.
+                ? t(
+                    pendingCount === 1
+                      ? "editor:dialogs.unsaved.lostOne"
+                      : "editor:dialogs.unsaved.lostMany",
+                    { count: pendingCount },
+                  )
+                : t("editor:dialogs.unsaved.lostGeneric")}
             </p>
           )
         )}
         {inFlight > 0 && (
           <p className="dialog-note">
-            {one ? "A generation is" : `${inFlight} generations are`} still
-            running. Leaving does not stop {one ? "it" : "them"}: what{" "}
-            {one ? "it makes" : "they make"} is written into the project, and is
-            there when the project is opened again.
+            {one
+              ? t("editor:dialogs.unsaved.runningOne")
+              : t("editor:dialogs.unsaved.runningMany", { count: inFlight })}
           </p>
         )}
         {error && (
@@ -82,7 +92,7 @@ export function UnsavedWorkDialog({
         {onlyRunning ? (
           <div className="dialog-actions">
             <button disabled={busy !== null} onClick={onCancel} type="button">
-              Cancel
+              {t("editor:action.cancel")}
             </button>
             <button
               autoFocus
@@ -91,32 +101,34 @@ export function UnsavedWorkDialog({
               onClick={() => onAction("save")}
               type="button"
             >
-              Close
+              {t("editor:action.close")}
             </button>
           </div>
         ) : (
           <div className="dialog-actions">
             <button disabled={busy !== null} onClick={onCancel} type="button">
-              Cancel
+              {t("editor:action.cancel")}
             </button>
             <button
               disabled={busy !== null}
               onClick={() => onAction("discard")}
               type="button"
             >
-              Discard and close
+              {t("editor:dialogs.unsaved.discardAndClose")}
             </button>
             <button
               disabled={busy !== null}
               onClick={() => onAction("export")}
               title={
                 conflicted
-                  ? "Exports the last saved revision; unsaved changes are not included"
-                  : "Save, then export the project as a package"
+                  ? t("editor:dialogs.unsaved.exportHintConflict")
+                  : t("editor:dialogs.unsaved.exportHint")
               }
               type="button"
             >
-              {busy === "export" ? "Exporting…" : "Export copy and close"}
+              {busy === "export"
+                ? t("editor:dialogs.unsaved.exporting")
+                : t("editor:dialogs.unsaved.exportCopyAndClose")}
             </button>
             <button
               autoFocus={!conflicted}
@@ -125,12 +137,14 @@ export function UnsavedWorkDialog({
               onClick={() => onAction("save")}
               title={
                 conflicted
-                  ? "Blocked by a revision conflict — reload the project first"
+                  ? t("editor:dialogs.unsaved.saveHintConflict")
                   : undefined
               }
               type="button"
             >
-              {busy === "save" ? "Saving…" : "Save and close"}
+              {busy === "save"
+                ? t("editor:action.saving")
+                : t("editor:dialogs.unsaved.saveAndClose")}
             </button>
           </div>
         )}

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { GenerationPreferences } from "../../../api";
+import { i18n } from "../../../shared/i18n";
 import {
   AUDIO_FORMATS,
   GENERATION_SHAPES,
@@ -20,8 +22,8 @@ export type ParamValue = string | number | boolean;
 
 /** What the two things a video can do with its pictures are called. */
 const VIDEO_MODE_NAMES: Record<string, string> = {
-  auto: "Frames",
-  reference: "References",
+  auto: "editor:generationParams.modeFrames",
+  reference: "editor:generationParams.modeReferences",
 };
 
 interface Props {
@@ -51,33 +53,34 @@ export function GenerationParams({
   defaults,
   onChange,
 }: Props) {
+  const { t } = useTranslation();
   if (capability === "image") {
     return (
       <div className="prompt-panel-params">
         <Choice
           fallback={defaults?.image.size}
-          label="Shape"
+          label={t("editor:field.shape")}
           onChange={(value) => onChange("size", value)}
           options={GENERATION_SHAPES}
           value={word(params, "size")}
         />
         <Choice
           fallback={defaults?.image.quality}
-          label="Quality"
+          label={t("editor:field.quality")}
           onChange={(value) => onChange("quality", value)}
           options={IMAGE_QUALITIES}
           value={word(params, "quality")}
         />
         <Choice
           fallback={defaults?.image.background}
-          label="Background"
+          label={t("editor:field.background")}
           onChange={(value) => onChange("background", value)}
           options={IMAGE_BACKGROUNDS}
           value={word(params, "background")}
         />
         <Amount
           fallback={defaults?.image.count}
-          label="Images"
+          label={t("editor:field.images")}
           max={MAX_IMAGES_PER_RUN}
           min={1}
           onChange={(value) => onChange("count", value)}
@@ -92,21 +95,21 @@ export function GenerationParams({
     return (
       <div className="prompt-panel-params">
         <Choice
-          label="Shape"
+          label={t("editor:field.shape")}
           onChange={(value) => onChange("ratio", value)}
           options={GENERATION_SHAPES}
           value={word(params, "ratio")}
         />
         <Choice
           fallback={defaults?.video.resolution}
-          label="Resolution"
+          label={t("editor:field.resolution")}
           onChange={(value) => onChange("resolution", value)}
           options={VIDEO_RESOLUTIONS}
           value={word(params, "resolution")}
         />
         <Amount
           fallback={defaults?.video.seconds}
-          label="Seconds"
+          label={t("editor:field.seconds")}
           max={MAX_VIDEO_SECONDS}
           min={1}
           onChange={(value) => onChange("seconds", value)}
@@ -115,14 +118,14 @@ export function GenerationParams({
         />
         <Choice
           fallback={defaults?.video.mode}
-          label="Pictures are"
+          label={t("editor:generationParams.picturesAre")}
           names={VIDEO_MODE_NAMES}
           onChange={(value) => onChange("mode", value)}
           options={VIDEO_IMAGE_MODES}
           value={word(params, "mode")}
         />
         <Flag
-          label="Generate audio"
+          label={t("editor:field.generateAudio")}
           onChange={(value) => onChange("generateAudio", value)}
           value={
             yesNo(params, "generateAudio") ??
@@ -131,7 +134,7 @@ export function GenerationParams({
           }
         />
         <Flag
-          label="Watermark"
+          label={t("editor:field.watermark")}
           onChange={(value) => onChange("watermark", value)}
           value={
             yesNo(params, "watermark") ?? defaults?.video.watermark ?? false
@@ -146,21 +149,21 @@ export function GenerationParams({
       <div className="prompt-panel-params">
         <Words
           fallback={defaults?.audio.voice}
-          label="Voice"
+          label={t("editor:field.voice")}
           onChange={(value) => onChange("voice", value)}
-          placeholder="The voice the model knows"
+          placeholder={t("editor:generationParams.voicePlaceholder")}
           value={word(params, "voice")}
         />
         <Choice
           fallback={defaults?.audio.format}
-          label="Format"
+          label={t("editor:field.format")}
           onChange={(value) => onChange("format", value)}
           options={AUDIO_FORMATS}
           value={word(params, "format")}
         />
         <Amount
           fallback={defaults?.audio.speed}
-          label="Speed"
+          label={t("editor:field.speed")}
           max={MAX_AUDIO_SPEED}
           min={MIN_AUDIO_SPEED}
           onChange={(value) => onChange("speed", value)}
@@ -168,16 +171,16 @@ export function GenerationParams({
           value={figure(params, "speed")}
         />
         <Flag
-          label="File under Music"
+          label={t("editor:generationParams.fileUnderMusic")}
           onChange={(value) => onChange("music", value)}
           value={yesNo(params, "music") ?? false}
         />
         <Words
           className="prompt-panel-wide"
           fallback={defaults?.audio.instructions}
-          label="Direction"
+          label={t("editor:field.direction")}
           onChange={(value) => onChange("instructions", value)}
-          placeholder="Spoken as directions to the voice"
+          placeholder={t("editor:generationParams.directionPlaceholder")}
           value={word(params, "instructions")}
         />
       </div>
@@ -187,7 +190,7 @@ export function GenerationParams({
   return (
     <div className="prompt-panel-params">
       <Amount
-        label="Temperature"
+        label={t("editor:field.temperature")}
         max={2}
         min={0}
         onChange={(value) => onChange("temperature", value)}
@@ -195,7 +198,7 @@ export function GenerationParams({
         value={figure(params, "temperature")}
       />
       <Amount
-        label="Max tokens"
+        label={t("editor:field.maxTokens")}
         min={1}
         onChange={(value) => onChange("maxTokens", value)}
         step={1}
@@ -203,7 +206,7 @@ export function GenerationParams({
       />
       <Choice
         fallback={defaults?.reasoningEffort}
-        label="Reasoning effort"
+        label={t("editor:field.reasoningEffort")}
         onChange={(value) => onChange("reasoningEffort", value)}
         options={REASONING_EFFORTS}
         value={word(params, "reasoningEffort")}
@@ -211,9 +214,9 @@ export function GenerationParams({
       <Words
         className="prompt-panel-wide"
         fallback={defaults?.systemPrompt}
-        label="System prompt"
+        label={t("editor:field.systemPrompt")}
         onChange={(value) => onChange("instructions", value)}
-        placeholder="Frames this node's answer"
+        placeholder={t("editor:generationParams.systemPlaceholder")}
         value={word(params, "instructions")}
       />
     </div>
@@ -239,8 +242,8 @@ function yesNo(params: Record<string, unknown>, key: string): boolean | null {
 /** What leaving a parameter out is called: the default, and what it is. */
 function inherited(fallback: string | number | undefined): string {
   return fallback === undefined || `${fallback}`.trim() === ""
-    ? "Default"
-    : `Default · ${fallback}`;
+    ? i18n.t("editor:generationParams.default")
+    : i18n.t("editor:generationParams.defaultWith", { value: fallback });
 }
 
 interface ChoiceProps {
@@ -261,6 +264,7 @@ function Choice({
   names,
   onChange,
 }: ChoiceProps) {
+  const { t } = useTranslation();
   // A value set somewhere this list does not reach is still what will be sent,
   // so it is offered rather than shown as no choice at all.
   const kept = value !== null && !options.includes(value);
@@ -276,10 +280,14 @@ function Choice({
         <option value="">{inherited(fallback)}</option>
         {options.map((option) => (
           <option key={option} value={option}>
-            {names?.[option] ?? option}
+            {names?.[option] !== undefined ? t(names[option]) : option}
           </option>
         ))}
-        {kept && <option value={value ?? ""}>{value} (kept)</option>}
+        {kept && (
+          <option value={value ?? ""}>
+            {t("editor:generationParams.kept", { value })}
+          </option>
+        )}
       </select>
     </label>
   );
@@ -396,7 +404,9 @@ function Words({
         }}
         placeholder={
           fallback && fallback.trim() !== ""
-            ? `Default · ${fallback}`
+            ? i18n.t("editor:generationParams.defaultWith", {
+                value: fallback,
+              })
             : placeholder
         }
         value={draft}

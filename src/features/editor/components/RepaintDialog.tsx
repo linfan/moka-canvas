@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { assetUrl } from "../../../api";
 import type { GenerationSpec, MokaFile, Point } from "../../../shared/domain";
 import { buildResourceIndex } from "../canvas/mediaCards";
@@ -57,6 +58,7 @@ function askOf(moka: MokaFile | null, nodeId: string): GenerationSpec | null {
  * painting.
  */
 export function RepaintDialog() {
+  const { t } = useTranslation();
   const asked = useEditorStore((state) => state.pictureTool);
   const moka = useProjectStore((state) => state.moka);
   const view = useModelStore((state) => state.view);
@@ -158,13 +160,13 @@ export function RepaintDialog() {
   const close = () => useEditorStore.getState().closePictureTool();
   const marked = marks.some(drawn);
   const refusal = unread
-    ? "The picture cannot be read here, so there is nothing to mark on"
+    ? t("editor:repaint.unreadable")
     : size === null
-      ? "Reading the picture…"
+      ? t("editor:repaint.reading")
       : !marked
-        ? "Mark the part of the picture that may change"
+        ? t("editor:repaint.markPrompt")
         : words.trim() === ""
-          ? "Say what the marked part should become"
+          ? t("editor:repaint.sayWhatItBecomes")
           : null;
 
   /**
@@ -241,7 +243,7 @@ export function RepaintDialog() {
       sheet.height = size.height;
       const context = sheet.getContext("2d");
       if (!context) {
-        setFailed("This window cannot draw a mask");
+        setFailed(t("editor:repaint.cannotDraw"));
         return;
       }
       traceMask(context, marks, size);
@@ -249,16 +251,14 @@ export function RepaintDialog() {
       // erased all over leaves something in the list and nothing in the picture,
       // and an all-black mask would ask for the whole picture to be repainted.
       if (!marksAnything(context.getImageData(0, 0, size.width, size.height))) {
-        setFailed(
-          "Nothing is left marked. A mask with nothing white in it asks for the whole picture to change, which is not a repaint.",
-        );
+        setFailed(t("editor:repaint.nothingMarked"));
         return;
       }
       const mask = await new Promise<Blob | null>((done) =>
         sheet.toBlob(done, "image/png"),
       );
       if (!mask) {
-        setFailed("The mask could not be written out");
+        setFailed(t("editor:repaint.maskNotWritten"));
         return;
       }
       const filed = await fileRepaint({
@@ -305,14 +305,9 @@ export function RepaintDialog() {
         role="dialog"
       >
         <h2 id="repaint-title">
-          {TOOL_LABELS.repaint} — {entry.name}
+          {t(TOOL_LABELS.repaint)} — {entry.name}
         </h2>
-        <p className="dialog-note">
-          Mark the part that may change. The rest is sent exactly as it is, and
-          what the marking becomes is said in words beside it. The picture this
-          node holds is left alone: the mask is filed next to it, wired into its
-          mask port, and the run is one press away in the panel that opens.
-        </p>
+        <p className="dialog-note">{t("editor:repaint.note")}</p>
 
         <div className="tool-stage">
           <div className="tool-frame">
@@ -328,7 +323,7 @@ export function RepaintDialog() {
               src={assetUrl(painting.assetId)}
             />
             <canvas
-              aria-label="The region that may change"
+              aria-label={t("editor:repaint.regionAria")}
               className="repaint-sheet"
               onPointerCancel={letGo}
               onPointerDown={press}
@@ -341,15 +336,19 @@ export function RepaintDialog() {
 
         <p className="dialog-note">
           {unread
-            ? "The picture cannot be shown here."
+            ? t("editor:repaint.cannotShow")
             : size
-              ? `The mask will be ${size.width.toLocaleString()} × ${size.height.toLocaleString()} pixels — the size of the picture itself — and filed as ${maskName(entry.name)}.`
-              : "Reading the picture…"}
+              ? t("editor:repaint.maskSize", {
+                  width: size.width.toLocaleString(),
+                  height: size.height.toLocaleString(),
+                  name: maskName(entry.name),
+                })
+              : t("editor:repaint.reading")}
         </p>
 
         <div className="tool-params">
           <div
-            aria-label="How the region is marked"
+            aria-label={t("editor:repaint.howMarked")}
             className="tool-choices"
             role="group"
           >
@@ -358,19 +357,19 @@ export function RepaintDialog() {
                 aria-pressed={tool === offered}
                 key={offered}
                 onClick={() => setTool(offered)}
-                title={MARK_HINTS[offered]}
+                title={t(MARK_HINTS[offered])}
                 type="button"
               >
-                {MARK_LABELS[offered]}
+                {t(MARK_LABELS[offered])}
               </button>
             ))}
           </div>
-          <p className="dialog-note">{MARK_HINTS[tool]}</p>
+          <p className="dialog-note">{t(MARK_HINTS[tool])}</p>
           <div className="settings-columns">
             <label className="dialog-field">
-              <span>Brush — {radius} pixels across</span>
+              <span>{t("editor:repaint.brush", { radius })}</span>
               <input
-                aria-label="Brush width"
+                aria-label={t("editor:field.brushWidth")}
                 max={BRUSH_WIDEST}
                 min={BRUSH_NARROWEST}
                 onChange={(event) => setRadius(Number(event.target.value))}
@@ -380,9 +379,9 @@ export function RepaintDialog() {
               />
             </label>
             <label className="dialog-field">
-              <span>Soft edge — {softness}%</span>
+              <span>{t("editor:repaint.softEdge", { softness })}</span>
               <input
-                aria-label="Soft edge"
+                aria-label={t("editor:field.softEdge")}
                 max={100}
                 min={0}
                 onChange={(event) => setSoftness(Number(event.target.value))}
@@ -393,7 +392,7 @@ export function RepaintDialog() {
             </label>
           </div>
           <div
-            aria-label="Taking marks back"
+            aria-label={t("editor:repaint.takingBack")}
             className="tool-choices"
             role="group"
           >
@@ -405,7 +404,7 @@ export function RepaintDialog() {
               }}
               type="button"
             >
-              Undo the last mark
+              {t("editor:action.undoLastMark")}
             </button>
             <button
               disabled={draft === null && marks.length === 0}
@@ -415,14 +414,14 @@ export function RepaintDialog() {
               }}
               type="button"
             >
-              Clear the marking
+              {t("editor:action.clearMarking")}
             </button>
           </div>
           <label className="dialog-field">
-            <span>What the marked part should become</span>
+            <span>{t("editor:repaint.whatItBecomes")}</span>
             <textarea
               onChange={(event) => setWords(event.target.value)}
-              placeholder="A stone jetty running out into the water"
+              placeholder={t("editor:repaint.becomesPlaceholder")}
               rows={3}
               value={words}
             />
@@ -435,10 +434,10 @@ export function RepaintDialog() {
           }
         >
           {protocol === null
-            ? "No model is chosen yet, so which one this is asked through will decide whether the region can be held to."
+            ? t("editor:repaint.noModel")
             : takesMask
-              ? "This model has a field of its own for a mask, so what changes stays inside the marking."
-              : "This model has no field of its own for a mask. It travels as a second picture beside the words, so what changes may not stay inside the marking — say which part of the picture is meant in the words as well."}
+              ? t("editor:repaint.hasMaskField")
+              : t("editor:repaint.noMaskField")}
         </p>
 
         {failed && <p className="dialog-error">{failed}</p>}
@@ -446,7 +445,7 @@ export function RepaintDialog() {
 
         <div className="dialog-actions">
           <button disabled={busy} onClick={close} type="button">
-            Cancel
+            {t("editor:action.cancel")}
           </button>
           <button
             autoFocus
@@ -455,7 +454,7 @@ export function RepaintDialog() {
             title={refusal ?? undefined}
             type="submit"
           >
-            {busy ? "Filing…" : "File the mask"}
+            {busy ? t("editor:repaint.filing") : t("editor:repaint.fileMask")}
           </button>
         </div>
       </form>

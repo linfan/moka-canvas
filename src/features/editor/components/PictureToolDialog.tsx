@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { assetUrl } from "../../../api";
 import type {
   PictureFit,
@@ -7,6 +8,7 @@ import type {
   PictureToolParams,
 } from "../../../api/tools";
 import { MAX_OPERATED_PIXELS, MAX_TILT_DEGREES } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { buildResourceIndex } from "../canvas/mediaCards";
 import { applyPictureTool } from "../interactions/actions";
 import { useEditorStore } from "../stores/editorStore";
@@ -54,25 +56,22 @@ interface Draft {
 
 /** What each tool is for, said before it is used rather than after. */
 const PURPOSE: Record<PictureTool, string> = {
-  crop: "Cuts a region out and files it as a picture of its own. The picture this node holds is left exactly as it is.",
-  split:
-    "Divides the picture into pieces and files each one, in reading order.",
-  resize:
-    "Resamples the pixels that are here. It can make a picture smaller cleanly, and larger only by guessing — a model is what adds detail.",
-  tilt: "Turns the picture in perspective and files the plate, with the words that describe the shot beside it.",
+  crop: "editor:pictureTool.purposeCrop",
+  split: "editor:pictureTool.purposeSplit",
+  resize: "editor:pictureTool.purposeResize",
+  tilt: "editor:pictureTool.purposeTilt",
 };
 
 const FIT_LABELS: Record<PictureFit, string> = {
-  contain: "Fit inside",
-  cover: "Fill, cutting",
-  fill: "Fill, stretching",
+  contain: "editor:pictureTool.fitContain",
+  cover: "editor:pictureTool.fitCover",
+  fill: "editor:pictureTool.fitFill",
 };
 
 const FIT_HINTS: Record<PictureFit, string> = {
-  contain: "The whole picture, as large as the box allows.",
-  cover:
-    "The whole box, from the middle of the picture. What overflows is cut.",
-  fill: "The whole box, whatever that does to the shape.",
+  contain: "editor:pictureTool.hintContain",
+  cover: "editor:pictureTool.hintCover",
+  fill: "editor:pictureTool.hintFill",
 };
 
 /** The long edge a named size stands for. */
@@ -178,7 +177,11 @@ function askedFor(tool: PictureTool, draft: Draft, size: Size | null): Asking {
     const ceiling = MAX_OPERATED_PIXELS.toLocaleString();
     return {
       ask: null,
-      refusal: `This picture is ${size.width.toLocaleString()} by ${size.height.toLocaleString()}, which is past the ${ceiling} pixels one tool works on — make it smaller first`,
+      refusal: i18n.t("editor:pictureTool.overPixels", {
+        width: size.width.toLocaleString(),
+        height: size.height.toLocaleString(),
+        ceiling,
+      }),
     };
   }
   switch (tool) {
@@ -188,14 +191,16 @@ function askedFor(tool: PictureTool, draft: Draft, size: Size | null): Asking {
         if (ratio === null) {
           return {
             ask: null,
-            refusal:
-              "A proportion is two numbers with a colon between them, like 16:9",
+            refusal: i18n.t("editor:pictureTool.notAProportion"),
           };
         }
         if (size && regionForRatio(ratio, size) === null) {
           return {
             ask: null,
-            refusal: `A picture ${size.width} by ${size.height} has no room for that proportion`,
+            refusal: i18n.t("editor:pictureTool.noRoomForProportion", {
+              width: size.width,
+              height: size.height,
+            }),
           };
         }
         return { ask: { ratio: draft.ratio.trim() }, refusal: null };
@@ -205,8 +210,11 @@ function askedFor(tool: PictureTool, draft: Draft, size: Size | null): Asking {
         return {
           ask: null,
           refusal: size
-            ? `A region is four whole numbers inside the picture, which is ${size.width} by ${size.height}`
-            : "A region is four whole numbers of pixels: how far in, how far down, how wide, how tall",
+            ? i18n.t("editor:pictureTool.regionInsidePicture", {
+                width: size.width,
+                height: size.height,
+              })
+            : i18n.t("editor:pictureTool.regionFourNumbers"),
         };
       }
       return { ask: { region }, refusal: null };
@@ -217,13 +225,15 @@ function askedFor(tool: PictureTool, draft: Draft, size: Size | null): Asking {
       if (rows === null || cols === null || rows < 1 || cols < 1) {
         return {
           ask: null,
-          refusal: "A division is one whole number of rows and one of columns",
+          refusal: i18n.t("editor:pictureTool.divisionNumbers"),
         };
       }
       if (rows > MAX_DIVISIONS_PER_SIDE || cols > MAX_DIVISIONS_PER_SIDE) {
         return {
           ask: null,
-          refusal: `${MAX_DIVISIONS_PER_SIDE} is as far as one division goes each way`,
+          refusal: i18n.t("editor:pictureTool.divisionCeiling", {
+            count: MAX_DIVISIONS_PER_SIDE,
+          }),
         };
       }
       return { ask: { rows, cols }, refusal: null };
@@ -233,15 +243,18 @@ function askedFor(tool: PictureTool, draft: Draft, size: Size | null): Asking {
       if (!box) {
         return {
           ask: null,
-          refusal:
-            "A size is two whole numbers of pixels, at least one each way",
+          refusal: i18n.t("editor:pictureTool.sizeNumbers"),
         };
       }
       if (box.width * box.height > MAX_OPERATED_PIXELS) {
         const ceiling = MAX_OPERATED_PIXELS.toLocaleString();
         return {
           ask: null,
-          refusal: `${box.width.toLocaleString()} by ${box.height.toLocaleString()} is past the ${ceiling} pixels one tool works on`,
+          refusal: i18n.t("editor:pictureTool.targetPastCeiling", {
+            width: box.width.toLocaleString(),
+            height: box.height.toLocaleString(),
+            ceiling,
+          }),
         };
       }
       return {
@@ -254,7 +267,10 @@ function askedFor(tool: PictureTool, draft: Draft, size: Size | null): Asking {
     }
     case "tilt": {
       if (draft.yaw === 0 && draft.pitch === 0) {
-        return { ask: null, refusal: "Nothing to turn yet" };
+        return {
+          ask: null,
+          refusal: i18n.t("editor:pictureTool.nothingToTurn"),
+        };
       }
       if (
         Math.abs(draft.yaw) > MAX_TILT_DEGREES ||
@@ -262,7 +278,9 @@ function askedFor(tool: PictureTool, draft: Draft, size: Size | null): Asking {
       ) {
         return {
           ask: null,
-          refusal: `${MAX_TILT_DEGREES} degrees is as far as this turns`,
+          refusal: i18n.t("editor:pictureTool.turnCeiling", {
+            count: MAX_TILT_DEGREES,
+          }),
         };
       }
       return { ask: { yaw: draft.yaw, pitch: draft.pitch }, refusal: null };
@@ -305,6 +323,7 @@ function starting(): Draft {
  * against the picture — and the picture is what is worked on.
  */
 export function PictureToolDialog() {
+  const { t } = useTranslation();
   const opened = useEditorStore((state) => state.pictureTool);
   // Standing aside for an entry with a dialog of its own has to be complete,
   // keys included: an Escape listener left running here would close the dialog
@@ -430,9 +449,9 @@ export function PictureToolDialog() {
         role="dialog"
       >
         <h2 id="picture-tool-title">
-          {TOOL_LABELS[tool]} — {entry.name}
+          {t(TOOL_LABELS[tool])} — {entry.name}
         </h2>
-        <p className="dialog-note">{PURPOSE[tool]}</p>
+        <p className="dialog-note">{t(PURPOSE[tool])}</p>
 
         <div className="tool-stage">
           <div className="tool-frame">
@@ -483,16 +502,19 @@ export function PictureToolDialog() {
 
         <p className="dialog-note">
           {unread
-            ? "The picture cannot be shown here. The numbers are still in its own pixels, and the tool works on the file itself."
+            ? t("editor:pictureTool.cannotShow")
             : size
-              ? `${size.width.toLocaleString()} × ${size.height.toLocaleString()} pixels. Every number here is in them, not in the size the node is drawn at.`
-              : "Reading the picture…"}
+              ? t("editor:pictureTool.pictureSize", {
+                  width: size.width.toLocaleString(),
+                  height: size.height.toLocaleString(),
+                })
+              : t("editor:pictureTool.reading")}
         </p>
 
         {tool === "crop" && (
           <div className="tool-params">
             <div
-              aria-label="How the region is given"
+              aria-label={t("editor:pictureTool.howRegionGiven")}
               className="tool-choices"
               role="group"
             >
@@ -501,30 +523,30 @@ export function PictureToolDialog() {
                 onClick={() => set({ exact: false })}
                 type="button"
               >
-                A proportion
+                {t("editor:pictureTool.aProportion")}
               </button>
               <button
                 aria-pressed={draft.exact}
                 onClick={() => set({ exact: true })}
                 type="button"
               >
-                An exact region
+                {t("editor:pictureTool.anExactRegion")}
               </button>
             </div>
             {draft.exact ? (
               <div className="settings-columns">
                 {(
                   [
-                    ["x", "How far in"],
-                    ["y", "How far down"],
-                    ["width", "How wide"],
-                    ["height", "How tall"],
+                    ["x", "editor:field.x"],
+                    ["y", "editor:field.y"],
+                    ["width", "editor:field.width"],
+                    ["height", "editor:field.height"],
                   ] as const
                 ).map(([field, label]) => (
                   <label className="dialog-field" key={field}>
-                    <span>{label}</span>
+                    <span>{t(label)}</span>
                     <input
-                      aria-label={label}
+                      aria-label={t(label)}
                       inputMode="numeric"
                       onChange={(event) => set({ [field]: event.target.value })}
                       value={draft[field]}
@@ -535,7 +557,7 @@ export function PictureToolDialog() {
             ) : (
               <>
                 <div
-                  aria-label="Proportions offered"
+                  aria-label={t("editor:pictureTool.proportionsOffered")}
                   className="tool-choices"
                   role="group"
                 >
@@ -551,7 +573,7 @@ export function PictureToolDialog() {
                   ))}
                 </div>
                 <label className="dialog-field">
-                  <span>Or written out</span>
+                  <span>{t("editor:pictureTool.orWrittenOut")}</span>
                   <input
                     onChange={(event) => set({ ratio: event.target.value })}
                     placeholder="16:9"
@@ -566,7 +588,7 @@ export function PictureToolDialog() {
         {tool === "split" && (
           <div className="tool-params">
             <div
-              aria-label="Divisions offered"
+              aria-label={t("editor:pictureTool.divisionsOffered")}
               className="tool-choices"
               role="group"
             >
@@ -588,9 +610,9 @@ export function PictureToolDialog() {
             </div>
             <div className="settings-columns">
               <label className="dialog-field">
-                <span>Rows</span>
+                <span>{t("editor:field.rows")}</span>
                 <input
-                  aria-label="Rows"
+                  aria-label={t("editor:field.rows")}
                   inputMode="numeric"
                   max={MAX_DIVISIONS_PER_SIDE}
                   min={1}
@@ -599,9 +621,9 @@ export function PictureToolDialog() {
                 />
               </label>
               <label className="dialog-field">
-                <span>Columns</span>
+                <span>{t("editor:field.columns")}</span>
                 <input
-                  aria-label="Columns"
+                  aria-label={t("editor:field.columns")}
                   inputMode="numeric"
                   max={MAX_DIVISIONS_PER_SIDE}
                   min={1}
@@ -612,8 +634,10 @@ export function PictureToolDialog() {
             </div>
             <p className="dialog-note">
               {pieces === null
-                ? "How many pieces, across and down."
-                : `${pieces} ${pieces === 1 ? "piece" : "pieces"}, filed in reading order and selected together, so they can be grouped the moment they land.`}
+                ? t("editor:pictureTool.piecesNote")
+                : pieces === 1
+                  ? t("editor:pictureTool.onePieceMade")
+                  : t("editor:pictureTool.piecesMade", { count: pieces })}
             </p>
           </div>
         )}
@@ -621,7 +645,7 @@ export function PictureToolDialog() {
         {tool === "resize" && (
           <div className="tool-params">
             <div
-              aria-label="The size to meet"
+              aria-label={t("editor:pictureTool.sizeToMeet")}
               className="tool-choices"
               role="group"
             >
@@ -644,24 +668,24 @@ export function PictureToolDialog() {
                 onClick={() => set({ size: "box" })}
                 type="button"
               >
-                Exact
+                {t("editor:pictureTool.exact")}
               </button>
             </div>
             {draft.size === "box" && (
               <div className="settings-columns">
                 <label className="dialog-field">
-                  <span>Pixels wide</span>
+                  <span>{t("editor:pictureTool.pixelsWide")}</span>
                   <input
-                    aria-label="Pixels wide"
+                    aria-label={t("editor:pictureTool.pixelsWide")}
                     inputMode="numeric"
                     onChange={(event) => set({ boxWidth: event.target.value })}
                     value={draft.boxWidth}
                   />
                 </label>
                 <label className="dialog-field">
-                  <span>Pixels tall</span>
+                  <span>{t("editor:pictureTool.pixelsTall")}</span>
                   <input
-                    aria-label="Pixels tall"
+                    aria-label={t("editor:pictureTool.pixelsTall")}
                     inputMode="numeric"
                     onChange={(event) => set({ boxHeight: event.target.value })}
                     value={draft.boxHeight}
@@ -670,7 +694,7 @@ export function PictureToolDialog() {
               </div>
             )}
             <div
-              aria-label="How it meets the box"
+              aria-label={t("editor:pictureTool.howItMeets")}
               className="tool-choices"
               role="group"
             >
@@ -679,19 +703,22 @@ export function PictureToolDialog() {
                   aria-pressed={draft.fit === fit}
                   key={fit}
                   onClick={() => set({ fit })}
-                  title={FIT_HINTS[fit]}
+                  title={t(FIT_HINTS[fit])}
                   type="button"
                 >
-                  {FIT_LABELS[fit]}
+                  {t(FIT_LABELS[fit])}
                 </button>
               ))}
             </div>
             <p className="dialog-note">
               {outcome === null
-                ? "The size it will be resampled to."
-                : `${outcome.width.toLocaleString()} × ${outcome.height.toLocaleString()} pixels — ${FIT_HINTS[draft.fit]}`}
-              {guessed &&
-                " That is larger than the picture that is there, so the extra is guessed rather than remembered."}
+                ? t("editor:pictureTool.willBeResampled")
+                : t("editor:pictureTool.resampledTo", {
+                    width: outcome.width.toLocaleString(),
+                    height: outcome.height.toLocaleString(),
+                    fit: t(FIT_HINTS[draft.fit]),
+                  })}
+              {guessed && t("editor:pictureTool.largerThanSource")}
             </p>
           </div>
         )}
@@ -700,9 +727,11 @@ export function PictureToolDialog() {
           <div className="tool-params">
             <div className="settings-columns">
               <label className="dialog-field">
-                <span>Turn — {draft.yaw}°</span>
+                <span>
+                  {t("editor:pictureTool.turnLabel", { degrees: draft.yaw })}
+                </span>
                 <input
-                  aria-label="Turn"
+                  aria-label={t("editor:pictureTool.turnAria")}
                   max={MAX_TILT_DEGREES}
                   min={-MAX_TILT_DEGREES}
                   onChange={(event) => set({ yaw: Number(event.target.value) })}
@@ -712,9 +741,11 @@ export function PictureToolDialog() {
                 />
               </label>
               <label className="dialog-field">
-                <span>Tip — {draft.pitch}°</span>
+                <span>
+                  {t("editor:pictureTool.tipLabel", { degrees: draft.pitch })}
+                </span>
                 <input
-                  aria-label="Tip"
+                  aria-label={t("editor:pictureTool.tipAria")}
                   max={MAX_TILT_DEGREES}
                   min={-MAX_TILT_DEGREES}
                   onChange={(event) =>
@@ -726,11 +757,7 @@ export function PictureToolDialog() {
                 />
               </label>
             </div>
-            <p className="dialog-note">
-              A sketch of the turn rather than the pixels it will make. The
-              plate keeps the picture's own size, and what the turn leaves
-              see-through stays see-through — which is why it is filed as a PNG.
-            </p>
+            <p className="dialog-note">{t("editor:pictureTool.tiltNote")}</p>
           </div>
         )}
 
@@ -738,7 +765,7 @@ export function PictureToolDialog() {
 
         <div className="dialog-actions">
           <button disabled={busy} onClick={close} type="button">
-            Cancel
+            {t("editor:action.cancel")}
           </button>
           <button
             autoFocus
@@ -747,7 +774,7 @@ export function PictureToolDialog() {
             title={refusal ?? undefined}
             type="submit"
           >
-            {busy ? "Working…" : TOOL_LABELS[tool]}
+            {busy ? t("editor:pictureTool.working") : t(TOOL_LABELS[tool])}
           </button>
         </div>
       </form>

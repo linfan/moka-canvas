@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   findNode,
   type AssetId,
@@ -138,6 +139,7 @@ export function ReferenceBar({
   onTakeAsset,
   onTakeFiles,
 }: ReferenceBarProps) {
+  const { t } = useTranslation();
   const [dragged, setDragged] = useState<number | null>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -151,7 +153,7 @@ export function ReferenceBar({
 
   return (
     <div
-      aria-label="What this node is given"
+      aria-label={t("editor:referenceBar.aria")}
       className={hovered ? "reference-bar is-dropping" : "reference-bar"}
       data-testid="reference-bar"
       onDragLeave={() => setHovered(false)}
@@ -187,10 +189,13 @@ export function ReferenceBar({
       {spec.inputMode === "upstream" &&
         (arrivals.length === 0 ? (
           <p className="reference-empty">
-            Nothing is wired into this node yet.
+            {t("editor:referenceBar.nothingWired")}
           </p>
         ) : (
-          <ul aria-label="What is wired in" className="reference-chips">
+          <ul
+            aria-label={t("editor:referenceBar.wiredIn")}
+            className="reference-chips"
+          >
             {arrivals.map((arrival) => (
               <li className="reference-chip" key={arrival.edge.id}>
                 {arrival.media?.url && (
@@ -204,7 +209,10 @@ export function ReferenceBar({
                 <span className="reference-port">{arrival.port}</span>
                 {arrival.moves.map((port) => (
                   <button
-                    aria-label={`Use ${arrival.source.title} as the ${port.label.toLowerCase()}`}
+                    aria-label={t("editor:referenceBar.useAs", {
+                      name: arrival.source.title,
+                      port: port.label.toLowerCase(),
+                    })}
                     className="reference-action"
                     key={port.id}
                     onClick={() => onMove(arrival.edge, port.id)}
@@ -214,15 +222,20 @@ export function ReferenceBar({
                   </button>
                 ))}
                 <button
-                  aria-label={`Find ${arrival.source.title} on the canvas`}
+                  aria-label={t("editor:referenceBar.findOnCanvas", {
+                    name: arrival.source.title,
+                  })}
                   className="reference-action"
                   onClick={() => onFind(arrival.source.id)}
                   type="button"
                 >
-                  Find
+                  {t("editor:action.find")}
                 </button>
                 <button
-                  aria-label={`Disconnect ${arrival.source.title} from ${node.title}`}
+                  aria-label={t("editor:referenceBar.disconnectFrom", {
+                    name: arrival.source.title,
+                    node: node.title,
+                  })}
                   className="reference-action"
                   onClick={() => onCut(arrival.edge)}
                   type="button"
@@ -237,7 +250,7 @@ export function ReferenceBar({
       {spec.inputMode === "manual" &&
         (pointed.length === 0 ? (
           <p className="reference-empty">
-            Nothing is listed yet.{" "}
+            {t("editor:referenceBar.nothingListed")}
             {arrivals.length > 0 ? (
               <button
                 className="reference-action"
@@ -250,15 +263,15 @@ export function ReferenceBar({
                 }
                 type="button"
               >
-                List what is wired in
+                {t("editor:action.listWiredIn")}
               </button>
             ) : (
-              "Connect a node, or write @ to point at one."
+              t("editor:referenceBar.connectOrWrite")
             )}
           </p>
         ) : (
           <ul
-            aria-label="What is pointed at by hand"
+            aria-label={t("editor:referenceBar.pointedByHand")}
             className="reference-chips"
           >
             {pointed.map((nodeId, at) => {
@@ -266,7 +279,7 @@ export function ReferenceBar({
               const media = named
                 ? mediaInfoForNode(named, resources, issues)
                 : null;
-              const name = named?.title ?? "a node that is gone";
+              const name = named?.title ?? t("editor:referenceBar.nodeGone");
               return (
                 <li
                   className={
@@ -295,22 +308,26 @@ export function ReferenceBar({
                   )}
                   <span
                     className="reference-name"
-                    title="Drag to change the order"
+                    title={t("editor:referenceBar.dragToReorder")}
                   >
                     {name}
                   </span>
                   {named && (
                     <button
-                      aria-label={`Find ${named.title} on the canvas`}
+                      aria-label={t("editor:referenceBar.findOnCanvas", {
+                        name: named.title,
+                      })}
                       className="reference-action"
                       onClick={() => onFind(named.id)}
                       type="button"
                     >
-                      Find
+                      {t("editor:action.find")}
                     </button>
                   )}
                   <button
-                    aria-label={`Take ${name} out of the list`}
+                    aria-label={t("editor:referenceBar.takeOutOfList", {
+                      name,
+                    })}
                     className="reference-action"
                     onClick={() =>
                       onPoint(
@@ -329,8 +346,7 @@ export function ReferenceBar({
 
       {spec.inputMode === "mentions" && (
         <p className="reference-empty">
-          What the prompt points at with @ is what will be sent, in the order it
-          is written.
+          {t("editor:referenceBar.mentionOrder")}
         </p>
       )}
 
@@ -344,7 +360,7 @@ export function ReferenceBar({
           }
           type="button"
         >
-          From assets…
+          {t("editor:referenceBar.fromAssets")}
         </button>
       )}
     </div>

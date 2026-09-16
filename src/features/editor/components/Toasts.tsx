@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../stores/appStore";
 
 /**
@@ -7,6 +8,7 @@ import { useAppStore } from "../stores/appStore";
  * own goes there first: the label on it is what tells the two apart.
  */
 export function Toasts() {
+  const { t } = useTranslation();
   const toasts = useAppStore((state) => state.toasts);
   const dismiss = useAppStore((state) => state.dismissToast);
   if (toasts.length === 0) return null;
@@ -20,7 +22,7 @@ export function Toasts() {
             toast.choice?.go();
             dismiss(toast.id);
           }}
-          title={toast.choice ? toast.choice.label : "Dismiss"}
+          title={toast.choice ? toast.choice.label : t("app:dismiss")}
           type="button"
         >
           {toast.message}

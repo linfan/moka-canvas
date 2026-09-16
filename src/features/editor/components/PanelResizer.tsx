@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
 import {
   PANEL_BIG_STEP,
   PANEL_MIN,
@@ -18,11 +19,11 @@ import {
 
 /** What each edge is called to a reader who cannot see it. */
 const LABELS: Record<PanelSide, string> = {
-  left: "Width of the project column",
-  right: "Width of the column beside the canvas",
+  left: "editor:stores.resizeProjectColumn",
+  right: "editor:stores.resizeRightColumn",
 };
 
-const HINT = "Drag to widen or narrow the column — double-click to put it back";
+const HINT = "editor:stores.resizeHint";
 
 interface PanelResizerProps {
   side: PanelSide;
@@ -39,6 +40,7 @@ interface PanelResizerProps {
  * anything asked of it — the canvas has been measuring its own box all along.
  */
 export function PanelResizer({ side }: PanelResizerProps) {
+  const { t } = useTranslation();
   const width = usePanelWidths((state) => state[side]);
   const setWidth = usePanelWidths((state) => state.setWidth);
   const resetWidth = usePanelWidths((state) => state.resetWidth);
@@ -139,7 +141,7 @@ export function PanelResizer({ side }: PanelResizerProps) {
 
   return (
     <div
-      aria-label={LABELS[side]}
+      aria-label={t(LABELS[side])}
       aria-orientation="vertical"
       aria-valuemax={Math.round(panelCeiling())}
       aria-valuemin={PANEL_MIN}
@@ -157,7 +159,7 @@ export function PanelResizer({ side }: PanelResizerProps) {
       ref={grip}
       role="separator"
       tabIndex={0}
-      title={HINT}
+      title={t(HINT)}
     />
   );
 }

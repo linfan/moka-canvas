@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { findNode, LOW_DETAIL_ZOOM } from "../../../shared/domain";
 import { worldToClient } from "../canvas/canvasControl";
 import { NODE_HEADER_HEIGHT } from "../canvas/theme";
@@ -17,6 +18,7 @@ const GAP = 8;
  * is, and written down in full in the inspector for anybody not pointing at it.
  */
 export function RunHint() {
+  const { t } = useTranslation();
   const hovered = useEditorStore((state) => state.hoveredNodeId);
   // Read for its own sake as much as for the zoom: it is what brings the note
   // back as the view moves, since worldToClient answers from the live camera
@@ -56,7 +58,9 @@ export function RunHint() {
       role="tooltip"
       style={style}
     >
-      <strong className="run-note-head">This ask did not finish</strong>
+      <strong className="run-note-head">
+        {t("editor:run.thisAskDidNotFinish")}
+      </strong>
       <p className="run-note-why">{failure}</p>
     </div>
   );

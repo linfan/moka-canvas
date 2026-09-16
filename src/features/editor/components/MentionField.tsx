@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   AssetId,
   CanvasDocument,
@@ -371,6 +372,7 @@ export function MentionField({
    */
   onOffer: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [typed, setTyped] = useState<{ start: number; query: string } | null>(
@@ -700,7 +702,7 @@ export function MentionField({
             aria-hidden="true"
             className="mention-field-grip"
             onPointerDown={resize}
-            title="Drag to make the prompt field wider or taller"
+            title={t("editor:mention.fieldGrip")}
           />
         )}
       </div>
@@ -714,14 +716,14 @@ export function MentionField({
           {looked ? (
             <MentionLook media={lookedMedia} node={looked} />
           ) : (
-            <p className="mention-look-label">A node that is gone</p>
+            <p className="mention-look-label">{t("editor:mention.gone")}</p>
           )}
         </div>
       )}
 
       {offered && (
         <div
-          aria-label="What this prompt may mention"
+          aria-label={t("editor:mention.mayMention")}
           className="mention-offer"
           id={listId}
           role="listbox"
@@ -748,9 +750,7 @@ export function MentionField({
           }
         >
           {rows.length === 0 && (
-            <p className="prompt-panel-note">
-              Nothing on this canvas answers to that.
-            </p>
+            <p className="prompt-panel-note">{t("editor:mention.noAnswer")}</p>
           )}
           {rows.map((row, at) => (
             <div key={row.choice.node.id}>

@@ -10,7 +10,7 @@ import { useModelStore } from "../../settings/modelStore";
 import { buildResourceIndex } from "../canvas/mediaCards";
 import { fileDescription } from "../interactions/actions";
 import {
-  GENERATION_UNAVAILABLE,
+  generationUnavailable,
   useGenerationAvailable,
 } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
@@ -118,11 +118,13 @@ export function DescribeDialog() {
       ? view?.models.find((one) => one.id === reference)
       : null) ?? null;
   const refusal = !reachable
-    ? GENERATION_UNAVAILABLE
+    ? generationUnavailable()
     : reference === null
-      ? `No ${t(CAPABILITY_LABELS.text).toLowerCase()} model is configured yet`
+      ? t("editor:promptPanel.noModel", {
+          kind: t(CAPABILITY_LABELS.text).toLowerCase(),
+        })
       : question.trim() === ""
-        ? "Say what to ask about the picture"
+        ? t("editor:describe.sayWhatToAsk")
         : null;
 
   const submit = async () => {
@@ -155,9 +157,7 @@ export function DescribeDialog() {
       // the server settled on, which is the aggregate of the stream.
       const words = (answer.text ?? gathered).trim();
       if (words === "") {
-        setFailed(
-          "Nothing came back to file. Ask in other words, or check that the model can see a picture at all.",
-        );
+        setFailed(t("editor:describe.nothingCameBack"));
         return;
       }
       const filed = fileDescription({
@@ -166,7 +166,7 @@ export function DescribeDialog() {
         words,
       });
       if (filed) close();
-      else setFailed("The words could not be filed on this canvas");
+      else setFailed(t("editor:describe.wordsNotFiled"));
     } catch (error) {
       // Let go of on purpose: nothing to report, and the words that arrived stay
       // on screen to be read.
@@ -174,7 +174,7 @@ export function DescribeDialog() {
       setFailed(
         error instanceof Error
           ? error.message
-          : "The picture could not be read",
+          : t("editor:describe.pictureNotRead"),
       );
     } finally {
       asking.current = null;
@@ -197,16 +197,9 @@ export function DescribeDialog() {
         role="dialog"
       >
         <h2 id="describe-title">
-          {TOOL_LABELS.describe} — {entry.name}
+          {t(TOOL_LABELS.describe)} — {entry.name}
         </h2>
-        <p className="dialog-note">
-          Ask a model to read this picture back as the words that would make it.
-          The words become a text node of their own, wired into this picture's
-          prompt, so they can be read, corrected and let go of on the canvas
-          rather than hiding in a field — and the picture is one press from
-          being generated again from them. This is an ask, and it costs what an
-          ask costs.
-        </p>
+        <p className="dialog-note">{t("editor:describe.note")}</p>
 
         <div className="tool-stage">
           <div className="tool-frame">
@@ -220,7 +213,7 @@ export function DescribeDialog() {
 
         <div className="tool-params">
           <label className="dialog-field">
-            <span>What to ask about the picture</span>
+            <span>{t("editor:describe.whatToAsk")}</span>
             <textarea
               onChange={(event) => setQuestion(event.target.value)}
               rows={3}
@@ -237,22 +230,22 @@ export function DescribeDialog() {
           }
         >
           {reference === null
-            ? "No model is chosen for written answers, so there is nothing to ask."
+            ? t("editor:describe.noModelChosen")
             : chosen === null
-              ? "The model this would be asked through is gone, so there is nothing to ask."
-              : `Asked through ${chosen.displayName} as ${chosen.model}. A model that cannot see a picture will answer about the question alone, which reads as a description of nothing — Escape lets go of an answer still arriving.`}
+              ? t("editor:describe.modelGone")
+              : t("editor:describe.askedThrough", {
+                  display: chosen.displayName,
+                  model: chosen.model,
+                })}
         </p>
 
         {unread && (
-          <p className="dialog-note">
-            The picture cannot be shown here, but it is still sent as it is
-            stored.
-          </p>
+          <p className="dialog-note">{t("editor:describe.cannotShow")}</p>
         )}
 
         {busy && (
           <p aria-live="polite" className="dialog-note">
-            Reading the picture…
+            {t("editor:describe.reading")}
           </p>
         )}
         {said.trim() !== "" && (
@@ -266,7 +259,7 @@ export function DescribeDialog() {
 
         <div className="dialog-actions">
           <button disabled={busy} onClick={close} type="button">
-            Cancel
+            {t("editor:action.cancel")}
           </button>
           <button
             autoFocus
@@ -275,7 +268,7 @@ export function DescribeDialog() {
             title={refusal ?? undefined}
             type="submit"
           >
-            {busy ? "Reading…" : "Ask"}
+            {busy ? t("editor:describe.readingBusy") : t("editor:describe.ask")}
           </button>
         </div>
       </form>

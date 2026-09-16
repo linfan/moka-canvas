@@ -1,14 +1,15 @@
+import { useTranslation } from "react-i18next";
 import type { GenerationPreview, InputRole, PreviewInput } from "../../../api";
 import { formatBytes, formatDuration } from "../canvas/mediaCards";
 
 /** What a reference is asked to do, in the words the rest of the panel uses. */
 const ROLE_LABELS: Record<InputRole, string> = {
-  reference: "Reference",
-  firstFrame: "First frame",
-  lastFrame: "Last frame",
-  mask: "Mask",
-  controlVideo: "Control video",
-  controlAudio: "Control audio",
+  reference: "editor:inputPreview.roleReference",
+  firstFrame: "editor:inputPreview.roleFirstFrame",
+  lastFrame: "editor:inputPreview.roleLastFrame",
+  mask: "editor:inputPreview.roleMask",
+  controlVideo: "editor:inputPreview.roleControlVideo",
+  controlAudio: "editor:inputPreview.roleControlAudio",
 };
 
 /** What the project measured about an asset, on one line. */
@@ -49,14 +50,14 @@ export function InputPreview({
   /** How a source node is named on the canvas. */
   titleOf: (nodeId: string) => string;
 }) {
+  const { t } = useTranslation();
   const gone = (preview?.inputs ?? []).filter((input) => input.missing);
   const sent = (preview?.inputs ?? []).filter((input) => !input.missing);
   const unresolved = preview?.unresolved ?? [];
   const cut = preview?.truncatedChars ?? 0;
-  const one = unresolved.length === 1;
   return (
     <div
-      aria-label="What this node will send"
+      aria-label={t("editor:inputPreview.aria")}
       className="prompt-panel-preview"
       data-testid="input-preview"
       role="group"
@@ -67,51 +68,64 @@ export function InputPreview({
         </p>
       )}
       {reading && !preview && (
-        <p className="prompt-panel-note">Reading what this node will send…</p>
+        <p className="prompt-panel-note">{t("editor:inputPreview.reading")}</p>
       )}
       {preview && (
         <>
           {unresolved.length > 0 && (
             <p className="prompt-panel-warn" role="alert">
-              {one
-                ? "A mention names a node"
-                : `${unresolved.length} mentions name nodes`}{" "}
-              this canvas has never heard of, so nothing is sent for{" "}
-              {one ? "it" : "them"}.
+              {unresolved.length === 1
+                ? t("editor:inputPreview.unresolvedOne")
+                : t("editor:inputPreview.unresolvedMany", {
+                    count: unresolved.length,
+                  })}
             </p>
           )}
           {gone.length > 0 && (
             <p className="prompt-panel-warn" role="alert">
-              {gone.map((input) => input.name ?? input.assetId).join(", ")}{" "}
-              {gone.length === 1 ? "is" : "are"} not there any more and will not
-              be sent.
+              {gone.length === 1
+                ? t("editor:inputPreview.goneOne", {
+                    name: gone[0].name ?? gone[0].assetId,
+                  })
+                : t("editor:inputPreview.goneMany", {
+                    names: gone
+                      .map((input) => input.name ?? input.assetId)
+                      .join(", "),
+                  })}
             </p>
           )}
           {cut > 0 && (
             <p className="prompt-panel-warn" role="alert">
-              Upstream text was cut by {cut.toLocaleString()} characters to fit
-              the prompt limit.
+              {t("editor:inputPreview.cut", {
+                count: cut.toLocaleString(),
+              })}
             </p>
           )}
 
-          <p className="prompt-panel-preview-label">The words it will send</p>
+          <p className="prompt-panel-preview-label">
+            {t("editor:inputPreview.wordsLabel")}
+          </p>
           {preview.prompt.trim() === "" ? (
-            <p className="prompt-panel-note">No words will be sent.</p>
+            <p className="prompt-panel-note">
+              {t("editor:inputPreview.noWords")}
+            </p>
           ) : (
             <pre className="prompt-panel-preview-text">{preview.prompt}</pre>
           )}
 
           <p className="prompt-panel-preview-label">
             {sent.length === 0
-              ? "No references will be sent"
-              : `${sent.length} ${sent.length === 1 ? "reference" : "references"} will be sent`}
+              ? t("editor:inputPreview.noReferences")
+              : sent.length === 1
+                ? t("editor:inputPreview.sentOne")
+                : t("editor:inputPreview.sentMany", { count: sent.length })}
           </p>
           {sent.length > 0 && (
             <ul className="prompt-panel-preview-list">
               {sent.map((input) => (
                 <li key={`${input.nodeId}:${input.assetId}:${input.role}`}>
                   <span className="prompt-panel-preview-role">
-                    {ROLE_LABELS[input.role]}
+                    {t(ROLE_LABELS[input.role])}
                   </span>
                   <span className="prompt-panel-preview-name">
                     {input.name ?? input.assetId}
@@ -120,7 +134,9 @@ export function InputPreview({
                     {described(input)}
                   </span>
                   <span className="prompt-panel-preview-from">
-                    from {titleOf(input.nodeId)}
+                    {t("editor:inputPreview.from", {
+                      name: titleOf(input.nodeId),
+                    })}
                   </span>
                 </li>
               ))}

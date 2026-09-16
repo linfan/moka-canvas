@@ -35,7 +35,7 @@ import {
   setNodeGeneration,
 } from "../interactions/actions";
 import {
-  GENERATION_UNAVAILABLE,
+  generationUnavailable,
   useAppStore,
   useGenerationAvailable,
 } from "../stores/appStore";
@@ -126,21 +126,25 @@ function refusalFor(asked: {
   dangling: boolean;
   fedFromUpstream: boolean;
 }): string | null {
-  if (!asked.available) return GENERATION_UNAVAILABLE;
+  if (!asked.available) return generationUnavailable();
   if (asked.noModel) {
-    const kind = i18n.t(CAPABILITY_LABELS[asked.capability]).toLowerCase();
-    return `No ${kind} model is configured yet`;
+    return i18n.t("editor:promptPanel.noModel", {
+      kind: i18n.t(CAPABILITY_LABELS[asked.capability]).toLowerCase(),
+    });
   }
   if (asked.dangling) {
-    return "A mention names a node that is not on this canvas";
+    return i18n.t("editor:promptPanel.danglingMention");
   }
   if (asked.prompt.trim() === "" && !asked.fedFromUpstream) {
-    return "Nothing to ask for yet: write a prompt, or connect one";
+    return i18n.t("editor:promptPanel.nothingToAsk");
   }
   const over = asked.prompt.length - MAX_PROMPT_LENGTH;
   if (over > 0) {
     const limit = MAX_PROMPT_LENGTH.toLocaleString();
-    return `The prompt is ${over.toLocaleString()} characters past the ${limit} it may be`;
+    return i18n.t("editor:promptPanel.overLimit", {
+      over: over.toLocaleString(),
+      limit,
+    });
   }
   return null;
 }
@@ -317,7 +321,7 @@ export function PromptPanel() {
         setPreviewError(
           error instanceof Error
             ? error.message
-            : "What this node will send could not be read",
+            : t("editor:promptPanel.previewUnreadable"),
         );
       })
       .finally(() => {
@@ -329,7 +333,7 @@ export function PromptPanel() {
     };
     // The revision is not read here: it is what makes this ask again, since a
     // preview of the document as it was is a preview of something else.
-  }, [previewOpen, canvasId, nodeId, revision]);
+  }, [previewOpen, canvasId, nodeId, revision, t]);
 
   if (!node || !canvas || !capability) return null;
 
@@ -589,7 +593,9 @@ export function PromptPanel() {
         .getState()
         .pushToast(
           "error",
-          error instanceof Error ? error.message : "Run failed to start",
+          error instanceof Error
+            ? error.message
+            : t("editor:promptPanel.runFailedToStart"),
         );
     } finally {
       setBusy(false);
@@ -656,7 +662,7 @@ export function PromptPanel() {
 
   return (
     <div
-      aria-label={`Generation panel for ${node.title}`}
+      aria-label={t("editor:promptPanel.aria", { name: node.title })}
       className="prompt-panel"
       data-testid="prompt-panel"
       ref={panelRef}
@@ -665,7 +671,7 @@ export function PromptPanel() {
     >
       <div className="prompt-panel-head">
         <div
-          aria-label="Panel sections"
+          aria-label={t("editor:promptPanel.sections")}
           className="prompt-panel-tabs"
           role="tablist"
         >
@@ -676,27 +682,27 @@ export function PromptPanel() {
             role="tab"
             type="button"
           >
-            Prompt
+            {t("editor:promptPanel.prompt")}
           </button>
           <button
             aria-selected={tab === "parameter"}
             className={tab === "parameter" ? "is-active" : ""}
             onClick={() => selectTab("parameter")}
             role="tab"
-            title="What this node's own ask carries, over the defaults set in settings"
+            title={t("editor:promptPanel.parameterHint")}
             type="button"
           >
-            Parameter
+            {t("editor:promptPanel.parameter")}
           </button>
           <button
             aria-selected={tab === "preview"}
             className={tab === "preview" ? "is-active" : ""}
             onClick={() => selectTab("preview")}
             role="tab"
-            title="What a run of this node would actually hand over"
+            title={t("editor:promptPanel.previewHint")}
             type="button"
           >
-            Preview
+            {t("editor:promptPanel.preview")}
           </button>
         </div>
         {going ? (
@@ -705,13 +711,11 @@ export function PromptPanel() {
             disabled={stopping}
             onClick={stop}
             title={
-              stopping
-                ? "This run has been asked to stop and has not noticed yet"
-                : "Stop this run"
+              stopping ? t("editor:run.stoppingHint") : t("editor:run.stopHint")
             }
             type="button"
           >
-            {stopping ? "Stopping…" : "Stop"}
+            {stopping ? t("editor:run.stopping") : t("editor:action.stop")}
           </button>
         ) : (
           <button
@@ -721,11 +725,11 @@ export function PromptPanel() {
             title={refusal ?? undefined}
             type="button"
           >
-            {busy ? "Starting…" : "Run"}
+            {busy ? t("editor:promptPanel.starting") : t("editor:action.run")}
           </button>
         )}
         <button
-          aria-label="Close the generation panel"
+          aria-label={t("editor:promptPanel.close")}
           className="prompt-panel-close"
           onClick={dismiss}
           type="button"
@@ -739,17 +743,17 @@ export function PromptPanel() {
           <div className="prompt-panel-prompt">
             <button
               aria-expanded={promptShown}
-              aria-label="Prompt"
+              aria-label={t("editor:promptPanel.prompt")}
               className="prompt-panel-fold"
               onClick={fold}
               title={
                 promptShown
-                  ? "Fold the prompt away and take what is given from the wiring"
-                  : "Unfold the prompt and say in words what is given"
+                  ? t("editor:promptPanel.foldAway")
+                  : t("editor:promptPanel.unfold")
               }
               type="button"
             >
-              {promptShown ? "▾" : "▸"} Prompt
+              {promptShown ? "▾" : "▸"} {t("editor:promptPanel.prompt")}
             </button>
 
             {promptShown && (
@@ -759,14 +763,16 @@ export function PromptPanel() {
                 inputRef={areaRef}
                 issues={issues}
                 key={`prompt-${node.id}`}
-                label={`Prompt for ${node.title}`}
+                label={t("editor:promptPanel.promptField", {
+                  name: node.title,
+                })}
                 offerAtCaret
                 onChange={changePrompt}
                 onCommit={commitPrompt}
                 onDismiss={dismiss}
                 onOffer={() => {}}
                 onSubmit={() => void ask()}
-                placeholder="What should this node make?"
+                placeholder={t("editor:promptPanel.promptPlaceholder")}
                 resources={resources}
                 value={prompt}
               />
@@ -774,7 +780,7 @@ export function PromptPanel() {
 
             {dangling && (
               <p className="prompt-panel-warn" role="alert">
-                A mention names a node that is not on this canvas.
+                {t("editor:promptPanel.danglingMentionPeriod")}
               </p>
             )}
 
@@ -784,16 +790,19 @@ export function PromptPanel() {
                   over > 0 ? "prompt-panel-count is-over" : "prompt-panel-count"
                 }
               >
-                {prompt.length.toLocaleString()} of{" "}
-                {MAX_PROMPT_LENGTH.toLocaleString()} characters
+                {t("editor:promptPanel.counter", {
+                  used: prompt.length.toLocaleString(),
+                  limit: MAX_PROMPT_LENGTH.toLocaleString(),
+                })}
               </p>
             )}
 
             {noModel ? (
               <div className="prompt-panel-models">
                 <p className="prompt-panel-note">
-                  No {t(CAPABILITY_LABELS[capability]).toLowerCase()} model is
-                  configured yet.
+                  {t("editor:promptPanel.noModelPeriod", {
+                    kind: t(CAPABILITY_LABELS[capability]).toLowerCase(),
+                  })}
                 </p>
                 <button
                   onClick={() =>
@@ -806,13 +815,13 @@ export function PromptPanel() {
                   }
                   type="button"
                 >
-                  Configure models
+                  {t("editor:promptPanel.configureModels")}
                 </button>
               </div>
             ) : (
               <ModelPicker
                 capability={capability}
-                noneLabel="Provider default"
+                noneLabel={t("editor:promptPanel.providerDefault")}
                 onChange={(reference) => commit({ model: reference ?? "" })}
                 value={spec.model || null}
               />
@@ -862,7 +871,7 @@ export function PromptPanel() {
         aria-hidden="true"
         className="prompt-panel-grip"
         onPointerDown={resize}
-        title="Drag to make the panel wider or taller"
+        title={t("editor:promptPanel.grip")}
       />
     </div>
   );

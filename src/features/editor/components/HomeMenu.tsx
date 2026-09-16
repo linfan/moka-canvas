@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../stores/appStore";
 
 /** Which page the menu is standing on, and marks as current. */
@@ -123,6 +124,7 @@ interface HomeMenuProps {
  * turning a tab over by mistake.
  */
 export function HomeMenu({ current, onHome }: HomeMenuProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -156,11 +158,11 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
       <button
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label="Home menu"
+        aria-label={t("app:homeMenu.button")}
         className="home-menu-button"
         data-testid="home-menu-button"
         onClick={() => setOpen((seen) => !seen)}
-        title="Home, canvas, and clip"
+        title={t("app:homeMenu.hint")}
         type="button"
       >
         <CoffeeIcon />
@@ -188,7 +190,7 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
                 type="button"
               >
                 <HomeIcon />
-                <span>Home</span>
+                <span>{t("app:homeMenu.home")}</span>
               </button>
             </div>
             <div className="home-menu-group">
@@ -202,7 +204,7 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
                 type="button"
               >
                 <CanvasIcon />
-                <span>Canvas</span>
+                <span>{t("app:homeMenu.canvas")}</span>
               </button>
               <button
                 aria-current={current === "clip" ? "page" : undefined}
@@ -214,7 +216,7 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
                 type="button"
               >
                 <ClipIcon />
-                <span>Clip</span>
+                <span>{t("app:homeMenu.clip")}</span>
               </button>
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { findNode, type WorkflowNode } from "../../../shared/domain";
 import { worldToClient } from "../canvas/canvasControl";
 import {
@@ -43,6 +44,7 @@ function unionBounds(nodes: WorkflowNode[]) {
  * frame standing for them, so a frame is not counted here.
  */
 export function SelectionActionBar() {
+  const { t } = useTranslation();
   const selected = useEditorStore((state) => state.selection.nodeIds);
   const gesture = useEditorStore((state) => state.gesture);
   const camera = useEditorStore((state) => state.camera);
@@ -81,7 +83,7 @@ export function SelectionActionBar() {
 
   return (
     <div
-      aria-label={`Selection actions for ${nodes.length} nodes`}
+      aria-label={t("editor:selectionBar.aria", { count: nodes.length })}
       className="node-bar selection-bar"
       data-testid="selection-action-bar"
       role="toolbar"
@@ -90,61 +92,61 @@ export function SelectionActionBar() {
       <button
         disabled={!arranged}
         onClick={() => groupSelection()}
-        title="Put the selection in a group"
+        title={t("editor:selectionBar.groupHint")}
         type="button"
       >
-        Group
+        {t("editor:action.group")}
       </button>
       <button
-        aria-label="Align left"
+        aria-label={t("editor:selectionBar.alignLeft")}
         disabled={!arranged}
         onClick={() => alignNodes("left")}
-        title="Line their left edges up"
+        title={t("editor:selectionBar.alignLeftHint")}
         type="button"
       >
         ⇤
       </button>
       <button
-        aria-label="Align centers"
+        aria-label={t("editor:selectionBar.alignCenters")}
         disabled={!arranged}
         onClick={() => alignNodes("center")}
-        title="Put their middles on one vertical line"
+        title={t("editor:selectionBar.alignCentersHint")}
         type="button"
       >
         ↔
       </button>
       <button
-        aria-label="Align right"
+        aria-label={t("editor:selectionBar.alignRight")}
         disabled={!arranged}
         onClick={() => alignNodes("right")}
-        title="Line their right edges up"
+        title={t("editor:selectionBar.alignRightHint")}
         type="button"
       >
         ⇥
       </button>
       <button
-        aria-label="Align top"
+        aria-label={t("editor:selectionBar.alignTop")}
         disabled={!arranged}
         onClick={() => alignNodes("top")}
-        title="Line their top edges up"
+        title={t("editor:selectionBar.alignTopHint")}
         type="button"
       >
         ⇧
       </button>
       <button
-        aria-label="Align middles"
+        aria-label={t("editor:selectionBar.alignMiddles")}
         disabled={!arranged}
         onClick={() => alignNodes("middle")}
-        title="Put their middles on one horizontal line"
+        title={t("editor:selectionBar.alignMiddlesHint")}
         type="button"
       >
         ↕
       </button>
       <button
-        aria-label="Align bottom"
+        aria-label={t("editor:selectionBar.alignBottom")}
         disabled={!arranged}
         onClick={() => alignNodes("bottom")}
-        title="Line their bottom edges up"
+        title={t("editor:selectionBar.alignBottomHint")}
         type="button"
       >
         ⇩
@@ -152,43 +154,43 @@ export function SelectionActionBar() {
       <button
         disabled={!arranged}
         onClick={() => equalizeNodes("width")}
-        title="Give every selected node the width of the widest"
+        title={t("editor:selectionBar.sameWidthHint")}
         type="button"
       >
-        Same width
+        {t("editor:selectionBar.sameWidth")}
       </button>
       <button
         disabled={!arranged}
         onClick={() => equalizeNodes("height")}
-        title="Give every selected node the height of the tallest"
+        title={t("editor:selectionBar.sameHeightHint")}
         type="button"
       >
-        Same height
+        {t("editor:selectionBar.sameHeight")}
       </button>
       <button
-        aria-label="Distribute horizontally"
+        aria-label={t("editor:selectionBar.distributeHorizontally")}
         disabled={!spreadable}
         onClick={() => distributeNodes("horizontal")}
-        title="Leave the two ends and make the room between neighbours the same"
+        title={t("editor:selectionBar.distributeHint")}
         type="button"
       >
-        Distribute ⇔
+        {t("editor:selectionBar.distributeHorizontallyLabel")}
       </button>
       <button
-        aria-label="Distribute vertically"
+        aria-label={t("editor:selectionBar.distributeVertically")}
         disabled={!spreadable}
         onClick={() => distributeNodes("vertical")}
-        title="Leave the two ends and make the room between neighbours the same"
+        title={t("editor:selectionBar.distributeHint")}
         type="button"
       >
-        Distribute ⇕
+        {t("editor:selectionBar.distributeVerticallyLabel")}
       </button>
       <button
         onClick={() => deleteSelection()}
-        title="Delete the selection and the edges that touch it"
+        title={t("editor:selectionBar.deleteHint")}
         type="button"
       >
-        Delete
+        {t("editor:action.delete")}
       </button>
     </div>
   );

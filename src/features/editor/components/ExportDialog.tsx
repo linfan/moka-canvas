@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { formatBytes } from "../canvas/mediaCards";
 
 /** What the person exporting asked for. */
@@ -42,6 +43,7 @@ export function ExportDialog({
   onCancel: () => void;
   onExport: (choices: ExportChoices) => void;
 }) {
+  const { t } = useTranslation();
   const [choices, setChoices] = useState<ExportChoices>(EXPORT_DEFAULTS);
   const nothingToLeave = leftBehind.count === 0;
   const set = (patch: Partial<ExportChoices>) =>
@@ -54,12 +56,8 @@ export function ExportDialog({
         className="dialog"
         role="dialog"
       >
-        <h2 id="export-title">Export package</h2>
-        <p className="dialog-note">
-          The canvas, its nodes and the assets they hold. Model configurations,
-          API keys and the prompt library are not part of a project, so they are
-          never exported.
-        </p>
+        <h2 id="export-title">{t("editor:dialogs.exportPackage.title")}</h2>
+        <p className="dialog-note">{t("editor:dialogs.exportPackage.note")}</p>
         <label className="dialog-choice">
           <input
             checked={choices.includePersonalHistory}
@@ -69,10 +67,9 @@ export function ExportDialog({
             type="checkbox"
           />
           <span>
-            Include my run history — for my own backup only
+            {t("editor:dialogs.exportPackage.includeHistory")}
             <small>
-              Keeps the record of each run this machine made, with the prompt it
-              was asked with and the model that answered.
+              {t("editor:dialogs.exportPackage.includeHistoryNote")}
             </small>
           </span>
         </label>
@@ -86,19 +83,24 @@ export function ExportDialog({
             type="checkbox"
           />
           <span>
-            Only the assets a node points at
+            {t("editor:dialogs.exportPackage.onlyReferenced")}
             <small>
               {nothingToLeave
-                ? "Every asset in this project is placed on a canvas."
-                : `Leaves out ${leftBehind.count} unreferenced ${
-                    leftBehind.count === 1 ? "asset" : "assets"
-                  } (${formatBytes(leftBehind.bytes)}).`}
+                ? t("editor:dialogs.exportPackage.allPlaced")
+                : leftBehind.count === 1
+                  ? t("editor:dialogs.exportPackage.leavesOutOne", {
+                      bytes: formatBytes(leftBehind.bytes),
+                    })
+                  : t("editor:dialogs.exportPackage.leavesOutMany", {
+                      bytes: formatBytes(leftBehind.bytes),
+                      count: leftBehind.count,
+                    })}
             </small>
           </span>
         </label>
         <div className="dialog-actions">
           <button disabled={busy} onClick={onCancel} type="button">
-            Cancel
+            {t("editor:action.cancel")}
           </button>
           <button
             autoFocus
@@ -107,7 +109,9 @@ export function ExportDialog({
             onClick={() => onExport(choices)}
             type="button"
           >
-            {busy ? "Exporting…" : "Export package"}
+            {busy
+              ? t("editor:dialogs.exportPackage.exporting")
+              : t("editor:dialogs.exportPackage.title")}
           </button>
         </div>
       </div>

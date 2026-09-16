@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { confirmDeleteAsset } from "../interactions/actions";
 import { buildResourceIndex } from "../canvas/mediaCards";
 import { useEditorStore } from "../stores/editorStore";
@@ -9,6 +10,7 @@ import { useProjectStore } from "../stores/projectStore";
  * Confirming removes the referencing nodes (edges cascade) and the file.
  */
 export function AssetDeleteDialog() {
+  const { t } = useTranslation();
   const prompt = useEditorStore((state) => state.assetDeletePrompt);
   const moka = useProjectStore((state) => state.moka);
 
@@ -37,22 +39,25 @@ export function AssetDeleteDialog() {
         onClick={(event) => event.stopPropagation()}
         role="alertdialog"
       >
-        <h2 id="asset-delete-title">Delete asset?</h2>
+        <h2 id="asset-delete-title">{t("editor:dialogs.assetDelete.title")}</h2>
         <p>
-          <strong>{entry?.name ?? "This asset"}</strong> is used by {count} node
-          {count === 1 ? "" : "s"}. Deleting it also removes{" "}
-          {count === 1 ? "that node" : "those nodes"} and their connections.
+          <strong>
+            {entry?.name ?? t("editor:dialogs.assetDelete.thisAsset")}
+          </strong>{" "}
+          {count === 1
+            ? t("editor:dialogs.assetDelete.usedByOne")
+            : t("editor:dialogs.assetDelete.usedByMany", { count })}
         </p>
         <div className="dialog-actions">
           <button onClick={close} type="button">
-            Cancel
+            {t("editor:action.cancel")}
           </button>
           <button
             className="danger"
             onClick={() => void confirmDeleteAsset()}
             type="button"
           >
-            Remove nodes and delete
+            {t("editor:dialogs.assetDelete.removeAndDelete")}
           </button>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { SHORTCUT_GROUPS } from "../interactions/keyboard";
 import { useEditorStore } from "../stores/editorStore";
 
@@ -31,6 +32,7 @@ function chordLabel(chord: string[]): string {
  * rather than from a copy, so help cannot go stale on its own.
  */
 export function ShortcutsDialog() {
+  const { t } = useTranslation();
   const open = useEditorStore((state) => state.shortcutsOpen);
 
   useEffect(() => {
@@ -55,19 +57,23 @@ export function ShortcutsDialog() {
         role="dialog"
       >
         <header className="dialog-head">
-          <h2 id="shortcuts-title">Keyboard shortcuts</h2>
-          <button aria-label="Close shortcuts" onClick={close} type="button">
+          <h2 id="shortcuts-title">{t("editor:dialogs.shortcuts.title")}</h2>
+          <button
+            aria-label={t("editor:dialogs.shortcuts.close")}
+            onClick={close}
+            type="button"
+          >
             ✕
           </button>
         </header>
         <div className="shortcut-groups">
           {SHORTCUT_GROUPS.map((group) => (
             <section className="shortcut-group" key={group.title}>
-              <h3>{group.title}</h3>
+              <h3>{t(group.title)}</h3>
               <ul>
                 {group.rows.map((row) => (
                   <li key={row.label}>
-                    <span>{row.label}</span>
+                    <span>{t(row.label)}</span>
                     <span className="shortcut-keys">
                       {row.chords.map((chord) => (
                         <kbd key={chord.join("+")}>{chordLabel(chord)}</kbd>

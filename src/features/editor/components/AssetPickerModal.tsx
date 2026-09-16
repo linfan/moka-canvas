@@ -262,24 +262,28 @@ export function AssetPickerModal() {
       >
         <header className="preview-dialog-head">
           <h2>{title}</h2>
-          <button aria-label="Close the picker" onClick={close} type="button">
+          <button
+            aria-label={t("editor:picker.close")}
+            onClick={close}
+            type="button"
+          >
             ✕
           </button>
         </header>
 
         <div className="asset-pick-filter">
           <input
-            aria-label="Search the shelf"
+            aria-label={t("editor:picker.searchShelf")}
             data-testid="asset-pick-asked"
             onChange={(event) =>
               setFilter((seen) => ({ ...seen, asked: event.target.value }))
             }
-            placeholder="Name, word, note, or summary"
+            placeholder={t("editor:picker.searchPlaceholder")}
             type="search"
             value={filter.asked}
           />
           <select
-            aria-label="Which kind"
+            aria-label={t("editor:picker.whichKind")}
             data-testid="asset-pick-category"
             onChange={(event) =>
               setFilter((seen) => ({
@@ -289,7 +293,7 @@ export function AssetPickerModal() {
             }
             value={filter.kind ?? ""}
           >
-            <option value="">Every kind</option>
+            <option value="">{t("editor:picker.everyKind")}</option>
             {SHELF_KINDS.map((kind) => (
               <option key={kind} value={kind}>
                 {t(CAPABILITY_LABELS[kind])}
@@ -298,7 +302,7 @@ export function AssetPickerModal() {
           </select>
           {words.length > 0 && (
             <div
-              aria-label="Filed under"
+              aria-label={t("editor:picker.filedUnder")}
               className="side-shelf-tags"
               role="group"
             >
@@ -329,10 +333,13 @@ export function AssetPickerModal() {
 
         {entries.length === 0 ? (
           <p className="prompt-panel-note" data-testid="asset-pick-none">
-            Nothing on the shelf matches.
+            {t("editor:picker.nothingMatches")}
           </p>
         ) : (
-          <ul aria-label="Files on the shelf" className="asset-pick-list">
+          <ul
+            aria-label={t("editor:picker.filesOnShelf")}
+            className="asset-pick-list"
+          >
             {entries.map((entry) => {
               const kind = kindOf(entry);
               const thumb = thumbOf(entry);
@@ -381,7 +388,7 @@ export function AssetPickerModal() {
             {count}
           </p>
           <button onClick={close} type="button">
-            Cancel
+            {t("editor:action.cancel")}
           </button>
           <button
             className="primary"
