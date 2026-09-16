@@ -244,11 +244,28 @@ describe("project creation", () => {
         directory: "/tmp/projects",
         name: "Spoken",
         firstCanvasName: "画布 1",
+        useSubdirectory: false,
       });
       expect(useProjectStore.getState().moka?.canvas[0].name).toBe("画布 1");
     } finally {
       // The catalogue is shared with the cases after this one.
       await i18n.changeLanguage("en");
     }
+  });
+
+  it("carries the consent a folder that already holds something was given", async () => {
+    const opened = buildGoldenMokaFile();
+    fetchMock.mockResolvedValue(
+      jsonResponse(201, {
+        root: "/tmp/projects/nested",
+        moka: opened,
+        selfCheck: { ok: true, issues: [] },
+      }),
+    );
+
+    await useProjectStore.getState().create("/tmp/projects", "Nested", true);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body)).useSubdirectory).toBe(true);
   });
 });

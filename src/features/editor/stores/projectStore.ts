@@ -34,7 +34,11 @@ interface ProjectState {
 
   hydrate: (opened: OpenProjectResult) => SelfCheckReport;
   open: (path: string) => Promise<SelfCheckReport>;
-  create: (directory: string, name: string) => Promise<SelfCheckReport>;
+  create: (
+    directory: string,
+    name: string,
+    useSubdirectory?: boolean,
+  ) => Promise<SelfCheckReport>;
   importFromPath: (
     archivePath: string,
     directory: string,
@@ -147,7 +151,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
       return get().hydrate(await projectsApi.open(path));
     },
 
-    async create(directory, name) {
+    async create(directory, name, useSubdirectory = false) {
       // The scaffold makes the first canvas, but its name is the interface's
       // to give, so a project made in Chinese says 画布 1.
       return get().hydrate(
@@ -155,6 +159,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
           directory,
           name,
           i18n.t("domain:canvas.defaultName", { n: 1 }),
+          useSubdirectory,
         ),
       );
     },

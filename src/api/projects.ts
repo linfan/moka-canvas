@@ -40,14 +40,21 @@ export interface ExportOptions {
 }
 
 export const projectsApi = {
+  /**
+   * Makes a project in `directory`. `useSubdirectory` carries a reader's
+   * agreement that a folder already holding something gets a subfolder named
+   * after the project; without it, such a folder is refused rather than
+   * written into, and an empty one holds the project itself.
+   */
   create(
     directory: string,
     name: string,
     firstCanvasName?: string,
+    useSubdirectory = false,
   ): Promise<OpenProjectResult> {
     return http.request<OpenProjectResult>("/api/v1/projects", {
       method: "POST",
-      body: { directory, name, firstCanvasName },
+      body: { directory, name, firstCanvasName, useSubdirectory },
     });
   },
 

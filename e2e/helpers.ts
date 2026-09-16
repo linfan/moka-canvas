@@ -42,9 +42,18 @@ export async function createProject(
   await dialog.getByLabel("Folder").fill(directory);
   await dialog.getByLabel("Project name").fill(name);
   await dialog.getByRole("button", { name: "New project" }).click();
-  await expect(
-    page.getByRole("banner").getByText(name, { exact: true }),
-  ).toBeVisible({ timeout: 10_000 });
+  // A folder that already holds something is asked about before the project
+  // goes into a subfolder of its own; answer the question if it is there.
+  const opened = page.getByRole("banner").getByText(name, { exact: true });
+  const confirm = dialog.getByRole("button", { name: "Create", exact: true });
+  const asked = await Promise.race([
+    confirm.waitFor({ state: "visible", timeout: 15_000 }).then(() => true),
+    opened.waitFor({ state: "visible", timeout: 15_000 }).then(() => false),
+  ]).catch(() => false);
+  if (asked) {
+    await confirm.click();
+  }
+  await expect(opened).toBeVisible({ timeout: 10_000 });
 }
 
 /** Double-click empty canvas and add a node of the given kind. */

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { isApiError } from "../../../api/client";
 import type { SelfCheckReport } from "../../../shared/domain";
 import { useProjectStore } from "../stores/projectStore";
 import { PathBrowserDialog } from "./PathBrowserDialog";
@@ -37,6 +38,8 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
   const [error, setError] = useState<string | null>(null);
   /** Which field the application's own file dialog is choosing for, if one is. */
   const [browsing, setBrowsing] = useState<Field | null>(null);
+  /** Whether the folder's question has been raised and the fields stepped aside. */
+  const [confirmingSubfolder, setConfirmingSubfolder] = useState(false);
 
   /** Run a native picker and surface its failure instead of dropping it. */
   const pick = async (
@@ -75,28 +78,57 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
     );
   };
 
+  /**
+   * Makes the project. A folder that already holds something is refused by
+   * the server until the reader has agreed to a subfolder of its own, and
+   * that refusal is what puts the question on screen.
+   */
+  const submitCreate = async (useSubdirectory: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const selfCheck = await useProjectStore
+        .getState()
+        .create(directory.trim(), name.trim(), useSubdirectory);
+      onDone(selfCheck);
+    } catch (cause) {
+      if (!useSubdirectory && isApiError(cause, "TARGET_DIRECTORY_NOT_EMPTY")) {
+        setConfirmingSubfolder(true);
+      } else {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : t("app:dialog.requestFailed"),
+        );
+      }
+      setBusy(false);
+    }
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (mode === "create") {
+      await submitCreate(false);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const project = useProjectStore.getState();
       const selfCheck =
-        mode === "create"
-          ? await project.create(directory.trim(), name.trim())
-          : mode === "open"
-            ? await project.open(path.trim())
-            : archive
-              ? await project.importUpload(
-                  archive,
-                  directory.trim(),
-                  name.trim() || undefined,
-                )
-              : await project.importFromPath(
-                  path.trim(),
-                  directory.trim(),
-                  name.trim() || undefined,
-                );
+        mode === "open"
+          ? await project.open(path.trim())
+          : archive
+            ? await project.importUpload(
+                archive,
+                directory.trim(),
+                name.trim() || undefined,
+              )
+            : await project.importFromPath(
+                path.trim(),
+                directory.trim(),
+                name.trim() || undefined,
+              );
       onDone(selfCheck);
     } catch (cause) {
       setError(
@@ -127,7 +159,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
       <form className="dialog" onSubmit={(event) => void submit(event)}>
         <h2>{t(TITLES[mode])}</h2>
 
-        {mode !== "open" && (
+        {!confirmingSubfolder && mode !== "open" && (
           <div className="dialog-field">
             <span id="project-folder-label">{t("app:dialog.folder")}</span>
             <div className="dialog-path">
@@ -148,7 +180,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
           </div>
         )}
 
-        {mode !== "open" && (
+        {!confirmingSubfolder && mode !== "open" && (
           <label className="dialog-field">
             <span>
               {mode === "create"
@@ -159,7 +191,7 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
               onChange={(event) => setName(event.target.value)}
               placeholder={
                 mode === "create"
-                  ? "Launch teaser"
+                  ? t("app:dialog.createNamePlaceholder")
                   : t("app:dialog.namePlaceholder")
               }
               value={name}
@@ -229,6 +261,10 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
             </label>
           ))}
 
+        {confirmingSubfolder && (
+          <p className="dialog-note">{t("app:dialog.folderNotEmpty")}</p>
+        )}
+
         {error && (
           <p className="dialog-error" role="alert">
             {error}
@@ -236,12 +272,35 @@ export function ProjectDialog({ mode, nativePickers, onClose, onDone }: Props) {
         )}
 
         <div className="dialog-actions">
-          <button disabled={busy} onClick={onClose} type="button">
-            {t("app:cancel")}
-          </button>
-          <button disabled={!ready} type="submit">
-            {busy ? t("app:dialog.working") : t(TITLES[mode])}
-          </button>
+          {confirmingSubfolder ? (
+            <>
+              <button
+                disabled={busy}
+                onClick={() => setConfirmingSubfolder(false)}
+                type="button"
+              >
+                {t("app:cancel")}
+              </button>
+              <button
+                autoFocus
+                className="primary"
+                disabled={busy}
+                onClick={() => void submitCreate(true)}
+                type="button"
+              >
+                {busy ? t("app:dialog.working") : t("app:dialog.confirmCreate")}
+              </button>
+            </>
+          ) : (
+            <>
+              <button disabled={busy} onClick={onClose} type="button">
+                {t("app:cancel")}
+              </button>
+              <button disabled={!ready} type="submit">
+                {busy ? t("app:dialog.working") : t(TITLES[mode])}
+              </button>
+            </>
+          )}
         </div>
       </form>
 

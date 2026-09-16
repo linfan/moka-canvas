@@ -16,6 +16,12 @@ pub struct CreateProjectRequest {
     /// it is drawn in; absent callers get the scaffold's English name.
     #[serde(default)]
     pub first_canvas_name: Option<String>,
+    /// Whether the caller has agreed that a folder already holding something
+    /// gets a subfolder named after the project. Absent — or false — asks for
+    /// the folder itself, and such a folder is then refused rather than
+    /// written into.
+    #[serde(default)]
+    pub use_subdirectory: bool,
 }
 
 #[derive(Debug, Deserialize)]

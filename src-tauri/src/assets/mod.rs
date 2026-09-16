@@ -96,6 +96,12 @@ pub fn analyze_staged(path: &Path) -> Result<StagedAnalysis, ProjectError> {
     })
 }
 
+/// A name made safe for one path segment, keeping the words it is made of.
+///
+/// Letters and digits of any script survive — a project named 中文项目 names
+/// its folder in Chinese rather than in a word of this function's invention —
+/// and every other character is kept as a separator, turned into one, or
+/// dropped, which is what keeps the result a single segment.
 pub fn slugify(name: &str) -> String {
     let stem = Path::new(name)
         .file_stem()
@@ -103,16 +109,18 @@ pub fn slugify(name: &str) -> String {
         .unwrap_or("asset");
     let mut slug = String::with_capacity(stem.len());
     for ch in stem.chars() {
-        if ch.is_ascii_alphanumeric() {
-            slug.push(ch.to_ascii_lowercase());
+        if ch.is_alphanumeric() {
+            slug.extend(ch.to_lowercase());
         } else if ch == '-' || ch == '_' {
             slug.push(ch);
-        } else if ch == ' ' || ch == '.' {
+        } else if ch.is_whitespace() || ch == '.' {
             slug.push('-');
         }
     }
     let slug = slug.trim_matches('-').to_string();
     if slug.is_empty() {
+        // Nothing a name can be read back from; the caller still needs one
+        // segment, and this is the one word every caller knows.
         "asset".to_string()
     } else {
         slug.chars().take(60).collect()
@@ -185,4 +193,48 @@ pub fn new_tmp_path(project_root: &Path) -> std::io::Result<PathBuf> {
     let dir = tmp_dir(project_root);
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(format!("upload-{}.bin", uuid::Uuid::now_v7())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slugify;
+
+    #[test]
+    fn a_slug_keeps_the_words_of_its_name() {
+        assert_eq!(slugify("My Film"), "my-film");
+        assert_eq!(slugify("clip.png"), "clip");
+        assert_eq!(slugify("_kept-as_is"), "_kept-as_is");
+        assert_eq!(slugify("  padded  "), "padded");
+    }
+
+    #[test]
+    fn letters_of_any_script_survive() {
+        assert_eq!(slugify("中文项目"), "中文项目");
+        assert_eq!(slugify("发布 预告片"), "发布-预告片");
+        assert_eq!(slugify("Über Äpfel"), "über-äpfel");
+    }
+
+    #[test]
+    fn a_slug_is_one_segment_and_never_a_way_out_of_it() {
+        for name in ["../etc/passwd", "..\\..\\windows", "a/b", "!/$%"] {
+            let slug = slugify(name);
+            assert!(
+                slug.chars()
+                    .all(|ch| ch.is_alphanumeric() || ch == '-' || ch == '_'),
+                "{name} became {slug}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_with_nothing_to_read_back_falls_back_to_one_word() {
+        assert_eq!(slugify("!!! ???"), "asset");
+        assert_eq!(slugify(""), "asset");
+    }
+
+    #[test]
+    fn a_long_name_is_cut_to_what_a_folder_can_hold() {
+        let slug = slugify(&"é".repeat(100));
+        assert_eq!(slug.chars().count(), 60);
+    }
 }

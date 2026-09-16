@@ -1,5 +1,5 @@
 import { basename, join } from "node:path";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
   backToLauncher,
@@ -21,6 +21,11 @@ test("a project is opened through the file dialog the web runtime draws", async 
 }) => {
   const home = projectHome("browse");
   const root = join(home, "project");
+  // The folder already holds a reader's own file, so the project goes into a
+  // subfolder of its own — and the dialog asks before making one, which the
+  // helper answers the way a reader would.
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "notes.txt"), "kept");
   await forgetProjects();
   await page.goto("/");
   await createProject(page, root, "Browsed");

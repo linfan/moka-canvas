@@ -159,7 +159,12 @@ async fn create_open_and_recent_flow() {
 
     let created = create_project(&app, &projects_dir, "My Film").await;
     assert_eq!(created["moka"]["metadata"]["name"], "My Film");
-    assert!(created["root"].as_str().unwrap().ends_with("my-film"));
+    // The chosen folder was not there yet, so the project stands in it rather
+    // than in a subfolder of its own.
+    assert_eq!(
+        created["root"].as_str().unwrap(),
+        projects_dir.to_str().unwrap()
+    );
     assert_eq!(created["selfCheck"]["ok"], true);
     let root = created["root"].as_str().unwrap().to_string();
     assert!(Path::new(&root).join("canvas.moka").is_file());
@@ -229,6 +234,93 @@ async fn create_open_and_recent_flow() {
         .await
         .unwrap();
     assert_eq!(body_json(response).await.as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn a_folder_that_holds_something_needs_consent_before_a_project_goes_in() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let folder = temp.path().join("films");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("notes.txt"), "a reader's own file").unwrap();
+
+    // Refused while nobody has said where the work is meant to land, and the
+    // folder is left exactly as it was.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects",
+            json!({ "directory": folder.to_string_lossy(), "name": "My Film" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let problem = body_json(response).await;
+    assert_eq!(problem["code"], "TARGET_DIRECTORY_NOT_EMPTY");
+    let written = std::fs::read_dir(&folder).unwrap().count();
+    assert_eq!(written, 1, "only the reader's own file is still there");
+
+    // Agreed: the project goes into a subfolder of its own, and the reader's
+    // file stands where it was.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects",
+            json!({
+                "directory": folder.to_string_lossy(),
+                "name": "My Film",
+                "useSubdirectory": true,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    assert!(created["root"].as_str().unwrap().ends_with("my-film"));
+    assert!(folder.join("notes.txt").is_file());
+    assert!(folder.join("my-film").join("canvas.moka").is_file());
+}
+
+#[tokio::test]
+async fn a_chinese_name_names_its_subfolder_in_chinese() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let folder = temp.path().join("films");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("kept.txt"), "kept").unwrap();
+
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects",
+            json!({
+                "directory": folder.to_string_lossy(),
+                "name": "中文项目",
+                "useSubdirectory": true,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    // The words of the name, not the "asset" the slug used to fall back to
+    // when every character of it was outside ASCII.
+    assert!(created["root"].as_str().unwrap().ends_with("中文项目"));
+    assert!(folder.join("中文项目").join("canvas.moka").is_file());
+}
+
+#[tokio::test]
+async fn a_folder_holding_nothing_but_the_systems_own_note_counts_as_empty() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let folder = temp.path().join("films");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join(".DS_Store"), "").unwrap();
+
+    let created = create_project(&app, &folder, "My Film").await;
+    assert_eq!(created["root"].as_str().unwrap(), folder.to_str().unwrap());
 }
 
 #[tokio::test]

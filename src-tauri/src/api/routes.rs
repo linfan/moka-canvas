@@ -156,6 +156,26 @@ pub async fn browse_filesystem(
     ))
 }
 
+/// Whether a folder can take a project as it stands.
+///
+/// A folder that is not there yet counts, and so does one holding nothing but
+/// macOS's own .DS_Store: a reader who picked a folder Finder has already
+/// looked at has picked an empty folder, whatever was left beside it.
+fn target_is_empty(path: &FsPath) -> std::io::Result<bool> {
+    match std::fs::read_dir(path) {
+        Ok(entries) => {
+            for entry in entries {
+                if entry?.file_name().to_str() != Some(".DS_Store") {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
 pub async fn create_project(
     State(state): State<ApiState>,
     json: Result<Json<CreateProjectRequest>, JsonRejection>,
@@ -169,7 +189,22 @@ pub async fn create_project(
             "Project name and directory are required",
         ));
     }
-    let root = FsPath::new(request.directory.trim()).join(crate::assets::slugify(name));
+    // A folder that is free holds the project itself. A folder that already
+    // holds something is somebody else's, and a project goes into a subfolder
+    // of its own there only once the caller has said as much — the refusal is
+    // what a client turns into that question.
+    let directory = FsPath::new(request.directory.trim());
+    let root = if request.use_subdirectory {
+        directory.join(crate::assets::slugify(name))
+    } else if target_is_empty(directory).map_err(problem_from_io)? {
+        directory.to_path_buf()
+    } else {
+        return Err(Problem::new(
+            StatusCode::CONFLICT,
+            "TARGET_DIRECTORY_NOT_EMPTY",
+            "The target folder is not empty; the project needs a subfolder of its own",
+        ));
+    };
     let opened = state
         .store
         .create_project(

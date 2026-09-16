@@ -111,8 +111,8 @@ test("missing asset surfaces the self-check dialog and blocks export", async ({
   page,
 }) => {
   const home = projectHome("missing");
-  // The server scaffolds the project under a slugified name subdirectory.
-  const root = join(home, "project", "missing-asset");
+  // The chosen folder starts empty, so the project stands in it directly.
+  const root = join(home, "project");
 
   await page.goto("/");
   await createProject(page, join(home, "project"), "Missing Asset");
