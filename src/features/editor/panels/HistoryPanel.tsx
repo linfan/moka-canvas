@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { MokaFile, NodeId, RunRecord } from "../../../shared/domain";
 import { useAppStore } from "../stores/appStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -59,6 +60,7 @@ function RunRow({
   run: RunRecord;
   titles: ReadonlyMap<NodeId, string>;
 }) {
+  const { t } = useTranslation();
   const starting = useRunStore((state) => state.starting);
   const active = run.status === "queued" || run.status === "running";
   const steps =
@@ -83,7 +85,9 @@ function RunRow({
           .getState()
           .pushToast(
             "error",
-            error instanceof Error ? error.message : "Run failed to start",
+            error instanceof Error
+              ? error.message
+              : t("editor:runHistory.runFailedToStart"),
           ),
       );
   };
@@ -92,17 +96,17 @@ function RunRow({
     <li className="history-run" data-testid={`history-run-${run.id}`}>
       <div className="history-run-head">
         <span className={`run-chip run-chip-${run.status}`}>
-          {RUN_STATUS_LABEL[run.status]}
-          {run.cancelRequested && active ? " · cancelling" : ""}
+          {t(RUN_STATUS_LABEL[run.status])}
+          {run.cancelRequested && active ? t("editor:run.cancelling") : ""}
         </span>
         <span className="history-run-when">{formatWhen(run.createdAt)}</span>
         <button
           disabled={starting || active}
           onClick={askAgain}
-          title="Ask for what this run asked for, once more"
+          title={t("editor:runHistory.askAgainHint")}
           type="button"
         >
-          Run again
+          {t("editor:action.runAgain")}
         </button>
       </div>
       <ul className="history-steps">
@@ -115,7 +119,7 @@ function RunRow({
                 {titles.get(step.nodeId) ?? step.nodeId}
               </span>
               <span className={`run-chip run-chip-${step.status}`}>
-                {RUN_STATUS_LABEL[step.status]}
+                {t(RUN_STATUS_LABEL[step.status])}
               </span>
               {error && <p className="history-step-error">{error}</p>}
               <Snapshot parameters={run.parameters[step.nodeId]} />
@@ -136,6 +140,7 @@ function RunRow({
  * ended — with the one press that asks for the same thing again.
  */
 export function HistoryPanel() {
+  const { t } = useTranslation();
   const runs = useRunStore((state) => state.runs);
   const loading = useRunStore((state) => state.loading);
   const moka = useProjectStore((state) => state.moka);
@@ -159,21 +164,23 @@ export function HistoryPanel() {
 
   return (
     <aside
-      aria-label="History"
+      aria-label={t("editor:runHistory.title")}
       className="editor-inspector history-panel"
       data-testid="history-panel"
     >
-      <h2>History</h2>
+      <h2>{t("editor:runHistory.title")}</h2>
       {filterable.length > 1 && (
         <label className="history-filter">
-          <span>Asked of</span>
+          <span>{t("editor:field.asking")}</span>
           <select
-            aria-label="Filter by node"
+            aria-label={t("editor:runHistory.filterByNode")}
             data-testid="history-filter"
             onChange={(event) => setOnly(event.target.value)}
             value={only}
           >
-            <option value={EVERY_NODE}>Every node</option>
+            <option value={EVERY_NODE}>
+              {t("editor:runHistory.everyNode")}
+            </option>
             {filterable.map(({ nodeId, title }) => (
               <option key={nodeId} value={nodeId}>
                 {title}
@@ -186,9 +193,9 @@ export function HistoryPanel() {
         <p className="inspector-empty">
           {runs.length === 0
             ? loading
-              ? "Reading what has been asked…"
-              : "Nothing has been asked here yet."
-            : "Nothing has asked that node."}
+              ? t("editor:runHistory.reading")
+              : t("editor:runHistory.nothingAsked")
+            : t("editor:runHistory.nothingAskedOfNode")}
         </p>
       )}
       <ul className="history-list">

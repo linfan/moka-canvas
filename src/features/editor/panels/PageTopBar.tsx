@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useModelStore } from "../../settings/modelStore";
 import { redo, undo } from "../commands/execute";
 import { useHistoryStore, isBoundary } from "../stores/historyStore";
@@ -6,10 +7,10 @@ import { useProjectStore } from "../stores/projectStore";
 import { HomeMenu } from "../components/HomeMenu";
 
 export const SAVE_LABEL: Record<string, string> = {
-  saved: "Saved",
-  saving: "Saving…",
-  conflicted: "Conflict",
-  error: "Save failed",
+  saved: "editor:topBar.saved",
+  saving: "editor:topBar.saving",
+  conflicted: "editor:topBar.conflicted",
+  error: "editor:topBar.saveFailed",
 };
 
 export function useCanUndo(): boolean {
@@ -50,6 +51,7 @@ export function PageTopBar({
   tabs,
   exportItems,
 }: PageTopBarProps) {
+  const { t } = useTranslation();
   const projectName = useProjectStore((state) => state.moka?.metadata.name);
   const saveStatus = useProjectStore((state) => state.saveStatus);
   const saveError = useProjectStore((state) => state.saveError);
@@ -85,19 +87,23 @@ export function PageTopBar({
         className={`save-status save-status-${saveStatus}`}
         title={saveError ?? undefined}
       >
-        {SAVE_LABEL[saveStatus]}
+        {t(SAVE_LABEL[saveStatus])}
       </span>
       {saveStatus === "conflicted" && (
         <button
           onClick={() => void useProjectStore.getState().reload()}
           type="button"
         >
-          Reload
+          {t("editor:topBar.reload")}
         </button>
       )}
-      <div aria-label="Edit" className="tool-group" role="group">
+      <div
+        aria-label={t("editor:topBar.edit")}
+        className="tool-group"
+        role="group"
+      >
         <button
-          aria-label="Undo"
+          aria-label={t("editor:topBar.undo")}
           disabled={!canUndo}
           onClick={() => undo()}
           type="button"
@@ -105,7 +111,7 @@ export function PageTopBar({
           ↶
         </button>
         <button
-          aria-label="Redo"
+          aria-label={t("editor:topBar.redo")}
           disabled={!canRedo}
           onClick={() => redo()}
           type="button"
@@ -117,7 +123,7 @@ export function PageTopBar({
         onClick={() => useModelStore.getState().openSettings()}
         type="button"
       >
-        Settings
+        {t("editor:topBar.settings")}
       </button>
       <div className="export-menu" ref={exportRef}>
         <button
@@ -127,11 +133,11 @@ export function PageTopBar({
           onClick={() => setExportOpen((seen) => !seen)}
           type="button"
         >
-          Export
+          {t("editor:topBar.export")}
         </button>
         {exportOpen && (
           <div
-            aria-label="Export"
+            aria-label={t("editor:topBar.export")}
             className="menu export-menu-pop"
             data-testid="export-menu"
             // A choice made under this button puts the menu down with it; a

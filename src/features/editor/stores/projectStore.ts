@@ -17,6 +17,7 @@ import {
   type SaveResult,
 } from "../../../api/projects";
 import { isApiError } from "../../../api/client";
+import { i18n } from "../../../shared/i18n";
 import { useOpenCanvases } from "./openCanvases";
 
 export type SaveStatus = "saved" | "saving" | "conflicted" | "error";
@@ -208,12 +209,15 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
     applyLocal(commands) {
       const { moka, saveStatus } = get();
       if (!moka) {
-        throw new CommandError("PROJECT_NOT_OPEN", "No project is open");
+        throw new CommandError(
+          "PROJECT_NOT_OPEN",
+          i18n.t("editor:stores.noProjectOpen"),
+        );
       }
       if (saveStatus === "conflicted") {
         throw new CommandError(
           "REVISION_CONFLICT",
-          "Resolve the save conflict before making more changes",
+          i18n.t("editor:stores.resolveConflictFirst"),
         );
       }
       const { next, inverse } = applyToDocument(moka, commands);
@@ -263,7 +267,9 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
             set({
               saveStatus: "error",
               saveError:
-                error instanceof Error ? error.message : "Saving failed",
+                error instanceof Error
+                  ? error.message
+                  : i18n.t("editor:stores.savingFailed"),
             });
             // Transient failures retry on the next change; keep the batch queued.
           }

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { exportCanvasImage } from "../interactions/actions";
 import { useActiveCanvas } from "../stores/projectStore";
 import { CanvasTabs } from "./CanvasTabs";
@@ -19,6 +20,7 @@ interface TopBarProps {
  * is arranged.
  */
 export function TopBar({ onBack, onExport }: TopBarProps) {
+  const { t } = useTranslation();
   const canvasDoc = useActiveCanvas();
 
   return (
@@ -30,19 +32,19 @@ export function TopBar({ onBack, onExport }: TopBarProps) {
           <button
             onClick={onExport}
             role="menuitem"
-            title="Choose what leaves with the project, and where to"
+            title={t("editor:topBar.exportProjectHint")}
             type="button"
           >
-            Export project
+            {t("editor:topBar.exportProject")}
           </button>
           <button
             disabled={!canvasDoc || canvasDoc.nodes.length === 0}
             onClick={() => void exportCanvasImage()}
             role="menuitem"
-            title="Save the canvas as a PNG image"
+            title={t("editor:topBar.exportImageHint")}
             type="button"
           >
-            Export as image
+            {t("editor:topBar.exportImage")}
           </button>
         </>
       }

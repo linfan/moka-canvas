@@ -1,4 +1,5 @@
 import { Fragment, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   findNode,
   generationCapabilityFor,
@@ -23,6 +24,7 @@ import {
 } from "../interactions/actions";
 import { useAppStore } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
+import { i18n } from "../../../shared/i18n";
 import { isActive, nodeRun, retryRun, useRunStore } from "../stores/runStore";
 import { useClampedMenuPosition } from "./useClampedMenuPosition";
 
@@ -44,9 +46,11 @@ interface Item {
 async function copyPrompt(prompt: string) {
   try {
     await navigator.clipboard.writeText(prompt);
-    useEditorStore.getState().announce("Prompt copied");
+    useEditorStore.getState().announce(i18n.t("editor:menu.promptCopied"));
   } catch {
-    useAppStore.getState().pushToast("error", "The clipboard is not available");
+    useAppStore
+      .getState()
+      .pushToast("error", i18n.t("editor:menu.clipboardUnavailable"));
   }
 }
 
@@ -56,6 +60,7 @@ async function copyPrompt(prompt: string) {
  * node or edge selects that target first (handled by the canvas callback).
  */
 export function ContextMenu() {
+  const { t } = useTranslation();
   const menu = useEditorStore((state) => state.contextMenu);
   const { ref: listRef, pos } = useClampedMenuPosition(
     menu?.x ?? 0,
@@ -88,7 +93,7 @@ export function ContextMenu() {
     const targetNode = canvas ? findNode(canvas, targetId) : undefined;
     if (targetNode && generationCapabilityFor(targetNode.kind) !== null) {
       items.push({
-        label: "Generate…",
+        label: t("editor:menu.generate"),
         action: () => editor.openPromptPanel(targetId, true),
       });
     }
@@ -100,20 +105,20 @@ export function ContextMenu() {
     if (targetNode?.kind === "text" && words && words.trim() !== "") {
       items.push(
         {
-          title: "Generate",
-          label: "Image from these words",
+          title: t("editor:menu.generateTitle"),
+          label: t("editor:menu.imageFromWords"),
           action: () => generateFrom(targetId, "image"),
         },
         {
-          label: "Video from these words",
+          label: t("editor:menu.videoFromWords"),
           action: () => generateFrom(targetId, "video"),
         },
         {
-          label: "Audio from these words",
+          label: t("editor:menu.audioFromWords"),
           action: () => generateFrom(targetId, "audio"),
         },
         {
-          label: "Rewrite these words",
+          label: t("editor:menu.rewriteWords"),
           action: () => generateFrom(targetId, "text"),
         },
       );
@@ -128,7 +133,7 @@ export function ContextMenu() {
     if (asked && going) {
       const runId = asked.run.id;
       items.push({
-        label: "Stop",
+        label: t("editor:action.stop"),
         action: () => void useRunStore.getState().cancel(runId),
       });
     }
@@ -138,14 +143,17 @@ export function ContextMenu() {
       (asked.run.status === "failed" || asked.run.status === "cancelled")
     ) {
       const runId = asked.run.id;
-      items.push({ label: "Retry", action: () => void retryRun(runId) });
+      items.push({
+        label: t("editor:action.retry"),
+        action: () => void retryRun(runId),
+      });
     }
     if (targetNode) {
       const spec = (targetNode.data as { generation?: GenerationSpec })
         .generation;
       if (spec && spec.prompt.trim() !== "") {
         items.push({
-          label: "Copy prompt",
+          label: t("editor:menu.copyPrompt"),
           action: () => void copyPrompt(spec.prompt),
         });
       }
@@ -159,38 +167,47 @@ export function ContextMenu() {
       }
       if (canvas && filingPossible(targetNode)) {
         items.push({
-          label: "Save as material",
+          label: t("editor:menu.saveAsMaterial"),
           action: () => void fileNodeAsAsset(canvas.id, targetId),
         });
       }
     }
     items.push(
-      { label: "Rename", action: () => editor.startRenaming(targetId) },
-      { label: "Duplicate", action: () => void duplicateSelection() },
-      { label: "Copy", action: () => void copySelection() },
-      { label: "Cut", action: () => void cutSelection() },
       {
-        label: "Group",
+        label: t("editor:action.rename"),
+        action: () => editor.startRenaming(targetId),
+      },
+      {
+        label: t("editor:action.duplicate"),
+        action: () => void duplicateSelection(),
+      },
+      { label: t("editor:action.copy"), action: () => void copySelection() },
+      { label: t("editor:action.cut"), action: () => void cutSelection() },
+      {
+        label: t("editor:action.group"),
         disabled: selectedCount < 2,
         action: () => groupSelection(),
       },
       {
-        label: "Ungroup",
+        label: t("editor:action.ungroup"),
         disabled: targetNode?.kind !== "group",
         action: () => ungroupSelection(),
       },
-      { label: "Delete", action: () => deleteSelection() },
+      { label: t("editor:action.delete"), action: () => deleteSelection() },
     );
   } else if (menu.target.kind === "edge") {
-    items.push({ label: "Delete edge", action: () => deleteSelection() });
+    items.push({
+      label: t("editor:menu.deleteEdge"),
+      action: () => deleteSelection(),
+    });
   } else {
     const world = menu.target.world;
     items.push(
-      { label: "Paste here", action: () => void pasteAt(world) },
-      { label: "Select all", action: () => selectAll() },
-      { label: "Fit view", action: () => fitViewAction() },
+      { label: t("editor:menu.pasteHere"), action: () => void pasteAt(world) },
+      { label: t("editor:menu.selectAll"), action: () => selectAll() },
+      { label: t("editor:page.fitView"), action: () => fitViewAction() },
       {
-        label: "Add node",
+        label: t("editor:nodeMenu.title"),
         action: () => {
           editor.openNodeMenu({
             x: menu.x,
@@ -227,7 +244,7 @@ export function ContextMenu() {
 
   return (
     <div
-      aria-label="Context menu"
+      aria-label={t("editor:menu.contextMenu")}
       className="menu context-menu"
       onKeyDown={onKeyDown}
       ref={listRef}

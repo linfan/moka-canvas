@@ -44,11 +44,11 @@ export interface NodeRun {
 
 /** How a run's state reads, wherever one is listed. */
 export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  cancelled: "Cancelled",
+  queued: "editor:run.queued",
+  running: "editor:run.running",
+  succeeded: "editor:run.succeeded",
+  failed: "editor:run.failed",
+  cancelled: "editor:run.cancelled",
 };
 
 /**
@@ -160,7 +160,7 @@ async function announceFiling(run: RunRecord, adopted: Promise<void> | null) {
     : [];
   const app = useAppStore.getState();
   if (filed.length === 0) {
-    app.pushToast("success", "Run finished");
+    app.pushToast("success", i18n.t("editor:run.finished"));
     return;
   }
   const named = filed
@@ -169,10 +169,14 @@ async function announceFiling(run: RunRecord, adopted: Promise<void> | null) {
         `${i18n.t(ASSET_CATEGORY_LABELS[shelf])} (${count})`,
     )
     .join(", ");
-  app.pushToast("success", `Filed under ${named}`, {
-    label: "Show assets",
-    go: () => useEditorStore.getState().setLeftPanelTab("assets"),
-  });
+  app.pushToast(
+    "success",
+    i18n.t("editor:run.filedUnder", { shelves: named }),
+    {
+      label: i18n.t("editor:run.showAssets"),
+      go: () => useEditorStore.getState().setLeftPanelTab("assets"),
+    },
+  );
 }
 
 export const useRunStore = create<RunState>()((set, get) => {
@@ -226,7 +230,9 @@ export const useRunStore = create<RunState>()((set, get) => {
         .getState()
         .pushToast(
           "error",
-          failed === 1 ? "Run did not finish" : `${failed} runs did not finish`,
+          failed === 1
+            ? i18n.t("editor:run.didNotFinishOne")
+            : i18n.t("editor:run.didNotFinishMany", { count: failed }),
         );
     }
     for (const run of succeeded) void announceFiling(run, adopted);
@@ -244,7 +250,9 @@ export const useRunStore = create<RunState>()((set, get) => {
       stopPolling();
       set({
         error:
-          error instanceof Error ? error.message : "Failed to load run history",
+          error instanceof Error
+            ? error.message
+            : i18n.t("editor:run.loadHistoryFailed"),
       });
     }
   };
@@ -300,7 +308,7 @@ export const useRunStore = create<RunState>()((set, get) => {
           error:
             error instanceof Error
               ? error.message
-              : "Failed to load run history",
+              : i18n.t("editor:run.loadHistoryFailed"),
         });
       }
     },
@@ -336,7 +344,10 @@ export const useRunStore = create<RunState>()((set, get) => {
       } catch (error) {
         // The record still coming in from the poll says which of the two it was.
         set({
-          error: error instanceof Error ? error.message : "Cancel failed",
+          error:
+            error instanceof Error
+              ? error.message
+              : i18n.t("editor:run.cancelFailed"),
         });
       }
     },
@@ -595,7 +606,9 @@ export async function retryRun(runId: RunId) {
       .getState()
       .pushToast(
         "error",
-        error instanceof Error ? error.message : "Retry failed",
+        error instanceof Error
+          ? error.message
+          : i18n.t("editor:run.retryFailed"),
       );
   }
 }

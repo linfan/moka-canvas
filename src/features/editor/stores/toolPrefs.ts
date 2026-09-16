@@ -55,12 +55,12 @@ export function isPictureTool(entry: BarEntry): entry is PictureTool {
  * model that can actually add detail is offered beside it.
  */
 export const TOOL_LABELS: Record<BarEntry, string> = {
-  crop: "Crop",
-  split: "Split",
-  resize: "Resample",
-  tilt: "Tilt",
-  repaint: "Repaint",
-  describe: "Describe",
+  crop: "editor:tool.crop",
+  split: "editor:tool.split",
+  resize: "editor:tool.resize",
+  tilt: "editor:tool.tilt",
+  repaint: "editor:tool.repaint",
+  describe: "editor:tool.describe",
 };
 
 /** The ratios the crop field offers before anything is typed into it. */

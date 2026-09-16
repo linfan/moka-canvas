@@ -14,6 +14,7 @@ import {
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { mentionToken } from "../canvas/mentions";
 
 /**
@@ -91,8 +92,12 @@ export async function writeFragment(fragment: CanvasFragment): Promise<void> {
   const payload = JSON.stringify(fragment);
   const summary =
     fragment.nodes.length === 1
-      ? `Node: ${fragment.nodes[0].title}`
-      : `${fragment.nodes.length} canvas nodes`;
+      ? i18n.t("editor:stores.clipboardNodeSummary", {
+          name: fragment.nodes[0].title,
+        })
+      : i18n.t("editor:stores.clipboardFragmentSummary", {
+          count: fragment.nodes.length,
+        });
   try {
     await navigator.clipboard.writeText(`${summary}\n${payload}`);
   } catch {

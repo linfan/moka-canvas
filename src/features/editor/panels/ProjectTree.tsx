@@ -236,6 +236,7 @@ function Row({
   maxLength: number;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   const key = keyOf(target);
   const renaming = api.renaming !== null && keyOf(api.renaming) === key;
   // Words between the names, since a row dressed in "tree-rowis-active" wears
@@ -253,7 +254,11 @@ function Row({
     <div className={classes} {...dragProps(api, target, drag)}>
       {caret ? (
         <button
-          aria-label={`${open ? "Fold" : "Open"} ${label}`}
+          aria-label={
+            open
+              ? t("editor:tree.fold", { name: label })
+              : t("editor:tree.openRow", { name: label })
+          }
           className="tree-caret"
           onClick={() => api.toggle(key)}
           type="button"
@@ -271,7 +276,7 @@ function Row({
       {renaming ? (
         <RenameField
           api={api}
-          label={`Rename ${label}`}
+          label={t("editor:tree.renameField", { name: label })}
           maxLength={maxLength}
         />
       ) : (
@@ -309,6 +314,7 @@ function Branch({
   /** Whether this is the tree itself rather than a level inside it. */
   root?: boolean;
 }) {
+  const { t } = useTranslation();
   const folders = childFolders(api.moka, parentId);
   const canvases = folderCanvases(api.moka, parentId);
   return (
@@ -378,7 +384,7 @@ function Branch({
       })}
       {folders.length === 0 && canvases.length === 0 && depth > 1 && (
         <li className="tree-empty" role="presentation">
-          Nothing in here yet
+          {t("editor:tree.nothingInHere")}
         </li>
       )}
     </ul>
@@ -452,8 +458,9 @@ function BoardBranch({
                 ))}
                 {entries.length === 0 && (
                   <li className="tree-empty" role="presentation">
-                    No {t(CAPABILITY_LABELS[capability]).toLowerCase()} on this
-                    board
+                    {t("editor:tree.noKindOnBoard", {
+                      kind: t(CAPABILITY_LABELS[capability]).toLowerCase(),
+                    })}
                   </li>
                 )}
               </ul>
@@ -489,6 +496,7 @@ function AssetRow({
   uses: number;
   depth: number;
 }) {
+  const { t } = useTranslation();
   const openPreview = useEditorStore((state) => state.openPreview);
   const shelf = shelfOf(entry);
   const target: TreeTarget = {
@@ -507,7 +515,11 @@ function AssetRow({
           event.dataTransfer.setData(ASSET_DRAG_MIME, entry.id);
           event.dataTransfer.effectAllowed = "copy";
         }}
-        title={uses === 1 ? "1 card holds it" : `${uses} cards hold it`}
+        title={
+          uses === 1
+            ? t("editor:tree.cardHoldsOne")
+            : t("editor:tree.cardHoldsMany", { count: uses })
+        }
       >
         <span aria-hidden="true" className="tree-caret is-blank" />
         <span aria-hidden="true" className="tree-glyph">
@@ -530,12 +542,12 @@ function AssetRow({
           {entry.name}
         </button>
         <button
-          aria-label={`Preview ${entry.name}`}
+          aria-label={t("editor:tree.preview", { name: entry.name })}
           className="tree-peek"
           onClick={() => openPreview(entry.id)}
           type="button"
         >
-          View
+          {t("editor:action.view")}
         </button>
       </div>
     </li>
@@ -569,6 +581,7 @@ function TreeMenu({
   /** Called once the menu is finished with, before the item asked for. */
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const { ref, pos } = useClampedMenuPosition(x, y);
 
   useEffect(() => {
@@ -594,7 +607,7 @@ function TreeMenu({
 
   return (
     <div
-      aria-label="Canvas tree menu"
+      aria-label={t("editor:tree.menu")}
       className="menu tree-menu"
       ref={ref}
       role="menu"
@@ -804,14 +817,14 @@ export function ProjectTree() {
     const offers: MenuItem[] = [];
     if (moka && !atCanvasLimit(moka, ceiling)) {
       offers.push({
-        title: "New here",
-        label: "New canvas",
+        title: t("editor:tree.newHere"),
+        label: t("editor:tree.newCanvas"),
         action: () => createCanvas(parentId),
       });
     }
     offers.push({
-      title: offers.length === 0 ? "New here" : undefined,
-      label: "New folder",
+      title: offers.length === 0 ? t("editor:tree.newHere") : undefined,
+      label: t("editor:tree.newFolder"),
       action: () => createFolderIn(parentId),
     });
     return offers;
@@ -840,15 +853,17 @@ export function ProjectTree() {
       const held = boardsInFolder(moka, id);
       items.push(
         {
-          title: "This folder",
-          label: "Rename",
+          title: t("editor:tree.thisFolder"),
+          label: t("editor:action.rename"),
           action: () => startRename(target),
         },
         {
           label:
             held > 0
-              ? `Delete (moves ${held} ${held === 1 ? "canvas" : "canvases"} up)`
-              : "Delete",
+              ? held === 1
+                ? t("editor:tree.deleteMovesOne")
+                : t("editor:tree.deleteMovesMany", { count: held })
+              : t("editor:action.delete"),
           danger: true,
           action: () => removeFolder(id),
         },
@@ -857,34 +872,47 @@ export function ProjectTree() {
     if (target.kind === "canvas") {
       const id = target.id;
       items.push(
-        { title: "This canvas", label: "Open", action: () => openCanvas(id) },
-        { label: "Rename", action: () => startRename(target) },
-        { label: "Close tab", action: () => closeCanvas(id) },
-        { label: "Delete", danger: true, action: () => removeCanvas(id) },
+        {
+          title: t("editor:tree.thisCanvas"),
+          label: t("editor:action.open"),
+          action: () => openCanvas(id),
+        },
+        { label: t("editor:action.rename"), action: () => startRename(target) },
+        { label: t("editor:tree.closeTab"), action: () => closeCanvas(id) },
+        {
+          label: t("editor:action.delete"),
+          danger: true,
+          action: () => removeCanvas(id),
+        },
       );
     }
     if (target.kind === "branch") {
       const { canvasId, capability } = target;
       items.push(
         {
-          title: `The ${t(CAPABILITY_LABELS[capability]).toLowerCase()} this board uses`,
-          label: "Show in assets",
+          title: t("editor:tree.usesKind", {
+            kind: t(CAPABILITY_LABELS[capability]).toLowerCase(),
+          }),
+          label: t("editor:action.showInAssets"),
           action: () => useEditorStore.getState().setAssetKind(capability),
         },
-        { label: "Open this canvas", action: () => openCanvas(canvasId) },
+        {
+          label: t("editor:tree.openThisCanvas"),
+          action: () => openCanvas(canvasId),
+        },
       );
     }
     if (target.kind === "asset") {
       const { id, canvasId, capability } = target;
       items.push(
         {
-          title: "This file",
-          label: "Show in assets",
+          title: t("editor:tree.thisFile"),
+          label: t("editor:action.showInAssets"),
           action: () =>
             useEditorStore.getState().showAssetOnShelf(id, capability),
         },
         {
-          label: "Select the cards using it",
+          label: t("editor:tree.selectCardsUsingIt"),
           action: () => {
             const canvas = moka.canvas.find((held) => held.id === canvasId);
             const nodes = canvas ? canvasNodesUsing(canvas, id) : [];
@@ -937,24 +965,24 @@ export function ProjectTree() {
       <div className="side-tree-head">
         <span className="side-tree-new">
           <button
-            aria-label="New canvas at the top level"
+            aria-label={t("editor:tree.newCanvasTopLevel")}
             disabled={atCanvasLimit(moka, ceiling)}
             onClick={() => createCanvas(null)}
             title={
               atCanvasLimit(moka, ceiling)
-                ? `A project holds at most ${ceiling} canvases`
-                : "New canvas at the top level"
+                ? t("editor:tree.canvasCeiling", { count: ceiling })
+                : t("editor:tree.newCanvasTopLevel")
             }
             type="button"
           >
-            + Canvas
+            {t("editor:tree.addCanvas")}
           </button>
           <button
-            aria-label="New folder at the top level"
+            aria-label={t("editor:tree.newFolderTopLevel")}
             onClick={() => createFolderIn(null)}
             type="button"
           >
-            + Folder
+            {t("editor:tree.addFolder")}
           </button>
         </span>
       </div>
@@ -966,7 +994,7 @@ export function ProjectTree() {
       >
         <Branch api={api} depth={1} parentId={null} root />
         {moka.canvas.length === 0 && (
-          <p className="inspector-empty">No canvases yet — add one to start.</p>
+          <p className="inspector-empty">{t("editor:tree.empty")}</p>
         )}
       </div>
       {menu && (

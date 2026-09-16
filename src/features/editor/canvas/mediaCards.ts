@@ -7,6 +7,7 @@ import type {
   WorkflowNode,
 } from "../../../shared/domain";
 import { assetUrl } from "../../../api";
+import { i18n } from "../../../shared/i18n";
 
 export type MediaState = "ready" | "missing" | "changed" | "empty";
 
@@ -80,7 +81,7 @@ const MENTION_STAND_IN = "@ref";
 
 /** The identifier a node names its model by, or the default label. */
 function modelAlias(model: string): string {
-  return model.trim() || "Default model";
+  return model.trim() || i18n.t("editor:canvas.defaultModel");
 }
 
 /**
@@ -123,7 +124,7 @@ export function mediaInfoForNode(
   if (issue || !entry) {
     return {
       state: issue ?? "missing",
-      label: entry?.name ?? "Missing asset",
+      label: entry?.name ?? i18n.t("editor:canvas.missingAsset"),
       entry,
     };
   }

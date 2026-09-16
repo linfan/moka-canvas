@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { findNode, generationCapabilityFor } from "../../../shared/domain";
 import type { WorkflowNode } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { redo, undo } from "../commands/execute";
 import { cancelGesture, zoomBy, zoomReset } from "../canvas/canvasControl";
 import { useEditorStore } from "../stores/editorStore";
@@ -63,67 +64,72 @@ export interface ShortcutGroup {
  */
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
-    title: "Editing",
+    title: "editor:shortcuts.groupEditing",
     rows: [
-      { label: "Undo", chords: [["Mod", "Z"]] },
+      { label: "editor:shortcuts.undo", chords: [["Mod", "Z"]] },
       {
-        label: "Redo",
+        label: "editor:shortcuts.redo",
         chords: [
           ["Shift", "Mod", "Z"],
           ["Mod", "Y"],
         ],
       },
-      { label: "Select all", chords: [["Mod", "A"]] },
-      { label: "Copy", chords: [["Mod", "C"]] },
-      { label: "Cut", chords: [["Mod", "X"]] },
-      { label: "Paste", chords: [["Mod", "V"]] },
-      { label: "Duplicate", chords: [["Mod", "D"]] },
+      { label: "editor:shortcuts.selectAll", chords: [["Mod", "A"]] },
+      { label: "editor:shortcuts.copy", chords: [["Mod", "C"]] },
+      { label: "editor:shortcuts.cut", chords: [["Mod", "X"]] },
+      { label: "editor:shortcuts.paste", chords: [["Mod", "V"]] },
+      { label: "editor:shortcuts.duplicate", chords: [["Mod", "D"]] },
       {
-        label: "Delete the selection",
+        label: "editor:shortcuts.deleteSelection",
         chords: [["Delete"], ["Backspace"]],
       },
-      { label: "Edit the words, ask the node, or rename", chords: [["Enter"]] },
       {
-        label: "Close what is open, or clear the selection",
+        label: "editor:shortcuts.editOrAsk",
+        chords: [["Enter"]],
+      },
+      {
+        label: "editor:shortcuts.closeOrClear",
         chords: [["Escape"]],
       },
     ],
   },
   {
-    title: "Selection",
+    title: "editor:shortcuts.groupSelection",
     rows: [
-      { label: "Group", chords: [["Mod", "G"]] },
-      { label: "Ungroup", chords: [["Shift", "Mod", "G"]] },
+      { label: "editor:shortcuts.group", chords: [["Mod", "G"]] },
+      { label: "editor:shortcuts.ungroup", chords: [["Shift", "Mod", "G"]] },
     ],
   },
   {
-    title: "View",
+    title: "editor:shortcuts.groupView",
     rows: [
-      { label: "Zoom in", chords: [["Mod", "="]] },
-      { label: "Zoom out", chords: [["Mod", "-"]] },
-      { label: "Actual size", chords: [["Mod", "0"]] },
-      { label: "Fit everything", chords: [["Mod", "1"]] },
-      { label: "Fit the selection", chords: [["Shift", "Mod", "1"]] },
+      { label: "editor:shortcuts.zoomIn", chords: [["Mod", "="]] },
+      { label: "editor:shortcuts.zoomOut", chords: [["Mod", "-"]] },
+      { label: "editor:shortcuts.actualSize", chords: [["Mod", "0"]] },
+      { label: "editor:shortcuts.fitEverything", chords: [["Mod", "1"]] },
       {
-        label: "Pan while held",
+        label: "editor:shortcuts.fitSelection",
+        chords: [["Shift", "Mod", "1"]],
+      },
+      {
+        label: "editor:shortcuts.panWhileHeld",
         chords: [["Space"]],
       },
       {
-        label:
-          "The other tool while held: pan while choosing, choose while panning",
+        label: "editor:shortcuts.otherToolWhileHeld",
         chords: [["Ctrl"]],
       },
       {
-        label: "The second action: pan while choosing, choose while panning",
+        label: "editor:shortcuts.secondAction",
         chords: [["Middle-drag"], ["Three-finger drag"]],
       },
-      { label: "Select tool", chords: [["V"]] },
-      { label: "Pan tool", chords: [["H"]] },
+      { label: "editor:shortcuts.selectTool", chords: [["V"]] },
+      { label: "editor:shortcuts.panTool", chords: [["H"]] },
     ],
   },
   {
-    title: "Help",
-    rows: [{ label: "Keyboard shortcuts", chords: [["?"]] }],
+    title: "editor:shortcuts.groupHelp",
+    rows: [{ label: "editor:shortcuts.keyboardShortcuts", chords: [["?"]] }],
   },
 ];
 
@@ -200,7 +206,7 @@ export function useEditorKeyboard() {
           cancelGesture();
         } else {
           editor.clearSelection();
-          editor.announce("Nothing selected");
+          editor.announce(i18n.t("editor:interactions.nothingSelected"));
         }
         return;
       }

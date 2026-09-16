@@ -17,6 +17,7 @@ import { useOpenCanvases } from "../stores/openCanvases";
 import { useProjectStore, nextCanvasName } from "../stores/projectStore";
 import { runsInFlight } from "../stores/runStore";
 import { execute, historyBoundary } from "../commands/execute";
+import { i18n } from "../../../shared/i18n";
 
 /**
  * What can be done to the canvas tree: the boards a project has, the folders
@@ -51,14 +52,19 @@ export function openCanvas(canvasId: CanvasId): void {
     (canvas) => canvas.id === project.activeCanvasId,
   );
   project.switchCanvas(canvasId);
-  historyBoundary(`Switch to ${target.name}`);
+  historyBoundary(i18n.t("editor:history.switchTo", { name: target.name }));
   if (going > 0 && left) {
-    useAppStore
-      .getState()
-      .pushToast(
-        "info",
-        `${going} ${going === 1 ? "generation is" : "generations are"} still running on ${left.name}`,
-      );
+    useAppStore.getState().pushToast(
+      "info",
+      going === 1
+        ? i18n.t("editor:interactions.runningOnCanvasOne", {
+            name: left.name,
+          })
+        : i18n.t("editor:interactions.runningOnCanvasMany", {
+            count: going,
+            name: left.name,
+          }),
+    );
   }
 }
 
@@ -119,12 +125,15 @@ export function createCanvas(folderId: FolderId | null): CanvasId | null {
   if (atCanvasLimit(moka)) {
     useAppStore
       .getState()
-      .pushToast("info", `A project holds at most ${canvasLimit()} canvases`);
+      .pushToast(
+        "info",
+        i18n.t("editor:tree.canvasCeiling", { count: canvasLimit() }),
+      );
     return null;
   }
   const canvas = emptyCanvas(newId(), nextCanvasName(moka));
   const placed = folderId ? { ...canvas, folderId } : canvas;
-  const applied = execute("Add canvas", [
+  const applied = execute(i18n.t("editor:history.addCanvas"), [
     { type: "addCanvas", canvas: placed },
   ]);
   if (!applied) return null;
@@ -137,7 +146,9 @@ export function createFolderIn(parentId: FolderId | null): FolderId | null {
   const moka = useProjectStore.getState().moka;
   if (!moka) return null;
   const folder = createFolder(nextFolderName(moka, parentId), parentId);
-  const applied = execute("Add folder", [{ type: "addFolder", folder }]);
+  const applied = execute(i18n.t("editor:history.addFolder"), [
+    { type: "addFolder", folder },
+  ]);
   return applied ? folder.id : null;
 }
 
@@ -146,7 +157,9 @@ export function renameCanvas(canvasId: CanvasId, name: string): void {
   const moka = useProjectStore.getState().moka;
   const current = moka?.canvas.find((canvas) => canvas.id === canvasId);
   if (!trimmed || !current || trimmed === current.name) return;
-  execute("Rename canvas", [{ type: "renameCanvas", canvasId, name: trimmed }]);
+  execute(i18n.t("editor:history.renameCanvas"), [
+    { type: "renameCanvas", canvasId, name: trimmed },
+  ]);
 }
 
 export function renameFolder(folderId: FolderId, name: string): void {
@@ -156,7 +169,9 @@ export function renameFolder(folderId: FolderId, name: string): void {
     (folder) => folder.id === folderId,
   );
   if (!trimmed || !current || trimmed === current.name) return;
-  execute("Rename folder", [{ type: "renameFolder", folderId, name: trimmed }]);
+  execute(i18n.t("editor:history.renameFolder"), [
+    { type: "renameFolder", folderId, name: trimmed },
+  ]);
 }
 
 /** How many boards a folder holds, counting the folders inside it. */
@@ -181,20 +196,21 @@ export function removeCanvas(canvasId: CanvasId): void {
   const canvas = moka?.canvas.find((item) => item.id === canvasId);
   if (!moka || !canvas) return;
   if (moka.canvas.length <= 1) {
-    useAppStore
-      .getState()
-      .pushToast("info", "The last canvas cannot be removed");
+    useAppStore.getState().pushToast("info", i18n.t("editor:tree.lastCanvas"));
     return;
   }
   if (
     canvas.nodes.length > 0 &&
     !window.confirm(
-      `Delete “${canvas.name}” and its ${canvas.nodes.length} nodes?`,
+      i18n.t("editor:tree.confirmDeleteCanvas", {
+        name: canvas.name,
+        count: canvas.nodes.length,
+      }),
     )
   ) {
     return;
   }
-  const applied = execute("Delete canvas", [
+  const applied = execute(i18n.t("editor:history.deleteCanvas"), [
     { type: "removeCanvas", canvasId },
   ]);
   if (!applied) return;
@@ -237,14 +253,19 @@ export function removeFolder(folderId: FolderId): void {
   if (
     boards > 0 &&
     !window.confirm(
-      `Delete “${folder.name}” and move the ${boards} ${
-        boards === 1 ? "canvas" : "canvases"
-      } it holds up beside it?`,
+      boards === 1
+        ? i18n.t("editor:tree.confirmDeleteFolderOne", { name: folder.name })
+        : i18n.t("editor:tree.confirmDeleteFolderMany", {
+            name: folder.name,
+            count: boards,
+          }),
     )
   ) {
     return;
   }
-  execute("Delete folder", [{ type: "removeFolder", folderId }]);
+  execute(i18n.t("editor:history.deleteFolder"), [
+    { type: "removeFolder", folderId },
+  ]);
 }
 
 /** Files a board in a folder at the place it was let go. */
@@ -253,7 +274,9 @@ export function moveCanvasTo(
   folderId: FolderId | null,
   index: number,
 ): void {
-  execute("Move canvas", [{ type: "moveCanvas", canvasId, folderId, index }]);
+  execute(i18n.t("editor:history.moveCanvas"), [
+    { type: "moveCanvas", canvasId, folderId, index },
+  ]);
 }
 
 /** Files a folder in another at the place it was let go. */
@@ -262,7 +285,9 @@ export function moveFolderTo(
   parentId: FolderId | null,
   index: number,
 ): void {
-  execute("Move folder", [{ type: "moveFolder", folderId, parentId, index }]);
+  execute(i18n.t("editor:history.moveFolder"), [
+    { type: "moveFolder", folderId, parentId, index },
+  ]);
 }
 
 /** What is being dragged about the tree. */

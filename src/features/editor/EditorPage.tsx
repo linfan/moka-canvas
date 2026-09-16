@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { isApiError, projectsApi } from "../../api";
 import { unreferencedAssets, type MokaFile } from "../../shared/domain";
 import { CanvasSurface } from "./canvas/CanvasSurface";
@@ -69,6 +70,7 @@ function countLeftBehind(moka: MokaFile | null): LeftBehind {
 }
 
 export function EditorPage() {
+  const { t } = useTranslation();
   const saveStatus = useProjectStore((state) => state.saveStatus);
   const activeCanvas = useActiveCanvas();
   const liveZoom = useEditorStore((state) => state.camera?.zoom);
@@ -154,9 +156,8 @@ export function EditorPage() {
         setCloseBusy(null);
         setCloseError(
           after.saveStatus === "conflicted"
-            ? "Saving is blocked by a revision conflict — reload the project or discard your changes."
-            : (after.saveError ??
-                "Saving failed — try again or discard your changes."),
+            ? t("editor:page.saveConflict")
+            : (after.saveError ?? t("editor:page.saveFailed")),
         );
         return;
       }
@@ -186,14 +187,18 @@ export function EditorPage() {
       });
       setExportBlock(null);
       setExportOpen(false);
-      useAppStore
-        .getState()
-        .pushToast(
-          "success",
-          report.incomplete
-            ? `Exported ${report.entries} files (flagged incomplete) to ${report.destination}`
-            : `Exported ${report.entries} files to ${report.destination}`,
-        );
+      useAppStore.getState().pushToast(
+        "success",
+        report.incomplete
+          ? t("editor:page.exportedIncomplete", {
+              count: report.entries,
+              destination: report.destination,
+            })
+          : t("editor:page.exported", {
+              count: report.entries,
+              destination: report.destination,
+            }),
+      );
       if (exportThenClose) finishClose();
     } catch (error) {
       if (!allowIncomplete && isApiError(error, "ASSET_MISSING")) {
@@ -205,7 +210,9 @@ export function EditorPage() {
           .getState()
           .pushToast(
             "error",
-            error instanceof Error ? error.message : "Export failed",
+            error instanceof Error
+              ? error.message
+              : t("editor:page.exportFailed"),
           );
       }
     } finally {
@@ -271,8 +278,11 @@ export function EditorPage() {
           <RunHint />
           <p className="editor-canvas-hint">
             {activeCanvas
-              ? `${activeCanvas.nodes.length} nodes · ${activeCanvas.edges.length} edges`
-              : "No canvas"}
+              ? t("editor:counts.nodesEdges", {
+                  nodes: activeCanvas.nodes.length,
+                  edges: activeCanvas.edges.length,
+                })
+              : t("editor:page.noCanvas")}
           </p>
         </main>
         {!rightFolded && <PanelResizer side="right" />}
@@ -320,64 +330,72 @@ export function EditorPage() {
         {/* One switch with two ends rather than two buttons to press: the
             thumb slides to the tool being held, and each end says what it is
             with the mark of the thing it does. */}
-        <div aria-label="Tool" className="tool-switch" role="group">
+        <div
+          aria-label={t("editor:page.toolGroup")}
+          className="tool-switch"
+          role="group"
+        >
           <span
             aria-hidden="true"
             className="tool-switch-thumb"
             data-tool={tool}
           />
           <button
-            aria-label="Select tool"
+            aria-label={t("editor:page.selectTool")}
             aria-pressed={tool === "select"}
             className={tool === "select" ? "is-active" : ""}
             data-testid="tool-select"
             onClick={() => useEditorStore.getState().setTool("select")}
-            title="Select (V) — drag on empty canvas to choose"
+            title={t("editor:page.selectToolHint")}
             type="button"
           >
             <ArrowIcon />
           </button>
           <button
-            aria-label="Pan tool"
+            aria-label={t("editor:page.panTool")}
             aria-pressed={tool === "pan"}
             className={tool === "pan" ? "is-active" : ""}
             data-testid="tool-pan"
             onClick={() => useEditorStore.getState().setTool("pan")}
-            title="Pan (H) — drag to move the canvas"
+            title={t("editor:page.panToolHint")}
             type="button"
           >
             <HandIcon />
           </button>
         </div>
-        <div aria-label="Zoom" className="tool-group" role="group">
+        <div
+          aria-label={t("editor:page.zoomGroup")}
+          className="tool-group"
+          role="group"
+        >
           <button
-            aria-label="Fit view"
+            aria-label={t("editor:page.fitView")}
             data-testid="zoom-fit"
             onClick={() => fitViewAction()}
-            title="Fit everything in the view"
+            title={t("editor:page.fitViewHint")}
             type="button"
           >
             <FitIcon />
           </button>
           <button
-            aria-label="Zoom to selection"
+            aria-label={t("editor:page.zoomToSelection")}
             data-testid="zoom-selection"
             disabled={selectedCount === 0}
             onClick={() => fitSelectionAction()}
-            title="Fit the selection in the view"
+            title={t("editor:page.zoomToSelectionHint")}
             type="button"
           >
             <SelectionIcon />
           </button>
           <button
-            aria-label="Zoom to 100 percent"
+            aria-label={t("editor:page.zoomTo100")}
             onClick={() => zoomReset()}
             type="button"
           >
             100%
           </button>
           <input
-            aria-label="Zoom"
+            aria-label={t("editor:page.zoomGroup")}
             className="zoom-slider"
             max={500}
             min={5}

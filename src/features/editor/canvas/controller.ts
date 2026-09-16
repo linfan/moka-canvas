@@ -28,6 +28,7 @@ import {
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import type { ActiveGesture, PortRef, Selection } from "../stores/editorStore";
 import type { NodeRunView } from "../stores/runStore";
 import {
@@ -513,7 +514,7 @@ export class LeaferEditorController {
   async renderSnapshot(): Promise<Blob> {
     const leafer = this.leafer;
     if (!leafer || this.nodeViews.size === 0) {
-      throw new Error("There is nothing to export yet");
+      throw new Error(i18n.t("editor:canvas.nothingToExport"));
     }
     // Bounds are read from the views themselves so that everything drawn —
     // strokes, shadows, run badges — fits inside the picture.
@@ -531,7 +532,7 @@ export class LeaferEditorController {
       Math.max(...boxes.map((box) => box.y + box.height)) - top,
     );
     if (width < 1 || height < 1) {
-      throw new Error("There is nothing to export yet");
+      throw new Error(i18n.t("editor:canvas.nothingToExport"));
     }
 
     // One picture rather than tiles: the density gives way as the diagram
@@ -577,7 +578,7 @@ export class LeaferEditorController {
       hidden.forEach((leaf, index) => (leaf.visible = wasVisible[index]));
       canvas.destroy();
     }
-    if (!blob) throw new Error("The browser could not encode the image");
+    if (!blob) throw new Error(i18n.t("editor:canvas.encodeFailed"));
     return blob;
   }
 

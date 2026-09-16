@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useOpenCanvases } from "../stores/openCanvases";
 import { useProjectStore } from "../stores/projectStore";
 import {
@@ -22,6 +23,7 @@ import {
  * the other meant.
  */
 export function CanvasTabs() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeCanvasId = useProjectStore((state) => state.activeCanvasId);
   const openIds = useOpenCanvases((state) => state.ids);
@@ -41,7 +43,10 @@ export function CanvasTabs() {
   const open = moka.canvas.filter((canvas) => openIds.includes(canvas.id));
 
   return (
-    <nav aria-label="Open canvases" className="canvas-tabs">
+    <nav
+      aria-label={t("editor:canvasTabs.openCanvases")}
+      className="canvas-tabs"
+    >
       {open.map((canvas) => (
         <span
           className={`canvas-tab${
@@ -52,18 +57,23 @@ export function CanvasTabs() {
           <button
             data-testid={`canvas-tab-${canvas.name}`}
             onClick={() => openCanvas(canvas.id)}
-            title={`${canvas.nodes.length} nodes · ${canvas.edges.length} edges`}
+            title={t("editor:counts.nodesEdges", {
+              nodes: canvas.nodes.length,
+              edges: canvas.edges.length,
+            })}
             type="button"
           >
             {canvas.name}
           </button>
           {open.length > 1 && (
             <button
-              aria-label={`Close ${canvas.name}`}
+              aria-label={t("editor:canvasTabs.closeAria", {
+                name: canvas.name,
+              })}
               className="canvas-tab-close"
               data-testid={`canvas-tab-close-${canvas.name}`}
               onClick={() => closeCanvas(canvas.id)}
-              title="Close this canvas — it stays in the project"
+              title={t("editor:canvasTabs.closeHint")}
               type="button"
             >
               ×
@@ -73,9 +83,9 @@ export function CanvasTabs() {
       ))}
       <span
         className="canvas-tabs-hint"
-        title="Open a canvas from the project tree"
+        title={t("editor:canvasTabs.openHint")}
       >
-        {moka.canvas.length} in project
+        {t("editor:counts.inProject", { count: moka.canvas.length })}
       </span>
     </nav>
   );

@@ -37,6 +37,7 @@ import {
   type PictureToolParams,
   type ToolReport,
 } from "../../../api/tools";
+import { i18n } from "../../../shared/i18n";
 import { useAppStore } from "../stores/appStore";
 import {
   useEditorStore,
@@ -71,6 +72,13 @@ function toastError(message: string) {
 function announce(message: string) {
   useEditorStore.getState().announce(message);
 }
+
+/** What each background mode is called, for the history entry it writes. */
+const BACKGROUND_LABEL_KEYS: Record<BackgroundMode, string> = {
+  dots: "editor:inspector.backgroundModeDots",
+  lines: "editor:inspector.backgroundModeLines",
+  blank: "editor:inspector.backgroundModeBlank",
+};
 
 /**
  * How far a new node sits from the point asked for: centred across it and a
@@ -221,13 +229,20 @@ export function selectNodeWithMembers(nodeId: NodeId, additive: boolean) {
 function announceSelection(canvas: CanvasDocument) {
   const selection = useEditorStore.getState().selection;
   if (selection.nodeIds.length === 0 && selection.edgeIds.length === 0) {
-    announce("Nothing selected");
+    announce(i18n.t("editor:interactions.nothingSelected"));
   } else if (selection.nodeIds.length === 1 && selection.edgeIds.length === 0) {
     const node = findNode(canvas, selection.nodeIds[0]);
-    announce(`Selected ${node?.title ?? "node"}`);
+    announce(
+      i18n.t("editor:interactions.selectedOne", {
+        name: node?.title ?? i18n.t("editor:interactions.selectedNode"),
+      }),
+    );
   } else {
     announce(
-      `Selected ${selection.nodeIds.length} nodes, ${selection.edgeIds.length} edges`,
+      i18n.t("editor:interactions.selectedMany", {
+        nodes: selection.nodeIds.length,
+        edges: selection.edgeIds.length,
+      }),
     );
   }
 }
@@ -239,7 +254,11 @@ export function selectAll() {
     nodeIds: canvas.nodes.map((node) => node.id),
     edgeIds: [],
   });
-  announce(`Selected all ${canvas.nodes.length} nodes`);
+  announce(
+    i18n.t("editor:interactions.selectedAll", {
+      count: canvas.nodes.length,
+    }),
+  );
 }
 
 export function deleteSelection() {
@@ -269,10 +288,13 @@ export function deleteSelection() {
   if (edgeIds.length > 0) {
     commands.push({ type: "removeEdges", canvasId: canvas.id, edgeIds });
   }
-  if (execute("Delete selection", commands)) {
+  if (execute(i18n.t("editor:history.deleteSelection"), commands)) {
     useEditorStore.getState().clearSelection();
     announce(
-      `Deleted ${selection.nodeIds.length} nodes, ${edgeIds.length} edges`,
+      i18n.t("editor:interactions.deleted", {
+        nodes: selection.nodeIds.length,
+        edges: edgeIds.length,
+      }),
     );
   }
 }
@@ -284,7 +306,9 @@ export async function copySelection(): Promise<void> {
   const fragment = buildFragment(canvas, selection.nodeIds);
   if (!fragment) return;
   await writeFragment(fragment);
-  announce(`Copied ${fragment.nodes.length} nodes`);
+  announce(
+    i18n.t("editor:interactions.copied", { count: fragment.nodes.length }),
+  );
 }
 
 export async function cutSelection(): Promise<void> {
@@ -314,16 +338,20 @@ function pasteFragment(fragment: CanvasFragment, anchor: Point) {
       (edge) => ({ type: "addEdge", canvasId: canvas.id, edge }) as const,
     ),
   ];
-  if (!execute("Paste", [...commands])) return;
+  if (!execute(i18n.t("editor:history.paste"), [...commands])) return;
   useEditorStore
     .getState()
     .setSelection({ nodeIds: nodes.map((node) => node.id), edgeIds: [] });
   if (missingAssets > 0) {
     toastError(
-      `${missingAssets} asset reference${missingAssets === 1 ? "" : "s"} missing in this project`,
+      missingAssets === 1
+        ? i18n.t("editor:interactions.pastedMissingOne")
+        : i18n.t("editor:interactions.pastedMissingMany", {
+            count: missingAssets,
+          }),
     );
   }
-  announce(`Pasted ${nodes.length} nodes`);
+  announce(i18n.t("editor:interactions.pasted", { count: nodes.length }));
 }
 
 /** Paste at a world point, falling back to the view center, then cascade. */
@@ -412,13 +440,19 @@ async function pasteImage(blob: Blob, anchor: Point) {
     });
     node.data = { ...node.data, assetId: change.entry.id };
     if (
-      execute("Paste image", [{ type: "addNode", canvasId: canvas.id, node }])
+      execute(i18n.t("editor:history.pasteImage"), [
+        { type: "addNode", canvasId: canvas.id, node },
+      ])
     ) {
       useEditorStore.getState().selectOnly(node.id);
-      announce("Pasted image");
+      announce(i18n.t("editor:interactions.pastedImage"));
     }
   } catch (error) {
-    toastError(error instanceof Error ? error.message : "Image paste failed");
+    toastError(
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.imagePasteFailed"),
+    );
   }
 }
 
@@ -443,7 +477,7 @@ export function groupSelection() {
     return node && node.kind !== "group";
   });
   if (members.length < 2) {
-    toastError("Select at least two nodes to group");
+    toastError(i18n.t("editor:interactions.groupNeedsTwo"));
     return;
   }
   const rects = members.map((nodeId) => findNode(canvas, nodeId)!.bounds);
@@ -468,11 +502,11 @@ export function groupSelection() {
       childNodeIds: members,
     },
   ];
-  if (execute("Group nodes", commands)) {
+  if (execute(i18n.t("editor:history.groupNodes"), commands)) {
     useEditorStore
       .getState()
       .setSelection({ nodeIds: [group.id, ...members], edgeIds: [] });
-    announce(`Grouped ${members.length} nodes`);
+    announce(i18n.t("editor:interactions.grouped", { count: members.length }));
   }
 }
 
@@ -496,11 +530,11 @@ export function ungroupSelection() {
       childNodeIds: [],
     });
   }
-  if (execute("Ungroup", commands)) {
+  if (execute(i18n.t("editor:history.ungroup"), commands)) {
     useEditorStore
       .getState()
       .setSelection({ nodeIds: formerMembers, edgeIds: [] });
-    announce("Ungrouped");
+    announce(i18n.t("editor:interactions.ungrouped"));
   }
 }
 
@@ -533,11 +567,23 @@ export function setCanvasViewSettings(patch: {
   }
   if (Object.keys(changed).length === 0) return;
   const said: string[] = [];
-  if (changed.background) said.push(`background to ${changed.background}`);
-  if (changed.showMinimap !== undefined) {
-    said.push(changed.showMinimap ? "the minimap up" : "the minimap away");
+  if (changed.background) {
+    said.push(
+      i18n.t("editor:history.backgroundTo", {
+        mode: i18n.t(BACKGROUND_LABEL_KEYS[changed.background]),
+      }),
+    );
   }
-  execute(`Canvas ${said.join(", ")}`, [
+  if (changed.showMinimap !== undefined) {
+    said.push(
+      i18n.t(
+        changed.showMinimap
+          ? "editor:history.minimapUp"
+          : "editor:history.minimapAway",
+      ),
+    );
+  }
+  execute(i18n.t("editor:history.canvas", { said: said.join(", ") }), [
     { type: "setCanvasSettings", canvasId: canvas.id, settings: changed },
   ]);
 }
@@ -593,8 +639,16 @@ export function alignNodes(edge: AlignEdge) {
   const commands: DocumentCommand[] = [
     { type: "moveNodes", canvasId: canvas.id, positions },
   ];
-  if (execute(`Align ${edge}`, commands)) {
-    announce(`Aligned ${nodes.length} nodes`);
+  const labels: Record<AlignEdge, string> = {
+    left: "editor:history.alignLeft",
+    center: "editor:history.alignCenter",
+    right: "editor:history.alignRight",
+    top: "editor:history.alignTop",
+    middle: "editor:history.alignMiddle",
+    bottom: "editor:history.alignBottom",
+  };
+  if (execute(i18n.t(labels[edge]), commands)) {
+    announce(i18n.t("editor:interactions.aligned", { count: nodes.length }));
   }
 }
 
@@ -631,8 +685,12 @@ export function distributeNodes(axis: ArrangeAxis) {
   const commands: DocumentCommand[] = [
     { type: "moveNodes", canvasId: canvas.id, positions },
   ];
-  if (execute(`Distribute ${axis}`, commands)) {
-    announce(`Spread ${nodes.length} nodes evenly`);
+  const label =
+    axis === "horizontal"
+      ? "editor:history.distributeHorizontal"
+      : "editor:history.distributeVertical";
+  if (execute(i18n.t(label), commands)) {
+    announce(i18n.t("editor:interactions.spread", { count: nodes.length }));
   }
 }
 
@@ -659,8 +717,19 @@ export function equalizeNodes(axis: SizeAxis) {
     });
   }
   if (commands.length === 0) return;
-  if (execute(`Same ${axis}`, commands)) {
-    announce(`Gave ${nodes.length} nodes the same ${axis}`);
+  const label =
+    axis === "width" ? "editor:history.sameWidth" : "editor:history.sameHeight";
+  if (execute(i18n.t(label), commands)) {
+    announce(
+      i18n.t("editor:interactions.sameSize", {
+        count: nodes.length,
+        axis: i18n.t(
+          axis === "width"
+            ? "editor:interactions.axisWidth"
+            : "editor:interactions.axisHeight",
+        ),
+      }),
+    );
   }
 }
 
@@ -689,7 +758,11 @@ export function connectPorts(source: PortRef, target: PortRef) {
       });
     } else {
       toastError(result.message);
-      announce(`Connection rejected: ${result.message}`);
+      announce(
+        i18n.t("editor:interactions.connectionRejected", {
+          message: result.message,
+        }),
+      );
       return;
     }
   }
@@ -698,10 +771,14 @@ export function connectPorts(source: PortRef, target: PortRef) {
     canvasId: canvas.id,
     edge: { id: newId(), source, target, createdAt: nowIso() },
   });
-  if (execute("Connect ports", commands)) {
-    const from = findNode(canvas, source.nodeId)?.title ?? "node";
-    const to = findNode(canvas, target.nodeId)?.title ?? "node";
-    announce(`Connected ${from} to ${to}`);
+  if (execute(i18n.t("editor:history.connectPorts"), commands)) {
+    const from =
+      findNode(canvas, source.nodeId)?.title ??
+      i18n.t("editor:interactions.connectedNodeFallback");
+    const to =
+      findNode(canvas, target.nodeId)?.title ??
+      i18n.t("editor:interactions.connectedNodeFallback");
+    announce(i18n.t("editor:interactions.connected", { from, to }));
   }
 }
 
@@ -727,11 +804,11 @@ export function disconnectEdge(edgeId: EdgeId) {
   const canvas = activeCanvas();
   if (!canvas) return;
   if (
-    execute("Disconnect", [
+    execute(i18n.t("editor:history.disconnect"), [
       { type: "removeEdges", canvasId: canvas.id, edgeIds: [edgeId] },
     ])
   ) {
-    announce("Disconnected input");
+    announce(i18n.t("editor:interactions.disconnectedInput"));
   }
 }
 
@@ -746,11 +823,11 @@ export function disconnectInput(nodeId: NodeId, portId: string) {
     .map((edge) => edge.id);
   if (edgeIds.length === 0) return;
   if (
-    execute("Disconnect input", [
+    execute(i18n.t("editor:history.disconnectInput"), [
       { type: "removeEdges", canvasId: canvas.id, edgeIds },
     ])
   ) {
-    announce("Disconnected input");
+    announce(i18n.t("editor:interactions.disconnectedInput"));
   }
 }
 
@@ -770,7 +847,11 @@ export function moveInput(edgeId: EdgeId, portId: string) {
   const result = validateEdgeCandidate(canvas, edge.source, target);
   if (!result.ok && result.code !== "CARDINALITY_VIOLATION") {
     toastError(result.message);
-    announce(`Connection rejected: ${result.message}`);
+    announce(
+      i18n.t("editor:interactions.connectionRejected", {
+        message: result.message,
+      }),
+    );
     return;
   }
   const leaving = canvas.edges
@@ -785,12 +866,12 @@ export function moveInput(edgeId: EdgeId, portId: string) {
     findNode(canvas, target.nodeId)?.ports.find((port) => port.id === portId)
       ?.label ?? portId;
   if (
-    execute("Move an input", [
+    execute(i18n.t("editor:history.moveAnInput"), [
       { type: "removeEdges", canvasId: canvas.id, edgeIds: leaving },
       { type: "addEdge", canvasId: canvas.id, edge: { ...edge, target } },
     ])
   ) {
-    announce(`Moved to ${label}`);
+    announce(i18n.t("editor:interactions.movedTo", { label }));
   }
 }
 
@@ -841,7 +922,7 @@ export function resolveInputPick(sourceNodeId: NodeId) {
       return;
     }
   }
-  toastError("That node has no compatible output");
+  toastError(i18n.t("editor:interactions.noCompatibleOutput"));
 }
 
 /** Nodes across every canvas that reference the asset. */
@@ -896,11 +977,13 @@ export function focusNodes(nodeIds: NodeId[]): void {
 export function focusAssetUses(nodeIds: NodeId[]): void {
   if (nodeIds.length === 0) return;
   focusNodes(nodeIds);
-  useEditorStore
-    .getState()
-    .announce(
-      `Selected ${nodeIds.length} card${nodeIds.length === 1 ? "" : "s"} on this canvas using this asset`,
-    );
+  useEditorStore.getState().announce(
+    nodeIds.length === 1
+      ? i18n.t("editor:interactions.selectedCardsOne")
+      : i18n.t("editor:interactions.selectedCardsMany", {
+          count: nodeIds.length,
+        }),
+  );
 }
 
 /**
@@ -917,10 +1000,19 @@ export async function markAssetKeeper(
       revision: change.revision,
       updatedAt: change.updatedAt,
     });
-    announce(`${entry.name} ${keeper ? "is a keeper" : "is no keeper"}`);
+    announce(
+      i18n.t(
+        keeper
+          ? "editor:interactions.keeperOn"
+          : "editor:interactions.keeperOff",
+        { name: entry.name },
+      ),
+    );
   } catch (error) {
     toastError(
-      error instanceof Error ? error.message : "Could not write to the shelf",
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.shelfWriteFailed"),
     );
   }
 }
@@ -939,10 +1031,14 @@ export async function editShelfEntry(
       revision: change.revision,
       updatedAt: change.updatedAt,
     });
-    announce(`Refiled ${change.entry.name}`);
+    announce(
+      i18n.t("editor:interactions.refiled", { name: change.entry.name }),
+    );
   } catch (error) {
     toastError(
-      error instanceof Error ? error.message : "Could not write to the shelf",
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.shelfWriteFailed"),
     );
   }
 }
@@ -973,7 +1069,7 @@ export async function fileNodeAsAsset(
   try {
     await useProjectStore.getState().flush();
     if (useProjectStore.getState().pending.length > 0) {
-      toastError("Changes are still saving — try again in a moment");
+      toastError(i18n.t("editor:interactions.stillSaving"));
       return;
     }
     const filed = await assetsApi.fileNode(canvasId, nodeId);
@@ -983,12 +1079,16 @@ export async function fileNodeAsAsset(
     });
     announce(
       filed.created
-        ? `${filed.entry.name} saved to the shelf`
-        : `${filed.entry.name} is already on the shelf`,
+        ? i18n.t("editor:interactions.savedToShelf", { name: filed.entry.name })
+        : i18n.t("editor:interactions.alreadyOnShelf", {
+            name: filed.entry.name,
+          }),
     );
   } catch (error) {
     toastError(
-      error instanceof Error ? error.message : "Could not save to the shelf",
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.shelfSaveFailed"),
     );
   }
 }
@@ -1012,14 +1112,18 @@ async function removeAssetNow(assetId: string) {
     // pending edits (like the just-removed nodes) must land first.
     await useProjectStore.getState().flush();
     if (useProjectStore.getState().pending.length > 0) {
-      toastError("Changes are still saving — try again in a moment");
+      toastError(i18n.t("editor:interactions.stillSaving"));
       return;
     }
     const result = await assetsApi.remove(assetId);
     useProjectStore.getState().removeAssetEntry(assetId, result);
-    announce("Asset removed");
+    announce(i18n.t("editor:interactions.assetRemoved"));
   } catch (error) {
-    toastError(error instanceof Error ? error.message : "Delete failed");
+    toastError(
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.deleteFailed"),
+    );
   }
 }
 
@@ -1043,7 +1147,10 @@ export async function confirmDeleteAsset() {
       });
     }
   }
-  if (commands.length > 0 && !execute("Remove referencing nodes", commands)) {
+  if (
+    commands.length > 0 &&
+    !execute(i18n.t("editor:history.removeReferencingNodes"), commands)
+  ) {
     return;
   }
   useEditorStore.getState().setSelection({ nodeIds: [], edgeIds: [] });
@@ -1124,10 +1231,12 @@ export async function addAssetNode(assetId: AssetId, at?: Point) {
   );
   if (!node) return;
   if (
-    execute("Add asset node", [{ type: "addNode", canvasId: canvas.id, node }])
+    execute(i18n.t("editor:history.addAssetNode"), [
+      { type: "addNode", canvasId: canvas.id, node },
+    ])
   ) {
     useEditorStore.getState().selectOnly(node.id);
-    announce(`Added ${node.title}`);
+    announce(i18n.t("editor:interactions.addedOne", { title: node.title }));
   }
 }
 
@@ -1161,9 +1270,11 @@ export async function addAssetBeside(
   });
   if (!node) return null;
   if (
-    execute("Add a reference", [{ type: "addNode", canvasId: canvas.id, node }])
+    execute(i18n.t("editor:history.addAReference"), [
+      { type: "addNode", canvasId: canvas.id, node },
+    ])
   ) {
-    announce(`Added ${node.title}`);
+    announce(i18n.t("editor:interactions.addedOne", { title: node.title }));
     return node.id;
   }
   return null;
@@ -1207,9 +1318,9 @@ export async function addAssetNodes(
     made.push(node.id);
   }
   if (made.length === 0) return [];
-  if (!execute("Add asset nodes", commands)) return [];
+  if (!execute(i18n.t("editor:history.addAssetNodes"), commands)) return [];
   useEditorStore.getState().setSelection({ nodeIds: made, edgeIds: [] });
-  announce(`Added ${made.length} ${made.length === 1 ? "node" : "nodes"}`);
+  announce(i18n.t("editor:interactions.addedMany", { count: made.length }));
   return made;
 }
 
@@ -1255,7 +1366,7 @@ export async function attachAssetsToNode(
   }
   const unwired = made.filter((nodeId) => !feedInto(nodeId, targetNodeId));
   if (unwired.length > 0) {
-    announce("It is on the canvas, but this node has no input for it");
+    announce(i18n.t("editor:interactions.noInputForIt"));
   }
 }
 
@@ -1288,7 +1399,9 @@ export async function applyPictureTool(
     report = await toolsApi.apply(tool, assetId, params);
   } catch (error) {
     toastError(
-      error instanceof Error ? error.message : "The tool could not be done",
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.toolFailed"),
     );
     return null;
   }
@@ -1334,15 +1447,26 @@ export async function applyPictureTool(
     }
   }
   if (made.length === 0) return null;
-  if (!execute(`${TOOL_LABELS[tool]} a picture`, commands)) return null;
+  if (
+    !execute(
+      i18n.t("editor:history.applyTool", {
+        tool: i18n.t(TOOL_LABELS[tool]),
+      }),
+      commands,
+    )
+  ) {
+    return null;
+  }
   useEditorStore.getState().setSelection({ nodeIds: made, edgeIds: [] });
   // A turn reports the words its picture was made from, and they are worth more
   // than a count: they are what the next ask made out of it is written against.
   announce(
     report.prompt ??
       (made.length === 1
-        ? `Made ${report.entries[0].name}`
-        : `Made ${made.length} pieces, and selected them`),
+        ? i18n.t("editor:interactions.madeOne", {
+            name: report.entries[0].name,
+          })
+        : i18n.t("editor:interactions.madeMany", { count: made.length })),
   );
   return made;
 }
@@ -1395,7 +1519,9 @@ export async function fileRepaint(ask: RepaintAsk): Promise<NodeId | null> {
     );
   } catch (error) {
     toastError(
-      error instanceof Error ? error.message : "The mask could not be filed",
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.maskFailed"),
     );
     return null;
   }
@@ -1463,13 +1589,17 @@ export async function fileRepaint(ask: RepaintAsk): Promise<NodeId | null> {
       },
     });
   }
-  if (!execute("Mark a region to repaint", commands)) return null;
+  if (!execute(i18n.t("editor:history.markRegionToRepaint"), commands)) {
+    return null;
+  }
 
   useEditorStore.getState().selectOnly(subject.id);
   // Left open on the picture rather than closed with the painting: the next
   // thing to do with a mask is ask what it marks, and that is one press away.
   useEditorStore.getState().openPromptPanel(subject.id);
-  announce(`Marked a region of ${ask.sourceName} to repaint`);
+  announce(
+    i18n.t("editor:interactions.markedRegion", { name: ask.sourceName }),
+  );
   return node.id;
 }
 
@@ -1526,12 +1656,12 @@ export function fileDescription(ask: DescriptionAsk): NodeId | null {
         ? subject.bounds.y
         : Math.max(...fed.map((entry) => entry.bounds.y)) + CASCADE_DROP_OFFSET,
   });
-  node.title = `Words for ${ask.sourceName}`;
+  node.title = i18n.t("editor:interactions.wordsFor", { name: ask.sourceName });
   node.data = { content: ask.words.slice(0, MAX_TEXT_CONTENT_LENGTH) };
   const out = node.ports.find((port) => port.direction === "output");
   if (!out) return null;
 
-  const filed = execute("Read a picture back as words", [
+  const filed = execute(i18n.t("editor:history.readPictureBack"), [
     { type: "addNode", canvasId: canvas.id, node },
     {
       type: "addEdge",
@@ -1549,7 +1679,7 @@ export function fileDescription(ask: DescriptionAsk): NodeId | null {
   // Selected rather than the picture: what a reader wants next is the words, and
   // they are on this node.
   useEditorStore.getState().selectOnly(node.id);
-  announce(`Read ${ask.sourceName} back as words`);
+  announce(i18n.t("editor:interactions.readBack", { name: ask.sourceName }));
   return node.id;
 }
 
@@ -1567,7 +1697,7 @@ export function linkAsset(nodeId: NodeId, assetId: AssetId) {
   if (!entry) return;
   const data = { ...(node.data as Record<string, unknown>), assetId };
   if (
-    execute("Link an asset", [
+    execute(i18n.t("editor:history.linkAnAsset"), [
       {
         type: "updateNode",
         canvasId: canvas.id,
@@ -1576,7 +1706,7 @@ export function linkAsset(nodeId: NodeId, assetId: AssetId) {
       },
     ])
   ) {
-    announce(`Linked ${entry.name}`);
+    announce(i18n.t("editor:interactions.linked", { name: entry.name }));
   }
 }
 
@@ -1654,7 +1784,10 @@ export async function importFiles(
       options.onFileDone?.(index);
     } catch (error) {
       if (options.signal?.aborted) break;
-      const message = error instanceof Error ? error.message : "Import failed";
+      const message =
+        error instanceof Error
+          ? error.message
+          : i18n.t("editor:interactions.importFailed");
       toastError(`${file.name}: ${message}`);
       options.onFileDone?.(index, message);
     }
@@ -1717,7 +1850,7 @@ export async function dropFileOnNode(
       ...(await assetDataFor(kind, change.entry)),
     };
     if (
-      execute("Replace the node's asset", [
+      execute(i18n.t("editor:history.replaceNodeAsset"), [
         {
           type: "updateNode",
           canvasId: canvas.id,
@@ -1726,10 +1859,18 @@ export async function dropFileOnNode(
         },
       ])
     ) {
-      announce(`Replaced ${node.title} with ${change.entry.name}`);
+      announce(
+        i18n.t("editor:interactions.replaced", {
+          title: node.title,
+          name: change.entry.name,
+        }),
+      );
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Import failed";
+    const message =
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:interactions.importFailed");
     toastError(`${file.name}: ${message}`);
   }
 }
@@ -1782,11 +1923,24 @@ export function addNodeAt(
       connected = true;
     }
   }
-  if (!execute(connected ? "Add connected node" : "Add node", commands)) {
+  if (
+    !execute(
+      i18n.t(
+        connected
+          ? "editor:history.addConnectedNode"
+          : "editor:history.addNode",
+      ),
+      commands,
+    )
+  ) {
     return null;
   }
   useEditorStore.getState().selectOnly(node.id);
-  announce(`Added ${node.title}${connected ? " (connected)" : ""}`);
+  announce(
+    connected
+      ? i18n.t("editor:interactions.addedConnected", { title: node.title })
+      : i18n.t("editor:interactions.addedOne", { title: node.title }),
+  );
   return node.id;
 }
 
@@ -1823,7 +1977,7 @@ export function renameNode(nodeId: NodeId, title: string) {
   const trimmed = title.trim();
   const node = findNode(canvas, nodeId);
   if (!node || !trimmed || trimmed === node.title) return;
-  execute("Rename node", [
+  execute(i18n.t("editor:history.renameNode"), [
     {
       type: "updateNode",
       canvasId: canvas.id,
@@ -1840,7 +1994,7 @@ export function editTextContent(nodeId: NodeId, content: string) {
   if (!node || node.kind !== "text") return;
   const current = (node.data as { content?: string }).content ?? "";
   if (content === current) return;
-  execute("Edit text", [
+  execute(i18n.t("editor:history.editText"), [
     {
       type: "updateNode",
       canvasId: canvas.id,
@@ -1906,7 +2060,14 @@ export function setNodeGeneration(
   if (bounds) commands.push({ type: "resizeNode", canvasId, nodeId, bounds });
   if (commands.length === 0) return;
 
-  execute(generation ? "Edit generation" : "Clear generation", commands);
+  execute(
+    i18n.t(
+      generation
+        ? "editor:history.editGeneration"
+        : "editor:history.clearGeneration",
+    ),
+    commands,
+  );
 }
 
 interface HeldResults {
@@ -1975,7 +2136,14 @@ export function choosableResults(
     return held.flatMap((slot, index) =>
       slot.isPrimary || !answered(slot)
         ? []
-        : [{ slotId: slot.id, label: `Show result ${index + 1}` }],
+        : [
+            {
+              slotId: slot.id,
+              label: i18n.t("editor:menu.showResultNumber", {
+                index: index + 1,
+              }),
+            },
+          ],
     );
   }
   // One answer of a batch sits on a card of its own, and the node that asked for
@@ -1985,7 +2153,12 @@ export function choosableResults(
   const holder = findHolder(canvas, node, own);
   if (!holder || holder.slot.isPrimary) return [];
   return [
-    { slotId: own.id, label: `Show this result on ${holder.node.title}` },
+    {
+      slotId: own.id,
+      label: i18n.t("editor:menu.showThisResultOn", {
+        name: holder.node.title,
+      }),
+    },
   ];
 }
 
@@ -2017,7 +2190,7 @@ export function chooseResult(nodeId: NodeId, slotId: string) {
     ...slot,
     isPrimary: slot.id === holder.slot.id,
   }));
-  execute("Show this result", [
+  execute(i18n.t("editor:history.showThisResult"), [
     {
       type: "updateNode",
       canvasId: canvas.id,
@@ -2026,7 +2199,12 @@ export function chooseResult(nodeId: NodeId, slotId: string) {
     },
   ]);
   const index = slots.findIndex((slot) => slot.id === holder.slot.id);
-  announce(`Showing result ${index + 1} of ${slots.length}`);
+  announce(
+    i18n.t("editor:interactions.showingResult", {
+      index: index + 1,
+      count: slots.length,
+    }),
+  );
 }
 
 /** The node holding a batch, and the slot in it that one of its cards carries. */
@@ -2074,7 +2252,7 @@ export async function exportCanvasImage(): Promise<void> {
   if (!canvas || canvas.nodes.length === 0) return;
   const pending = renderSnapshot();
   if (!pending) {
-    toastError("The canvas is not ready");
+    toastError(i18n.t("editor:canvas.canvasNotReady"));
     return;
   }
   try {
@@ -2089,12 +2267,12 @@ export async function exportCanvasImage(): Promise<void> {
     // The file is read from the URL after the click returns, so it is let go
     // on the next turn rather than under the download's feet.
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    announce("Canvas image exported");
+    announce(i18n.t("editor:canvas.canvasImageExported"));
   } catch (error) {
     toastError(
       error instanceof Error
         ? error.message
-        : "The canvas could not be exported",
+        : i18n.t("editor:canvas.canvasNotExported"),
     );
   }
 }
@@ -2196,9 +2374,11 @@ export function moveNodes(positions: Record<NodeId, Point>) {
       });
     }
   }
-  if (execute("Move nodes", commands)) {
+  if (execute(i18n.t("editor:history.moveNodes"), commands)) {
     announce(
-      `Moved ${movedIds.length} node${movedIds.length === 1 ? "" : "s"}`,
+      movedIds.length === 1
+        ? i18n.t("editor:interactions.movedOne")
+        : i18n.t("editor:interactions.movedMany", { count: movedIds.length }),
     );
   }
 }
@@ -2218,11 +2398,11 @@ export function resizeNodeTo(nodeId: NodeId, bounds: Rect) {
     return;
   }
   if (
-    execute("Resize node", [
+    execute(i18n.t("editor:history.resizeNode"), [
       { type: "resizeNode", canvasId: canvas.id, nodeId, bounds },
     ])
   ) {
-    announce(`Resized ${node.title}`);
+    announce(i18n.t("editor:interactions.resized", { name: node.title }));
   }
 }
 

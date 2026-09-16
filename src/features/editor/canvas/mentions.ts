@@ -141,7 +141,9 @@ function summaryFor(
   }
   if (node.kind === "group") {
     const count = membersOf(canvas, node).length;
-    return `${count} ${count === 1 ? "node" : "nodes"} inside`;
+    return count === 1
+      ? i18n.t("editor:counts.nodesInsideOne", { count })
+      : i18n.t("editor:counts.nodesInsideMany", { count });
   }
   return media?.label ?? media?.entry?.name ?? "";
 }

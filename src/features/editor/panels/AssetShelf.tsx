@@ -21,6 +21,7 @@ import {
   CAPABILITY_LABELS,
   PROJECT_ASSET_CATEGORIES,
 } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { assetUrl } from "../../../api";
 import { buildIssueIndex, formatBytes } from "../canvas/mediaCards";
 import {
@@ -112,7 +113,7 @@ export interface AssetShelfProps {
 /** Selects the node a generated asset came from, wherever it sits. */
 function focusGeneratingNode(nodeId: NodeId) {
   focusNodes([nodeId]);
-  useEditorStore.getState().announce("Selected the node that made this asset");
+  useEditorStore.getState().announce(i18n.t("editor:shelf.selectedMaker"));
 }
 
 /** The node that made an asset, on whichever canvas it is. */
@@ -181,6 +182,7 @@ function ShelfEditor({
   entry: ResourceEntry;
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const [tags, setTags] = useState(() => (entry.tags ?? []).join(", "));
   const [note, setNote] = useState(entry.note ?? "");
   return (
@@ -200,23 +202,23 @@ function ShelfEditor({
       }}
     >
       <input
-        aria-label={`Words to file ${entry.name} under`}
+        aria-label={t("editor:shelf.tagsFor", { name: entry.name })}
         className="resource-editor-tags"
         onChange={(event) => setTags(event.target.value)}
-        placeholder="Words, comma separated"
+        placeholder={t("editor:shelf.tagsPlaceholder")}
         value={tags}
       />
       <textarea
-        aria-label={`Note about ${entry.name}`}
+        aria-label={t("editor:shelf.noteFor", { name: entry.name })}
         onChange={(event) => setNote(event.target.value)}
-        placeholder="What is worth remembering"
+        placeholder={t("editor:shelf.notePlaceholder")}
         rows={2}
         value={note}
       />
       <div className="resource-editor-actions">
-        <button type="submit">Save</button>
+        <button type="submit">{t("editor:action.save")}</button>
         <button onClick={onDone} type="button">
-          Cancel
+          {t("editor:action.cancel")}
         </button>
       </div>
     </form>
@@ -293,37 +295,47 @@ function ResourceRow({
         className="resource-main"
         data-testid="resource-main"
         onClick={() => onSelect(entry.id)}
-        title="Read this file in the inspector"
+        title={t("editor:shelf.readInInspector")}
         type="button"
       >
         <strong>{entry.name}</strong>
         <span>
-          {broken ? "⚠ broken · " : ""}
+          {broken ? t("editor:shelf.broken") : ""}
           {formatBytes(entry.bytes)}
-          {uses > 0 ? ` · ${uses} use${uses === 1 ? "" : "s"}` : ""}
+          {uses > 0
+            ? uses === 1
+              ? t("editor:counts.usesOne", { count: uses })
+              : t("editor:counts.usesMany", { count: uses })
+            : ""}
         </span>
       </button>
       <span className="resource-actions">
         {extraActions}
         <button
-          aria-label={`${keeper ? "Stop keeping" : "Keep"} ${entry.name} to hand`}
+          aria-label={
+            keeper
+              ? t("editor:shelf.stopKeepingAria", { name: entry.name })
+              : t("editor:shelf.keepAria", { name: entry.name })
+          }
           aria-pressed={keeper}
           className={`resource-action keeper${keeper ? " is-active" : ""}`}
           onClick={() => void markAssetKeeper(entry, !keeper)}
-          title={keeper ? "Kept to hand" : "Not kept to hand"}
+          title={
+            keeper ? t("editor:shelf.keptHint") : t("editor:shelf.notKeptHint")
+          }
           type="button"
         >
           ★
         </button>
         <button
-          aria-label={`Tag ${entry.name}`}
+          aria-label={t("editor:shelf.tagAria", { name: entry.name })}
           aria-pressed={editing}
           className={`resource-action${editing ? " is-active" : ""}`}
           onClick={() => setEditing((current) => !current)}
-          title="Words and notes"
+          title={t("editor:shelf.wordsAndNotes")}
           type="button"
         >
-          Tag
+          {t("editor:action.tag")}
         </button>
         {/*
           The way to the cards rather than the way to the file: a reader who
@@ -334,24 +346,26 @@ function ResourceRow({
         */}
         {canvasActions && (
           <button
-            aria-label={`Focus the cards on this canvas using ${entry.name}`}
+            aria-label={t("editor:shelf.focusUsing", { name: entry.name })}
             className="resource-action"
             disabled={usesHere.length === 0}
             onClick={() => focusAssetUses(usesHere)}
             title={
               usesHere.length === 0
-                ? "No card on this canvas uses it"
-                : `Select the ${usesHere.length} card${
-                    usesHere.length === 1 ? "" : "s"
-                  } on this canvas using it`
+                ? t("editor:shelf.noCardUsesIt")
+                : usesHere.length === 1
+                  ? t("editor:shelf.selectCardsOne")
+                  : t("editor:shelf.selectCardsMany", {
+                      count: usesHere.length,
+                    })
             }
             type="button"
           >
-            Focus
+            {t("editor:action.focus")}
           </button>
         )}
         <button
-          aria-label={`Delete ${entry.name}`}
+          aria-label={t("editor:shelf.deleteAria", { name: entry.name })}
           className="resource-action danger"
           onClick={() => void requestDeleteAsset(entry.id)}
           type="button"
@@ -370,13 +384,16 @@ function ResourceRow({
         ))}
         {maker && (
           <button
-            aria-label={`Go to ${maker.title}, which made ${entry.name}`}
+            aria-label={t("editor:shelf.goToMaker", {
+              maker: maker.title,
+              name: entry.name,
+            })}
             className="resource-origin"
             onClick={() => focusGeneratingNode(maker.id)}
-            title={`Made by ${maker.title}`}
+            title={t("editor:shelf.madeBy", { title: maker.title })}
             type="button"
           >
-            Made by {maker.title}
+            {t("editor:shelf.madeBy", { title: maker.title })}
           </button>
         )}
       </span>
@@ -406,11 +423,11 @@ function ShelfFilterBar({
   return (
     <div className="side-shelf-filter">
       <input
-        aria-label="Search the shelf"
+        aria-label={t("editor:shelf.searchShelf")}
         className="side-shelf-asked"
         data-testid="shelf-asked"
         onChange={(event) => onChange({ ...filter, asked: event.target.value })}
-        placeholder="Name, word, note, or summary"
+        placeholder={t("editor:shelf.searchPlaceholder")}
         type="search"
         value={filter.asked}
       />
@@ -423,7 +440,7 @@ function ShelfFilterBar({
         */}
         {shelves.length > 1 && (
           <select
-            aria-label="Which shelf"
+            aria-label={t("editor:shelf.whichShelf")}
             data-testid="shelf-category"
             onChange={(event) =>
               onChange({
@@ -434,7 +451,7 @@ function ShelfFilterBar({
             }
             value={filter.category ?? ""}
           >
-            <option value="">Every shelf</option>
+            <option value="">{t("editor:shelf.everyShelf")}</option>
             {shelves.map((category) => (
               <option key={category} value={category}>
                 {t(ASSET_CATEGORY_LABELS[category])}
@@ -450,7 +467,7 @@ function ShelfFilterBar({
         */}
         {!whereLocked && (
           <select
-            aria-label="Where it came from"
+            aria-label={t("editor:shelf.whereFrom")}
             data-testid="shelf-where"
             onChange={(event) =>
               onChange({
@@ -460,7 +477,7 @@ function ShelfFilterBar({
             }
             value={filter.where ?? ""}
           >
-            <option value="">Any origin</option>
+            <option value="">{t("editor:shelf.anyOrigin")}</option>
             {(Object.keys(SHELF_WHERE_LABELS) as ShelfWhere[]).map((where) => (
               <option key={where} value={where}>
                 {t(SHELF_WHERE_LABELS[where])}
@@ -477,7 +494,7 @@ function ShelfFilterBar({
             }
             type="checkbox"
           />
-          Keepers only
+          {t("editor:shelf.keepersOnly")}
         </label>
         {!shelfFilterIsOpen(filter) && (
           <button
@@ -485,12 +502,16 @@ function ShelfFilterBar({
             onClick={() => onChange(OPEN_SHELF_FILTER)}
             type="button"
           >
-            Clear
+            {t("editor:action.clear")}
           </button>
         )}
       </div>
       {words.length > 0 && (
-        <div aria-label="Filed under" className="side-shelf-tags" role="group">
+        <div
+          aria-label={t("editor:picker.filedUnder")}
+          className="side-shelf-tags"
+          role="group"
+        >
           {words.map(({ count, tag }) => (
             <button
               aria-pressed={filter.tags.includes(tag)}
@@ -720,7 +741,7 @@ export function AssetShelf({
               onChange={(event) => setAddNodesToCanvas(event.target.checked)}
               type="checkbox"
             />
-            Add to canvas
+            {t("editor:shelf.addToCanvas")}
           </label>
         )}
         <button
@@ -728,10 +749,14 @@ export function AssetShelf({
           onClick={() => fileInput.current?.click()}
           type="button"
         >
-          Import…
+          {t("editor:shelf.import")}
         </button>
       </div>
-      <div aria-label="Asset kind" className="side-asset-kinds" role="tablist">
+      <div
+        aria-label={t("editor:shelf.assetKind")}
+        className="side-asset-kinds"
+        role="tablist"
+      >
         {kinds.map((each) => (
           <button
             aria-selected={each === kind}
@@ -740,7 +765,9 @@ export function AssetShelf({
             key={each}
             onClick={() => chooseKind(each)}
             role="tab"
-            title={`Add to a ${t(CAPABILITY_LABELS[each]).toLowerCase()} node`}
+            title={t("editor:shelf.addToNode", {
+              kind: t(CAPABILITY_LABELS[each]).toLowerCase(),
+            })}
             type="button"
           >
             {t(CAPABILITY_LABELS[each])}
@@ -749,7 +776,7 @@ export function AssetShelf({
         ))}
       </div>
       <input
-        aria-label="Import files"
+        aria-label={t("editor:shelf.importFiles")}
         hidden
         multiple
         onChange={(event) => {
@@ -769,7 +796,7 @@ export function AssetShelf({
                 <>
                   <progress max={1} value={job.progress} />
                   <button
-                    aria-label="Cancel import"
+                    aria-label={t("editor:action.cancelImport")}
                     onClick={() => abortRef.current?.abort()}
                     type="button"
                   >
@@ -778,13 +805,15 @@ export function AssetShelf({
                 </>
               ) : job.status === "error" ? (
                 <>
-                  <span className="side-import-error">Failed</span>
+                  <span className="side-import-error">
+                    {t("editor:shelf.failed")}
+                  </span>
                   <button onClick={() => retryJob(index)} type="button">
-                    Retry
+                    {t("editor:action.retry")}
                   </button>
                 </>
               ) : (
-                <span>Done</span>
+                <span>{t("editor:shelf.done")}</span>
               )}
             </li>
           ))}
@@ -799,7 +828,7 @@ export function AssetShelf({
       />
       {filed > 0 && visible.length === 0 && (
         <p className="inspector-empty" data-testid="shelf-no-match">
-          Nothing on this shelf says that.
+          {t("editor:shelf.noMatch")}
         </p>
       )}
       {groupShelf(visible).map(({ category, entries }) => (
@@ -831,24 +860,31 @@ export function AssetShelf({
       {matched.length > visible.length && (
         <div className="side-shelf-paging">
           <span data-testid="shelf-shown">
-            {visible.length} of {matched.length}
+            {t("editor:shelf.shown", {
+              shown: visible.length,
+              total: matched.length,
+            })}
           </span>
           <button
             onClick={() => setPages((current) => current + 1)}
             type="button"
           >
-            Show {Math.min(SHELF_PAGE, matched.length - visible.length)} more
+            {t("editor:shelf.showMore", {
+              count: Math.min(SHELF_PAGE, matched.length - visible.length),
+            })}
           </button>
         </div>
       )}
       {filed === 0 && (
         <p className="inspector-empty">
           {emptyText ??
-            `No ${t(CAPABILITY_LABELS[kind]).toLowerCase()} assets yet — import files or drop them on the canvas.`}
+            t("editor:shelf.empty", {
+              kind: t(CAPABILITY_LABELS[kind]).toLowerCase(),
+            })}
         </p>
       )}
       {acceptFileDrops && dropping && (
-        <div className="clip-media-drop">Drop to import</div>
+        <div className="clip-media-drop">{t("editor:shelf.dropToImport")}</div>
       )}
     </section>
   );

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { AssistantPanel } from "../../assistant/AssistantPanel";
 import { PanelFold } from "../components/PanelFold";
 import { useEditorStore } from "../stores/editorStore";
@@ -15,6 +16,7 @@ import { InspectorPanel } from "./InspectorPanel";
  * corner that folds the column away.
  */
 export function RightPanel() {
+  const { t } = useTranslation();
   const tab = useEditorStore((state) => state.sidePanelTab);
   const setTab = useEditorStore((state) => state.setSidePanelTab);
 
@@ -22,7 +24,7 @@ export function RightPanel() {
     <div className="editor-right" data-testid="right-panel" id="panel-right">
       <PanelFold side="right" />
       <div
-        aria-label="What the column shows"
+        aria-label={t("editor:rightPanel.columnShows")}
         className="side-panel-tabs"
         role="tablist"
       >
@@ -32,10 +34,10 @@ export function RightPanel() {
           data-testid="right-tab-inspector"
           onClick={() => setTab("inspector")}
           role="tab"
-          title="What is chosen on the canvas, or the canvas itself"
+          title={t("editor:rightPanel.inspectorHint")}
           type="button"
         >
-          Inspector
+          {t("editor:rightPanel.inspector")}
         </button>
         <button
           aria-selected={tab === "assistant"}
@@ -43,10 +45,10 @@ export function RightPanel() {
           data-testid="right-tab-assistant"
           onClick={() => setTab("assistant")}
           role="tab"
-          title="Ask about the cards on this canvas"
+          title={t("editor:rightPanel.assistantHint")}
           type="button"
         >
-          Assistant
+          {t("editor:rightPanel.assistant")}
         </button>
         <button
           aria-selected={tab === "history"}
@@ -54,10 +56,10 @@ export function RightPanel() {
           data-testid="right-tab-history"
           onClick={() => setTab("history")}
           role="tab"
-          title="What has been asked of this project, and the way to ask again"
+          title={t("editor:rightPanel.historyHint")}
           type="button"
         >
-          History
+          {t("editor:rightPanel.history")}
         </button>
       </div>
       {tab === "assistant" ? (

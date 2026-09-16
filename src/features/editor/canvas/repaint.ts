@@ -17,18 +17,17 @@ export const MARK_TOOLS: readonly MarkTool[] = [
 ];
 
 export const MARK_LABELS: Record<MarkTool, string> = {
-  brush: "Brush",
-  erase: "Erase",
-  box: "Rectangle",
-  outline: "Outline",
+  brush: "editor:repaint.markToolBrush",
+  erase: "editor:repaint.markToolErase",
+  box: "editor:repaint.markToolBox",
+  outline: "editor:repaint.markToolOutline",
 };
 
 export const MARK_HINTS: Record<MarkTool, string> = {
-  brush: "Drag over the part that may change",
-  erase: "Drag over a mark to take it back off",
-  box: "Drag out a rectangle, corner to corner",
-  outline:
-    "Click around the part, then click the first point again to close it",
+  brush: "editor:repaint.hintBrush",
+  erase: "editor:repaint.hintErase",
+  box: "editor:repaint.hintBox",
+  outline: "editor:repaint.hintOutline",
 };
 
 /** How wide a brush gets, and how far an edge may fade, in the picture's pixels. */

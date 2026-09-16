@@ -40,8 +40,8 @@ export const CANVAS_THEME_NAMES: readonly CanvasThemeName[] = [
 
 /** What each theme is called on the button that chooses it. */
 export const CANVAS_THEME_LABELS: Record<CanvasThemeName, string> = {
-  graphite: "Graphite",
-  paper: "Paper",
+  graphite: "editor:theme.graphite",
+  paper: "editor:theme.paper",
 };
 
 export const CANVAS_THEMES: Record<CanvasThemeName, CanvasPalette> = {

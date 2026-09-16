@@ -7,6 +7,7 @@ import type {
 } from "../../../shared/domain";
 import type { NodeRunView } from "../stores/runStore";
 import { NODE_HEADER_HEIGHT, PORT_RADIUS, canvasTheme } from "./theme";
+import { i18n } from "../../../shared/i18n";
 import {
   HALO_GLOW_BLUR,
   HALO_GLOW_STROKE,
@@ -144,20 +145,24 @@ function summarize(node: WorkflowNode): string {
     case "text": {
       const content = typeof data.content === "string" ? data.content : "";
       if (content.trim()) return content.slice(0, 120);
-      return generationSummary(node) || "Double-click to edit";
+      return (
+        generationSummary(node) || i18n.t("editor:canvas.doubleClickToEdit")
+      );
     }
     case "image":
     case "audio":
     case "video":
-      if (data.assetId) return "Asset linked";
-      return generationSummary(node) || "No asset yet";
+      if (data.assetId) return i18n.t("editor:canvas.assetLinked");
+      return generationSummary(node) || i18n.t("editor:canvas.noAssetYet");
     case "operation":
       return String(data.operationType ?? "operation");
     case "group": {
       const children = Array.isArray(data.childNodeIds)
         ? data.childNodeIds.length
         : 0;
-      return `${children} item${children === 1 ? "" : "s"}`;
+      return children === 1
+        ? i18n.t("editor:counts.itemsOne", { count: children })
+        : i18n.t("editor:counts.itemsMany", { count: children });
     }
     case "export":
       return String(data.format ?? "export").toUpperCase();

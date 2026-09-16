@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { CanvasDocument } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import type {
   ControllerCallbacks,
   HitTarget,
@@ -50,7 +51,7 @@ function createCallbacks(host: () => HTMLElement | null): ControllerCallbacks {
         return;
       }
       editor.clearSelection();
-      editor.announce("Nothing selected");
+      editor.announce(i18n.t("editor:interactions.nothingSelected"));
     },
     onBackgroundDoubleTap: (world, screen) => {
       const client = toClient(screen);

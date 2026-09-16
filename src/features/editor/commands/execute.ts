@@ -1,4 +1,5 @@
 import { newId, type DocumentCommand } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { useAppStore } from "../stores/appStore";
 import { useHistoryStore, type HistoryEntry } from "../stores/historyStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -26,7 +27,11 @@ export function execute(
     });
     return inverse;
   } catch (error) {
-    toastError(error instanceof Error ? error.message : "Change rejected");
+    toastError(
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:stores.changeRejected"),
+    );
     return null;
   }
 }
@@ -41,7 +46,11 @@ export function undo(): boolean {
     return true;
   } catch (error) {
     history.restoreUndo(entry);
-    toastError(error instanceof Error ? error.message : "Undo failed");
+    toastError(
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:stores.undoFailed"),
+    );
     return false;
   }
 }
@@ -58,7 +67,11 @@ export function redo(): boolean {
     return true;
   } catch (error) {
     history.pushRedo(entry);
-    toastError(error instanceof Error ? error.message : "Redo failed");
+    toastError(
+      error instanceof Error
+        ? error.message
+        : i18n.t("editor:stores.redoFailed"),
+    );
     return false;
   }
 }

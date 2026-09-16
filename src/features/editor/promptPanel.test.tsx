@@ -22,7 +22,7 @@ import {
 import type { GenerationSpec, MokaFile, RunRecord } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY } from "../../shared/domain";
 import type { GenerationPreview, ModelsView } from "../../api";
-import { GENERATION_UNAVAILABLE, useAppStore } from "./stores/appStore";
+import { generationUnavailable, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
@@ -595,7 +595,7 @@ describe("the generation panel", () => {
     await settle();
     const run = within(panel()).getByRole("button", { name: "Run" });
     expect(run).toHaveProperty("disabled", true);
-    expect(run).toHaveProperty("title", GENERATION_UNAVAILABLE);
+    expect(run).toHaveProperty("title", generationUnavailable());
   });
 
   it("goes away on Escape, and stays away while that node is selected", async () => {

@@ -1,4 +1,5 @@
 import { Fragment, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { NodeKind } from "../../../shared/domain";
 import {
   addNodeAt,
@@ -8,32 +9,35 @@ import {
 import { useEditorStore } from "../stores/editorStore";
 import { useClampedMenuPosition } from "./useClampedMenuPosition";
 
-const GROUPS: { label: string; kinds: { kind: NodeKind; label: string }[] }[] =
-  [
-    {
-      label: "Generation nodes",
-      kinds: [
-        { kind: "text", label: "Text" },
-        { kind: "image", label: "Image" },
-        { kind: "audio", label: "Audio" },
-        { kind: "video", label: "Video" },
-      ],
-    },
-    {
-      label: "Structure",
-      kinds: [
-        { kind: "operation", label: "Operation" },
-        { kind: "group", label: "Group" },
-        { kind: "export", label: "Export" },
-      ],
-    },
-  ];
+const GROUPS: {
+  label: string;
+  kinds: { kind: NodeKind; label: string }[];
+}[] = [
+  {
+    label: "editor:nodeMenu.generationNodes",
+    kinds: [
+      { kind: "text", label: "domain:nodeTitle.text" },
+      { kind: "image", label: "domain:nodeTitle.image" },
+      { kind: "audio", label: "domain:nodeTitle.audio" },
+      { kind: "video", label: "domain:nodeTitle.video" },
+    ],
+  },
+  {
+    label: "editor:nodeMenu.structure",
+    kinds: [
+      { kind: "operation", label: "domain:nodeTitle.operation" },
+      { kind: "group", label: "domain:nodeTitle.group" },
+      { kind: "export", label: "domain:nodeTitle.export" },
+    ],
+  },
+];
 
 /**
  * Quick-add menu: double-click on blank canvas, or the tail of a connection
  * dropped on blank space (then only compatible kinds are enabled).
  */
 export function NodeMenu() {
+  const { t } = useTranslation();
   const menu = useEditorStore((state) => state.nodeMenu);
   const { ref: listRef, pos } = useClampedMenuPosition(
     menu?.x ?? 0,
@@ -80,17 +84,19 @@ export function NodeMenu() {
 
   return (
     <div
-      aria-label="Add node"
+      aria-label={t("editor:nodeMenu.title")}
       className="menu node-menu"
       onKeyDown={onKeyDown}
       ref={listRef}
       role="menu"
       style={{ left: pos.x, top: pos.y }}
     >
-      {menu.connectFrom && <p className="menu-title">Connect to new node</p>}
+      {menu.connectFrom && (
+        <p className="menu-title">{t("editor:nodeMenu.connectToNewNode")}</p>
+      )}
       {GROUPS.map((group) => (
         <Fragment key={group.label}>
-          <p className="menu-title">{group.label}</p>
+          <p className="menu-title">{t(group.label)}</p>
           {group.kinds.map(({ kind, label }) => {
             const disabled =
               menu.connectFrom !== null &&
@@ -104,13 +110,13 @@ export function NodeMenu() {
                 role="menuitem"
                 type="button"
               >
-                {label}
+                {t(label)}
               </button>
             );
           })}
         </Fragment>
       ))}
-      <p className="menu-title">From the shelf</p>
+      <p className="menu-title">{t("editor:nodeMenu.fromTheShelf")}</p>
       <button
         // A menu opened to finish a connection promises the node it makes will
         // be wired in, and a file off the shelf is not offered as one.
@@ -124,7 +130,7 @@ export function NodeMenu() {
         role="menuitem"
         type="button"
       >
-        From assets…
+        {t("editor:nodeMenu.fromAssets")}
       </button>
     </div>
   );

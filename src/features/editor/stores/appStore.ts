@@ -5,6 +5,7 @@ import {
   type PublicConfig,
 } from "../../../api";
 import { PROVIDER_EXECUTOR_KEY } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 
 export type AppPhase =
   "booting" | "launcher" | "opening" | "editing" | "clip" | "error";
@@ -56,7 +57,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         bootError:
           error instanceof Error
             ? error.message
-            : "The local process could not be reached",
+            : i18n.t("editor:stores.localProcessUnreachable"),
       });
     }
   },
@@ -95,6 +96,12 @@ export function useGenerationAvailable(): boolean {
   );
 }
 
-/** Why a generation control is dead where nothing can reach a provider. */
-export const GENERATION_UNAVAILABLE =
-  "This deployment is offline, so nothing can be generated";
+/**
+ * Why a generation control is dead where nothing can reach a provider.
+ *
+ * Read at each use rather than once, so a reader who switches the interface
+ * language hears the new one without a reload.
+ */
+export function generationUnavailable(): string {
+  return i18n.t("editor:stores.generationUnavailable");
+}

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { PanelFold } from "../components/PanelFold";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -21,16 +22,21 @@ import { ProjectTree } from "./ProjectTree";
  * the room; what is left in that corner of the window brings it back.
  */
 export function SidePanel() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const tab = useEditorStore((state) => state.leftPanelTab);
   const setTab = useEditorStore((state) => state.setLeftPanelTab);
   if (!moka) return null;
 
   return (
-    <aside aria-label="Project" className="editor-side" id="panel-left">
+    <aside
+      aria-label={t("editor:sidePanel.project")}
+      className="editor-side"
+      id="panel-left"
+    >
       <PanelFold side="left" />
       <div
-        aria-label="What the column shows"
+        aria-label={t("editor:sidePanel.columnShows")}
         className="side-panel-tabs"
         role="tablist"
       >
@@ -40,10 +46,10 @@ export function SidePanel() {
           data-testid="left-tab-project"
           onClick={() => setTab("project")}
           role="tab"
-          title="The project's canvases and the folders they are filed in"
+          title={t("editor:sidePanel.projectHint")}
           type="button"
         >
-          Project
+          {t("editor:sidePanel.project")}
         </button>
         <button
           aria-selected={tab === "assets"}
@@ -51,10 +57,10 @@ export function SidePanel() {
           data-testid="left-tab-assets"
           onClick={() => setTab("assets")}
           role="tab"
-          title="The files this project holds, by kind"
+          title={t("editor:sidePanel.assetsHint")}
           type="button"
         >
-          Assets
+          {t("editor:sidePanel.assets")}
         </button>
       </div>
       {tab === "project" ? <ProjectTree /> : <AssetsPanel />}

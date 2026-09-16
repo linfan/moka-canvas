@@ -27,7 +27,7 @@ import type {
 } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY, findNode } from "../../shared/domain";
 import { UnsavedWorkDialog } from "./components/UnsavedWorkDialog";
-import { GENERATION_UNAVAILABLE, useAppStore } from "./stores/appStore";
+import { generationUnavailable, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
@@ -1193,8 +1193,8 @@ describe("generation UI", () => {
       name: "▶ Run this node",
     });
     expect(inInspector).toHaveProperty("disabled", true);
-    expect(inInspector).toHaveProperty("title", GENERATION_UNAVAILABLE);
-    expect(screen.getByText(GENERATION_UNAVAILABLE)).toBeTruthy();
+    expect(inInspector).toHaveProperty("title", generationUnavailable());
+    expect(screen.getByText(generationUnavailable())).toBeTruthy();
   });
 
   it("asks again under what an asset recorded, as a new run", async () => {

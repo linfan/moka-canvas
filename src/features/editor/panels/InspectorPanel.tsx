@@ -23,8 +23,9 @@ import {
   generationSpecFromSnapshot,
 } from "../../../shared/domain";
 import { assetsApi, assetUrl } from "../../../api";
+import { i18n } from "../../../shared/i18n";
 import {
-  GENERATION_UNAVAILABLE,
+  generationUnavailable,
   useAppStore,
   useGenerationAvailable,
 } from "../stores/appStore";
@@ -81,6 +82,7 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function TitleField({ node }: { node: WorkflowNode }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(node.title);
   useEffect(() => setValue(node.title), [node.id, node.title]);
   const commit = () => {
@@ -93,7 +95,7 @@ function TitleField({ node }: { node: WorkflowNode }) {
   };
   return (
     <input
-      aria-label="Node title"
+      aria-label={t("editor:inspector.nodeTitle")}
       className="inspector-title-input"
       onBlur={commit}
       onChange={(event) => setValue(event.target.value)}
@@ -131,6 +133,7 @@ function linkable(moka: MokaFile | null, kind: NodeKind): ResourceEntry[] {
 
 /** Preview + metadata + provenance + file actions for a media node's asset. */
 function MediaAssetSection({ node }: { node: WorkflowNode }) {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const selfCheck = useProjectStore((state) => state.selfCheck);
   const openPreview = useEditorStore((state) => state.openPreview);
@@ -151,17 +154,17 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
     const offers = linkable(moka, node.kind);
     return (
       <section className="inspector-section">
-        <h3>Asset</h3>
-        <p className="inspector-empty">No asset linked</p>
+        <h3>{t("editor:inspector.asset")}</h3>
+        <p className="inspector-empty">{t("editor:inspector.noAssetLinked")}</p>
         {offers.length > 0 && (
           <select
-            aria-label={`Link an asset to ${node.title}`}
+            aria-label={t("editor:inspector.linkAssetTo", { name: node.title })}
             onChange={(event) => {
               if (event.target.value) linkAsset(node.id, event.target.value);
             }}
             value=""
           >
-            <option value="">Link an asset…</option>
+            <option value="">{t("editor:inspector.linkAsset")}</option>
             {offers.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.name}
@@ -177,18 +180,28 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
 
   return (
     <section className="inspector-section">
-      <h3>Asset</h3>
+      <h3>{t("editor:inspector.asset")}</h3>
       {broken && (
         <p className="inspector-media-broken" role="alert">
-          ⚠ Asset {media.state}
-          {media.state === "changed" ? " — file contents changed on disk" : ""}
+          {t("editor:inspector.assetBroken", {
+            state: t(
+              media.state === "missing"
+                ? "editor:inspector.mediaStateMissing"
+                : media.state === "changed"
+                  ? "editor:inspector.mediaStateChanged"
+                  : "editor:inspector.mediaStateEmpty",
+            ),
+          })}
+          {media.state === "changed"
+            ? t("editor:inspector.contentsChangedOnDisk")
+            : ""}
         </p>
       )}
       {media?.state === "ready" && media.url && entry && (
         <>
           {node.kind === "image" && (
             <button
-              aria-label="Open full preview"
+              aria-label={t("editor:inspector.openFullPreview")}
               className="inspector-preview"
               onClick={() => openPreview(entry.id)}
               type="button"
@@ -211,17 +224,17 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
       {media?.state === "ready" && entry && (
         <div className="inspector-actions">
           <button onClick={() => void revealAsset(entry.id)} type="button">
-            Reveal
+            {t("editor:action.reveal")}
           </button>
           <a download={entry.name} href={assetUrl(entry.id)}>
-            Download
+            {t("editor:action.download")}
           </a>
           <button
             className="danger"
             onClick={() => void requestDeleteAsset(entry.id)}
             type="button"
           >
-            Remove
+            {t("editor:action.remove")}
           </button>
         </div>
       )}
@@ -230,6 +243,7 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
 }
 
 function AssetRows({ entry }: { entry: ResourceEntry }) {
+  const { t } = useTranslation();
   const probe = entry.probe;
   const dimensions =
     probe?.width && probe.height ? `${probe.width}×${probe.height}` : "";
@@ -238,14 +252,23 @@ function AssetRows({ entry }: { entry: ResourceEntry }) {
     : "";
   return (
     <>
-      <Row label="File" value={entry.name} />
-      <Row label="Type" value={entry.mime ?? probe?.mime ?? ""} />
-      <Row label="Dimensions" value={dimensions} />
-      <Row label="Duration" value={formatDuration(probe?.durationMs)} />
-      <Row label="Audio" value={audio} />
-      <Row label="Codec" value={probe?.codecSummary ?? ""} />
-      <Row label="Size" value={formatBytes(entry.bytes ?? probe?.bytes)} />
-      <Row label="Path" value={entry.path} />
+      <Row label={t("editor:field.file")} value={entry.name} />
+      <Row
+        label={t("editor:field.type")}
+        value={entry.mime ?? probe?.mime ?? ""}
+      />
+      <Row label={t("editor:field.dimensions")} value={dimensions} />
+      <Row
+        label={t("editor:field.duration")}
+        value={formatDuration(probe?.durationMs)}
+      />
+      <Row label={t("editor:field.audio")} value={audio} />
+      <Row label={t("editor:field.codec")} value={probe?.codecSummary ?? ""} />
+      <Row
+        label={t("editor:field.size")}
+        value={formatBytes(entry.bytes ?? probe?.bytes)}
+      />
+      <Row label={t("editor:field.path")} value={entry.path} />
     </>
   );
 }
@@ -262,7 +285,7 @@ function toolThatMade(provenance: AssetProvenance): string | null {
   const named = provenance.parameterSnapshot?.tool;
   if (typeof named !== "string") return null;
   const entry = BAR_ENTRIES.find((candidate) => candidate === named);
-  return entry === undefined ? null : TOOL_LABELS[entry];
+  return entry === undefined ? null : i18n.t(TOOL_LABELS[entry]);
 }
 
 /** The picture a tool worked on, by name when the project still holds it. */
@@ -294,28 +317,35 @@ function ProvenanceRows({
   entry: ResourceEntry;
   resources: ReadonlyMap<AssetId, ResourceEntry>;
 }) {
+  const { t } = useTranslation();
   const provenance = entry.provenance;
   if (!provenance) return null;
   const tool = toolThatMade(provenance);
   return (
     <>
-      <h3>Provenance</h3>
+      <h3>{t("editor:field.provenance")}</h3>
       {tool ? (
         <>
-          <Row label="Made by" value={tool} />
-          <Row label="From" value={workedOn(provenance, resources)} />
+          <Row label={t("editor:field.madeBy")} value={tool} />
+          <Row
+            label={t("editor:field.from")}
+            value={workedOn(provenance, resources)}
+          />
         </>
       ) : (
         <>
-          <Row label="Source" value="Generated by workflow" />
-          <Row label="Run" value={provenance.runId ?? ""} />
           <Row
-            label="Operation node"
+            label={t("editor:field.source")}
+            value={t("editor:inspector.generatedByWorkflow")}
+          />
+          <Row label={t("editor:field.run")} value={provenance.runId ?? ""} />
+          <Row
+            label={t("editor:field.operationNode")}
             value={provenance.operationNodeId ?? ""}
           />
         </>
       )}
-      <Row label="Created" value={provenance.createdAt} />
+      <Row label={t("editor:field.created")} value={provenance.createdAt} />
     </>
   );
 }
@@ -328,12 +358,13 @@ function InputChips({
   canvas: CanvasDocument;
   node: WorkflowNode;
 }) {
+  const { t } = useTranslation();
   const inputPick = useEditorStore((state) => state.inputPick);
   const inputs = node.ports.filter((port) => port.direction === "input");
   if (inputs.length === 0 || node.kind === "group") return null;
   return (
     <section className="inspector-section">
-      <h3>Inputs</h3>
+      <h3>{t("editor:inspector.inputsSection")}</h3>
       {inputs.map((port) => {
         const incoming = canvas.edges.filter(
           (edge) =>
@@ -359,16 +390,20 @@ function InputChips({
                 }}
                 type="button"
               >
-                {picking ? "Cancel pick" : "Replace"}
+                {picking
+                  ? t("editor:action.cancelPick")
+                  : t("editor:action.replace")}
               </button>
             </div>
             {picking && (
               <p className="inspector-pick-hint">
-                Click a compatible source node on the canvas (Esc to cancel)
+                {t("editor:inspector.clickCompatible")}
               </p>
             )}
             {incoming.length === 0 ? (
-              <p className="inspector-empty">Not connected</p>
+              <p className="inspector-empty">
+                {t("editor:inspector.notConnected")}
+              </p>
             ) : (
               <ul className="inspector-chip-list">
                 {incoming.map((edge) => (
@@ -390,6 +425,7 @@ function InputChip({
   canvas: CanvasDocument;
   edge: WorkflowEdge;
 }) {
+  const { t } = useTranslation();
   const source = canvas.nodes.find((node) => node.id === edge.source.nodeId);
   const portLabel = source?.ports.find(
     (port) => port.id === edge.source.portId,
@@ -401,12 +437,12 @@ function InputChip({
   return (
     <li className="inspector-chip">
       <span className="inspector-chip-label">
-        <strong>{source?.title ?? "Unknown"}</strong>
+        <strong>{source?.title ?? t("editor:inspector.unknown")}</strong>
         {portLabel ? ` · ${portLabel}` : ""}
         {excerpt ? <em> “{excerpt}”</em> : null}
       </span>
       <button
-        aria-label="Disconnect"
+        aria-label={t("editor:inspector.disconnect")}
         onClick={() => disconnectEdge(edge.id)}
         type="button"
       >
@@ -444,7 +480,9 @@ async function revealAsset(assetId: AssetId) {
       .getState()
       .pushToast(
         "error",
-        error instanceof Error ? error.message : "Reveal failed",
+        error instanceof Error
+          ? error.message
+          : i18n.t("editor:inspector.revealFailed"),
       );
   }
 }
@@ -458,6 +496,7 @@ async function revealAsset(assetId: AssetId) {
  * no place to read a long thing — the whole of it is a download away.
  */
 function TextExcerpt({ entry }: { entry: ResourceEntry }) {
+  const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -485,16 +524,16 @@ function TextExcerpt({ entry }: { entry: ResourceEntry }) {
   if (failed) {
     return (
       <p className="inspector-empty" data-testid="asset-text-failed">
-        What is in it could not be read.
+        {t("editor:inspector.textUnreadable")}
       </p>
     );
   }
   if (text === null) {
-    return <p className="inspector-empty">Reading…</p>;
+    return <p className="inspector-empty">{t("editor:inspector.reading")}</p>;
   }
   return (
     <p className="inspector-text-excerpt" data-testid="asset-text">
-      {text.trim() ? text : "Empty"}
+      {text.trim() ? text : t("editor:inspector.empty")}
     </p>
   );
 }
@@ -506,14 +545,20 @@ function GenerationSection({ node }: { node: WorkflowNode }) {
   if (!spec) return null;
   return (
     <section className="inspector-section">
-      <h3>Generation</h3>
-      <Row label="Capability" value={t(CAPABILITY_LABELS[spec.capability])} />
-      <Row label="Mode" value={spec.mode} />
-      <Row label="Model" value={spec.model || "Provider default"} />
-      <Row label="Inputs from" value={spec.inputMode} />
-      <h3>Prompt</h3>
+      <h3>{t("editor:inspector.generation")}</h3>
+      <Row
+        label={t("editor:field.capability")}
+        value={t(CAPABILITY_LABELS[spec.capability])}
+      />
+      <Row label={t("editor:field.mode")} value={spec.mode} />
+      <Row
+        label={t("editor:field.model")}
+        value={spec.model || t("editor:inspector.providerDefault")}
+      />
+      <Row label={t("editor:field.inputsFrom")} value={spec.inputMode} />
+      <h3>{t("editor:inspector.prompt")}</h3>
       <p className="inspector-text-excerpt">
-        {spec.prompt.trim() ? spec.prompt : "Empty"}
+        {spec.prompt.trim() ? spec.prompt : t("editor:inspector.empty")}
       </p>
       {Object.keys(spec.params).length > 0 && (
         <pre className="inspector-json">
@@ -541,6 +586,7 @@ function LastGeneration({
   canvas: CanvasDocument;
   node: WorkflowNode;
 }) {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const made = useNodeGenerationAssets(node.id);
   const starting = useRunStore((state) => state.starting);
@@ -575,7 +621,9 @@ function LastGeneration({
         .getState()
         .pushToast(
           "error",
-          error instanceof Error ? error.message : "Run failed to start",
+          error instanceof Error
+            ? error.message
+            : t("editor:runHistory.runFailedToStart"),
         );
     } finally {
       setBusy(false);
@@ -584,26 +632,25 @@ function LastGeneration({
 
   return (
     <>
-      <h3>Last generation</h3>
+      <h3>{t("editor:inspector.lastGeneration")}</h3>
       {!recorded.runId && (
         <p className="inspector-note">
-          The record of the run that made this did not come with the project.
-          What it was asked for did, so it can be asked for again.
+          {t("editor:inspector.lastGenerationNote")}
         </p>
       )}
-      <Row label="Inputs" value={inputs} />
+      <Row label={t("editor:field.inputs")} value={inputs} />
       <pre className="inspector-json">
         {JSON.stringify(recorded.parameterSnapshot, null, 2)}
       </pre>
       <div className="inspector-actions">
         <button
-          aria-label="Run again with the parameters of the last generation"
+          aria-label={t("editor:inspector.runAgainWithLast")}
           disabled={busy || starting || !generationOn}
           onClick={() => void askAgain()}
-          title={generationOn ? undefined : GENERATION_UNAVAILABLE}
+          title={generationOn ? undefined : generationUnavailable()}
           type="button"
         >
-          {busy ? "Starting…" : "Run again"}
+          {busy ? t("editor:inspector.starting") : t("editor:action.runAgain")}
         </button>
       </div>
     </>
@@ -618,6 +665,7 @@ function RunSection({
   canvas: CanvasDocument;
   node: WorkflowNode;
 }) {
+  const { t } = useTranslation();
   const run = useLatestRunForNode(node.id);
   const asked = useNodeRuns(node.id);
   const choices = choosableResults(canvas, node);
@@ -658,16 +706,18 @@ function RunSection({
 
   return (
     <section className="inspector-section">
-      <h3>Run</h3>
+      <h3>{t("editor:inspector.runSection")}</h3>
       {executor !== null && (
         <div className="inspector-actions">
           <button
             disabled={starting || offline}
             onClick={() => void start()}
-            title={offline ? GENERATION_UNAVAILABLE : undefined}
+            title={offline ? generationUnavailable() : undefined}
             type="button"
           >
-            {starting ? "Starting…" : "▶ Run this node"}
+            {starting
+              ? t("editor:inspector.starting")
+              : t("editor:action.runThisNode")}
           </button>
           {active && run && (
             <button
@@ -675,17 +725,17 @@ function RunSection({
               onClick={() => void useRunStore.getState().cancel(run.id)}
               type="button"
             >
-              Cancel
+              {t("editor:action.cancel")}
             </button>
           )}
           {retryable && run && (
             <button onClick={() => void retryRun(run.id)} type="button">
-              Retry
+              {t("editor:action.retry")}
             </button>
           )}
         </div>
       )}
-      {offline && <p className="inspector-empty">{GENERATION_UNAVAILABLE}</p>}
+      {offline && <p className="inspector-empty">{generationUnavailable()}</p>}
       {relevantIssues.length > 0 && (
         <ul className="inspector-issues" role="alert">
           {relevantIssues.map((issue, index) => (
@@ -698,25 +748,30 @@ function RunSection({
       {run && step && (
         <>
           <div className="inspector-row">
-            <span>Status</span>
+            <span>{t("editor:field.status")}</span>
             <span className={`run-chip run-chip-${step.status}`}>
-              {RUN_STATUS_LABEL[step.status]}
-              {run.cancelRequested && active ? " · cancelling" : ""}
+              {t(RUN_STATUS_LABEL[step.status])}
+              {run.cancelRequested && active
+                ? t("editor:inspector.cancelling")
+                : ""}
             </span>
           </div>
           {active && progress !== null && (
             <progress
-              aria-label="How far this node's run has got"
+              aria-label={t("editor:inspector.progress")}
               className="inspector-progress"
               max={1}
               value={progress}
             />
           )}
           <Row
-            label="Started"
+            label={t("editor:field.started")}
             value={formatTime(step.startedAt ?? run.createdAt)}
           />
-          <Row label="Finished" value={formatTime(step.finishedAt)} />
+          <Row
+            label={t("editor:field.finished")}
+            value={formatTime(step.finishedAt)}
+          />
           {failure && <p className="inspector-run-error">{failure}</p>}
           {!failure && run.error && !active && (
             <p className="inspector-run-error">{run.error}</p>
@@ -733,7 +788,7 @@ function RunSection({
       {asked.length > 1 && (
         <>
           <div className="inspector-row">
-            <span>Asked in</span>
+            <span>{t("editor:inspector.askedIn")}</span>
             <span className="inspector-run-list">
               {asked.map((entry) => (
                 <span
@@ -741,24 +796,27 @@ function RunSection({
                   key={entry.run.id}
                 >
                   {formatTime(entry.run.createdAt)} ·{" "}
-                  {RUN_STATUS_LABEL[entry.step.status]}
+                  {t(RUN_STATUS_LABEL[entry.step.status])}
                 </span>
               ))}
             </span>
           </div>
           <p className="inspector-empty">
-            Each ask went ahead. What the node shows is what the last of them to
-            land wrote.
+            {t("editor:inspector.eachAskWentAhead")}
           </p>
         </>
       )}
       <LastGeneration canvas={canvas} node={node} />
       {slots.length > 0 && (
         <>
-          <h3>Results</h3>
+          <h3>{t("editor:field.results")}</h3>
           {slots.map((slot, index) => (
             <div className="inspector-row" key={slot.id}>
-              <span>{slot.isPrimary ? "Shown" : `Result ${index + 1}`}</span>
+              <span>
+                {slot.isPrimary
+                  ? t("editor:inspector.shown")
+                  : t("editor:inspector.resultNumber", { index: index + 1 })}
+              </span>
               <span className={`run-chip run-chip-${slot.status}`}>
                 {slot.status}
               </span>
@@ -785,7 +843,7 @@ function RunSection({
         </>
       )}
       {!run && executor !== null && relevantIssues.length === 0 && (
-        <p className="inspector-empty">No runs yet</p>
+        <p className="inspector-empty">{t("editor:inspector.noRunsYet")}</p>
       )}
     </section>
   );
@@ -805,6 +863,7 @@ function ShelfSection({
   canvas: CanvasDocument;
   node: WorkflowNode;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   if (!filingPossible(node)) return null;
   const save = async () => {
@@ -817,10 +876,10 @@ function ShelfSection({
   };
   return (
     <section className="inspector-section">
-      <h3>Shelf</h3>
+      <h3>{t("editor:field.shelf")}</h3>
       <div className="inspector-actions">
         <button disabled={busy} onClick={() => void save()} type="button">
-          {busy ? "Saving…" : "Save as material"}
+          {busy ? t("editor:action.saving") : t("editor:menu.saveAsMaterial")}
         </button>
       </div>
     </section>
@@ -836,26 +895,27 @@ function ShelfSection({
  * looking at.
  */
 function JsonSection({ node }: { node: WorkflowNode }) {
+  const { t } = useTranslation();
   const json = JSON.stringify(node, null, 2);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(json);
-      useEditorStore.getState().announce("Node JSON copied");
+      useEditorStore.getState().announce(t("editor:inspector.nodeJsonCopied"));
     } catch {
       useAppStore
         .getState()
-        .pushToast("error", "The clipboard is not available");
+        .pushToast("error", t("editor:inspector.clipboardUnavailable"));
     }
   };
   return (
     <details className="inspector-section inspector-json-section">
-      <summary>JSON</summary>
+      <summary>{t("editor:inspector.json")}</summary>
       <pre className="inspector-json" data-testid="node-json">
         {json}
       </pre>
       <div className="inspector-actions">
         <button onClick={() => void copy()} type="button">
-          Copy JSON
+          {t("editor:inspector.copyJson")}
         </button>
       </div>
     </details>
@@ -869,15 +929,16 @@ function NodeInspector({
   canvas: CanvasDocument;
   node: WorkflowNode;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <TitleField node={node} />
       <div className="inspector-row">
-        <span>Kind</span>
+        <span>{t("editor:field.kind")}</span>
         <span>{node.kind}</span>
       </div>
       <div className="inspector-row">
-        <span>Position</span>
+        <span>{t("editor:inspector.position")}</span>
         <span>
           {Math.round(node.bounds.x)}, {Math.round(node.bounds.y)} ·{" "}
           {Math.round(node.bounds.width)}×{Math.round(node.bounds.height)}
@@ -887,7 +948,7 @@ function NodeInspector({
       {node.kind === "operation" && <OperationSection node={node} />}
       {node.kind === "export" && (
         <div className="inspector-row">
-          <span>Format</span>
+          <span>{t("editor:field.format")}</span>
           <span>{(node.data as { format?: string }).format ?? ""}</span>
         </div>
       )}
@@ -902,19 +963,20 @@ function NodeInspector({
 }
 
 function TextSection({ node }: { node: WorkflowNode }) {
+  const { t } = useTranslation();
   const content = (node.data as { content?: string }).content ?? "";
   return (
     <section className="inspector-section">
-      <h3>Content</h3>
+      <h3>{t("editor:field.content")}</h3>
       <p className="inspector-text-excerpt">
-        {content.trim() ? content.slice(0, 280) : "Empty"}
+        {content.trim() ? content.slice(0, 280) : t("editor:inspector.empty")}
       </p>
       <div className="inspector-actions">
         <button
           onClick={() => useEditorStore.getState().startEditingText(node.id)}
           type="button"
         >
-          Edit text
+          {t("editor:inspector.editText")}
         </button>
       </div>
     </section>
@@ -922,6 +984,7 @@ function TextSection({ node }: { node: WorkflowNode }) {
 }
 
 function OperationSection({ node }: { node: WorkflowNode }) {
+  const { t } = useTranslation();
   const data = node.data as {
     operationType?: string;
     parameters?: Record<string, unknown>;
@@ -929,8 +992,8 @@ function OperationSection({ node }: { node: WorkflowNode }) {
   const params = Object.entries(data.parameters ?? {});
   return (
     <section className="inspector-section">
-      <h3>Operation</h3>
-      <Row label="Type" value={data.operationType ?? ""} />
+      <h3>{t("editor:inspector.operation")}</h3>
+      <Row label={t("editor:field.type")} value={data.operationType ?? ""} />
       {params.map(([key, value]) => (
         <Row key={key} label={key} value={String(value)} />
       ))}
@@ -945,20 +1008,23 @@ function EdgeInspector({
   canvas: CanvasDocument;
   edge: WorkflowEdge;
 }) {
+  const { t } = useTranslation();
   const endpoint = (nodeId: string, portId: string) => {
     const node = canvas.nodes.find((entry) => entry.id === nodeId);
     const port = node?.ports.find((entry) => entry.id === portId);
-    return node ? `${node.title}${port ? ` · ${port.label}` : ""}` : "Unknown";
+    return node
+      ? `${node.title}${port ? ` · ${port.label}` : ""}`
+      : t("editor:inspector.unknown");
   };
   return (
     <>
-      <h2 className="inspector-heading">Edge</h2>
+      <h2 className="inspector-heading">{t("editor:inspector.edge")}</h2>
       <Row
-        label="From"
+        label={t("editor:field.from")}
         value={endpoint(edge.source.nodeId, edge.source.portId)}
       />
       <Row
-        label="To"
+        label={t("editor:field.to")}
         value={endpoint(edge.target.nodeId, edge.target.portId)}
       />
       <div className="inspector-actions">
@@ -967,7 +1033,7 @@ function EdgeInspector({
           onClick={() => deleteSelection()}
           type="button"
         >
-          Delete edge
+          {t("editor:inspector.deleteEdge")}
         </button>
       </div>
     </>
@@ -975,9 +1041,9 @@ function EdgeInspector({
 }
 
 const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
-  dots: "Dots",
-  lines: "Lines",
-  blank: "Blank",
+  dots: "editor:inspector.backgroundModeDots",
+  lines: "editor:inspector.backgroundModeLines",
+  blank: "editor:inspector.backgroundModeBlank",
 };
 
 /**
@@ -991,14 +1057,19 @@ const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
  * looked at is where a way of looking at it belongs.
  */
 function CanvasViewSection({ canvas }: { canvas: CanvasDocument }) {
+  const { t } = useTranslation();
   const { background, showMinimap } = canvas.settings;
   const theme = useAppearance((state) => state.theme);
   return (
     <section className="inspector-section">
-      <h3>Canvas view</h3>
+      <h3>{t("editor:inspector.canvasView")}</h3>
       <div className="inspector-row">
-        <span>Background</span>
-        <div aria-label="Canvas background" className="tool-group" role="group">
+        <span>{t("editor:field.background")}</span>
+        <div
+          aria-label={t("editor:inspector.canvasBackground")}
+          className="tool-group"
+          role="group"
+        >
           {BACKGROUND_MODES.map((mode) => (
             <button
               aria-pressed={background === mode}
@@ -1007,37 +1078,41 @@ function CanvasViewSection({ canvas }: { canvas: CanvasDocument }) {
               onClick={() => setCanvasViewSettings({ background: mode })}
               type="button"
             >
-              {BACKGROUND_LABELS[mode]}
+              {t(BACKGROUND_LABELS[mode])}
             </button>
           ))}
         </div>
       </div>
       <div className="inspector-row">
-        <span>Palette</span>
-        <div aria-label="Theme" className="tool-group" role="group">
+        <span>{t("editor:field.palette")}</span>
+        <div
+          aria-label={t("editor:inspector.theme")}
+          className="tool-group"
+          role="group"
+        >
           {CANVAS_THEME_NAMES.map((name) => (
             <button
               aria-pressed={theme === name}
               className={theme === name ? "is-active" : ""}
               key={name}
               onClick={() => useAppearance.getState().setTheme(name)}
-              title="The colors this machine draws the canvas in"
+              title={t("editor:inspector.themeHint")}
               type="button"
             >
-              {CANVAS_THEME_LABELS[name]}
+              {t(CANVAS_THEME_LABELS[name])}
             </button>
           ))}
         </div>
       </div>
       <div className="inspector-row">
-        <span>Minimap</span>
+        <span>{t("editor:field.minimap")}</span>
         <button
           aria-pressed={showMinimap}
           className={showMinimap ? "is-active" : ""}
           onClick={() => setCanvasViewSettings({ showMinimap: !showMinimap })}
           type="button"
         >
-          Show minimap
+          {t("editor:inspector.showMinimap")}
         </button>
       </div>
     </section>
@@ -1076,7 +1151,10 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
       (total, canvas) => total + canvasNodesUsing(canvas, entry.id).length,
       0,
     ) ?? 0;
-  const cards = (count: number) => `${count} card${count === 1 ? "" : "s"}`;
+  const cards = (count: number) =>
+    count === 1
+      ? t("editor:inspector.cardsOne", { count })
+      : t("editor:inspector.cardsMany", { count });
 
   return (
     <div className="inspector-asset" data-testid="asset-inspector">
@@ -1084,19 +1162,29 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
         {entry.name}
       </h3>
       <section className="inspector-section">
-        <h3>Preview</h3>
+        <h3>{t("editor:field.preview")}</h3>
         {issue && (
           <p className="inspector-media-broken" role="alert">
-            ⚠ Asset {issue}
-            {issue === "changed" ? " — file contents changed on disk" : ""}
+            {t("editor:inspector.assetBroken", {
+              state: t(
+                issue === "missing"
+                  ? "editor:inspector.mediaStateMissing"
+                  : issue === "changed"
+                    ? "editor:inspector.mediaStateChanged"
+                    : "editor:inspector.mediaStateEmpty",
+              ),
+            })}
+            {issue === "changed"
+              ? t("editor:inspector.contentsChangedOnDisk")
+              : ""}
           </p>
         )}
         {!issue && <AssetPreview entry={entry} mime={mime} />}
       </section>
       <section className="inspector-section">
-        <h3>File</h3>
+        <h3>{t("editor:field.file")}</h3>
         <Row
-          label="Shelf"
+          label={t("editor:field.shelf")}
           value={
             shelf
               ? `${t(ASSET_CATEGORY_LABELS[shelf])} · ${t(CAPABILITY_LABELS[kindOfShelf(shelf)])}`
@@ -1104,16 +1192,31 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
           }
         />
         <AssetRows entry={entry} />
-        <Row label="Origin" value={t(SHELF_WHERE_LABELS[shelfWhere(entry)])} />
-        <Row label="Kept to hand" value={keeper ? "Yes" : ""} />
-        <Row label="Words" value={(entry.tags ?? []).join(", ")} />
-        <Row label="About" value={entry.keyword ?? ""} />
-        <Row label="Added" value={formatStamp(entry.createdAt)} />
-        <Row label="Updated" value={formatStamp(entry.updatedAt)} />
+        <Row
+          label={t("editor:field.origin")}
+          value={t(SHELF_WHERE_LABELS[shelfWhere(entry)])}
+        />
+        <Row
+          label={t("editor:field.keptToHand")}
+          value={keeper ? t("editor:field.yes") : ""}
+        />
+        <Row
+          label={t("editor:field.words")}
+          value={(entry.tags ?? []).join(", ")}
+        />
+        <Row label={t("editor:field.about")} value={entry.keyword ?? ""} />
+        <Row
+          label={t("editor:field.added")}
+          value={formatStamp(entry.createdAt)}
+        />
+        <Row
+          label={t("editor:field.updated")}
+          value={formatStamp(entry.updatedAt)}
+        />
       </section>
       {entry.note && (
         <section className="inspector-section">
-          <h3>Note</h3>
+          <h3>{t("editor:field.note")}</h3>
           <p className="inspector-text-excerpt">{entry.note}</p>
         </section>
       )}
@@ -1123,9 +1226,15 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
         </section>
       )}
       <section className="inspector-section">
-        <h3>Used by</h3>
-        <Row label="On this canvas" value={cards(usesHere.length)} />
-        <Row label="In this project" value={cards(usesProject)} />
+        <h3>{t("editor:field.usedBy")}</h3>
+        <Row
+          label={t("editor:field.onThisCanvas")}
+          value={cards(usesHere.length)}
+        />
+        <Row
+          label={t("editor:field.inThisProject")}
+          value={cards(usesProject)}
+        />
       </section>
       {/* What can be done about the file rather than about a card: where it is
           on this machine, the cards made of it, whether it is kept to hand, and
@@ -1136,32 +1245,38 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
           onClick={() => focusAssetUses(usesHere)}
           title={
             usesHere.length === 0
-              ? "No card on this canvas uses it"
-              : `Select the ${cards(usesHere.length)} on this canvas using it`
+              ? t("editor:shelf.noCardUsesIt")
+              : usesHere.length === 1
+                ? t("editor:inspector.selectCardsOne")
+                : t("editor:inspector.selectCardsMany", {
+                    count: usesHere.length,
+                  })
           }
           type="button"
         >
-          Focus cards
+          {t("editor:inspector.focusCards")}
         </button>
         <button onClick={() => void revealAsset(entry.id)} type="button">
-          Reveal
+          {t("editor:action.reveal")}
         </button>
         <a download={entry.name} href={url}>
-          Download
+          {t("editor:action.download")}
         </a>
         <button
           aria-pressed={keeper}
           onClick={() => void markAssetKeeper(entry, !keeper)}
           type="button"
         >
-          {keeper ? "Stop keeping" : "Keep to hand"}
+          {keeper
+            ? t("editor:action.stopKeeping")
+            : t("editor:action.keepToHand")}
         </button>
         <button
           className="danger"
           onClick={() => void requestDeleteAsset(entry.id)}
           type="button"
         >
-          Remove
+          {t("editor:action.remove")}
         </button>
       </div>
     </div>
@@ -1176,12 +1291,13 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
  * board it was dragged onto, and readable when no board holds it at all.
  */
 function AssetPreview({ entry, mime }: { entry: ResourceEntry; mime: string }) {
+  const { t } = useTranslation();
   const openPreview = useEditorStore((state) => state.openPreview);
   const url = assetUrl(entry.id);
   if (mime.startsWith("image/")) {
     return (
       <button
-        aria-label="Open full preview"
+        aria-label={t("editor:inspector.openFullPreview")}
         className="inspector-preview"
         data-testid="asset-preview-image"
         onClick={() => openPreview(entry.id)}
@@ -1214,12 +1330,15 @@ function AssetPreview({ entry, mime }: { entry: ResourceEntry; mime: string }) {
   if (mime.startsWith("text/")) return <TextExcerpt entry={entry} />;
   return (
     <p className="inspector-empty" data-testid="asset-preview-none">
-      {mime ? `Nothing to show for ${mime}` : "Nothing to show for this file"}
+      {mime
+        ? t("editor:inspector.nothingToShowForMime", { mime })
+        : t("editor:inspector.nothingToShow")}
     </p>
   );
 }
 
 export function InspectorPanel() {
+  const { t } = useTranslation();
   const selection = useEditorStore((state) => state.selection);
   const inspectedAssetId = useEditorStore((state) => state.inspectedAssetId);
   const activeCanvas = useActiveCanvas();
@@ -1265,7 +1384,9 @@ export function InspectorPanel() {
   } else if (selectedNodes.length === 0 && selectedEdges.length === 0) {
     body = (
       <>
-        <p className="inspector-empty">Nothing selected</p>
+        <p className="inspector-empty">
+          {t("editor:inspector.nothingSelected")}
+        </p>
         {activeCanvas && <CanvasViewSection canvas={activeCanvas} />}
       </>
     );
@@ -1280,7 +1401,7 @@ export function InspectorPanel() {
         ))}
         {selectedEdges.map((edge) => (
           <li key={edge.id}>
-            <strong>Edge</strong>
+            <strong>{t("editor:inspector.edge")}</strong>
             <span>
               {edge.source.nodeId} → {edge.target.nodeId}
             </span>
@@ -1291,8 +1412,11 @@ export function InspectorPanel() {
   }
 
   return (
-    <aside aria-label="Inspector" className="editor-inspector">
-      <h2>Inspector</h2>
+    <aside
+      aria-label={t("editor:inspector.title")}
+      className="editor-inspector"
+    >
+      <h2>{t("editor:inspector.title")}</h2>
       {body}
     </aside>
   );
