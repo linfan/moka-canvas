@@ -49,7 +49,9 @@ export interface DraftClip {
  * is the moment a snapped edge landed on, and `rowTrackId` is the row a
  * cross-track drag is landing on — null while it stays where it was. A seam
  * drag carries the window it would give the transition it grabbed, which the
- * canvas recomputes against the moment under the pointer.
+ * canvas recomputes against the moment under the pointer. A drop carries the
+ * block a file dragged from the shelf would become, placed where the release
+ * would lay it down.
  */
 export type TimelineDraft =
   | {
@@ -59,6 +61,7 @@ export type TimelineDraft =
       rowTrackId: TrackId | null;
     }
   | { kind: "trim"; clip: DraftClip; edge: ClipEdge; guideMs: number | null }
+  | { kind: "drop"; clip: DraftClip; guideMs: number | null }
   | { kind: "marquee"; rect: Rect }
   | { kind: "seam"; transitionId: TransitionId; durationMs: number };
 

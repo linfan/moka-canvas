@@ -34,6 +34,7 @@ import { useClipStore, type ClipSelection } from "../stores/clipStore";
 import type { TimelineHit } from "../timeline/geometry";
 import { frameAligned } from "../timeline/timecode";
 import { alignMoves, type AlignMode } from "./alignment";
+import type { DraftClip } from "./gestures";
 import { snapContext, snapMs } from "./snapping";
 
 /**
@@ -302,13 +303,67 @@ function landOnTrack(
 }
 
 /**
+ * The moment a dropped head lands on: the moment the pointer gave it, caught
+ * by the magnet when an existing edge stands within a hand's width of it.
+ */
+function landingMs(
+  timeline: TimelineDocument,
+  startMs: number,
+): { startMs: number; guideMs: number | null } {
+  const store = useClipStore.getState();
+  const caught = snapMs(
+    startMs,
+    snapContext(timeline, store.playheadMs),
+    store.view.pxPerSec,
+    store.snapEnabled,
+  );
+  return { startMs: caught ?? startMs, guideMs: caught };
+}
+
+/**
+ * What a file hanging over the rows would lay down, or null where the row
+ * would refuse it.
+ *
+ * The ghost a drag draws: the block the release would add — its kind, its
+ * length, and the very place the head would land, magnet included — or null
+ * for a row that will not take the file (a locked row, another kind's row, a
+ * file that makes no clip at all). The drawing reads this, and the drop lands
+ * through the same arithmetic, so what is seen while dragging is exactly what
+ * the release does.
+ */
+export function dropPreview(
+  timeline: TimelineDocument,
+  assetId: AssetId,
+  trackId: TrackId | null,
+  startMs: number,
+): { clip: DraftClip; guideMs: number | null } | null {
+  const entry = findAsset(useProjectStore.getState().moka, assetId);
+  if (!entry) return null;
+  const track = trackId === null ? null : trackOf(timeline, trackId);
+  if (!track) return null;
+  const kind = clipKindFor(entry);
+  if (kind === null || track.locked || !trackAccepts(track, kind)) return null;
+  const landed = landingMs(timeline, startMs);
+  const clip = createClipFromAsset(entry, track.id, landed.startMs);
+  return {
+    clip: {
+      clipId: clip.id,
+      trackId: clip.trackId,
+      kind: clip.kind,
+      startMs: clip.startMs,
+      durationMs: clip.durationMs,
+    },
+    guideMs: landed.guideMs,
+  };
+}
+
+/**
  * A file dropped from the shelf lands where the pointer put it.
  *
  * A drag that outlived the shelf it started on is ignored without a word: the
  * id names nothing, so there is nothing to say about it. Everything else the
  * row decides: its kind, its lock, and the place the pointer's moment falls on
- * the frame clock — with the magnet on, a place an existing edge already
- * stands on when the pointer's moment came within a hand's width of it.
+ * the frame clock — the same arithmetic the drag's ghost was drawn from.
  */
 export function dropAssetOnTrack(
   timeline: TimelineDocument,
@@ -320,14 +375,12 @@ export function dropAssetOnTrack(
   if (!entry) return;
   const track = trackId === null ? null : trackOf(timeline, trackId);
   if (!track) return;
-  const store = useClipStore.getState();
-  const caught = snapMs(
-    startMs,
-    snapContext(timeline, store.playheadMs),
-    store.view.pxPerSec,
-    store.snapEnabled,
+  const clip = landOnTrack(
+    timeline,
+    entry,
+    track,
+    landingMs(timeline, startMs).startMs,
   );
-  const clip = landOnTrack(timeline, entry, track, caught ?? startMs);
   if (clip) {
     useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
   }

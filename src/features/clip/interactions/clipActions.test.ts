@@ -32,6 +32,7 @@ import {
   deleteSelection,
   detachAudio,
   dropAssetOnTrack,
+  dropPreview,
   duplicateSelection,
   materialOf,
   nearestClipEdgeMs,
@@ -460,6 +461,75 @@ describe("landing a file from the shelf", () => {
 
     expect(cut().clips).toHaveLength(1);
     expect(messages()).toEqual([]);
+  });
+});
+
+describe("the ghost a hanging file draws", () => {
+  it("places the block where the release would, and the magnet catches its head", () => {
+    const ids = timelineIds();
+    open(buildTimelineMokaFile(), { timelineId: ids.timeline });
+
+    // A hand's width clear of the block already there: the pointer's own
+    // frame, and the file's own four seconds.
+    const free = dropPreview(cut(), ids.videoAsset, ids.videoTrack, 3_000);
+    expect(free?.clip).toMatchObject({
+      trackId: ids.videoTrack,
+      kind: "video",
+      startMs: 3_000,
+      durationMs: 4_000,
+    });
+    expect(free?.guideMs).toBeNull();
+
+    // Within the magnet's reach of the block's tail, the head is caught by
+    // it: the ghost butts the block rather than drawing an overlap.
+    const caught = dropPreview(cut(), ids.videoAsset, ids.videoTrack, 3_950);
+    expect(caught?.clip.startMs).toBe(4_000);
+    expect(caught?.guideMs).toBe(4_000);
+  });
+
+  it("lands exactly the block the ghost drew", () => {
+    const ids = timelineIds();
+    open(buildTimelineMokaFile(), { timelineId: ids.timeline });
+
+    // A moment the magnet pulls onto the block's tail: the ghost butts it,
+    // and the drop that follows lays the very block down instead of asking
+    // for an overlap it would be refused.
+    const drawn = dropPreview(cut(), ids.followerAsset, ids.videoTrack, 3_950);
+    expect(drawn?.clip.startMs).toBe(4_000);
+    const before = new Set(cut().clips.map((clip) => clip.id));
+    dropAssetOnTrack(cut(), ids.followerAsset, ids.videoTrack, 3_950);
+
+    const landed = cut().clips.find((clip) => !before.has(clip.id));
+    expect(landed?.startMs).toBe(drawn?.clip.startMs);
+    expect(landed?.durationMs).toBe(drawn?.clip.durationMs);
+    expect(messages()).toEqual([]);
+  });
+
+  it("draws nothing over a place that would refuse the file", () => {
+    const ids = timelineIds();
+    const moka = buildTimelineMokaFile();
+    const notes: ResourceEntry = {
+      id: "asset-notes",
+      name: "notes.md",
+      path: "assets/texts/notes-00000000.md",
+      mime: "text/markdown",
+      bytes: 120,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    moka.resources.texts.push(notes);
+    moka.timelines![0].tracks = moka.timelines![0].tracks.map((track) =>
+      track.kind === "video" ? { ...track, locked: true } : track,
+    );
+    open(moka, { timelineId: ids.timeline });
+
+    // A locked row, another kind's row, a file that makes no clip, no row at
+    // all, and an id the project no longer holds.
+    expect(dropPreview(cut(), ids.videoAsset, ids.videoTrack, 0)).toBeNull();
+    expect(dropPreview(cut(), ids.videoAsset, ids.audioTrack, 0)).toBeNull();
+    expect(dropPreview(cut(), notes.id, ids.videoTrack, 0)).toBeNull();
+    expect(dropPreview(cut(), ids.videoAsset, null, 0)).toBeNull();
+    expect(dropPreview(cut(), "asset-gone", ids.videoTrack, 0)).toBeNull();
   });
 });
 

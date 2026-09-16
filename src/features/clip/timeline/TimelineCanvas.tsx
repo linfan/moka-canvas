@@ -26,6 +26,7 @@ import { i18n } from "../../../shared/i18n";
 import {
   clickSelection,
   dropAssetOnTrack,
+  dropPreview,
   materialOf,
   selectedClips,
 } from "../interactions/clipActions";
@@ -167,6 +168,8 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
   const draftRef = useRef<TimelineDraft | null>(null);
   // The clip a Shift click reaches from, which is the last clip picked alone.
   const anchorRef = useRef<string | null>(null);
+  // The file a drag in flight is carrying, read off the row it started on.
+  const draggedAssetRef = useRef<string>("");
   const [dropping, setDropping] = useState(false);
   const [cursor, setCursor] = useState<Cursor>("default");
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -254,6 +257,15 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
           })
           .filter((entry) => entry.length > 0)
           .join(";"),
+      );
+      // The block a file hanging over the rows would land as, or empty: the
+      // ghost is pixels like everything else, and this is where a test reads
+      // the very arithmetic the release will land through.
+      const ghost =
+        draftRef.current?.kind === "drop" ? draftRef.current.clip : null;
+      room.setAttribute(
+        "data-drop-preview",
+        ghost ? `${ghost.trackId}:${ghost.startMs}:${ghost.durationMs}` : "",
       );
       room.setAttribute(
         "data-selected-clip-ids",
@@ -915,31 +927,53 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
     });
   };
 
+  /**
+   * The file a drag in flight is carrying, watched off the row it started on.
+   *
+   * A drag's data is private to the drop that ends it, so what hangs over the
+   * rows during a drag cannot ask the data transfer what it holds. The row's
+   * own contract is read instead — `data-asset-id`, the same mark the shelf
+   * writes and this canvas's drop already trusts — taken at the dragstart
+   * that begins the drag and let go of at its end, wherever that end falls.
+   */
+  useEffect(() => {
+    const onDragStart = (event: DragEvent) => {
+      const row =
+        event.target instanceof Element
+          ? event.target.closest("[data-asset-id]")
+          : null;
+      draggedAssetRef.current = row?.getAttribute("data-asset-id") ?? "";
+    };
+    const forget = () => {
+      draggedAssetRef.current = "";
+      // A drag that ends anywhere but on the rows takes its ghost with it.
+      if (draftRef.current?.kind === "drop") {
+        draftRef.current = null;
+        setDropping(false);
+        schedule();
+      }
+    };
+    document.addEventListener("dragstart", onDragStart);
+    document.addEventListener("dragend", forget);
+    document.addEventListener("drop", forget);
+    return () => {
+      document.removeEventListener("dragstart", onDragStart);
+      document.removeEventListener("dragend", forget);
+      document.removeEventListener("drop", forget);
+    };
+  }, [schedule]);
+
   /** Whether a drag carries a file from the shelf, which is the only drag the rows take. */
   const carriedAssetId = (event: ReactDragEvent<HTMLCanvasElement>) =>
     event.dataTransfer.types.includes(ASSET_DRAG_MIME)
       ? event.dataTransfer.getData(ASSET_DRAG_MIME)
       : "";
 
-  const onDragOver = (event: ReactDragEvent<HTMLCanvasElement>) => {
-    if (!event.dataTransfer.types.includes(ASSET_DRAG_MIME)) return;
-    // Saying the canvas can take the drop is what makes the drop arrive; the
-    // copy is the shelf's own promise, not the room moving anything.
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    setDropping(true);
-  };
-
-  const onDragLeave = () => setDropping(false);
-
-  const onDrop = (event: ReactDragEvent<HTMLCanvasElement>) => {
-    if (!event.dataTransfer.types.includes(ASSET_DRAG_MIME)) return;
-    event.preventDefault();
-    setDropping(false);
-    const assetId = carriedAssetId(event);
+  /** Where a drag's pointer would put the file: the row under it, and the frame the moment names. */
+  const dropTargetAt = (event: { clientX: number; clientY: number }) => {
     const viewport = viewportRef.current;
     const local = localPoint(event);
-    if (!assetId || !viewport || !local) return;
+    if (!viewport || !local) return null;
     const view = viewNow();
     const hit = hitTest(timeline, view, {
       x: local.x,
@@ -957,14 +991,56 @@ export function TimelineCanvas({ timeline, headersRef }: TimelineCanvasProps) {
             : hit.kind === "empty"
               ? hit.trackId
               : null;
-    if (trackId === null) return;
-    // The file lands on the frame the pointer's moment falls on: where a
-    // piece sits is decided when it is laid down and nowhere else.
+    if (trackId === null) return null;
+    // The file lands on the frame the pointer's moment falls on, and the
+    // ghost hanging over the rows is drawn from this same reading.
     const startMs = Math.max(
       0,
       frameAligned(msAt(local.x, view), timeline.settings.fps),
     );
-    dropAssetOnTrack(timeline, assetId, trackId, startMs);
+    return { trackId, startMs };
+  };
+
+  const onDragOver = (event: ReactDragEvent<HTMLCanvasElement>) => {
+    if (!event.dataTransfer.types.includes(ASSET_DRAG_MIME)) return;
+    // Saying the canvas can take the drop is what makes the drop arrive; the
+    // copy is the shelf's own promise, not the room moving anything.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDropping(true);
+    // The file's own ghost, drawn where the release would leave it: the row
+    // it hangs over, the frame under the pointer, the magnet's catch.
+    const target = dropTargetAt(event);
+    const preview = target
+      ? dropPreview(
+          timeline,
+          draggedAssetRef.current,
+          target.trackId,
+          target.startMs,
+        )
+      : null;
+    draftRef.current = preview
+      ? { kind: "drop", clip: preview.clip, guideMs: preview.guideMs }
+      : null;
+    schedule();
+  };
+
+  const onDragLeave = () => {
+    setDropping(false);
+    draftRef.current = null;
+    schedule();
+  };
+
+  const onDrop = (event: ReactDragEvent<HTMLCanvasElement>) => {
+    if (!event.dataTransfer.types.includes(ASSET_DRAG_MIME)) return;
+    event.preventDefault();
+    setDropping(false);
+    draftRef.current = null;
+    schedule();
+    const assetId = carriedAssetId(event);
+    const target = dropTargetAt(event);
+    if (!assetId || !target) return;
+    dropAssetOnTrack(timeline, assetId, target.trackId, target.startMs);
   };
 
   const canvasClass = [
