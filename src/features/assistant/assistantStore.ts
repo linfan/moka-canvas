@@ -16,6 +16,7 @@ import {
   mentionNodeIds,
   nowIso,
 } from "../../shared/domain";
+import { i18n } from "../../shared/i18n";
 import { execute } from "../editor/commands/execute";
 import { useEditorStore } from "../editor/stores/editorStore";
 import { useProjectStore } from "../editor/stores/projectStore";
@@ -183,10 +184,12 @@ function keep(
   if (before === null) return;
   const lost = before + lines.length - (lineCount(canvas.id, target.id) ?? 0);
   if (lost > 0) {
-    const words =
+    const words = i18n.t(
       lost === 1
-        ? "1 old line let go to keep the conversation readable. Undo brings it back."
-        : `${lost} old lines let go to keep the conversation readable. Undo brings them back.`;
+        ? "assistant:store.linesLetGoOne"
+        : "assistant:store.linesLetGoMany",
+      { count: lost },
+    );
     useEditorStore.getState().announce(words);
   }
 }
@@ -222,10 +225,10 @@ async function lineOfRun(options: {
     at: nowIso(),
     failure: {
       message: stopped
-        ? "Stopped. The card is on the canvas to ask again."
+        ? i18n.t("assistant:store.stoppedStays")
         : (step?.error ??
           settled?.error ??
-          "The card did not come back with anything."),
+          i18n.t("assistant:store.cardEmpty")),
       code: stopped ? "GENERATION_CANCELLED" : "PROVIDER_UNAVAILABLE",
       // A run that did not finish is asked again from the record, which is
       // what the line names, so nothing is spent twice by accident.
@@ -273,11 +276,11 @@ async function answerByCard(options: {
     ask.references.filter((reference) => wired.has(reference.nodeId)),
     nowIso(),
   );
-  if (!execute("Ask for a card", plan.commands)) {
+  if (!execute(i18n.t("assistant:actions.askForCard"), plan.commands)) {
     return {
       question,
       answer: lineFailed(
-        new Error("The canvas would not take the card."),
+        new Error(i18n.t("assistant:store.cardRefused")),
         nowIso(),
       ),
     };
@@ -332,7 +335,7 @@ async function answerInWords(
       : lineFailed(error, nowIso());
   }
   if (controller.signal.aborted && answer.role === "assistant") {
-    useEditorStore.getState().announce("Stopped. What had arrived was kept.");
+    useEditorStore.getState().announce(i18n.t("assistant:store.stoppedKept"));
   }
   return { question, answer };
 }
@@ -359,7 +362,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       (session) => session.id === sessionId,
     );
     if (!held || name === "" || name === held.title) return;
-    execute("Rename conversation", [
+    execute(i18n.t("assistant:actions.renameConversation"), [
       { type: "renameSession", canvasId: canvas.id, sessionId, title: name },
     ]);
   },
@@ -373,12 +376,20 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     if (
       lines > 0 &&
       !window.confirm(
-        `Delete “${held.title}” and its ${lines} ${lines === 1 ? "line" : "lines"}?`,
+        i18n.t("assistant:store.removeConfirm", {
+          title: held.title,
+          count: lines,
+          lines: i18n.t(
+            lines === 1
+              ? "assistant:counts.lineOne"
+              : "assistant:counts.lineMany",
+          ),
+        }),
       )
     ) {
       return;
     }
-    execute("Remove conversation", [
+    execute(i18n.t("assistant:actions.removeConversation"), [
       { type: "removeSession", canvasId: canvas.id, sessionId },
     ]);
   },
@@ -390,10 +401,22 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       (total, session) => total + session.messages.length,
       0,
     );
-    const many = sessions.length === 1 ? "conversation" : "conversations";
     if (
       !window.confirm(
-        `Delete all ${sessions.length} ${many} and their ${lines} ${lines === 1 ? "line" : "lines"}?`,
+        i18n.t("assistant:store.removeAllConfirm", {
+          count: sessions.length,
+          conversations: i18n.t(
+            sessions.length === 1
+              ? "assistant:counts.conversationOne"
+              : "assistant:counts.conversationMany",
+          ),
+          lines,
+          linesWord: i18n.t(
+            lines === 1
+              ? "assistant:counts.lineOne"
+              : "assistant:counts.lineMany",
+          ),
+        }),
       )
     ) {
       return;
@@ -401,7 +424,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     // One thing to undo, so a clear meant as a sweep cannot half-happen: a
     // conversation put back on its own would be one the reader had said go.
     execute(
-      "Remove conversations",
+      i18n.t("assistant:actions.removeConversations"),
       sessions.map((session) => ({
         type: "removeSession",
         canvasId: canvas.id,
@@ -448,7 +471,10 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
               set({ saying: words }),
             )
           : await answerByCard({ canvas, nodes, ask, sessionId: target.id });
-      keep(canvas, target, "Ask the assistant", [turn.question, turn.answer]);
+      keep(canvas, target, i18n.t("assistant:actions.askTheAssistant"), [
+        turn.question,
+        turn.answer,
+      ]);
       // A conversation the turn opened is one the reader is now in: left
       // unnamed, the next turn would open a second one beside it.
       if (target.opening) set({ shown: target.id });
@@ -466,16 +492,14 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     if (!made || !nodeId) return;
     const card = canvas.nodes.find((node) => node.id === nodeId);
     if (!card) {
-      useEditorStore
-        .getState()
-        .announce("The card that answer named is no longer on the canvas.");
+      useEditorStore.getState().announce(i18n.t("assistant:store.cardGone"));
       return;
     }
     // Saying what is paid for again, because the card was not: it is the making
     // that failed, and the ask that failed with it is still in this conversation.
     if (
       !window.confirm(
-        `Ask “${card.title}” to make it again? The card is already on the canvas, so only the making is paid for.`,
+        i18n.t("assistant:store.retryConfirm", { title: card.title }),
       )
     ) {
       return;
@@ -494,9 +518,12 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       });
       // Only the answer: the question was kept the first time and is still the
       // line above, and a second copy of it would read as a second ask.
-      keep(canvas, { id: sessionId, opening: false }, "Ask the card again", [
-        answer,
-      ]);
+      keep(
+        canvas,
+        { id: sessionId, opening: false },
+        i18n.t("assistant:actions.askTheCardAgain"),
+        [answer],
+      );
     } catch {
       // The run layer has already said why the retry was refused. Writing a line
       // about it would be two failures for one ask that never started.

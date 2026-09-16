@@ -11,6 +11,7 @@ import type {
   SessionId,
 } from "../../shared/domain";
 import { PROBLEM_CODES, newId } from "../../shared/domain";
+import { i18n } from "../../shared/i18n";
 
 /**
  * How much of a first question becomes the conversation's name.
@@ -177,7 +178,7 @@ export function lineFailed(error: unknown, at: string): AssistantMessage {
     text:
       error instanceof Error && error.message !== ""
         ? error.message
-        : "The answer did not arrive.",
+        : i18n.t("assistant:failure.noAnswer"),
     createdAt: at,
     failure: {
       code: problemOf(code),
@@ -203,7 +204,7 @@ export function lineCutShort(said: string, at: string): AssistantMessage {
   return {
     id: newId(),
     role: "error",
-    text: "Stopped before anything arrived.",
+    text: i18n.t("assistant:failure.stoppedEarly"),
     createdAt: at,
     failure: { code: "GENERATION_CANCELLED", retryable: true },
   };

@@ -142,17 +142,14 @@ function findProtocol(protocols: ProtocolGroups | null, id: string) {
  * and a restart that no control here can perform.
  */
 const GUIDANCE: Record<string, string> = {
-  CONFIG_METADATA_KEY_MISSING:
-    "The master key protecting stored credentials is missing. Start the server " +
-    "with MOKA_METADATA_KEY set — `moka-server --generate-key` prints a " +
-    "value — or put back the <metadata.dir>/master.key that belongs to this " +
-    "directory. A key created from now on cannot open credentials sealed with " +
-    "the missing one.",
+  CONFIG_METADATA_KEY_MISSING: "settings:guidance.configMetadataKeyMissing",
 };
 
 /** How to act on a failure whose code is known, if there is anything to add. */
 export function guidanceFor(code: string | null): string | null {
-  return code === null ? null : (GUIDANCE[code] ?? null);
+  if (code === null) return null;
+  const key = GUIDANCE[code];
+  return key ? i18n.t(key) : null;
 }
 
 /** The two fields every failure sets on the store. */
@@ -351,7 +348,10 @@ export const useModelStore = create<ModelState>()((set, get) => {
           errorCode: null,
         });
       } catch (error) {
-        set({ loading: false, ...describe(error, "Failed to load settings") });
+        set({
+          loading: false,
+          ...describe(error, i18n.t("settings:errors.load")),
+        });
       }
     },
 
@@ -367,13 +367,13 @@ export const useModelStore = create<ModelState>()((set, get) => {
     },
 
     saveModel(draft) {
-      return write("Failed to save the model", (revision) =>
+      return write(i18n.t("settings:errors.saveModel"), (revision) =>
         modelsApi.upsert({ ...draft, expectedRevision: revision }),
       );
     },
 
     removeModel(id) {
-      return write("Failed to remove the model", (revision) =>
+      return write(i18n.t("settings:errors.removeModel"), (revision) =>
         modelsApi.remove(id, revision ?? undefined),
       );
     },
@@ -398,26 +398,26 @@ export const useModelStore = create<ModelState>()((set, get) => {
     },
 
     setKey(id, apiKey) {
-      return write("Failed to update the credential", () =>
+      return write(i18n.t("settings:errors.updateKey"), () =>
         modelsApi.setKey(id, apiKey),
       );
     },
 
     setSecretStorage(storage) {
-      return write("Failed to switch the secret storage", () =>
+      return write(i18n.t("settings:errors.switchStorage"), () =>
         modelsApi.setSecretStorage(storage),
       );
     },
 
     setDefault(capability, id) {
       const patch: DefaultsPatch = { [capability]: id };
-      return write("Failed to save the default", (revision) =>
+      return write(i18n.t("settings:errors.saveDefault"), (revision) =>
         modelsApi.setDefaults({ ...patch, expectedRevision: revision }),
       );
     },
 
     savePreferences(patch) {
-      return write("Failed to save the preferences", (revision) =>
+      return write(i18n.t("settings:errors.savePreferences"), (revision) =>
         modelsApi.setPreferences({ ...patch, expectedRevision: revision }),
       );
     },

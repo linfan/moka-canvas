@@ -8,6 +8,7 @@ import {
   type ResourceEntry,
   type RunId,
 } from "../../shared/domain";
+import { i18n } from "../../shared/i18n";
 import { execute } from "../editor/commands/execute";
 import { focusNode } from "../editor/canvas/canvasControl";
 import { editTextContent } from "../editor/interactions/actions";
@@ -41,7 +42,7 @@ export function fileAnswer(
   });
   node.data = { content: words.slice(0, MAX_TEXT_CONTENT_LENGTH) };
   if (
-    !execute("Put an answer on the canvas", [
+    !execute(i18n.t("assistant:actions.putAnswer"), [
       { type: "addNode", canvasId: canvas.id, node },
     ])
   ) {
@@ -50,7 +51,7 @@ export function fileAnswer(
   // The new card rather than what the question was about: the words are what a
   // reader asked to have, and they are on this card.
   useEditorStore.getState().selectOnly(node.id);
-  useEditorStore.getState().announce("An answer is on the canvas");
+  useEditorStore.getState().announce(i18n.t("assistant:answers.filed"));
   return node.id;
 }
 
@@ -85,7 +86,7 @@ export function overwriteTarget(
 export function showOnCanvas(canvas: CanvasDocument, nodeId: NodeId): void {
   const editor = useEditorStore.getState();
   if (!findNode(canvas, nodeId)) {
-    editor.announce("That card is not on this canvas any more");
+    editor.announce(i18n.t("assistant:answers.gone"));
     return;
   }
   editor.selectOnly(nodeId);
@@ -125,12 +126,12 @@ export async function copyWords(words: string): Promise<void> {
   const editor = useEditorStore.getState();
   try {
     await navigator.clipboard.writeText(words);
-    editor.announce("Copied");
+    editor.announce(i18n.t("assistant:answers.copied"));
   } catch {
     // The clipboard refuses for reasons the page cannot see — no permission, no
     // focus, another window holding it — so it is said, rather than left to be
     // read in a paragraph that looks as though it had been copied.
-    editor.announce("The clipboard would not take it");
+    editor.announce(i18n.t("assistant:answers.clipboardRefused"));
   }
 }
 

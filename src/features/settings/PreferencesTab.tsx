@@ -52,6 +52,7 @@ function clone(preferences: GenerationPreferences): GenerationPreferences {
  * that saving here cannot undo a change made somewhere else.
  */
 function GenerationDefaults() {
+  const { t } = useTranslation();
   const view = useModelStore((state) => state.view);
   const saving = useModelStore((state) => state.saving);
   const [draft, setDraft] = useState<GenerationPreferences | null>(() =>
@@ -63,7 +64,7 @@ function GenerationDefaults() {
   }, [view]);
 
   if (!view || !draft) {
-    return <p className="settings-hint">Loading configuration…</p>;
+    return <p className="settings-hint">{t("settings:loading")}</p>;
   }
 
   const stored = view.preferences;
@@ -97,17 +98,17 @@ function GenerationDefaults() {
   return (
     <div className="settings-section">
       <label className="dialog-field">
-        <span>System prompt</span>
+        <span>{t("settings:generation.systemPrompt")}</span>
         <textarea
           onChange={(event) => edit({ systemPrompt: event.target.value })}
-          placeholder="Applies to every text node that does not carry its own"
+          placeholder={t("settings:generation.systemPromptTip")}
           rows={3}
           value={draft.systemPrompt}
         />
       </label>
 
       <label className="dialog-field">
-        <span>Reasoning effort</span>
+        <span>{t("settings:generation.reasoningEffort")}</span>
         <input
           onChange={(event) => edit({ reasoningEffort: event.target.value })}
           placeholder="auto"
@@ -115,11 +116,14 @@ function GenerationDefaults() {
         />
       </label>
 
-      <section aria-label="Image defaults" className="settings-section">
-        <h3 className="settings-heading">Image</h3>
+      <section
+        aria-label={t("settings:generation.imageDefaults")}
+        className="settings-section"
+      >
+        <h3 className="settings-heading">{t("settings:generation.image")}</h3>
         <div className="settings-columns">
           <label className="dialog-field">
-            <span>Size</span>
+            <span>{t("settings:generation.size")}</span>
             <input
               onChange={(event) => editImage({ size: event.target.value })}
               placeholder="1:1"
@@ -127,7 +131,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Quality</span>
+            <span>{t("settings:generation.quality")}</span>
             <input
               onChange={(event) => editImage({ quality: event.target.value })}
               placeholder="auto"
@@ -135,7 +139,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Background</span>
+            <span>{t("settings:generation.background")}</span>
             <input
               onChange={(event) =>
                 editImage({ background: event.target.value })
@@ -145,7 +149,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Images per run</span>
+            <span>{t("settings:generation.imagesPerRun")}</span>
             <input
               max={MAX_IMAGES_PER_RUN}
               min={1}
@@ -160,11 +164,14 @@ function GenerationDefaults() {
         </div>
       </section>
 
-      <section aria-label="Video defaults" className="settings-section">
-        <h3 className="settings-heading">Video</h3>
+      <section
+        aria-label={t("settings:generation.videoDefaults")}
+        className="settings-section"
+      >
+        <h3 className="settings-heading">{t("settings:generation.video")}</h3>
         <div className="settings-columns">
           <label className="dialog-field">
-            <span>Seconds</span>
+            <span>{t("settings:generation.seconds")}</span>
             <input
               max={MAX_VIDEO_SECONDS}
               min={1}
@@ -177,7 +184,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Resolution</span>
+            <span>{t("settings:generation.resolution")}</span>
             <input
               onChange={(event) =>
                 editVideo({ resolution: event.target.value })
@@ -187,7 +194,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Mode</span>
+            <span>{t("settings:generation.mode")}</span>
             <input
               onChange={(event) => editVideo({ mode: event.target.value })}
               placeholder="auto"
@@ -195,7 +202,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Aspect ratio</span>
+            <span>{t("settings:generation.aspectRatio")}</span>
             <input
               onChange={(event) => editVideo({ ratio: event.target.value })}
               placeholder="16:9"
@@ -211,7 +218,7 @@ function GenerationDefaults() {
             }
             type="checkbox"
           />
-          <span>Generate audio</span>
+          <span>{t("settings:generation.generateAudio")}</span>
         </label>
         <label className="settings-check">
           <input
@@ -219,23 +226,26 @@ function GenerationDefaults() {
             onChange={(event) => editVideo({ watermark: event.target.checked })}
             type="checkbox"
           />
-          <span>Watermark</span>
+          <span>{t("settings:generation.watermark")}</span>
         </label>
       </section>
 
-      <section aria-label="Audio defaults" className="settings-section">
-        <h3 className="settings-heading">Audio</h3>
+      <section
+        aria-label={t("settings:generation.audioDefaults")}
+        className="settings-section"
+      >
+        <h3 className="settings-heading">{t("settings:generation.audio")}</h3>
         <div className="settings-columns">
           <label className="dialog-field">
-            <span>Voice</span>
+            <span>{t("settings:generation.voice")}</span>
             <input
               onChange={(event) => editAudio({ voice: event.target.value })}
-              placeholder="The voice the model knows"
+              placeholder={t("settings:generation.voiceTip")}
               value={draft.audio.voice}
             />
           </label>
           <label className="dialog-field">
-            <span>Format</span>
+            <span>{t("settings:generation.format")}</span>
             <input
               onChange={(event) => editAudio({ format: event.target.value })}
               placeholder="mp3"
@@ -243,7 +253,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Speed</span>
+            <span>{t("settings:generation.speed")}</span>
             <input
               max={MAX_AUDIO_SPEED}
               min={MIN_AUDIO_SPEED}
@@ -256,7 +266,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Sample rate</span>
+            <span>{t("settings:generation.sampleRate")}</span>
             <input
               max={48000}
               min={8000}
@@ -269,7 +279,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Volume</span>
+            <span>{t("settings:generation.volume")}</span>
             <input
               max={100}
               min={0}
@@ -281,7 +291,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Rate</span>
+            <span>{t("settings:generation.rate")}</span>
             <input
               max={2}
               min={0.5}
@@ -294,7 +304,7 @@ function GenerationDefaults() {
             />
           </label>
           <label className="dialog-field">
-            <span>Pitch</span>
+            <span>{t("settings:generation.pitch")}</span>
             <input
               max={2}
               min={0.5}
@@ -308,12 +318,12 @@ function GenerationDefaults() {
           </label>
         </div>
         <label className="dialog-field">
-          <span>Voice instructions</span>
+          <span>{t("settings:generation.voiceInstructions")}</span>
           <input
             onChange={(event) =>
               editAudio({ instructions: event.target.value })
             }
-            placeholder="Spoken as directions to the voice"
+            placeholder={t("settings:generation.voiceInstructionsTip")}
             value={draft.audio.instructions}
           />
         </label>
@@ -326,7 +336,7 @@ function GenerationDefaults() {
           onClick={() => void useModelStore.getState().savePreferences(patch)}
           type="button"
         >
-          {saving ? "Saving…" : "Save preferences"}
+          {saving ? t("settings:saving") : t("settings:generation.save")}
         </button>
       </div>
     </div>
@@ -342,11 +352,21 @@ function GenerationDefaults() {
  * already made stays exactly where it was put.
  */
 function NodeToolChoices() {
+  const { t } = useTranslation();
   const shown = useToolPrefs((state) => state.shown);
   const toggleShown = useToolPrefs((state) => state.toggleShown);
+  const listed = PICTURE_TOOLS.map((tool) => t(TOOL_LABELS[tool])).join(
+    t("settings:join.list"),
+  );
+  const asked = ASKING_A_MODEL.map((tool) => t(TOOL_LABELS[tool])).join(
+    t("settings:join.and"),
+  );
   return (
-    <section aria-label="Picture tools" className="settings-section">
-      <h3 className="settings-heading">Picture tools on a node</h3>
+    <section
+      aria-label={t("settings:pictureTools.label")}
+      className="settings-section"
+    >
+      <h3 className="settings-heading">{t("settings:pictureTools.heading")}</h3>
       <div className="settings-columns">
         {BAR_ENTRIES.map((tool) => (
           <label className="settings-check" key={tool}>
@@ -355,22 +375,14 @@ function NodeToolChoices() {
               onChange={() => toggleShown(tool)}
               type="checkbox"
             />
-            <span>{TOOL_LABELS[tool]}</span>
+            <span>{t(TOOL_LABELS[tool])}</span>
           </label>
         ))}
       </div>
       <p className="settings-hint">
-        {PICTURE_TOOLS.map((tool) => TOOL_LABELS[tool]).join(", ")} work on the
-        pixels a picture already has, so they cost nothing and give the same
-        answer twice.{" "}
-        {ASKING_A_MODEL.map((tool) => TOOL_LABELS[tool]).join(" and ")} do not:
-        each hands the picture to a model, one with a region marked on it and
-        one with a question about it, so each costs what an ask costs.
+        {t("settings:pictureTools.hint", { tools: listed, asks: asked })}
       </p>
-      <p className="settings-hint">
-        None of them rewrites the file a node holds: what they make is filed
-        beside it and given a node of its own.
-      </p>
+      <p className="settings-hint">{t("settings:pictureTools.note")}</p>
     </section>
   );
 }

@@ -38,19 +38,19 @@ export const ASSISTANT_INTENTS: readonly AssistantIntent[] = [
 ];
 
 export const INTENT_LABELS: Record<AssistantIntent, string> = {
-  answer: "Ask",
-  rewrite: "Rewrite",
-  image: "Image",
-  video: "Video",
-  audio: "Audio",
+  answer: "assistant:intent.label.answer",
+  rewrite: "assistant:intent.label.rewrite",
+  image: "assistant:intent.label.image",
+  video: "assistant:intent.label.video",
+  audio: "assistant:intent.label.audio",
 };
 
 export const INTENT_HINTS: Record<AssistantIntent, string> = {
-  answer: "Ask about the cards this conversation is about",
-  rewrite: "Send the chosen text back written again, and nothing else",
-  image: "Put a picture on the canvas, asked with the cards this names",
-  video: "Put a moving picture on the canvas, asked with the cards this names",
-  audio: "Put a sound on the canvas, asked with the cards this names",
+  answer: "assistant:intent.hint.answer",
+  rewrite: "assistant:intent.hint.rewrite",
+  image: "assistant:intent.hint.image",
+  video: "assistant:intent.hint.video",
+  audio: "assistant:intent.hint.audio",
 };
 
 /** The kinds of card a conversation can ask for. */
@@ -71,11 +71,11 @@ export function mediaKindFor(intent: AssistantIntent): CardKind | null {
 
 /** What each intent invites the reader to type. */
 export const INTENT_PLACEHOLDERS: Record<AssistantIntent, string> = {
-  answer: "Ask about the cards you chose…",
-  rewrite: "How should it read instead?",
-  image: "What should the picture be?",
-  video: "What should the shot be?",
-  audio: "What should it sound like?",
+  answer: "assistant:intent.placeholder.answer",
+  rewrite: "assistant:intent.placeholder.rewrite",
+  image: "assistant:intent.placeholder.image",
+  video: "assistant:intent.placeholder.video",
+  audio: "assistant:intent.placeholder.audio",
 };
 
 /**
@@ -271,7 +271,7 @@ function readable(asked: string, names: ReadonlyMap<NodeId, string>): string {
   let at = 0;
   for (const span of mentionSpans(asked)) {
     words += asked.slice(at, span.start);
-    words += `[${names.get(span.nodeId) ?? "a card that is gone"}]`;
+    words += `[${names.get(span.nodeId) ?? i18n.t("assistant:ask.cardGone")}]`;
     at = span.end;
   }
   return `${words}${asked.slice(at)}`.trim();

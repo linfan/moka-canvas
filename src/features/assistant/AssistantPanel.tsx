@@ -1,5 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
+  CAPABILITY_LABELS,
   MAX_ASSISTANT_TITLE_LENGTH,
   mentionNodeIds,
   type AssetId,
@@ -21,7 +23,7 @@ import {
 import { mentionGroups, type MentionWanted } from "../editor/canvas/mentions";
 import { MentionField } from "../editor/components/MentionField";
 import {
-  GENERATION_UNAVAILABLE,
+  generationUnavailable,
   useGenerationAvailable,
 } from "../editor/stores/appStore";
 import { useEditorStore } from "../editor/stores/editorStore";
@@ -55,9 +57,9 @@ import {
 import { sessionShown } from "./conversation";
 
 const ROLE_WORDS: Record<AssistantRole, string> = {
-  user: "You",
-  assistant: "Assistant",
-  error: "Trouble",
+  user: "assistant:roles.user",
+  assistant: "assistant:roles.assistant",
+  error: "assistant:roles.error",
 };
 
 /** How many lines a conversation shows at once, and in what steps more do. */
@@ -71,11 +73,6 @@ const WINDOW_STEP = 50;
  * id is made as a UUID.
  */
 const FRESH_OPTION = "fresh";
-
-/** How many lines a conversation holds, said so that one reads as one. */
-function lineWords(count: number): string {
-  return `${count} ${count === 1 ? "line" : "lines"}`;
-}
 
 /**
  * One line of a conversation, whether it was kept or is still arriving.
@@ -96,23 +93,27 @@ function Line({
   live: ReadonlySet<NodeId>;
   actions?: ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <li className={`assistant-line is-${role}`}>
-      <p className="assistant-line-who">{ROLE_WORDS[role]}</p>
+      <p className="assistant-line-who">{t(ROLE_WORDS[role])}</p>
       <p className="assistant-line-words">{words}</p>
       {about && about.length > 0 && (
-        <ul aria-label="What this was about" className="assistant-line-about">
+        <ul
+          aria-label={t("assistant:line.about")}
+          className="assistant-line-about"
+        >
           {about.map((reference) => {
             const gone = !live.has(reference.nodeId);
             return (
               <li
                 className={gone ? "is-gone" : ""}
                 key={reference.nodeId}
-                title={
-                  gone ? "This card is no longer on the canvas." : undefined
-                }
+                title={gone ? t("assistant:line.goneTip") : undefined}
               >
-                {gone ? `${reference.title} — gone` : reference.title}
+                {gone
+                  ? t("assistant:line.gone", { title: reference.title })
+                  : reference.title}
               </li>
             );
           })}
@@ -159,6 +160,7 @@ function LineActions({
   onAskAgain: (words: string) => void;
   onRetry: (line: AssistantMessage) => void;
 }) {
+  const { t } = useTranslation();
   const made = line.toolCalls?.[0];
   if (made) {
     const onto = made.nodeId;
@@ -166,7 +168,7 @@ function LineActions({
       <div className="assistant-line-actions">
         {onto !== undefined && (
           <button onClick={() => showOnCanvas(canvas, onto)} type="button">
-            Show on canvas
+            {t("assistant:line.showOnCanvas")}
           </button>
         )}
         {(filed.get(made.runId)?.length ?? 0) > 0 && (
@@ -174,16 +176,16 @@ function LineActions({
             onClick={() => useEditorStore.getState().setLeftPanelTab("assets")}
             type="button"
           >
-            Show in assets
+            {t("assistant:line.showInAssets")}
           </button>
         )}
         {onto !== undefined && line.failure?.retryable && (
           <button
             onClick={() => onRetry(line)}
-            title="Ask this card to make it again, paying for the making and not for a second card"
+            title={t("assistant:line.askCardAgainTip")}
             type="button"
           >
-            Ask the card again
+            {t("assistant:line.askCardAgain")}
           </button>
         )}
       </div>
@@ -193,7 +195,7 @@ function LineActions({
     return (
       <div className="assistant-line-actions">
         <button onClick={() => onAskAgain(line.text)} type="button">
-          Ask again
+          {t("assistant:line.askAgain")}
         </button>
       </div>
     );
@@ -203,7 +205,7 @@ function LineActions({
     return (
       <div className="assistant-line-actions">
         <button onClick={() => onAskAgain(asked)} type="button">
-          Ask again
+          {t("assistant:line.askAgain")}
         </button>
       </div>
     );
@@ -214,18 +216,18 @@ function LineActions({
   return (
     <div className="assistant-line-actions">
       <button onClick={() => fileAnswer(canvas, line.text)} type="button">
-        Insert on canvas
+        {t("assistant:line.insert")}
       </button>
       {target !== null && (
         <button onClick={() => overwriteCard(target, line.text)} type="button">
-          Replace selection
+          {t("assistant:line.replace")}
         </button>
       )}
       <button onClick={() => void copyWords(line.text)} type="button">
-        Copy text
+        {t("assistant:line.copy")}
       </button>
       <a download={file.name} href={file.href}>
-        Download
+        {t("assistant:line.download")}
       </a>
     </div>
   );
@@ -242,6 +244,7 @@ function LineActions({
  * one thing to undo and a project reopened holds what it held.
  */
 function Conversations({ canvas }: { canvas: CanvasDocument }) {
+  const { t } = useTranslation();
   const shown = useAssistantStore((state) => state.shown);
   const [renaming, setRenaming] = useState<SessionId | null>(null);
   const [title, setTitle] = useState("");
@@ -263,7 +266,7 @@ function Conversations({ canvas }: { canvas: CanvasDocument }) {
     <div className="assistant-sessions">
       {renaming === null ? (
         <select
-          aria-label="Conversation"
+          aria-label={t("assistant:conversation.label")}
           data-testid="assistant-session-select"
           onChange={(event) =>
             useAssistantStore
@@ -274,19 +277,29 @@ function Conversations({ canvas }: { canvas: CanvasDocument }) {
                   : event.target.value,
               )
           }
-          title="Which conversation this panel is reading"
+          title={t("assistant:conversation.pickTip")}
           value={carrying?.id ?? FRESH_OPTION}
         >
           {sessions.map((session) => (
             <option key={session.id} value={session.id}>
-              {`${session.title} · ${lineWords(session.messages.length)}`}
+              {t("assistant:conversation.option", {
+                title: session.title,
+                count: session.messages.length,
+                lines: t(
+                  session.messages.length === 1
+                    ? "assistant:counts.lineOne"
+                    : "assistant:counts.lineMany",
+                ),
+              })}
             </option>
           ))}
-          <option value={FRESH_OPTION}>New conversation</option>
+          <option value={FRESH_OPTION}>
+            {t("assistant:conversation.fresh")}
+          </option>
         </select>
       ) : (
         <input
-          aria-label="Conversation name"
+          aria-label={t("assistant:conversation.nameLabel")}
           autoFocus
           data-testid="assistant-session-rename"
           maxLength={MAX_ASSISTANT_TITLE_LENGTH}
@@ -307,10 +320,10 @@ function Conversations({ canvas }: { canvas: CanvasDocument }) {
             setTitle(carrying.title);
             setRenaming(carrying.id);
           }}
-          title="Give this conversation another name"
+          title={t("assistant:conversation.renameTip")}
           type="button"
         >
-          Rename
+          {t("assistant:conversation.rename")}
         </button>
         <button
           disabled={carrying === null}
@@ -319,19 +332,19 @@ function Conversations({ canvas }: { canvas: CanvasDocument }) {
               useAssistantStore.getState().remove(canvas, carrying.id);
             }
           }}
-          title="Take this conversation and its lines away"
+          title={t("assistant:conversation.removeTip")}
           type="button"
         >
-          Remove
+          {t("assistant:conversation.remove")}
         </button>
         <button
           className="danger"
           disabled={sessions.length === 0}
           onClick={() => useAssistantStore.getState().removeEvery(canvas)}
-          title="Take every conversation on this canvas away, as one thing to undo"
+          title={t("assistant:conversation.removeAllTip")}
           type="button"
         >
-          Remove all
+          {t("assistant:conversation.removeAll")}
         </button>
       </div>
     </div>
@@ -352,6 +365,7 @@ function Conversations({ canvas }: { canvas: CanvasDocument }) {
  * hundred of each.
  */
 export function AssistantPanel() {
+  const { t } = useTranslation();
   const canvas = useActiveCanvas();
   const moka = useProjectStore((state) => state.moka);
   const selfCheck = useProjectStore((state) => state.selfCheck);
@@ -478,9 +492,11 @@ export function AssistantPanel() {
       : "";
   // A configuration still being read is not one with nothing in it.
   const refusal = !generationOn
-    ? GENERATION_UNAVAILABLE
+    ? generationUnavailable()
     : noModel
-      ? `No ${capability} model is configured yet.`
+      ? t("assistant:ask.refusal", {
+          capability: t(CAPABILITY_LABELS[capability]).toLowerCase(),
+        })
       : null;
   const canAsk =
     !busy && refusal === null && canvas !== null && draft.trim() !== "";
@@ -495,9 +511,7 @@ export function AssistantPanel() {
   const askAgain = (words: string) => {
     useAssistantStore.getState().setDraft(words);
     areaRef.current?.focus();
-    useEditorStore
-      .getState()
-      .announce("The question is back in the field, nothing sent yet.");
+    useEditorStore.getState().announce(t("assistant:ask.questionBack"));
   };
 
   const retryLine = (line: AssistantMessage) => {
@@ -508,14 +522,14 @@ export function AssistantPanel() {
 
   return (
     <aside
-      aria-label="Assistant"
+      aria-label={t("assistant:panel.title")}
       className="assistant-panel"
       data-testid="assistant-panel"
     >
-      <h2>Assistant</h2>
+      <h2>{t("assistant:panel.title")}</h2>
 
       {canvas === null ? (
-        <p className="prompt-panel-note">No canvas is open.</p>
+        <p className="prompt-panel-note">{t("assistant:panel.noCanvas")}</p>
       ) : (
         <>
           <Conversations canvas={canvas} />
@@ -524,8 +538,8 @@ export function AssistantPanel() {
             {lines.length === 0 && !busy && (
               <p className="prompt-panel-note">
                 {shown === "fresh"
-                  ? "A new conversation, nothing said in it yet."
-                  : "Nothing has been asked over this canvas yet."}
+                  ? t("assistant:panel.emptyFresh")
+                  : t("assistant:panel.emptyNone")}
               </p>
             )}
             {before > 0 && (
@@ -534,7 +548,12 @@ export function AssistantPanel() {
                 onClick={() => setShownCount(shownCount + WINDOW_STEP)}
                 type="button"
               >
-                {`Show ${before} earlier ${before === 1 ? "line" : "lines"}`}
+                {t(
+                  before === 1
+                    ? "assistant:line.showEarlierOne"
+                    : "assistant:line.showEarlierMany",
+                  { count: before },
+                )}
               </button>
             )}
             <ol>
@@ -570,8 +589,8 @@ export function AssistantPanel() {
 
           <p className="assistant-about" data-testid="assistant-about">
             {summary === ""
-              ? "About nothing yet — choose a card, or name one with @."
-              : `About ${summary}`}
+              ? t("assistant:about.none")
+              : t("assistant:about.some", { summary })}
           </p>
           <button
             className="assistant-from-assets"
@@ -580,14 +599,14 @@ export function AssistantPanel() {
                 .getState()
                 .openAssetPicker({ mode: "nodes", at: null })
             }
-            title="Put files from the shelf on the canvas, ready to ask about"
+            title={t("assistant:panel.fromAssetsTip")}
             type="button"
           >
-            From assets…
+            {t("assistant:panel.fromAssets")}
           </button>
 
           <div
-            aria-label="What to ask for"
+            aria-label={t("assistant:ask.modes")}
             className="prompt-panel-modes"
             role="group"
           >
@@ -597,10 +616,10 @@ export function AssistantPanel() {
                 className={option === intent ? "is-active" : ""}
                 key={option}
                 onClick={() => useAssistantStore.getState().setIntent(option)}
-                title={INTENT_HINTS[option]}
+                title={t(INTENT_HINTS[option])}
                 type="button"
               >
-                {INTENT_LABELS[option]}
+                {t(INTENT_LABELS[option])}
               </button>
             ))}
           </div>
@@ -608,7 +627,7 @@ export function AssistantPanel() {
           {wordsWanted && textModels.length > 0 && (
             <div className="assistant-model">
               <select
-                aria-label="Model"
+                aria-label={t("assistant:model.label")}
                 data-testid="assistant-model"
                 onChange={(event) =>
                   useAssistantStore
@@ -617,10 +636,10 @@ export function AssistantPanel() {
                       event.target.value === "" ? null : event.target.value,
                     )
                 }
-                title="Which configured text model answers in words"
+                title={t("assistant:model.tip")}
                 value={pickedModel}
               >
-                <option value="">Default model</option>
+                <option value="">{t("assistant:model.default")}</option>
                 {textModels.map((entry) => (
                   <option key={entry.reference} value={entry.reference}>
                     {entry.label}
@@ -632,9 +651,9 @@ export function AssistantPanel() {
 
           {wordsWanted && (
             <div className="assistant-history">
-              <span>Send earlier lines with this</span>
+              <span>{t("assistant:history.title")}</span>
               <div
-                aria-label="How many earlier lines to send"
+                aria-label={t("assistant:history.label")}
                 className="prompt-panel-modes"
                 role="group"
               >
@@ -648,7 +667,7 @@ export function AssistantPanel() {
                         .getState()
                         .setHistory(history === count ? null : count)
                     }
-                    title={`Send the last ${count} lines of this conversation along with the question`}
+                    title={t("assistant:history.choiceTip", { count })}
                     type="button"
                   >
                     {count}
@@ -660,10 +679,12 @@ export function AssistantPanel() {
                 data-testid="assistant-history-note"
               >
                 {history === null
-                  ? "Nothing said before this question is sent with it."
+                  ? t("assistant:history.noteOff")
                   : earlier === ""
-                    ? "Nothing has been said yet to send along."
-                    : `About ${earlier.length} characters of this conversation go with the ask.`}
+                    ? t("assistant:history.noteEmpty")
+                    : t("assistant:history.noteSome", {
+                        count: earlier.length,
+                      })}
               </p>
             </div>
           )}
@@ -680,7 +701,7 @@ export function AssistantPanel() {
                   }
                   type="button"
                 >
-                  Configure models
+                  {t("assistant:ask.configure")}
                 </button>
               )}
             </div>
@@ -691,22 +712,25 @@ export function AssistantPanel() {
                 choices={offered}
                 inputRef={areaRef}
                 issues={issues}
-                label="Ask about this canvas"
+                label={t("assistant:ask.field")}
                 onChange={(next) => useAssistantStore.getState().setDraft(next)}
                 onCommit={() => {}}
                 onDismiss={() => areaRef.current?.blur()}
                 onOffer={() => {}}
                 onSubmit={send}
-                placeholder={INTENT_PLACEHOLDERS[intent]}
+                placeholder={t(INTENT_PLACEHOLDERS[intent])}
                 resources={resources}
                 value={draft}
               />
 
               {planned !== null && planned.leftOut > 0 && (
                 <p className="prompt-panel-warn" role="alert">
-                  {planned.leftOut}{" "}
-                  {planned.leftOut === 1 ? "card is" : "cards are"} too much to
-                  send with one question and stayed behind.
+                  {t(
+                    planned.leftOut === 1
+                      ? "assistant:ask.leftOutOne"
+                      : "assistant:ask.leftOutMany",
+                    { count: planned.leftOut },
+                  )}
                 </p>
               )}
 
@@ -717,17 +741,19 @@ export function AssistantPanel() {
                     onClick={() => useAssistantStore.getState().stop()}
                     type="button"
                   >
-                    Stop
+                    {t("assistant:ask.stop")}
                   </button>
                 ) : (
                   <button
-                    aria-label={`Send: ${INTENT_LABELS[intent]}`}
+                    aria-label={t("assistant:ask.send", {
+                      intent: t(INTENT_LABELS[intent]),
+                    })}
                     className="primary"
                     disabled={!canAsk}
                     onClick={send}
                     type="button"
                   >
-                    {INTENT_LABELS[intent]}
+                    {t(INTENT_LABELS[intent])}
                   </button>
                 )}
               </div>

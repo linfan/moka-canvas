@@ -25,7 +25,7 @@ export function ModelPicker({
   value,
   onChange,
   disabled = false,
-  noneLabel = "No default",
+  noneLabel,
 }: Props) {
   const { t } = useTranslation();
   const view = useModelStore((state) => state.view);
@@ -46,13 +46,17 @@ export function ModelPicker({
         }
         value={value ?? ""}
       >
-        <option value="">{noneLabel}</option>
+        <option value="">{noneLabel ?? t("settings:picker.none")}</option>
         {options.map((option) => (
           <option key={option.reference} value={option.reference}>
             {option.label}
           </option>
         ))}
-        {orphan && <option value={value ?? ""}>{value} (unavailable)</option>}
+        {orphan && (
+          <option value={value ?? ""}>
+            {t("settings:picker.unavailable", { value: value ?? "" })}
+          </option>
+        )}
       </select>
     </label>
   );

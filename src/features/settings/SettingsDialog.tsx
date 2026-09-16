@@ -17,8 +17,8 @@ import { SystemTab } from "./SystemTab";
 
 /** The two top-level sections: model configuration, and the system. */
 const TOP_TABS: { id: SettingsTopTab; label: string }[] = [
-  { id: "model", label: "Model" },
-  { id: "system", label: "System" },
+  { id: "model", label: "settings:topTab.model" },
+  { id: "system", label: "settings:topTab.system" },
 ];
 
 /**
@@ -63,7 +63,7 @@ export function SettingsDialog() {
       id: capability as SettingsTab,
       label: t(CAPABILITY_LABELS[capability]),
     })),
-    { id: "preferences", label: "Preferences" },
+    { id: "preferences", label: t("settings:preferences") },
   ];
 
   // A model editor carries its own Save and Cancel; a Done beside them is a
@@ -87,9 +87,9 @@ export function SettingsDialog() {
         role="dialog"
       >
         <header className="settings-head">
-          <h2 id="settings-title">Settings</h2>
+          <h2 id="settings-title">{t("settings:title")}</h2>
           <button
-            aria-label="Close settings"
+            aria-label={t("settings:close")}
             className="settings-close"
             onClick={close}
             type="button"
@@ -99,7 +99,7 @@ export function SettingsDialog() {
         </header>
 
         <div
-          aria-label="Settings sections"
+          aria-label={t("settings:sections")}
           className="settings-tabs"
           role="tablist"
         >
@@ -114,7 +114,7 @@ export function SettingsDialog() {
               role="tab"
               type="button"
             >
-              {entry.label}
+              {t(entry.label)}
             </button>
           ))}
         </div>
@@ -127,7 +127,7 @@ export function SettingsDialog() {
             role="tabpanel"
           >
             <div
-              aria-label="Model sections"
+              aria-label={t("settings:modelSections")}
               className="settings-tabs settings-subtabs"
               role="tablist"
             >
@@ -154,7 +154,7 @@ export function SettingsDialog() {
               role="tabpanel"
             >
               {loading && !loaded ? (
-                <p className="settings-hint">Loading configuration…</p>
+                <p className="settings-hint">{t("settings:loading")}</p>
               ) : tab === "preferences" ? (
                 <PreferencesTab />
               ) : (
@@ -170,7 +170,7 @@ export function SettingsDialog() {
             role="tabpanel"
           >
             {loading && !loaded ? (
-              <p className="settings-hint">Loading configuration…</p>
+              <p className="settings-hint">{t("settings:loading")}</p>
             ) : (
               <SystemTab />
             )}
@@ -191,7 +191,7 @@ export function SettingsDialog() {
         {!editorOpen && (
           <div className="dialog-actions">
             <button onClick={close} type="button">
-              Done
+              {t("settings:done")}
             </button>
           </div>
         )}

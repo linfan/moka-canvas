@@ -1,1 +1,143 @@
-{}
+{
+  "panel": {
+    "title": "Assistant",
+    "noCanvas": "No canvas is open.",
+    "emptyFresh": "A new conversation, nothing said in it yet.",
+    "emptyNone": "Nothing has been asked over this canvas yet.",
+    "fromAssets": "From assets…",
+    "fromAssetsTip": "Put files from the shelf on the canvas, ready to ask about"
+  },
+  "roles": {
+    "user": "You",
+    "assistant": "Assistant",
+    "error": "Trouble"
+  },
+  "line": {
+    "about": "What this was about",
+    "gone": "{{title}} — gone",
+    "goneTip": "This card is no longer on the canvas.",
+    "showOnCanvas": "Show on canvas",
+    "showInAssets": "Show in assets",
+    "askCardAgain": "Ask the card again",
+    "askCardAgainTip": "Ask this card to make it again, paying for the making and not for a second card",
+    "askAgain": "Ask again",
+    "insert": "Insert on canvas",
+    "replace": "Replace selection",
+    "copy": "Copy text",
+    "download": "Download",
+    "showEarlierOne": "Show {{count}} earlier line",
+    "showEarlierMany": "Show {{count}} earlier lines"
+  },
+  "conversation": {
+    "label": "Conversation",
+    "pickTip": "Which conversation this panel is reading",
+    "nameLabel": "Conversation name",
+    "fresh": "New conversation",
+    "rename": "Rename",
+    "renameTip": "Give this conversation another name",
+    "remove": "Remove",
+    "removeTip": "Take this conversation and its lines away",
+    "removeAll": "Remove all",
+    "removeAllTip": "Take every conversation on this canvas away, as one thing to undo",
+    "option": "{{title}} · {{count}} {{lines}}"
+  },
+  "counts": {
+    "lineOne": "line",
+    "lineMany": "lines",
+    "conversationOne": "conversation",
+    "conversationMany": "conversations"
+  },
+  "about": {
+    "none": "About nothing yet — choose a card, or name one with @.",
+    "some": "About {{summary}}"
+  },
+  "intent": {
+    "label": {
+      "answer": "Ask",
+      "rewrite": "Rewrite",
+      "image": "Image",
+      "video": "Video",
+      "audio": "Audio"
+    },
+    "hint": {
+      "answer": "Ask about the cards this conversation is about",
+      "rewrite": "Send the chosen text back written again, and nothing else",
+      "image": "Put a picture on the canvas, asked with the cards this names",
+      "video": "Put a moving picture on the canvas, asked with the cards this names",
+      "audio": "Put a sound on the canvas, asked with the cards this names"
+    },
+    "placeholder": {
+      "answer": "Ask about the cards you chose…",
+      "rewrite": "How should it read instead?",
+      "image": "What should the picture be?",
+      "video": "What should the shot be?",
+      "audio": "What should it sound like?"
+    }
+  },
+  "ask": {
+    "modes": "What to ask for",
+    "refusal": "No {{capability}} model is configured yet.",
+    "configure": "Configure models",
+    "field": "Ask about this canvas",
+    "send": "Send: {{intent}}",
+    "stop": "Stop",
+    "leftOutOne": "{{count}} card is too much to send with one question and stayed behind.",
+    "leftOutMany": "{{count}} cards are too much to send with one question and stayed behind.",
+    "questionBack": "The question is back in the field, nothing sent yet.",
+    "cardGone": "a card that is gone"
+  },
+  "model": {
+    "label": "Model",
+    "default": "Default model",
+    "tip": "Which configured text model answers in words"
+  },
+  "history": {
+    "title": "Send earlier lines with this",
+    "label": "How many earlier lines to send",
+    "choiceTip": "Send the last {{count}} lines of this conversation along with the question",
+    "noteOff": "Nothing said before this question is sent with it.",
+    "noteEmpty": "Nothing has been said yet to send along.",
+    "noteSome": "About {{count}} characters of this conversation go with the ask."
+  },
+  "made": {
+    "nothing": "Made nothing",
+    "amount": "Made {{count}} {{noun}}",
+    "nounImage": "image",
+    "nounImages": "images",
+    "nounVideo": "video",
+    "nounVideos": "videos",
+    "nounSound": "sound",
+    "nounSounds": "sounds"
+  },
+  "answers": {
+    "filed": "An answer is on the canvas",
+    "gone": "That card is not on this canvas any more",
+    "copied": "Copied",
+    "clipboardRefused": "The clipboard would not take it"
+  },
+  "failure": {
+    "noAnswer": "The answer did not arrive.",
+    "stoppedEarly": "Stopped before anything arrived."
+  },
+  "store": {
+    "linesLetGoOne": "1 old line let go to keep the conversation readable. Undo brings it back.",
+    "linesLetGoMany": "{{count}} old lines let go to keep the conversation readable. Undo brings them back.",
+    "stoppedStays": "Stopped. The card is on the canvas to ask again.",
+    "cardEmpty": "The card did not come back with anything.",
+    "cardRefused": "The canvas would not take the card.",
+    "stoppedKept": "Stopped. What had arrived was kept.",
+    "cardGone": "The card that answer named is no longer on the canvas.",
+    "removeConfirm": "Delete “{{title}}” and its {{count}} {{lines}}?",
+    "removeAllConfirm": "Delete all {{count}} {{conversations}} and their {{lines}} {{linesWord}}?",
+    "retryConfirm": "Ask “{{title}}” to make it again? The card is already on the canvas, so only the making is paid for."
+  },
+  "actions": {
+    "putAnswer": "Put an answer on the canvas",
+    "askForCard": "Ask for a card",
+    "askTheAssistant": "Ask the assistant",
+    "askTheCardAgain": "Ask the card again",
+    "renameConversation": "Rename conversation",
+    "removeConversation": "Remove conversation",
+    "removeConversations": "Remove conversations"
+  }
+}

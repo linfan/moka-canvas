@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { i18n } from "../shared/i18n";
 
 interface Props {
   children: ReactNode;
@@ -16,11 +17,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      return (
-        <div className="error-state">
-          This canvas could not be initialized. Refresh to try again.
-        </div>
-      );
+      return <div className="error-state">{i18n.t("app:initFailed")}</div>;
     }
     return this.props.children;
   }

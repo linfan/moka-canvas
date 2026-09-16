@@ -17,6 +17,7 @@ import {
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../shared/domain";
+import { i18n } from "../../shared/i18n";
 import { viewCenterWorld } from "../editor/canvas/canvasControl";
 
 /**
@@ -48,10 +49,13 @@ export interface CardPlan {
  * still on the canvas and the line is where a reader will look for the reason.
  */
 export function madeWords(kind: NodeKind, count: number): string {
-  if (count === 0) return "Made nothing";
-  const noun =
-    kind === "audio" ? "sound" : kind === "video" ? "video" : "image";
-  return `Made ${count} ${count === 1 ? noun : `${noun}s`}`;
+  if (count === 0) return i18n.t("assistant:made.nothing");
+  const kindWord =
+    kind === "audio" ? "Sound" : kind === "video" ? "Video" : "Image";
+  return i18n.t("assistant:made.amount", {
+    count,
+    noun: i18n.t(`assistant:made.noun${kindWord}${count === 1 ? "" : "s"}`),
+  });
 }
 
 function overlaps(a: Rect, b: Rect): boolean {

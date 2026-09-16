@@ -22,7 +22,7 @@ function ModelCard({
   const remove = () => {
     if (
       !window.confirm(
-        `Delete “${model.displayName}”? The stored key goes with it.`,
+        t("settings:card.deleteConfirm", { name: model.displayName }),
       )
     ) {
       return;
@@ -37,10 +37,15 @@ function ModelCard({
         <span className="model-card-tag">
           {protocolLabel(protocols, model.protocol)}
         </span>
-        {!model.enabled && <span className="model-card-tag">off</span>}
+        {!model.enabled && (
+          <span className="model-card-tag">{t("settings:card.off")}</span>
+        )}
         <label className="settings-check">
           <input
-            aria-label={`Use ${model.displayName} as the default ${lower} model`}
+            aria-label={t("settings:card.useAsDefault", {
+              name: model.displayName,
+              category: lower,
+            })}
             checked={isDefault}
             disabled={saving}
             onChange={(event) =>
@@ -51,7 +56,7 @@ function ModelCard({
             type="radio"
             name={`default-${category}`}
           />
-          <span>Default</span>
+          <span>{t("settings:card.default")}</span>
         </label>
       </div>
       <p className="model-card-detail">
@@ -59,8 +64,10 @@ function ModelCard({
       </p>
       <p className="model-card-detail">
         {model.apiKey.set
-          ? `Key ${model.apiKey.masked ?? "stored"}`
-          : "No key stored"}
+          ? t("settings:card.key", {
+              masked: model.apiKey.masked ?? t("settings:card.stored"),
+            })
+          : t("settings:card.noKey")}
       </p>
       <div className="settings-row">
         <button
@@ -68,16 +75,16 @@ function ModelCard({
           onClick={() => useModelStore.getState().editModel(model.id)}
           type="button"
         >
-          Edit
+          {t("settings:edit")}
         </button>
         <button
-          aria-label={`Copy ${model.displayName}`}
+          aria-label={t("settings:card.copy", { name: model.displayName })}
           disabled={saving}
           onClick={() => useModelStore.getState().duplicateModel(model.id)}
-          title="Create a new configuration from this one, key included"
+          title={t("settings:card.copyTip")}
           type="button"
         >
-          Duplicate
+          {t("settings:duplicate")}
         </button>
         <button
           className="danger"
@@ -85,7 +92,7 @@ function ModelCard({
           onClick={remove}
           type="button"
         >
-          Delete
+          {t("settings:delete")}
         </button>
       </div>
     </li>
@@ -147,14 +154,13 @@ export function ModelsTab({ category }: { category: Capability }) {
           onClick={() => useModelStore.getState().newModel(category)}
           type="button"
         >
-          New {lower} model
+          {t("settings:models.new", { category: lower })}
         </button>
       </div>
 
       {models.length === 0 ? (
-        <p className="settings-hint" data-testid={`${lower}-empty`}>
-          No {lower} models yet. Add one: a complete endpoint URL, the protocol
-          it speaks, and its own key.
+        <p className="settings-hint" data-testid={`${category}-empty`}>
+          {t("settings:models.empty", { category: lower })}
         </p>
       ) : (
         <>
@@ -169,9 +175,8 @@ export function ModelsTab({ category }: { category: Capability }) {
             ))}
           </ul>
           {defaultId === null && (
-            <p className="settings-hint" data-testid={`${lower}-gap`}>
-              No enabled {lower} model: a {lower} node that names no model of
-              its own will be refused. Enable one above, or add one.
+            <p className="settings-hint" data-testid={`${category}-gap`}>
+              {t("settings:models.gap", { category: lower })}
             </p>
           )}
         </>

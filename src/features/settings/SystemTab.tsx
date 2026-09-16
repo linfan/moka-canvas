@@ -6,8 +6,8 @@ import { useModelStore } from "./modelStore";
 import { SecretStorageNote } from "./SecretStorageNote";
 
 const CHOICE_LABELS: Record<SecretStorageChoice, string> = {
-  file: "File — a master.key inside the metadata directory",
-  keyring: "Keyring — the operating system's keychain",
+  file: "settings:system.tierFile",
+  keyring: "settings:system.tierKeyring",
 };
 
 /**
@@ -27,7 +27,7 @@ export function SystemTab() {
   const [managing, setManaging] = useState(false);
 
   if (!view) {
-    return <p className="settings-hint">Loading configuration…</p>;
+    return <p className="settings-hint">{t("settings:loading")}</p>;
   }
 
   const options = view.secretStorageOptions ?? ["file"];
@@ -47,8 +47,8 @@ export function SystemTab() {
     if (choice === selected) return;
     const verdict = window.confirm(
       choice === "keyring"
-        ? "Move the master key into the OS keychain? Stored API keys keep working; the master.key file is removed."
-        : "Move the master key into a file in the metadata directory? Stored API keys keep working; the keychain entry is removed.",
+        ? t("settings:system.switchToKeyring")
+        : t("settings:system.switchToFile"),
     );
     if (!verdict) return;
     void useModelStore.getState().setSecretStorage(choice);
@@ -56,9 +56,7 @@ export function SystemTab() {
 
   const removeKey = (id: string, displayName: string) => {
     if (
-      !window.confirm(
-        `Delete the stored key of “${displayName}”? The model configuration stays; requests will fail until a new key is entered.`,
-      )
+      !window.confirm(t("settings:system.removeKey", { name: displayName }))
     ) {
       return;
     }
@@ -67,12 +65,12 @@ export function SystemTab() {
 
   return (
     <div className="settings-section">
-      <h3 className="settings-heading">API key storage</h3>
+      <h3 className="settings-heading">{t("settings:system.storage")}</h3>
       <SecretStorageNote tier={current} />
       {options.map((choice) => (
         <label className="settings-check" key={choice}>
           <input
-            aria-label={CHOICE_LABELS[choice]}
+            aria-label={t(CHOICE_LABELS[choice])}
             checked={selected === choice}
             disabled={saving || !switchable}
             name="secret-storage"
@@ -80,23 +78,17 @@ export function SystemTab() {
             type="radio"
             value={choice}
           />
-          <span>{CHOICE_LABELS[choice]}</span>
+          <span>{t(CHOICE_LABELS[choice])}</span>
         </label>
       ))}
       {envLocked && (
-        <p className="settings-hint">
-          MOKA_METADATA_KEY is set; the exported key takes precedence and cannot
-          be moved from here.
-        </p>
+        <p className="settings-hint">{t("settings:system.envLocked")}</p>
       )}
       {!switchable && !envLocked && options.length < 2 && (
-        <p className="settings-hint">
-          The OS keychain is not available in this runtime, so the file tier is
-          the only choice.
-        </p>
+        <p className="settings-hint">{t("settings:system.noKeychain")}</p>
       )}
 
-      <h3 className="settings-heading">Stored keys</h3>
+      <h3 className="settings-heading">{t("settings:system.storedKeys")}</h3>
       <div className="settings-row">
         <button
           disabled={saving}
@@ -104,15 +96,17 @@ export function SystemTab() {
           type="button"
         >
           {managing
-            ? "Hide stored keys"
+            ? t("settings:system.hideKeys")
             : storedKeys.length === 0
-              ? "Manage keys"
-              : `Manage keys (${storedKeys.length})`}
+              ? t("settings:system.manageKeys")
+              : t("settings:system.manageKeysCount", {
+                  count: storedKeys.length,
+                })}
         </button>
       </div>
       {managing &&
         (storedKeys.length === 0 ? (
-          <p className="settings-hint">No API keys are stored.</p>
+          <p className="settings-hint">{t("settings:system.noneStored")}</p>
         ) : (
           <ul className="key-list">
             {storedKeys.map((model) => (
@@ -123,13 +117,15 @@ export function SystemTab() {
                     {t(CAPABILITY_LABELS[model.category]).toLowerCase()} ·{" "}
                     {model.id}
                     {view.defaults[model.category] === model.id
-                      ? " · category default"
+                      ? t("settings:system.categoryDefault")
                       : ""}
                   </span>
                   <span className="settings-hint">
-                    {model.apiKey.masked ?? "key"}
+                    {model.apiKey.masked ?? t("settings:keyFallback")}
                     {model.apiKey.rotatedAt
-                      ? ` · rotated ${model.apiKey.rotatedAt.slice(0, 10)}`
+                      ? t("settings:system.rotated", {
+                          date: model.apiKey.rotatedAt.slice(0, 10),
+                        })
                       : ""}
                   </span>
                 </div>
@@ -138,7 +134,7 @@ export function SystemTab() {
                   onClick={() => removeKey(model.id, model.displayName)}
                   type="button"
                 >
-                  Delete
+                  {t("settings:delete")}
                 </button>
               </li>
             ))}

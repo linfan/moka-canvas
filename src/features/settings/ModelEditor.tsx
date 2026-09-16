@@ -186,10 +186,10 @@ export function ModelEditor({
   const idTaken = model === null && isTaken(identifier);
   const idShaped = !/\s/.test(identifier);
   const idProblem = idTaken
-    ? "Another model already uses this identifier."
+    ? t("settings:editor.identifierTaken")
     : idShaped
       ? null
-      : "An identifier cannot contain spaces.";
+      : t("settings:editor.identifierSpaces");
   const urlShaped = /^https?:\/\/\S+$/.test(form.url.trim());
   const canSave =
     !saving &&
@@ -224,7 +224,11 @@ export function ModelEditor({
 
   const clearKey = async () => {
     if (model === null) return;
-    if (!window.confirm(`Clear the stored key of “${model.displayName}”?`)) {
+    if (
+      !window.confirm(
+        t("settings:editor.clearKeyConfirm", { name: model.displayName }),
+      )
+    ) {
       return;
     }
     await useModelStore.getState().setKey(model.id, null);
@@ -238,45 +242,49 @@ export function ModelEditor({
           ? // The category went out of the form as a field of its own; the
             // heading is where an editor says which kind of model this is,
             // because the protocol choices below follow from it.
-            `Edit “${model.displayName}” · ${t(CAPABILITY_LABELS[category]).toLowerCase()}`
+            t("settings:editor.headingEdit", {
+              name: model.displayName,
+              category: t(CAPABILITY_LABELS[category]).toLowerCase(),
+            })
           : copySource !== null
-            ? `Copy “${copySource.displayName}” · ${t(CAPABILITY_LABELS[category]).toLowerCase()}`
-            : `New ${t(CAPABILITY_LABELS[category]).toLowerCase()} model`}
+            ? t("settings:editor.headingCopy", {
+                name: copySource.displayName,
+                category: t(CAPABILITY_LABELS[category]).toLowerCase(),
+              })
+            : t("settings:editor.headingNew", {
+                category: t(CAPABILITY_LABELS[category]).toLowerCase(),
+              })}
       </h3>
 
       <label className="dialog-field">
-        <span>Display name</span>
+        <span>{t("settings:editor.displayName")}</span>
         <input
-          aria-label="Display name"
+          aria-label={t("settings:editor.displayName")}
           autoFocus
           maxLength={MAX_MODEL_NAME_LENGTH}
           onChange={(event) => edit({ displayName: event.target.value })}
-          placeholder="What the pickers show"
+          placeholder={t("settings:editor.displayNameTip")}
           value={form.displayName}
         />
       </label>
 
       <label className="dialog-field">
-        <span>Identifier</span>
+        <span>{t("settings:editor.identifier")}</span>
         <input
-          aria-label="Model identifier"
+          aria-label={t("settings:editor.identifierAria")}
           disabled={model !== null}
           maxLength={MAX_MODEL_ID_LENGTH}
           onChange={(event) => chooseId(event.target.value)}
           title={
             model !== null
-              ? "Nodes reference this identifier, so it cannot change; duplicate the model to create a variant"
+              ? t("settings:editor.identifierLockedTip")
               : undefined
           }
           value={identifier}
         />
       </label>
       {model === null && (
-        <p className="settings-hint">
-          Suggested from the display name, and yours to overwrite — clearing it
-          asks for a new suggestion. Nodes store it, so it cannot change once
-          the model is saved.
-        </p>
+        <p className="settings-hint">{t("settings:editor.identifierHint")}</p>
       )}
       {idProblem && (
         <p className="settings-hint" role="alert">
@@ -285,9 +293,9 @@ export function ModelEditor({
       )}
 
       <label className="dialog-field">
-        <span>Protocol</span>
+        <span>{t("settings:editor.protocol")}</span>
         <select
-          aria-label="Protocol"
+          aria-label={t("settings:editor.protocol")}
           onChange={(event) => chooseProtocol(event.target.value)}
           value={form.protocol}
         >
@@ -300,40 +308,45 @@ export function ModelEditor({
       </label>
 
       <label className="dialog-field">
-        <span>URL</span>
+        <span>{t("settings:editor.url")}</span>
         <input
-          aria-label="Endpoint URL"
+          aria-label={t("settings:editor.urlAria")}
           onChange={(event) => edit({ url: event.target.value })}
           placeholder={protocolUrlExample(protocols, form.protocol)}
           value={form.url}
         />
       </label>
       <p className="settings-hint">
-        The complete endpoint address requests are sent to — not a base URL.
-        {urlShaped ? "" : " It has to start with http:// or https://."}
+        {urlShaped
+          ? t("settings:editor.urlHint")
+          : `${t("settings:editor.urlHint")} ${t("settings:editor.urlHintScheme")}`}
       </p>
 
       <label className="dialog-field">
-        <span>Model name</span>
+        <span>{t("settings:editor.modelName")}</span>
         <input
-          aria-label="Model name"
+          aria-label={t("settings:editor.modelName")}
           maxLength={MAX_MODEL_NAME_LENGTH}
           onChange={(event) => edit({ model: event.target.value })}
-          placeholder="The name the provider knows"
+          placeholder={t("settings:editor.modelNameTip")}
           value={form.model}
         />
       </label>
 
       <label className="dialog-field">
-        <span>API key</span>
+        <span>{t("settings:editor.apiKey")}</span>
         <input
-          aria-label="API key"
+          aria-label={t("settings:editor.apiKey")}
           onChange={(event) => edit({ apiKey: event.target.value })}
           placeholder={
             model?.apiKey.set
-              ? `Stored (${model.apiKey.masked ?? "key"}) — leave blank to keep`
+              ? t("settings:editor.keyStoredTip", {
+                  masked: model.apiKey.masked ?? t("settings:keyFallback"),
+                })
               : copySource?.apiKey.set
-                ? `Copied from “${copySource.displayName}” — leave blank to keep`
+                ? t("settings:editor.keyCopiedTip", {
+                    name: copySource.displayName,
+                  })
                 : "sk-…"
           }
           type="password"
@@ -343,19 +356,19 @@ export function ModelEditor({
       {model !== null && model.apiKey.set && (
         <div className="settings-row">
           <button disabled={saving} onClick={clearKey} type="button">
-            Clear the stored key
+            {t("settings:editor.clearKey")}
           </button>
         </div>
       )}
 
       <label className="settings-check">
         <input
-          aria-label="Enabled"
+          aria-label={t("settings:editor.enabled")}
           checked={form.enabled}
           onChange={(event) => edit({ enabled: event.target.checked })}
           type="checkbox"
         />
-        <span>Enabled</span>
+        <span>{t("settings:editor.enabled")}</span>
       </label>
 
       <div className="dialog-actions">
@@ -365,10 +378,10 @@ export function ModelEditor({
           onClick={() => void save()}
           type="button"
         >
-          {saving ? "Saving…" : "Save model"}
+          {saving ? t("settings:saving") : t("settings:editor.save")}
         </button>
         <button disabled={saving} onClick={onDone} type="button">
-          Cancel
+          {t("settings:cancel")}
         </button>
       </div>
     </div>
