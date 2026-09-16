@@ -59,7 +59,7 @@ export const SHELF_PAGE = 60;
 export type ShelfWhere = "made" | "brought" | "filed";
 
 export const SHELF_WHERE_LABELS: Record<ShelfWhere, string> = {
-  made: "Made here",
+  made: "domain:assetOrigin.madeHere",
   ...ASSET_ORIGIN_LABELS,
 };
 

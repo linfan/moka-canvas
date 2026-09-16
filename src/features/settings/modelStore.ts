@@ -16,6 +16,7 @@ import {
   type Capability,
   type ModelProtocol,
 } from "../../shared/domain";
+import { i18n } from "../../shared/i18n";
 
 /** The settings tabs: one per model category, plus the global preferences. */
 export type SettingsTab = Capability | "preferences";
@@ -89,7 +90,7 @@ export function protocolChoices(
   if (!group) {
     return PROTOCOLS_BY_CATEGORY[capability].map((id) => ({
       id,
-      label: PROTOCOL_LABELS[id],
+      label: i18n.t(PROTOCOL_LABELS[id]),
       urlExample: PROTOCOL_URL_EXAMPLES[id],
     }));
   }
@@ -113,7 +114,8 @@ export function protocolLabel(
 ): string {
   const entry = findProtocol(protocols, id);
   if (entry) return entry.displayName;
-  return PROTOCOL_LABELS[id as ModelProtocol] ?? id;
+  const label = PROTOCOL_LABELS[id as ModelProtocol];
+  return label ? i18n.t(label) : id;
 }
 
 /** The example address a protocol speaks at, empty when none is known. */

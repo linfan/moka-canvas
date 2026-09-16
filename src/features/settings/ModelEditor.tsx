@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ModelDraft, ModelView, ProtocolGroups } from "../../api";
 import {
   CAPABILITY_LABELS,
@@ -105,6 +106,7 @@ export function ModelEditor({
   category,
   onDone,
 }: Props) {
+  const { t } = useTranslation();
   const saving = useModelStore((state) => state.saving);
   const view = useModelStore((state) => state.view);
   const protocols = useModelStore((state) => state.protocols);
@@ -236,10 +238,10 @@ export function ModelEditor({
           ? // The category went out of the form as a field of its own; the
             // heading is where an editor says which kind of model this is,
             // because the protocol choices below follow from it.
-            `Edit “${model.displayName}” · ${CAPABILITY_LABELS[category].toLowerCase()}`
+            `Edit “${model.displayName}” · ${t(CAPABILITY_LABELS[category]).toLowerCase()}`
           : copySource !== null
-            ? `Copy “${copySource.displayName}” · ${CAPABILITY_LABELS[category].toLowerCase()}`
-            : `New ${CAPABILITY_LABELS[category].toLowerCase()} model`}
+            ? `Copy “${copySource.displayName}” · ${t(CAPABILITY_LABELS[category]).toLowerCase()}`
+            : `New ${t(CAPABILITY_LABELS[category]).toLowerCase()} model`}
       </h3>
 
       <label className="dialog-field">

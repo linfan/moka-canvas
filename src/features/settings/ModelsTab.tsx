@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ModelView } from "../../api";
 import { CAPABILITY_LABELS, type Capability } from "../../shared/domain";
 import { ModelEditor } from "./ModelEditor";
@@ -13,9 +14,10 @@ function ModelCard({
   category: Capability;
   isDefault: boolean;
 }) {
+  const { t } = useTranslation();
   const saving = useModelStore((state) => state.saving);
   const protocols = useModelStore((state) => state.protocols);
-  const lower = CAPABILITY_LABELS[category].toLowerCase();
+  const lower = t(CAPABILITY_LABELS[category]).toLowerCase();
 
   const remove = () => {
     if (
@@ -99,11 +101,12 @@ function ModelCard({
  * default ends up pointing at something nobody remembers choosing.
  */
 export function ModelsTab({ category }: { category: Capability }) {
+  const { t } = useTranslation();
   const view = useModelStore((state) => state.view);
   const saving = useModelStore((state) => state.saving);
   const editing = useModelStore((state) => state.editing);
   const copyOf = useModelStore((state) => state.copyOf);
-  const lower = CAPABILITY_LABELS[category].toLowerCase();
+  const lower = t(CAPABILITY_LABELS[category]).toLowerCase();
 
   if (editing !== null) {
     const model =

@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   AssetCategory,
   AssetId,
@@ -246,6 +247,7 @@ function ResourceRow({
   extraActions?: ReactNode;
   onSelect: (id: AssetId) => void;
 }) {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const [editing, setEditing] = useState(false);
   const rowRef = useRef<HTMLLIElement | null>(null);
@@ -359,7 +361,7 @@ function ResourceRow({
       </span>
       <span className="resource-said">
         <span className="resource-where" data-testid="resource-where">
-          {SHELF_WHERE_LABELS[where]}
+          {t(SHELF_WHERE_LABELS[where])}
         </span>
         {entry.tags?.map((tag) => (
           <span className="resource-tag" key={tag}>
@@ -400,6 +402,7 @@ function ShelfFilterBar({
   whereLocked: boolean;
   onChange: (next: ShelfFilter) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="side-shelf-filter">
       <input
@@ -434,7 +437,7 @@ function ShelfFilterBar({
             <option value="">Every shelf</option>
             {shelves.map((category) => (
               <option key={category} value={category}>
-                {ASSET_CATEGORY_LABELS[category]}
+                {t(ASSET_CATEGORY_LABELS[category])}
               </option>
             ))}
           </select>
@@ -460,7 +463,7 @@ function ShelfFilterBar({
             <option value="">Any origin</option>
             {(Object.keys(SHELF_WHERE_LABELS) as ShelfWhere[]).map((where) => (
               <option key={where} value={where}>
-                {SHELF_WHERE_LABELS[where]}
+                {t(SHELF_WHERE_LABELS[where])}
               </option>
             ))}
           </select>
@@ -533,6 +536,7 @@ export function AssetShelf({
   emptyText,
   onImported,
 }: AssetShelfProps) {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const selfCheck = useProjectStore((state) => state.selfCheck);
   const activeCanvas = useActiveCanvas();
@@ -736,10 +740,10 @@ export function AssetShelf({
             key={each}
             onClick={() => chooseKind(each)}
             role="tab"
-            title={`Add to a ${CAPABILITY_LABELS[each].toLowerCase()} node`}
+            title={`Add to a ${t(CAPABILITY_LABELS[each]).toLowerCase()} node`}
             type="button"
           >
-            {CAPABILITY_LABELS[each]}
+            {t(CAPABILITY_LABELS[each])}
             <span>{kindCount(moka, each, lens)}</span>
           </button>
         ))}
@@ -801,7 +805,7 @@ export function AssetShelf({
       {groupShelf(visible).map(({ category, entries }) => (
         <div className="side-resource-group" key={category}>
           <h3>
-            {ASSET_CATEGORY_LABELS[category]} · {entries.length}
+            {t(ASSET_CATEGORY_LABELS[category])} · {entries.length}
           </h3>
           <ul className="side-resource-list">
             {entries.map((entry) => (
@@ -840,7 +844,7 @@ export function AssetShelf({
       {filed === 0 && (
         <p className="inspector-empty">
           {emptyText ??
-            `No ${CAPABILITY_LABELS[kind].toLowerCase()} assets yet — import files or drop them on the canvas.`}
+            `No ${t(CAPABILITY_LABELS[kind]).toLowerCase()} assets yet — import files or drop them on the canvas.`}
         </p>
       )}
       {acceptFileDrops && dropping && (

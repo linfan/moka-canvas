@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   CAPABILITY_LABELS,
   MODEL_CAPABILITIES,
@@ -20,15 +21,6 @@ const TOP_TABS: { id: SettingsTopTab; label: string }[] = [
   { id: "system", label: "System" },
 ];
 
-/** The Model section's own tabs: one per category, plus the preferences. */
-const TABS: { id: SettingsTab; label: string }[] = [
-  ...MODEL_CAPABILITIES.map((capability: Capability) => ({
-    id: capability as SettingsTab,
-    label: CAPABILITY_LABELS[capability],
-  })),
-  { id: "preferences", label: "Preferences" },
-];
-
 /**
  * Model configuration and system settings.
  *
@@ -40,6 +32,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
  * credentials it protects.
  */
 export function SettingsDialog() {
+  const { t } = useTranslation();
   const open = useModelStore((state) => state.open);
   const topTab = useModelStore((state) => state.topTab);
   const tab = useModelStore((state) => state.tab);
@@ -63,6 +56,15 @@ export function SettingsDialog() {
   if (!open) return null;
 
   const close = () => useModelStore.getState().closeSettings();
+
+  // The Model section's own tabs: one per category, plus the preferences.
+  const tabs: { id: SettingsTab; label: string }[] = [
+    ...MODEL_CAPABILITIES.map((capability: Capability) => ({
+      id: capability as SettingsTab,
+      label: t(CAPABILITY_LABELS[capability]),
+    })),
+    { id: "preferences", label: "Preferences" },
+  ];
 
   // A model editor carries its own Save and Cancel; a Done beside them is a
   // third way out that says nothing about the half-written form it leaves
@@ -129,7 +131,7 @@ export function SettingsDialog() {
               className="settings-tabs settings-subtabs"
               role="tablist"
             >
-              {TABS.map((entry) => (
+              {tabs.map((entry) => (
                 <button
                   aria-controls={`settings-panel-${entry.id}`}
                   aria-selected={tab === entry.id}

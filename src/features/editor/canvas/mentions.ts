@@ -6,6 +6,7 @@ import type {
   WorkflowNode,
 } from "../../../shared/domain";
 import { CAPABILITY_LABELS, findNode } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import {
   mediaInfoForNode,
   type MediaCardInfo,
@@ -79,7 +80,7 @@ export const GROUP_LABELS: Record<GroupKey, string> = {
   image: CAPABILITY_LABELS.image,
   video: CAPABILITY_LABELS.video,
   audio: CAPABILITY_LABELS.audio,
-  group: "Group",
+  group: "domain:nodeTitle.group",
 };
 
 /** A node offered as a candidate, and why it is being offered. */
@@ -180,7 +181,7 @@ export function mentionGroups(
   }
 
   return GROUP_ORDER.filter((key) => grouped.has(key)).map((key) => ({
-    label: GROUP_LABELS[key],
+    label: i18n.t(GROUP_LABELS[key]),
     choices: grouped.get(key) ?? [],
   }));
 }

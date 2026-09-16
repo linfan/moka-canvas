@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { CAPABILITY_LABELS, type Capability } from "../../shared/domain";
 import { modelOptionsFor, useModelStore } from "./modelStore";
 
@@ -26,6 +27,7 @@ export function ModelPicker({
   disabled = false,
   noneLabel = "No default",
 }: Props) {
+  const { t } = useTranslation();
   const view = useModelStore((state) => state.view);
   const options = useMemo(
     () => modelOptionsFor(view, capability),
@@ -36,7 +38,7 @@ export function ModelPicker({
 
   return (
     <label className="dialog-field">
-      <span>{CAPABILITY_LABELS[capability]}</span>
+      <span>{t(CAPABILITY_LABELS[capability])}</span>
       <select
         disabled={disabled}
         onChange={(event) =>

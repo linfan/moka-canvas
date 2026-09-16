@@ -1,0 +1,57 @@
+{
+  "assetCategory": {
+    "images": "图片",
+    "music": "音乐",
+    "texts": "文本",
+    "videos": "视频",
+    "voice": "配音"
+  },
+  "assetOrigin": {
+    "brought": "导入",
+    "filed": "节点归档",
+    "madeHere": "本地生成"
+  },
+  "canvas": {
+    "defaultName": "画布 {{n}}"
+  },
+  "capability": {
+    "audio": "音频",
+    "image": "图像",
+    "text": "文本",
+    "video": "视频"
+  },
+  "nodeTitle": {
+    "audio": "音频",
+    "export": "导出",
+    "group": "分组",
+    "image": "图像",
+    "operation": "操作",
+    "text": "文本",
+    "video": "视频"
+  },
+  "port": {
+    "artifact": "产物",
+    "audio": "音频",
+    "audios": "音频",
+    "firstFrame": "首帧",
+    "image": "图像",
+    "images": "图片",
+    "lastFrame": "尾帧",
+    "mask": "蒙版",
+    "prompt": "提示词",
+    "result": "结果",
+    "text": "文本",
+    "video": "视频",
+    "videos": "视频"
+  },
+  "protocol": {
+    "custom": "自定义（预留）",
+    "gemini": "Google Gemini · generateContent",
+    "geminiVideo": "Google Gemini · 长任务（Veo）",
+    "openaiChat": "OpenAI 兼容 · Chat Completions",
+    "openaiImages": "OpenAI 兼容 · Images API",
+    "openaiResponses": "OpenAI 兼容 · Responses",
+    "openaiSpeech": "OpenAI 兼容 · Speech API",
+    "openaiVideos": "OpenAI 兼容 · Videos API"
+  }
+}

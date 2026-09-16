@@ -35,6 +35,7 @@ import type {
 } from "./types";
 import { folderDepth, foldersOf } from "./folders";
 import { validateTimeline } from "./timeline";
+import { i18n } from "../i18n";
 
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -126,14 +127,14 @@ export function validateEdgeCandidate(
     return {
       ok: false,
       code: "NODE_NOT_FOUND",
-      message: "Source node missing",
+      message: i18n.t("errors:validate.sourceNodeMissing"),
     };
   const targetNode = findNode(canvas, target.nodeId);
   if (!targetNode)
     return {
       ok: false,
       code: "NODE_NOT_FOUND",
-      message: "Target node missing",
+      message: i18n.t("errors:validate.targetNodeMissing"),
     };
 
   const sourcePort = findPort(sourceNode, source.portId);
@@ -141,21 +142,21 @@ export function validateEdgeCandidate(
     return {
       ok: false,
       code: "PORT_NOT_FOUND",
-      message: "Source port missing",
+      message: i18n.t("errors:validate.sourcePortMissing"),
     };
   const targetPort = findPort(targetNode, target.portId);
   if (!targetPort)
     return {
       ok: false,
       code: "PORT_NOT_FOUND",
-      message: "Target port missing",
+      message: i18n.t("errors:validate.targetPortMissing"),
     };
 
   if (sourcePort.direction !== "output" || targetPort.direction !== "input") {
     return {
       ok: false,
       code: "PORT_TYPE_MISMATCH",
-      message: "Edges must run from an output port to an input port",
+      message: i18n.t("errors:validate.edgesOutputToInput"),
     };
   }
 
@@ -163,7 +164,7 @@ export function validateEdgeCandidate(
     return {
       ok: false,
       code: "SELF_LOOP",
-      message: "A node cannot connect to itself",
+      message: i18n.t("errors:validate.selfLoop"),
     };
   }
 
@@ -171,7 +172,10 @@ export function validateEdgeCandidate(
     return {
       ok: false,
       code: "PORT_TYPE_MISMATCH",
-      message: `Port types are incompatible (${sourcePort.dataTypes.join("/")} → ${targetPort.dataTypes.join("/")})`,
+      message: i18n.t("errors:validate.portTypesIncompatible", {
+        source: sourcePort.dataTypes.join("/"),
+        target: targetPort.dataTypes.join("/"),
+      }),
     };
   }
 
@@ -184,8 +188,7 @@ export function validateEdgeCandidate(
       return {
         ok: false,
         code: "CARDINALITY_VIOLATION",
-        message:
-          "This input accepts a single connection; replace it explicitly",
+        message: i18n.t("errors:validate.cardinalityViolation"),
       };
     }
   }
@@ -202,7 +205,7 @@ export function validateEdgeCandidate(
     return {
       ok: false,
       code: "CONFLICT",
-      message: "This connection already exists",
+      message: i18n.t("errors:validate.connectionExists"),
     };
   }
 
@@ -210,7 +213,7 @@ export function validateEdgeCandidate(
     return {
       ok: false,
       code: "GRAPH_CYCLE",
-      message: "This connection would create a cycle",
+      message: i18n.t("errors:validate.wouldCreateCycle"),
     };
   }
 
@@ -380,7 +383,10 @@ function generationIssues(
   if ((data.resultSlots?.length ?? 0) > MAX_RESULT_SLOTS) {
     at(
       "RESULT_SLOT_LIMIT",
-      `Node "${node.title}" exceeds the result slot limit (${MAX_RESULT_SLOTS})`,
+      i18n.t("errors:validate.resultSlotLimit", {
+        title: node.title,
+        count: MAX_RESULT_SLOTS,
+      }),
     );
   }
 
@@ -390,19 +396,22 @@ function generationIssues(
   if (spec.capability !== node.kind) {
     at(
       "GENERATION_CAPABILITY_MISMATCH",
-      `Generation capability "${spec.capability}" does not match node kind "${node.kind}"`,
+      i18n.t("errors:validate.capabilityMismatch", {
+        capability: spec.capability,
+        kind: node.kind,
+      }),
     );
   }
   if (spec.model !== "" && !modelIdentifierShaped(spec.model)) {
     at(
       "GENERATION_MODEL_MISSING",
-      `Generation model "${spec.model}" is not a model configuration identifier`,
+      i18n.t("errors:validate.modelNotIdentifier", { model: spec.model }),
     );
   }
   if (spec.prompt.length > MAX_PROMPT_LENGTH) {
     at(
       "VALIDATION_FAILED",
-      `Generation prompt exceeds the ${MAX_PROMPT_LENGTH} character limit`,
+      i18n.t("errors:validate.promptTooLong", { count: MAX_PROMPT_LENGTH }),
     );
   }
 
@@ -416,15 +425,21 @@ function generationIssues(
   ) {
     at(
       "GENERATION_PROMPT_EMPTY",
-      `Node "${node.title}" has no prompt, no upstream prompt connection, and no references`,
+      i18n.t("errors:validate.promptEmpty", { title: node.title }),
     );
   }
 
   for (const id of mentionNodeIds(spec.prompt)) {
     if (id === node.id) {
-      at("MENTION_SELF_REFERENCE", "Prompt mentions its own node");
+      at(
+        "MENTION_SELF_REFERENCE",
+        i18n.t("errors:validate.mentionSelfReference"),
+      );
     } else if (!nodeIds.has(id)) {
-      at("MENTION_NODE_NOT_FOUND", `Prompt mentions missing node ${id}`);
+      at(
+        "MENTION_NODE_NOT_FOUND",
+        i18n.t("errors:validate.mentionNodeNotFound", { id }),
+      );
     }
   }
 
@@ -434,7 +449,10 @@ function generationIssues(
       if (!allowed.includes(key)) {
         at(
           "VALIDATION_FAILED",
-          `Unknown parameter "${key}" for ${spec.capability} generation`,
+          i18n.t("errors:validate.unknownParameter", {
+            key,
+            capability: spec.capability,
+          }),
         );
       }
     }
@@ -458,7 +476,9 @@ function sessionIssues(canvas: CanvasDocument): ValidationIssue[] {
   if (sessions.length > MAX_ASSISTANT_SESSIONS_PER_CANVAS) {
     issues.push({
       code: "VALIDATION_FAILED",
-      message: `Canvas exceeds the session limit (${MAX_ASSISTANT_SESSIONS_PER_CANVAS})`,
+      message: i18n.t("errors:validate.canvasSessionLimit", {
+        count: MAX_ASSISTANT_SESSIONS_PER_CANVAS,
+      }),
       canvasId,
     });
   }
@@ -467,7 +487,9 @@ function sessionIssues(canvas: CanvasDocument): ValidationIssue[] {
     if (seen.has(session.id)) {
       issues.push({
         code: "VALIDATION_FAILED",
-        message: `Duplicate session id ${session.id}`,
+        message: i18n.t("errors:validate.duplicateSessionId", {
+          id: session.id,
+        }),
         canvasId,
       });
     }
@@ -475,7 +497,10 @@ function sessionIssues(canvas: CanvasDocument): ValidationIssue[] {
     if (session.messages.length > MAX_ASSISTANT_MESSAGES_PER_SESSION) {
       issues.push({
         code: "VALIDATION_FAILED",
-        message: `Session "${session.title}" exceeds the message limit (${MAX_ASSISTANT_MESSAGES_PER_SESSION})`,
+        message: i18n.t("errors:validate.sessionMessageLimit", {
+          title: session.title,
+          count: MAX_ASSISTANT_MESSAGES_PER_SESSION,
+        }),
         canvasId,
       });
     }
@@ -490,14 +515,18 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
   if (canvas.nodes.length > MAX_NODES_PER_CANVAS) {
     issues.push({
       code: "VALIDATION_FAILED",
-      message: `Canvas exceeds the node limit (${MAX_NODES_PER_CANVAS})`,
+      message: i18n.t("errors:validate.canvasNodeLimit", {
+        count: MAX_NODES_PER_CANVAS,
+      }),
       canvasId,
     });
   }
   if (canvas.edges.length > MAX_EDGES_PER_CANVAS) {
     issues.push({
       code: "VALIDATION_FAILED",
-      message: `Canvas exceeds the edge limit (${MAX_EDGES_PER_CANVAS})`,
+      message: i18n.t("errors:validate.canvasEdgeLimit", {
+        count: MAX_EDGES_PER_CANVAS,
+      }),
       canvasId,
     });
   }
@@ -508,7 +537,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
     if (nodeIds.has(node.id)) {
       issues.push({
         code: "VALIDATION_FAILED",
-        message: `Duplicate node id ${node.id}`,
+        message: i18n.t("errors:validate.duplicateNodeId", { id: node.id }),
         canvasId,
         nodeId: node.id,
       });
@@ -517,7 +546,9 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
     if (!validateBounds(node.bounds)) {
       issues.push({
         code: "BOUNDS_INVALID",
-        message: `Node "${node.title}" has invalid bounds`,
+        message: i18n.t("errors:validate.nodeBoundsInvalid", {
+          title: node.title,
+        }),
         canvasId,
         nodeId: node.id,
       });
@@ -527,7 +558,10 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
       if (portIds.has(port.id)) {
         issues.push({
           code: "VALIDATION_FAILED",
-          message: `Duplicate port id ${port.id} on node "${node.title}"`,
+          message: i18n.t("errors:validate.duplicatePortId", {
+            portId: port.id,
+            title: node.title,
+          }),
           canvasId,
           nodeId: node.id,
           portId: port.id,
@@ -546,7 +580,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
     if (edgeIds.has(edge.id)) {
       issues.push({
         code: "VALIDATION_FAILED",
-        message: `Duplicate edge id ${edge.id}`,
+        message: i18n.t("errors:validate.duplicateEdgeId", { id: edge.id }),
         canvasId,
         edgeId: edge.id,
       });
@@ -577,7 +611,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
     if (!groupNode || groupNode.kind !== "group") {
       issues.push({
         code: "GROUP_INVALID",
-        message: "Membership references a missing or non-group node",
+        message: i18n.t("errors:validate.groupNodeMissing"),
         canvasId,
         nodeId: group.groupId,
       });
@@ -588,7 +622,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
       if (childId === group.groupId) {
         issues.push({
           code: "GROUP_INVALID",
-          message: "A group cannot contain itself",
+          message: i18n.t("errors:validate.groupContainsItself"),
           canvasId,
           nodeId: group.groupId,
         });
@@ -596,7 +630,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
       if (seen.has(childId)) {
         issues.push({
           code: "GROUP_INVALID",
-          message: "Group membership contains a duplicate node",
+          message: i18n.t("errors:validate.duplicateGroupMember"),
           canvasId,
           nodeId: childId,
         });
@@ -605,7 +639,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
       if (!nodeIds.has(childId)) {
         issues.push({
           code: "GROUP_INVALID",
-          message: "Group membership references a missing node",
+          message: i18n.t("errors:validate.groupMemberMissing"),
           canvasId,
           nodeId: childId,
         });
@@ -613,7 +647,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
       if (groupOf.has(childId)) {
         issues.push({
           code: "GROUP_INVALID",
-          message: "A node belongs to more than one group",
+          message: i18n.t("errors:validate.nodeInTwoGroups"),
           canvasId,
           nodeId: childId,
         });
@@ -623,7 +657,7 @@ export function validateCanvas(canvas: CanvasDocument): ValidationIssue[] {
     if (group.childNodeIds.length < 2) {
       issues.push({
         code: "GROUP_INVALID",
-        message: "A group requires at least two member nodes",
+        message: i18n.t("errors:validate.groupTooSmall"),
         canvasId,
         nodeId: group.groupId,
       });
@@ -647,26 +681,43 @@ function shelfIssues(entry: ResourceEntry): ValidationIssue[] {
   if (entry.tags) {
     if (entry.tags.length > MAX_ASSET_TAGS) {
       say(
-        `Asset "${entry.name}" carries more tags than the ${MAX_ASSET_TAGS} allowed`,
+        i18n.t("errors:validate.assetTooManyTags", {
+          name: entry.name,
+          count: MAX_ASSET_TAGS,
+        }),
       );
     }
     if (entry.tags.some((tag) => tag.length > MAX_ASSET_TAG_LENGTH)) {
       say(
-        `Asset "${entry.name}" carries a tag over ${MAX_ASSET_TAG_LENGTH} characters`,
+        i18n.t("errors:validate.assetTagTooLong", {
+          name: entry.name,
+          count: MAX_ASSET_TAG_LENGTH,
+        }),
       );
     }
   }
   if (entry.note && entry.note.length > MAX_ASSET_NOTE_LENGTH) {
-    say(`Asset "${entry.name}" carries a note over ${MAX_ASSET_NOTE_LENGTH}`);
+    say(
+      i18n.t("errors:validate.assetNoteTooLong", {
+        name: entry.name,
+        count: MAX_ASSET_NOTE_LENGTH,
+      }),
+    );
   }
   if (entry.keyword && entry.keyword.length > MAX_ASSET_KEYWORD_LENGTH) {
     say(
-      `Asset "${entry.name}" carries a summary over ${MAX_ASSET_KEYWORD_LENGTH}`,
+      i18n.t("errors:validate.assetSummaryTooLong", {
+        name: entry.name,
+        count: MAX_ASSET_KEYWORD_LENGTH,
+      }),
     );
   }
   if (entry.origin !== undefined && !ASSET_ORIGINS.includes(entry.origin)) {
     say(
-      `Asset "${entry.name}" says an origin nothing recognises: ${entry.origin}`,
+      i18n.t("errors:validate.assetOriginUnknown", {
+        name: entry.name,
+        origin: entry.origin,
+      }),
     );
   }
   return issues;
@@ -687,28 +738,40 @@ function folderIssues(moka: MokaFile): ValidationIssue[] {
     issues.push({ code: "VALIDATION_FAILED", message });
   const folders = foldersOf(moka);
   if (folders.length > MAX_FOLDERS_PER_PROJECT) {
-    say(`Project exceeds the folder limit (${MAX_FOLDERS_PER_PROJECT})`);
+    say(
+      i18n.t("errors:validate.folderLimit", {
+        count: MAX_FOLDERS_PER_PROJECT,
+      }),
+    );
   }
   const ids = new Set(folders.map((folder) => folder.id));
-  if (ids.size !== folders.length) say("Duplicate folder id");
+  if (ids.size !== folders.length)
+    say(i18n.t("errors:validate.duplicateFolderId"));
   for (const folder of folders) {
-    if (folder.name.length === 0) say(`Folder ${folder.id} has no name`);
+    if (folder.name.length === 0)
+      say(i18n.t("errors:validate.folderNoName", { id: folder.id }));
     if (folder.name.length > MAX_FOLDER_NAME_LENGTH) {
       say(
-        `Folder "${folder.name}" has a name over ${MAX_FOLDER_NAME_LENGTH} characters`,
+        i18n.t("errors:validate.folderNameTooLong", {
+          name: folder.name,
+          count: MAX_FOLDER_NAME_LENGTH,
+        }),
       );
     }
     if (folder.parentId !== undefined && !ids.has(folder.parentId)) {
-      say(`Folder "${folder.name}" sits in a folder that is not there`);
+      say(i18n.t("errors:validate.folderParentMissing", { name: folder.name }));
       continue;
     }
     if (holdsItself(moka, folder.id)) {
-      say(`Folder "${folder.name}" is inside itself`);
+      say(i18n.t("errors:validate.folderInsideItself", { name: folder.name }));
       continue;
     }
     if (folderDepth(moka, folder.id) > MAX_FOLDER_DEPTH) {
       say(
-        `Folder "${folder.name}" sits deeper than the ${MAX_FOLDER_DEPTH} levels allowed`,
+        i18n.t("errors:validate.folderTooDeep", {
+          name: folder.name,
+          count: MAX_FOLDER_DEPTH,
+        }),
       );
     }
   }
@@ -716,7 +779,9 @@ function folderIssues(moka: MokaFile): ValidationIssue[] {
     if (canvas.folderId !== undefined && !ids.has(canvas.folderId)) {
       issues.push({
         code: "FOLDER_NOT_FOUND",
-        message: `Canvas "${canvas.name}" sits in a folder that is not there`,
+        message: i18n.t("errors:validate.canvasFolderMissing", {
+          name: canvas.name,
+        }),
         canvasId: canvas.id,
       });
     }
@@ -745,7 +810,9 @@ export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
     if (canvasIds.has(canvas.id)) {
       issues.push({
         code: "VALIDATION_FAILED",
-        message: `Duplicate canvas id ${canvas.id}`,
+        message: i18n.t("errors:validate.duplicateCanvasId", {
+          id: canvas.id,
+        }),
         canvasId: canvas.id,
       });
     }
@@ -758,14 +825,18 @@ export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
     if (resourceIds.has(entry.id)) {
       issues.push({
         code: "VALIDATION_FAILED",
-        message: `Duplicate resource id ${entry.id}`,
+        message: i18n.t("errors:validate.duplicateResourceId", {
+          id: entry.id,
+        }),
       });
     }
     resourceIds.add(entry.id);
     if (!validateResourcePath(entry.path)) {
       issues.push({
         code: "PATH_ESCAPE",
-        message: `Resource path escapes the project root: ${entry.path}`,
+        message: i18n.t("errors:validate.resourcePathEscapes", {
+          path: entry.path,
+        }),
       });
     }
     issues.push(...shelfIssues(entry));
@@ -780,7 +851,9 @@ export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
     if (!resourceIds.has(assetId)) {
       issues.push({
         code: "ASSET_MISSING",
-        message: `Something in the project references unregistered asset ${assetId}`,
+        message: i18n.t("errors:validate.unregisteredAsset", {
+          id: assetId,
+        }),
       });
     }
   }

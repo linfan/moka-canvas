@@ -72,6 +72,7 @@ import {
   transitionsOfSeams,
 } from "./timeline";
 import { findNode, validateBounds, validateEdgeCandidate } from "./validate";
+import { i18n } from "../i18n";
 
 export class CommandError extends Error {
   readonly code: string;
@@ -98,13 +99,17 @@ export function emptyCanvas(id: string, name: string): CanvasDocument {
 export function nextCanvasName(moka: MokaFile): string {
   const used = new Set(moka.canvas.map((c) => c.name));
   let n = moka.canvas.length + 1;
-  while (used.has(`Canvas ${n}`)) n += 1;
-  return `Canvas ${n}`;
+  while (used.has(i18n.t("domain:canvas.defaultName", { n }))) n += 1;
+  return i18n.t("domain:canvas.defaultName", { n });
 }
 
 function canvasOf(moka: MokaFile, canvasId: string): CanvasDocument {
   const canvas = moka.canvas.find((c) => c.id === canvasId);
-  if (!canvas) throw new CommandError("CANVAS_NOT_FOUND", "Canvas not found");
+  if (!canvas)
+    throw new CommandError(
+      "CANVAS_NOT_FOUND",
+      i18n.t("errors:command.canvasNotFound"),
+    );
   return canvas;
 }
 
@@ -157,17 +162,26 @@ function folderOf(
 ): FolderId | null {
   if (folderId === null || folderId === undefined) return null;
   if (!folderById(moka, folderId)) {
-    throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+    throw new CommandError(
+      "FOLDER_NOT_FOUND",
+      i18n.t("errors:command.folderNotFound"),
+    );
   }
   return folderId;
 }
 
 function checkFolderName(name: string) {
   if (name.length === 0) {
-    throw new CommandError("VALIDATION_FAILED", "Folder name is empty");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.folderNameEmpty"),
+    );
   }
   if (name.length > MAX_FOLDER_NAME_LENGTH) {
-    throw new CommandError("VALIDATION_FAILED", "Folder name is too long");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.folderNameTooLong"),
+    );
   }
 }
 
@@ -184,7 +198,7 @@ function checkFolderDepth(candidate: MokaFile, folderId: FolderId) {
   if (depth > MAX_FOLDER_DEPTH) {
     throw new CommandError(
       "VALIDATION_FAILED",
-      `Folders nest at most ${MAX_FOLDER_DEPTH} deep`,
+      i18n.t("errors:command.foldersNestAtMost", { depth: MAX_FOLDER_DEPTH }),
     );
   }
 }
@@ -195,7 +209,10 @@ function sessionOf(
 ): AssistantSession {
   const session = canvas.sessions?.find((s) => s.id === sessionId);
   if (!session)
-    throw new CommandError("SESSION_NOT_FOUND", "Session not found");
+    throw new CommandError(
+      "SESSION_NOT_FOUND",
+      i18n.t("errors:command.sessionNotFound"),
+    );
   return session;
 }
 
@@ -249,7 +266,10 @@ function withTimelines(
 function timelineOf(moka: MokaFile, timelineId: TimelineId): TimelineDocument {
   const timeline = (moka.timelines ?? []).find((t) => t.id === timelineId);
   if (!timeline)
-    throw new CommandError("TIMELINE_NOT_FOUND", "Timeline not found");
+    throw new CommandError(
+      "TIMELINE_NOT_FOUND",
+      i18n.t("errors:command.timelineNotFound"),
+    );
   return timeline;
 }
 
@@ -262,9 +282,15 @@ function replaceTimeline(moka: MokaFile, timeline: TimelineDocument): MokaFile {
 
 function checkTimelineName(name: string) {
   if (name.length === 0)
-    throw new CommandError("VALIDATION_FAILED", "Timeline name is empty");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.timelineNameEmpty"),
+    );
   if (name.length > TIMELINE_NAME_MAX)
-    throw new CommandError("VALIDATION_FAILED", "Timeline name is too long");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.timelineNameTooLong"),
+    );
 }
 
 function isEven(value: number): boolean {
@@ -278,7 +304,7 @@ function validateTimelineSettings(settings: Partial<TimelineSettings>) {
   )
     throw new CommandError(
       "VALIDATION_FAILED",
-      "Frame rate is not one of the choices",
+      i18n.t("errors:command.frameRateNotAllowed"),
     );
   if (settings.width !== undefined) {
     if (
@@ -288,7 +314,7 @@ function validateTimelineSettings(settings: Partial<TimelineSettings>) {
     )
       throw new CommandError(
         "VALIDATION_FAILED",
-        "Width is out of range or odd",
+        i18n.t("errors:command.widthOutOfRange"),
       );
   }
   if (settings.height !== undefined) {
@@ -299,7 +325,7 @@ function validateTimelineSettings(settings: Partial<TimelineSettings>) {
     )
       throw new CommandError(
         "VALIDATION_FAILED",
-        "Height is out of range or odd",
+        i18n.t("errors:command.heightOutOfRange"),
       );
   }
   if (settings.background !== undefined) checkHexColor(settings.background);
@@ -331,16 +357,25 @@ function applyOne(
     case "addNode": {
       const canvas = canvasOf(moka, command.canvasId);
       if (findNode(canvas, command.node.id))
-        throw new CommandError("CONFLICT", "Node id already exists");
+        throw new CommandError(
+          "CONFLICT",
+          i18n.t("errors:command.nodeIdExists"),
+        );
       if (canvas.nodes.length + 1 > MAX_NODES_PER_CANVAS)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Canvas node limit reached",
+          i18n.t("errors:command.nodeLimitReached"),
         );
       if (!validateBounds(command.node.bounds))
-        throw new CommandError("BOUNDS_INVALID", "Node bounds are invalid");
+        throw new CommandError(
+          "BOUNDS_INVALID",
+          i18n.t("errors:command.nodeBoundsInvalid"),
+        );
       if (command.node.title.length > MAX_TITLE_LENGTH)
-        throw new CommandError("VALIDATION_FAILED", "Node title is too long");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.nodeTitleTooLong"),
+        );
       const next: CanvasDocument = {
         ...canvas,
         nodes: [...canvas.nodes, command.node],
@@ -360,12 +395,19 @@ function applyOne(
     case "updateNode": {
       const canvas = canvasOf(moka, command.canvasId);
       const node = findNode(canvas, command.nodeId);
-      if (!node) throw new CommandError("NODE_NOT_FOUND", "Node not found");
+      if (!node)
+        throw new CommandError(
+          "NODE_NOT_FOUND",
+          i18n.t("errors:command.nodeNotFound"),
+        );
       if (
         command.patch.title !== undefined &&
         command.patch.title.length > MAX_TITLE_LENGTH
       )
-        throw new CommandError("VALIDATION_FAILED", "Node title is too long");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.nodeTitleTooLong"),
+        );
       const inversePatch: Record<string, unknown> = {};
       if (command.patch.title !== undefined) inversePatch.title = node.title;
       if (command.patch.zIndex !== undefined) inversePatch.zIndex = node.zIndex;
@@ -406,7 +448,10 @@ function applyOne(
         const position = command.positions[node.id];
         if (!position) return node;
         if (!Number.isFinite(position.x) || !Number.isFinite(position.y))
-          throw new CommandError("BOUNDS_INVALID", "Position is not finite");
+          throw new CommandError(
+            "BOUNDS_INVALID",
+            i18n.t("errors:command.positionNotFinite"),
+          );
         previous[node.id] = { x: node.bounds.x, y: node.bounds.y };
         return {
           ...node,
@@ -429,9 +474,16 @@ function applyOne(
     case "resizeNode": {
       const canvas = canvasOf(moka, command.canvasId);
       const node = findNode(canvas, command.nodeId);
-      if (!node) throw new CommandError("NODE_NOT_FOUND", "Node not found");
+      if (!node)
+        throw new CommandError(
+          "NODE_NOT_FOUND",
+          i18n.t("errors:command.nodeNotFound"),
+        );
       if (!validateBounds(command.bounds))
-        throw new CommandError("BOUNDS_INVALID", "Bounds are invalid");
+        throw new CommandError(
+          "BOUNDS_INVALID",
+          i18n.t("errors:command.boundsInvalid"),
+        );
       const previous = { ...node.bounds };
       const next: CanvasDocument = {
         ...canvas,
@@ -457,7 +509,10 @@ function applyOne(
       const removing = new Set(command.nodeIds);
       const removedNodes = canvas.nodes.filter((n) => removing.has(n.id));
       if (removedNodes.length !== removing.size)
-        throw new CommandError("NODE_NOT_FOUND", "Some nodes were not found");
+        throw new CommandError(
+          "NODE_NOT_FOUND",
+          i18n.t("errors:command.someNodesNotFound"),
+        );
       const removedEdges = canvas.edges.filter(
         (e) => removing.has(e.source.nodeId) || removing.has(e.target.nodeId),
       );
@@ -529,11 +584,14 @@ function applyOne(
     case "addEdge": {
       const canvas = canvasOf(moka, command.canvasId);
       if (canvas.edges.some((e) => e.id === command.edge.id))
-        throw new CommandError("CONFLICT", "Edge id already exists");
+        throw new CommandError(
+          "CONFLICT",
+          i18n.t("errors:command.edgeIdExists"),
+        );
       if (canvas.edges.length + 1 > MAX_EDGES_PER_CANVAS)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Canvas edge limit reached",
+          i18n.t("errors:command.edgeLimitReached"),
         );
       const result = validateEdgeCandidate(
         canvas,
@@ -564,7 +622,10 @@ function applyOne(
         removing.has(e.id),
       );
       if (removed.length !== removing.size)
-        throw new CommandError("EDGE_NOT_FOUND", "Some edges were not found");
+        throw new CommandError(
+          "EDGE_NOT_FOUND",
+          i18n.t("errors:command.someEdgesNotFound"),
+        );
       const next: CanvasDocument = {
         ...canvas,
         edges: canvas.edges.filter((e) => !removing.has(e.id)),
@@ -583,23 +644,32 @@ function applyOne(
       const canvas = canvasOf(moka, command.canvasId);
       const groupNode = findNode(canvas, command.groupId);
       if (!groupNode || groupNode.kind !== "group")
-        throw new CommandError("GROUP_INVALID", "Group node not found");
+        throw new CommandError(
+          "GROUP_INVALID",
+          i18n.t("errors:command.groupNodeNotFound"),
+        );
       const unique = new Set(command.childNodeIds);
       if (unique.size !== command.childNodeIds.length)
-        throw new CommandError("GROUP_INVALID", "Duplicate group member");
+        throw new CommandError(
+          "GROUP_INVALID",
+          i18n.t("errors:command.duplicateGroupMember"),
+        );
       if (unique.has(command.groupId))
         throw new CommandError(
           "GROUP_INVALID",
-          "A group cannot contain itself",
+          i18n.t("errors:command.groupContainsItself"),
         );
       for (const id of unique) {
         const child = findNode(canvas, id);
         if (!child)
-          throw new CommandError("NODE_NOT_FOUND", "Member not found");
+          throw new CommandError(
+            "NODE_NOT_FOUND",
+            i18n.t("errors:command.memberNotFound"),
+          );
         if (child.kind === "group")
           throw new CommandError(
             "GROUP_INVALID",
-            "Nested groups are not supported",
+            i18n.t("errors:command.nestedGroupsUnsupported"),
           );
       }
       const previous =
@@ -661,7 +731,10 @@ function applyOne(
         zoom: clampZoom(command.viewport.zoom),
       };
       if (!Number.isFinite(viewport.x) || !Number.isFinite(viewport.y))
-        throw new CommandError("BOUNDS_INVALID", "Viewport is not finite");
+        throw new CommandError(
+          "BOUNDS_INVALID",
+          i18n.t("errors:command.viewportNotFinite"),
+        );
       const previous = { ...canvas.viewport };
       return {
         next: replaceCanvas(moka, { ...canvas, viewport }),
@@ -684,17 +757,17 @@ function applyOne(
       if (!BACKGROUND_MODES.includes(settings.background))
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Background mode is not one of the three",
+          i18n.t("errors:command.backgroundModeUnknown"),
         );
       if (typeof settings.showMinimap !== "boolean")
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Minimap preference is not a boolean",
+          i18n.t("errors:command.minimapNotBoolean"),
         );
       if (typeof settings.snapToGrid !== "boolean")
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Snap preference is not a boolean",
+          i18n.t("errors:command.snapNotBoolean"),
         );
       const previous = { ...canvas.settings };
       return {
@@ -713,23 +786,29 @@ function applyOne(
       const canvas = canvasOf(moka, command.canvasId);
       const sessions = canvas.sessions ?? [];
       if (sessions.some((s) => s.id === command.session.id))
-        throw new CommandError("CONFLICT", "Session id already exists");
+        throw new CommandError(
+          "CONFLICT",
+          i18n.t("errors:command.sessionIdExists"),
+        );
       if (sessions.length + 1 > MAX_ASSISTANT_SESSIONS_PER_CANVAS)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Canvas session limit reached",
+          i18n.t("errors:command.sessionLimitReached"),
         );
       if (command.session.title.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Session title is empty");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.sessionTitleEmpty"),
+        );
       if (command.session.title.length > MAX_ASSISTANT_TITLE_LENGTH)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Session title is too long",
+          i18n.t("errors:command.sessionTitleTooLong"),
         );
       if (command.session.messages.length > MAX_ASSISTANT_MESSAGES_PER_SESSION)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Session message limit reached",
+          i18n.t("errors:command.sessionMessageLimitReached"),
         );
       const index = Math.min(
         Math.max(command.index ?? sessions.length, 0),
@@ -753,11 +832,14 @@ function applyOne(
       const canvas = canvasOf(moka, command.canvasId);
       const session = sessionOf(canvas, command.sessionId);
       if (command.title.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Session title is empty");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.sessionTitleEmpty"),
+        );
       if (command.title.length > MAX_ASSISTANT_TITLE_LENGTH)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Session title is too long",
+          i18n.t("errors:command.sessionTitleTooLong"),
         );
       const previous = session.title;
       // What a conversation is called is not something said in it, so renaming
@@ -784,7 +866,10 @@ function applyOne(
       const sessions = canvas.sessions ?? [];
       const index = sessions.findIndex((s) => s.id === command.sessionId);
       if (index < 0)
-        throw new CommandError("SESSION_NOT_FOUND", "Session not found");
+        throw new CommandError(
+          "SESSION_NOT_FOUND",
+          i18n.t("errors:command.sessionNotFound"),
+        );
       return {
         next: replaceCanvas(
           moka,
@@ -808,14 +893,23 @@ function applyOne(
       const canvas = canvasOf(moka, command.canvasId);
       const session = sessionOf(canvas, command.sessionId);
       if (command.messages.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Nothing to append");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.nothingToAppend"),
+        );
       const known = new Set(session.messages.map((message) => message.id));
       for (const message of command.messages) {
         if (known.has(message.id))
-          throw new CommandError("CONFLICT", "Message id already exists");
+          throw new CommandError(
+            "CONFLICT",
+            i18n.t("errors:command.messageIdExists"),
+          );
         known.add(message.id);
         if (message.text.length > MAX_ASSISTANT_MESSAGE_LENGTH)
-          throw new CommandError("VALIDATION_FAILED", "Message is too long");
+          throw new CommandError(
+            "VALIDATION_FAILED",
+            i18n.t("errors:command.messageTooLong"),
+          );
       }
 
       const messages = [...session.messages];
@@ -880,7 +974,10 @@ function applyOne(
         removing.has(message.id),
       );
       if (removed.length !== removing.size)
-        throw new CommandError("MESSAGE_NOT_FOUND", "Some messages not found");
+        throw new CommandError(
+          "MESSAGE_NOT_FOUND",
+          i18n.t("errors:command.someMessagesNotFound"),
+        );
       const held = new Map(
         session.messages.map((message, position) => [message.id, position]),
       );
@@ -908,9 +1005,15 @@ function applyOne(
 
     case "addCanvas": {
       if (moka.canvas.length + 1 > MAX_CANVASES_PER_PROJECT)
-        throw new CommandError("VALIDATION_FAILED", "Canvas limit reached");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.canvasLimitReached"),
+        );
       if (moka.canvas.some((c) => c.id === command.canvas.id))
-        throw new CommandError("CONFLICT", "Canvas id already exists");
+        throw new CommandError(
+          "CONFLICT",
+          i18n.t("errors:command.canvasIdExists"),
+        );
       // A canvas born into a folder names it, so the folder has to be there:
       // one that is not would leave the board somewhere no tree can show it.
       folderOf(moka, command.canvas.folderId ?? null);
@@ -929,9 +1032,15 @@ function applyOne(
     case "renameCanvas": {
       const canvas = canvasOf(moka, command.canvasId);
       if (command.name.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Canvas name is empty");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.canvasNameEmpty"),
+        );
       if (command.name.length > MAX_CANVAS_NAME_LENGTH)
-        throw new CommandError("VALIDATION_FAILED", "Canvas name is too long");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.canvasNameTooLong"),
+        );
       const previous = canvas.name;
       return {
         next: replaceCanvas(moka, { ...canvas, name: command.name }),
@@ -944,7 +1053,10 @@ function applyOne(
     case "reorderCanvas": {
       const index = moka.canvas.findIndex((c) => c.id === command.canvasId);
       if (index < 0)
-        throw new CommandError("CANVAS_NOT_FOUND", "Canvas not found");
+        throw new CommandError(
+          "CANVAS_NOT_FOUND",
+          i18n.t("errors:command.canvasNotFound"),
+        );
       const target = Math.min(
         Math.max(command.index, 0),
         moka.canvas.length - 1,
@@ -961,11 +1073,14 @@ function applyOne(
     case "removeCanvas": {
       const index = moka.canvas.findIndex((c) => c.id === command.canvasId);
       if (index < 0)
-        throw new CommandError("CANVAS_NOT_FOUND", "Canvas not found");
+        throw new CommandError(
+          "CANVAS_NOT_FOUND",
+          i18n.t("errors:command.canvasNotFound"),
+        );
       if (moka.canvas.length <= 1)
         throw new CommandError(
           "CANVAS_REQUIRED",
-          "The last canvas cannot be removed",
+          i18n.t("errors:command.lastCanvasCannotBeRemoved"),
         );
       const removed = moka.canvas[index];
       const list = moka.canvas.filter((c) => c.id !== command.canvasId);
@@ -978,9 +1093,15 @@ function applyOne(
     case "addFolder": {
       const folders = foldersOf(moka);
       if (folders.length + 1 > MAX_FOLDERS_PER_PROJECT)
-        throw new CommandError("VALIDATION_FAILED", "Folder limit reached");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.folderLimitReached"),
+        );
       if (folders.some((folder) => folder.id === command.folder.id))
-        throw new CommandError("CONFLICT", "Folder id already exists");
+        throw new CommandError(
+          "CONFLICT",
+          i18n.t("errors:command.folderIdExists"),
+        );
       checkFolderName(command.folder.name);
       const parentId = folderOf(moka, command.folder.parentId ?? null);
       const placed = { ...command.folder, parentId: parentId ?? undefined };
@@ -1002,7 +1123,10 @@ function applyOne(
     case "renameFolder": {
       const folder = folderById(moka, command.folderId);
       if (!folder)
-        throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+        throw new CommandError(
+          "FOLDER_NOT_FOUND",
+          i18n.t("errors:command.folderNotFound"),
+        );
       checkFolderName(command.name);
       const previous = folder.name;
       return {
@@ -1026,17 +1150,20 @@ function applyOne(
       const folders = foldersOf(moka);
       const folder = folderById(moka, command.folderId);
       if (!folder)
-        throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+        throw new CommandError(
+          "FOLDER_NOT_FOUND",
+          i18n.t("errors:command.folderNotFound"),
+        );
       const parentId = folderOf(moka, command.parentId);
       if (parentId === folder.id)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "A folder cannot be moved into itself",
+          i18n.t("errors:command.folderIntoItself"),
         );
       if (descendantFolderIds(moka, folder.id).includes(parentId ?? ""))
         throw new CommandError(
           "VALIDATION_FAILED",
-          "A folder cannot be moved into one it holds",
+          i18n.t("errors:command.folderIntoDescendant"),
         );
       const previousParent = folder.parentId ?? null;
       const previousIndex = folderSiblingIndex(moka, folder.id);
@@ -1070,7 +1197,10 @@ function applyOne(
         (item) => item.id === command.folderId,
       );
       if (position < 0)
-        throw new CommandError("FOLDER_NOT_FOUND", "Folder not found");
+        throw new CommandError(
+          "FOLDER_NOT_FOUND",
+          i18n.t("errors:command.folderNotFound"),
+        );
       const removed = folders[position];
       const parentId = removed.parentId ?? null;
       const previousIndex = folderSiblingIndex(moka, removed.id);
@@ -1161,14 +1291,20 @@ function applyOne(
     case "addTimeline": {
       const timelines = moka.timelines ?? [];
       if (timelines.length + 1 > MAX_TIMELINES_PER_PROJECT)
-        throw new CommandError("VALIDATION_FAILED", "Timeline limit reached");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.timelineLimitReached"),
+        );
       if (timelines.some((t) => t.id === command.timeline.id))
-        throw new CommandError("CONFLICT", "Timeline id already exists");
+        throw new CommandError(
+          "CONFLICT",
+          i18n.t("errors:command.timelineIdExists"),
+        );
       checkTimelineName(command.timeline.name);
       if (command.timeline.schemaVersion > TIMELINE_SCHEMA_VERSION)
         throw new CommandError(
           "MOKA_VERSION_UNSUPPORTED",
-          "Timeline schema is newer than this build reads",
+          i18n.t("errors:command.timelineSchemaNewer"),
         );
       const index = Math.min(
         Math.max(command.index ?? timelines.length, 0),
@@ -1186,7 +1322,10 @@ function applyOne(
       const timelines = moka.timelines ?? [];
       const index = timelines.findIndex((t) => t.id === command.timelineId);
       if (index < 0)
-        throw new CommandError("TIMELINE_NOT_FOUND", "Timeline not found");
+        throw new CommandError(
+          "TIMELINE_NOT_FOUND",
+          i18n.t("errors:command.timelineNotFound"),
+        );
       const removed = timelines[index];
       const list = timelines.filter((t) => t.id !== command.timelineId);
       return {
@@ -1245,16 +1384,22 @@ function applyOne(
     case "addTrack": {
       const timeline = timelineOf(moka, command.timelineId);
       if (timeline.tracks.length + 1 > MAX_TRACKS_PER_TIMELINE)
-        throw new CommandError("VALIDATION_FAILED", "Track limit reached");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.trackLimitReached"),
+        );
       if (timeline.tracks.some((t) => t.id === command.track.id))
-        throw new CommandError("CONFLICT", "Track id already exists");
+        throw new CommandError(
+          "CONFLICT",
+          i18n.t("errors:command.trackIdExists"),
+        );
       if (
         command.track.name.length === 0 ||
         command.track.name.length > TIMELINE_NAME_MAX
       )
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Track name is empty or too long",
+          i18n.t("errors:command.trackNameInvalid"),
         );
       const index = Math.min(
         Math.max(command.index ?? timeline.tracks.length, 0),
@@ -1278,13 +1423,16 @@ function applyOne(
       const timeline = timelineOf(moka, command.timelineId);
       const index = timeline.tracks.findIndex((t) => t.id === command.trackId);
       if (index < 0)
-        throw new CommandError("TRACK_NOT_FOUND", "Track not found");
+        throw new CommandError(
+          "TRACK_NOT_FOUND",
+          i18n.t("errors:command.trackNotFound"),
+        );
       // A track holding clips is not taken out: the clips are work, and a
       // caller that wants the row gone moves them first.
       if (timeline.clips.some((clip) => clip.trackId === command.trackId))
         throw new CommandError(
           "TRACK_NOT_EMPTY",
-          "That track still holds clips",
+          i18n.t("errors:command.trackNotEmpty"),
         );
       const removed = timeline.tracks[index];
       const tracks = timeline.tracks.filter((t) => t.id !== command.trackId);
@@ -1304,7 +1452,11 @@ function applyOne(
     case "updateTrack": {
       const timeline = timelineOf(moka, command.timelineId);
       const track = timeline.tracks.find((t) => t.id === command.trackId);
-      if (!track) throw new CommandError("TRACK_NOT_FOUND", "Track not found");
+      if (!track)
+        throw new CommandError(
+          "TRACK_NOT_FOUND",
+          i18n.t("errors:command.trackNotFound"),
+        );
       if (
         command.patch.name !== undefined &&
         (command.patch.name.length === 0 ||
@@ -1312,7 +1464,7 @@ function applyOne(
       )
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Track name is empty or too long",
+          i18n.t("errors:command.trackNameInvalid"),
         );
       const previous: Partial<
         Pick<TimelineTrack, "name" | "muted" | "hidden" | "locked">
@@ -1340,21 +1492,29 @@ function applyOne(
     case "addClips": {
       const timeline = timelineOf(moka, command.timelineId);
       if (command.clips.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Nothing to add");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.nothingToAdd"),
+        );
       if (command.clips.length > MAX_CLIPS_PER_COMMAND)
         throw new CommandError(
           "VALIDATION_FAILED",
-          `One step lands at most ${MAX_CLIPS_PER_COMMAND} clips`,
+          i18n.t("errors:command.oneStepLandsAtMost", {
+            count: MAX_CLIPS_PER_COMMAND,
+          }),
         );
       if (timeline.clips.length + command.clips.length > MAX_CLIPS_PER_TIMELINE)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Timeline clip limit reached",
+          i18n.t("errors:command.clipLimitReached"),
         );
       const known = new Set(timeline.clips.map((clip) => clip.id));
       for (const clip of command.clips) {
         if (known.has(clip.id))
-          throw new CommandError("CONFLICT", "Clip id already exists");
+          throw new CommandError(
+            "CONFLICT",
+            i18n.t("errors:command.clipIdExists"),
+          );
         known.add(clip.id);
         checkClip(moka, timeline, clip);
       }
@@ -1373,12 +1533,15 @@ function applyOne(
       );
       for (const seam of seams) {
         if (seamIds.has(seam.id))
-          throw new CommandError("CONFLICT", "Transition id already exists");
+          throw new CommandError(
+            "CONFLICT",
+            i18n.t("errors:command.transitionIdExists"),
+          );
         seamIds.add(seam.id);
         if (seamLeaders.has(seam.afterClipId))
           throw new CommandError(
             "CONFLICT",
-            "That seam already carries a transition",
+            i18n.t("errors:command.seamTaken"),
           );
         seamLeaders.add(seam.afterClipId);
         checkTransitionRestoration(world, seam);
@@ -1408,7 +1571,10 @@ function applyOne(
       const removing = new Set(command.clipIds);
       const removed = timeline.clips.filter((clip) => removing.has(clip.id));
       if (removed.length !== removing.size)
-        throw new CommandError("CLIP_NOT_FOUND", "Some clips were not found");
+        throw new CommandError(
+          "CLIP_NOT_FOUND",
+          i18n.t("errors:command.someClipsNotFound"),
+        );
       // Each seam transition goes with its seam, and both seams a removed
       // clip touched — the one ahead of it and the one behind it — go.
       const removedTransitions = transitionsOfSeams(timeline, command.clipIds);
@@ -1441,22 +1607,31 @@ function applyOne(
     case "updateClips": {
       const timeline = timelineOf(moka, command.timelineId);
       if (command.patches.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Nothing to update");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.nothingToUpdate"),
+        );
       if (command.patches.length > MAX_CLIPS_PER_COMMAND)
         throw new CommandError(
           "VALIDATION_FAILED",
-          `One step touches at most ${MAX_CLIPS_PER_COMMAND} clips`,
+          i18n.t("errors:command.oneStepTouchesAtMost", {
+            count: MAX_CLIPS_PER_COMMAND,
+          }),
         );
       const byId = new Map(timeline.clips.map((clip) => [clip.id, clip]));
       const updated = new Map<string, TimelineClip>();
       const inverses: DocumentCommand[] = [];
       for (const { clipId, patch } of command.patches) {
         const clip = byId.get(clipId);
-        if (!clip) throw new CommandError("CLIP_NOT_FOUND", "Clip not found");
+        if (!clip)
+          throw new CommandError(
+            "CLIP_NOT_FOUND",
+            i18n.t("errors:command.clipNotFound"),
+          );
         if (updated.has(clipId))
           throw new CommandError(
             "CONFLICT",
-            "A clip is patched twice in one step",
+            i18n.t("errors:command.clipPatchedTwice"),
           );
         const next = checkClip(moka, timeline, mergeClipPatch(clip, patch));
         updated.set(clipId, next);
@@ -1483,11 +1658,16 @@ function applyOne(
     case "moveClips": {
       const timeline = timelineOf(moka, command.timelineId);
       if (command.moves.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Nothing to move");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.nothingToMove"),
+        );
       if (command.moves.length > MAX_CLIPS_PER_COMMAND)
         throw new CommandError(
           "VALIDATION_FAILED",
-          `One step moves at most ${MAX_CLIPS_PER_COMMAND} clips`,
+          i18n.t("errors:command.oneStepMovesAtMost", {
+            count: MAX_CLIPS_PER_COMMAND,
+          }),
         );
       const byId = new Map(timeline.clips.map((clip) => [clip.id, clip]));
       // Last one wins for a clip moved twice in one command, and the undo
@@ -1497,20 +1677,30 @@ function applyOne(
         {};
       for (const { clipId, startMs, trackId } of command.moves) {
         const clip = byId.get(clipId);
-        if (!clip) throw new CommandError("CLIP_NOT_FOUND", "Clip not found");
+        if (!clip)
+          throw new CommandError(
+            "CLIP_NOT_FOUND",
+            i18n.t("errors:command.clipNotFound"),
+          );
         const targetTrackId = trackId ?? clip.trackId;
         const target = timeline.tracks.find((t) => t.id === targetTrackId);
         if (!target)
-          throw new CommandError("TRACK_NOT_FOUND", "Clip's track not found");
+          throw new CommandError(
+            "TRACK_NOT_FOUND",
+            i18n.t("errors:command.clipTrackNotFound"),
+          );
         if (!trackAccepts(target, clip.kind))
           throw new CommandError(
             "VALIDATION_FAILED",
-            `A ${clip.kind} clip cannot sit on a ${target.kind} track`,
+            i18n.t("errors:command.clipOnWrongTrack", {
+              kind: clip.kind,
+              trackKind: target.kind,
+            }),
           );
         if (!Number.isInteger(startMs) || startMs < 0)
           throw new CommandError(
             "VALIDATION_FAILED",
-            "Clip start is not a whole number of milliseconds",
+            i18n.t("errors:command.clipStartNotWholeMs"),
           );
         if (!positions[clipId])
           positions[clipId] = { startMs: clip.startMs, trackId: clip.trackId };
@@ -1546,14 +1736,17 @@ function applyOne(
     case "addTransitions": {
       const timeline = timelineOf(moka, command.timelineId);
       if (command.transitions.length === 0)
-        throw new CommandError("VALIDATION_FAILED", "Nothing to add");
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.nothingToAdd"),
+        );
       if (
         timeline.transitions.length + command.transitions.length >
         MAX_TRANSITIONS_PER_TIMELINE
       )
         throw new CommandError(
           "VALIDATION_FAILED",
-          "Timeline transition limit reached",
+          i18n.t("errors:command.transitionLimitReached"),
         );
       const known = new Set(timeline.transitions.map((t) => t.id));
       const seamLeaders = new Set(
@@ -1564,12 +1757,15 @@ function applyOne(
       // pulls them back, one after the other, as it installs the records.
       for (const transition of command.transitions) {
         if (known.has(transition.id))
-          throw new CommandError("CONFLICT", "Transition id already exists");
+          throw new CommandError(
+            "CONFLICT",
+            i18n.t("errors:command.transitionIdExists"),
+          );
         known.add(transition.id);
         if (seamLeaders.has(transition.afterClipId))
           throw new CommandError(
             "CONFLICT",
-            "That seam already carries a transition",
+            i18n.t("errors:command.seamTaken"),
           );
         seamLeaders.add(transition.afterClipId);
         checkTransitionLanding(timeline, transition);
@@ -1616,7 +1812,7 @@ function applyOne(
       if (removing.size !== command.transitionIds.length)
         throw new CommandError(
           "CONFLICT",
-          "A transition is named twice in one step",
+          i18n.t("errors:command.transitionNamedTwice"),
         );
       // Release each follower back against its leader, one seam at a time in
       // the order the ids are given: a chain comes apart left to right,
@@ -1628,7 +1824,7 @@ function applyOne(
         if (!transition)
           throw new CommandError(
             "TRANSITION_NOT_FOUND",
-            "Some transitions were not found",
+            i18n.t("errors:command.someTransitionsNotFound"),
           );
         const leader = working.clips.find(
           (clip) => clip.id === transition.afterClipId,
@@ -1637,7 +1833,7 @@ function applyOne(
         if (!leader || !follower)
           throw new CommandError(
             "TRANSITION_NOT_FOUND",
-            "The seam a transition names is not on the timeline",
+            i18n.t("errors:command.seamMissing"),
           );
         const startMs = leader.startMs + leader.durationMs;
         working = {

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { assetUrl } from "../../../api";
 import {
   CAPABILITY_LABELS,
@@ -183,6 +184,7 @@ function RowWords({
  * is ten nodes or ten references and neither is obvious from the list alone.
  */
 export function AssetPickerModal() {
+  const { t } = useTranslation();
   const ask = useEditorStore((state) => state.assetPicker);
   const moka = useProjectStore((state) => state.moka);
   const [filter, setFilter] = useState<ShelfFilter>(OPEN_SHELF_FILTER);
@@ -290,7 +292,7 @@ export function AssetPickerModal() {
             <option value="">Every kind</option>
             {SHELF_KINDS.map((kind) => (
               <option key={kind} value={kind}>
-                {CAPABILITY_LABELS[kind]}
+                {t(CAPABILITY_LABELS[kind])}
               </option>
             ))}
           </select>
@@ -355,7 +357,7 @@ export function AssetPickerModal() {
                       className={`asset-pick-kind is-${kind}`}
                       data-testid={`asset-pick-kind-${entry.id}`}
                     >
-                      {CAPABILITY_LABELS[kind]}
+                      {t(CAPABILITY_LABELS[kind])}
                     </span>
                     {thumb ? (
                       <img alt="" className="asset-pick-thumb" src={thumb} />

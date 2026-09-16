@@ -14,6 +14,7 @@ import type {
   ValidationIssue,
 } from "../../../shared/domain";
 import { ASSET_CATEGORY_LABELS } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { useAppStore } from "./appStore";
 import { useEditorStore } from "./editorStore";
 import { useProjectStore } from "./projectStore";
@@ -163,7 +164,10 @@ async function announceFiling(run: RunRecord, adopted: Promise<void> | null) {
     return;
   }
   const named = filed
-    .map(({ shelf, count }) => `${ASSET_CATEGORY_LABELS[shelf]} (${count})`)
+    .map(
+      ({ shelf, count }) =>
+        `${i18n.t(ASSET_CATEGORY_LABELS[shelf])} (${count})`,
+    )
     .join(", ");
   app.pushToast("success", `Filed under ${named}`, {
     label: "Show assets",

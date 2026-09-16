@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { SecretStorageChoice } from "../../api";
 import { CAPABILITY_LABELS } from "../../shared/domain";
 import { useModelStore } from "./modelStore";
@@ -20,6 +21,7 @@ const CHOICE_LABELS: Record<SecretStorageChoice, string> = {
  * keep opening, because the key that seals them does not change.
  */
 export function SystemTab() {
+  const { t } = useTranslation();
   const view = useModelStore((state) => state.view);
   const saving = useModelStore((state) => state.saving);
   const [managing, setManaging] = useState(false);
@@ -118,7 +120,7 @@ export function SystemTab() {
                 <div className="key-list-info">
                   <span className="key-list-name">{model.displayName}</span>
                   <span className="settings-hint">
-                    {CAPABILITY_LABELS[model.category].toLowerCase()} ·{" "}
+                    {t(CAPABILITY_LABELS[model.category]).toLowerCase()} ·{" "}
                     {model.id}
                     {view.defaults[model.category] === model.id
                       ? " · category default"

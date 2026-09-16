@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { runsApi, type GenerationPreview } from "../../../api";
 import {
   CAPABILITY_LABELS,
@@ -19,6 +20,7 @@ import {
   type ResourceEntry,
   type WorkflowNode,
 } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { ModelPicker } from "../../settings/ModelPicker";
 import { modelOptionsFor, useModelStore } from "../../settings/modelStore";
 import { worldToClient } from "../canvas/canvasControl";
@@ -126,7 +128,7 @@ function refusalFor(asked: {
 }): string | null {
   if (!asked.available) return GENERATION_UNAVAILABLE;
   if (asked.noModel) {
-    const kind = CAPABILITY_LABELS[asked.capability].toLowerCase();
+    const kind = i18n.t(CAPABILITY_LABELS[asked.capability]).toLowerCase();
     return `No ${kind} model is configured yet`;
   }
   if (asked.dangling) {
@@ -169,6 +171,7 @@ function refusalFor(asked: {
  * a click is a choice rather than a draft of one.
  */
 export function PromptPanel() {
+  const { t } = useTranslation();
   const open = useEditorStore((state) => state.promptPanel);
   const selected = useEditorStore((state) => state.selection.nodeIds);
   const camera = useEditorStore((state) => state.camera);
@@ -789,7 +792,7 @@ export function PromptPanel() {
             {noModel ? (
               <div className="prompt-panel-models">
                 <p className="prompt-panel-note">
-                  No {CAPABILITY_LABELS[capability].toLowerCase()} model is
+                  No {t(CAPABILITY_LABELS[capability]).toLowerCase()} model is
                   configured yet.
                 </p>
                 <button

@@ -1,4 +1,5 @@
 import { newId, nowIso } from "./ids";
+import { i18n } from "../i18n";
 import {
   CANVAS_SCHEMA_VERSION,
   DEFAULT_NODE_HEIGHT,
@@ -227,12 +228,25 @@ export function createProject(name: string): MokaFile {
       updatedAt: now,
     },
     resources: emptyResources(),
-    canvas: [createCanvas("Canvas 1")],
+    canvas: [createCanvas(i18n.t("domain:canvas.defaultName", { n: 1 }))],
+  };
+}
+
+/**
+ * The ports of a kind as a document carries them. A label the table states as
+ * a translation key is read into the current language, so what lands in the
+ * document is the word a reader sees rather than the key behind it.
+ */
+function translatedPort(port: PortDefinition): PortDefinition {
+  return {
+    ...port,
+    label: port.label.startsWith("domain:") ? i18n.t(port.label) : port.label,
+    dataTypes: [...port.dataTypes],
   };
 }
 
 export function derivePorts(kind: NodeKind): PortDefinition[] {
-  return NODE_PORTS[kind].map((p) => ({ ...p, dataTypes: [...p.dataTypes] }));
+  return NODE_PORTS[kind].map(translatedPort);
 }
 
 /**
@@ -245,20 +259,18 @@ export function reconcilePorts(
 ): PortDefinition[] {
   const derived = derivePorts(kind);
   const known = new Set(derived.map((p) => p.id));
-  const extras = stored
-    .filter((p) => !known.has(p.id))
-    .map((p) => ({ ...p, dataTypes: [...p.dataTypes] }));
+  const extras = stored.filter((p) => !known.has(p.id)).map(translatedPort);
   return [...derived, ...extras];
 }
 
 const NODE_TITLES: Record<NodeKind, string> = {
-  text: "Text",
-  image: "Image",
-  audio: "Audio",
-  video: "Video",
-  operation: "Operation",
-  group: "Group",
-  export: "Export",
+  text: "domain:nodeTitle.text",
+  image: "domain:nodeTitle.image",
+  audio: "domain:nodeTitle.audio",
+  video: "domain:nodeTitle.video",
+  operation: "domain:nodeTitle.operation",
+  group: "domain:nodeTitle.group",
+  export: "domain:nodeTitle.export",
 };
 
 export function defaultDataForKind(kind: NodeKind): WorkflowNode["data"] {
@@ -457,7 +469,7 @@ export function createNode(
   return {
     id: newId(),
     kind,
-    title: options?.title ?? NODE_TITLES[kind],
+    title: options?.title ?? i18n.t(NODE_TITLES[kind]),
     bounds: {
       x: at.x,
       y: at.y,

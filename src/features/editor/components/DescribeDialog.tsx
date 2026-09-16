@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { assetUrl, generateApi } from "../../../api";
 import { CAPABILITY_LABELS } from "../../../shared/domain";
 import {
@@ -51,6 +52,7 @@ const FRAMING = describeFramingPrompt();
  * guess.
  */
 export function DescribeDialog() {
+  const { t } = useTranslation();
   const asked = useEditorStore((state) => state.pictureTool);
   const moka = useProjectStore((state) => state.moka);
   const view = useModelStore((state) => state.view);
@@ -118,7 +120,7 @@ export function DescribeDialog() {
   const refusal = !reachable
     ? GENERATION_UNAVAILABLE
     : reference === null
-      ? `No ${CAPABILITY_LABELS.text.toLowerCase()} model is configured yet`
+      ? `No ${t(CAPABILITY_LABELS.text).toLowerCase()} model is configured yet`
       : question.trim() === ""
         ? "Say what to ask about the picture"
         : null;

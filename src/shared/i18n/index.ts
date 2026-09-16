@@ -2,10 +2,22 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import { create } from "zustand";
 import enApp from "./locales/en/app.json";
+import enAssistant from "./locales/en/assistant.json";
+import enClip from "./locales/en/clip.json";
 import enCommon from "./locales/en/common.json";
+import enDomain from "./locales/en/domain.json";
+import enEditor from "./locales/en/editor.json";
+import enErrors from "./locales/en/errors.json";
+import enProblems from "./locales/en/problems.json";
 import enSettings from "./locales/en/settings.json";
 import zhApp from "./locales/zh/app.json";
+import zhAssistant from "./locales/zh/assistant.json";
+import zhClip from "./locales/zh/clip.json";
 import zhCommon from "./locales/zh/common.json";
+import zhDomain from "./locales/zh/domain.json";
+import zhEditor from "./locales/zh/editor.json";
+import zhErrors from "./locales/zh/errors.json";
+import zhProblems from "./locales/zh/problems.json";
 import zhSettings from "./locales/zh/settings.json";
 
 /**
@@ -22,11 +34,38 @@ export const LOCALES: Locale[] = ["en", "zh"];
 /** Kept on this machine, beside the other choices that are about the reader. */
 const STORED_UNDER = "moka-canvas:locale";
 
+/**
+ * The host this module is running in, reached instead of named.
+ *
+ * The words are not only read by the browser: unit tests and the browser
+ * suite's project compile this module too, and those have no DOM declared —
+ * so the page, the store, and the machine's language are looked up rather
+ * than spelled. Each is absent where it has no meaning, and the code below
+ * says what it does without one.
+ */
+type Host = {
+  localStorage?: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  };
+  navigator?: { language?: string };
+  document?: {
+    title: string;
+    documentElement: { lang: string };
+  };
+  window?: object;
+};
+
+function host(): Host {
+  return globalThis as unknown as Host;
+}
+
 function readMode(): LocaleMode {
-  // Tests that do not ask for a DOM have no store to read, and want the start.
-  if (typeof localStorage === "undefined") return "system";
+  // A host with no store to read wants the start.
+  const store = host().localStorage;
+  if (store === undefined) return "system";
   try {
-    const kept = localStorage.getItem(STORED_UNDER);
+    const kept = store.getItem(STORED_UNDER);
     return LOCALE_MODES.find((mode) => mode === kept) ?? "system";
   } catch {
     // A store this cannot read is one that has nothing in it.
@@ -35,9 +74,10 @@ function readMode(): LocaleMode {
 }
 
 function keepMode(mode: LocaleMode) {
-  if (typeof localStorage === "undefined") return;
+  const store = host().localStorage;
+  if (store === undefined) return;
   try {
-    localStorage.setItem(STORED_UNDER, mode);
+    store.setItem(STORED_UNDER, mode);
   } catch {
     // A store that will not take it costs the remembering, not the choice.
   }
@@ -45,9 +85,7 @@ function keepMode(mode: LocaleMode) {
 
 /** Every Chinese dialect reads the same Chinese interface; others read English. */
 export function systemLocale(language?: string): Locale {
-  const tag =
-    language ??
-    (typeof navigator === "undefined" ? "" : (navigator.language ?? ""));
+  const tag = language ?? host().navigator?.language ?? "";
   return tag.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
@@ -56,8 +94,28 @@ export function resolveLocale(mode: LocaleMode): Locale {
 }
 
 const resources = {
-  en: { app: enApp, common: enCommon, settings: enSettings },
-  zh: { app: zhApp, common: zhCommon, settings: zhSettings },
+  en: {
+    app: enApp,
+    assistant: enAssistant,
+    clip: enClip,
+    common: enCommon,
+    domain: enDomain,
+    editor: enEditor,
+    errors: enErrors,
+    problems: enProblems,
+    settings: enSettings,
+  },
+  zh: {
+    app: zhApp,
+    assistant: zhAssistant,
+    clip: zhClip,
+    common: zhCommon,
+    domain: zhDomain,
+    editor: zhEditor,
+    errors: zhErrors,
+    problems: zhProblems,
+    settings: zhSettings,
+  },
 };
 
 void i18n.use(initReactI18next).init({
@@ -78,17 +136,17 @@ void i18n.use(initReactI18next).init({
  * the taskbar reads the same as the window.
  */
 function syncNativeChrome() {
-  if (typeof document === "undefined") return;
+  const page = host().document;
+  if (page === undefined) return;
   const name = i18n.t("app:name");
-  document.title = name;
-  document.documentElement.lang = i18n.resolvedLanguage ?? "en";
+  page.title = name;
+  page.documentElement.lang = i18n.resolvedLanguage ?? "en";
   void setDesktopTitle(name);
 }
 
 async function setDesktopTitle(title: string) {
-  const inShell =
-    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-  if (!inShell) return;
+  const shell = host().window;
+  if (shell === undefined || !("__TAURI_INTERNALS__" in shell)) return;
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().setTitle(title);

@@ -91,11 +91,11 @@ export type AssetCategory = (typeof PROJECT_ASSET_CATEGORIES)[number];
 
 /** What each place assets are filed is called where a reader is told of it. */
 export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
-  images: "Images",
-  music: "Music",
-  voice: "Voice",
-  texts: "Texts",
-  videos: "Videos",
+  images: "domain:assetCategory.images",
+  music: "domain:assetCategory.music",
+  voice: "domain:assetCategory.voice",
+  texts: "domain:assetCategory.texts",
+  videos: "domain:assetCategory.videos",
 };
 
 /**
@@ -115,8 +115,8 @@ export type AssetOrigin = (typeof ASSET_ORIGINS)[number];
  * `provenance`, and the shelf calls that "Made here" where it reads the entry.
  */
 export const ASSET_ORIGIN_LABELS: Record<AssetOrigin, string> = {
-  brought: "Brought in",
-  filed: "Filed from a node",
+  brought: "domain:assetOrigin.brought",
+  filed: "domain:assetOrigin.filed",
 };
 
 /** How many words a reader may put on one asset to find it again. */
@@ -211,10 +211,10 @@ export const MODEL_CAPABILITIES = ["text", "image", "audio", "video"] as const;
 export type Capability = (typeof MODEL_CAPABILITIES)[number];
 
 export const CAPABILITY_LABELS: Record<Capability, string> = {
-  text: "Text",
-  image: "Image",
-  audio: "Audio",
-  video: "Video",
+  text: "domain:capability.text",
+  image: "domain:capability.image",
+  audio: "domain:capability.audio",
+  video: "domain:capability.video",
 };
 
 /**
@@ -253,14 +253,14 @@ export const PROTOCOLS_BY_CATEGORY: Record<
 
 /** What each protocol is called where a reader picks one. */
 export const PROTOCOL_LABELS: Record<ModelProtocol, string> = {
-  openaiChat: "OpenAI-compatible · Chat Completions",
-  openaiResponses: "OpenAI-compatible · Responses",
-  openaiImages: "OpenAI-compatible · Images API",
-  openaiSpeech: "OpenAI-compatible · Speech API",
-  openaiVideos: "OpenAI-compatible · Videos API",
-  gemini: "Google Gemini · generateContent",
-  geminiVideo: "Google Gemini · long-running (Veo)",
-  custom: "Custom (reserved)",
+  openaiChat: "domain:protocol.openaiChat",
+  openaiResponses: "domain:protocol.openaiResponses",
+  openaiImages: "domain:protocol.openaiImages",
+  openaiSpeech: "domain:protocol.openaiSpeech",
+  openaiVideos: "domain:protocol.openaiVideos",
+  gemini: "domain:protocol.gemini",
+  geminiVideo: "domain:protocol.geminiVideo",
+  custom: "domain:protocol.custom",
 };
 
 /**
@@ -315,45 +315,73 @@ export function port(
  */
 export const NODE_PORTS: Record<NodeKind, PortDefinition[]> = {
   text: [
-    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
-    port("images", "input", ["image"], "Images", { cardinality: "many" }),
-    port("audio", "input", ["audio"], "Audio"),
-    port("video", "input", ["video"], "Video"),
-    port("out", "output", ["text"], "Text"),
-  ],
-  image: [
-    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
-    port("images", "input", ["image"], "Images", { cardinality: "many" }),
-    port("mask", "input", ["image"], "Mask"),
-    port("out", "output", ["image"], "Image"),
-  ],
-  audio: [
-    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
-    port("out", "output", ["audio"], "Audio"),
-  ],
-  video: [
-    port("prompt", "input", ["text"], "Prompt", { cardinality: "many" }),
-    port("images", "input", ["image"], "Images", { cardinality: "many" }),
-    port("firstFrame", "input", ["image"], "First frame"),
-    port("lastFrame", "input", ["image"], "Last frame"),
-    port("videos", "input", ["video"], "Videos", { cardinality: "many" }),
-    port("audios", "input", ["audio"], "Audios", { cardinality: "many" }),
-    port("out", "output", ["video"], "Video"),
-  ],
-  operation: [
-    port("text", "input", ["text"], "Text", { cardinality: "many" }),
-    port("images", "input", ["image"], "Images", { cardinality: "many" }),
-    port("audio", "input", ["audio"], "Audio"),
-    port("video", "input", ["video"], "Video"),
-    port("out", "output", ["text", "image", "audio", "video"], "Result", {
+    port("prompt", "input", ["text"], "domain:port.prompt", {
       cardinality: "many",
     }),
+    port("images", "input", ["image"], "domain:port.images", {
+      cardinality: "many",
+    }),
+    port("audio", "input", ["audio"], "domain:port.audio"),
+    port("video", "input", ["video"], "domain:port.video"),
+    port("out", "output", ["text"], "domain:port.text"),
+  ],
+  image: [
+    port("prompt", "input", ["text"], "domain:port.prompt", {
+      cardinality: "many",
+    }),
+    port("images", "input", ["image"], "domain:port.images", {
+      cardinality: "many",
+    }),
+    port("mask", "input", ["image"], "domain:port.mask"),
+    port("out", "output", ["image"], "domain:port.image"),
+  ],
+  audio: [
+    port("prompt", "input", ["text"], "domain:port.prompt", {
+      cardinality: "many",
+    }),
+    port("out", "output", ["audio"], "domain:port.audio"),
+  ],
+  video: [
+    port("prompt", "input", ["text"], "domain:port.prompt", {
+      cardinality: "many",
+    }),
+    port("images", "input", ["image"], "domain:port.images", {
+      cardinality: "many",
+    }),
+    port("firstFrame", "input", ["image"], "domain:port.firstFrame"),
+    port("lastFrame", "input", ["image"], "domain:port.lastFrame"),
+    port("videos", "input", ["video"], "domain:port.videos", {
+      cardinality: "many",
+    }),
+    port("audios", "input", ["audio"], "domain:port.audios", {
+      cardinality: "many",
+    }),
+    port("out", "output", ["video"], "domain:port.video"),
+  ],
+  operation: [
+    port("text", "input", ["text"], "domain:port.text", {
+      cardinality: "many",
+    }),
+    port("images", "input", ["image"], "domain:port.images", {
+      cardinality: "many",
+    }),
+    port("audio", "input", ["audio"], "domain:port.audio"),
+    port("video", "input", ["video"], "domain:port.video"),
+    port(
+      "out",
+      "output",
+      ["text", "image", "audio", "video"],
+      "domain:port.result",
+      {
+        cardinality: "many",
+      },
+    ),
   ],
   group: [],
   export: [
-    port("video", "input", ["video"], "Video"),
-    port("audio", "input", ["audio"], "Audio"),
-    port("out", "output", ["artifact"], "Artifact"),
+    port("video", "input", ["video"], "domain:port.video"),
+    port("audio", "input", ["audio"], "domain:port.audio"),
+    port("out", "output", ["artifact"], "domain:port.artifact"),
   ],
 };
 

@@ -1,0 +1,57 @@
+{
+  "assetCategory": {
+    "images": "Images",
+    "music": "Music",
+    "texts": "Texts",
+    "videos": "Videos",
+    "voice": "Voice"
+  },
+  "assetOrigin": {
+    "brought": "Brought in",
+    "filed": "Filed from a node",
+    "madeHere": "Made here"
+  },
+  "canvas": {
+    "defaultName": "Canvas {{n}}"
+  },
+  "capability": {
+    "audio": "Audio",
+    "image": "Image",
+    "text": "Text",
+    "video": "Video"
+  },
+  "nodeTitle": {
+    "audio": "Audio",
+    "export": "Export",
+    "group": "Group",
+    "image": "Image",
+    "operation": "Operation",
+    "text": "Text",
+    "video": "Video"
+  },
+  "port": {
+    "artifact": "Artifact",
+    "audio": "Audio",
+    "audios": "Audios",
+    "firstFrame": "First frame",
+    "image": "Image",
+    "images": "Images",
+    "lastFrame": "Last frame",
+    "mask": "Mask",
+    "prompt": "Prompt",
+    "result": "Result",
+    "text": "Text",
+    "video": "Video",
+    "videos": "Videos"
+  },
+  "protocol": {
+    "custom": "Custom (reserved)",
+    "gemini": "Google Gemini · generateContent",
+    "geminiVideo": "Google Gemini · long-running (Veo)",
+    "openaiChat": "OpenAI-compatible · Chat Completions",
+    "openaiImages": "OpenAI-compatible · Images API",
+    "openaiResponses": "OpenAI-compatible · Responses",
+    "openaiSpeech": "OpenAI-compatible · Speech API",
+    "openaiVideos": "OpenAI-compatible · Videos API"
+  }
+}

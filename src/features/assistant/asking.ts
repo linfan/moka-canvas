@@ -10,6 +10,7 @@ import type {
   WorkflowNode,
 } from "../../shared/domain";
 import { findNode, mentionSpans } from "../../shared/domain";
+import { i18n } from "../../shared/i18n";
 import {
   answerSystemPrompt,
   askPrompt,
@@ -246,7 +247,10 @@ export function referenceSummary(
     counted.set(kind, (counted.get(kind) ?? 0) + 1);
   }
   return GROUP_ORDER.filter((kind) => counted.has(kind))
-    .map((kind) => `${counted.get(kind)} ${GROUP_LABELS[kind].toLowerCase()}`)
+    .map(
+      (kind) =>
+        `${counted.get(kind)} ${i18n.t(GROUP_LABELS[kind]).toLowerCase()}`,
+    )
     .join(" · ");
 }
 

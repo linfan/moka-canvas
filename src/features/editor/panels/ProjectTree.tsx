@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
@@ -402,6 +403,7 @@ function BoardBranch({
   depth: number;
   api: TreeApi;
 }) {
+  const { t } = useTranslation();
   const byKind = useMemo(
     () => canvasAssetsByKind(api.moka, canvasId),
     [api.moka, canvasId],
@@ -427,7 +429,7 @@ function BoardBranch({
               caret
               count={entries.length}
               drag={null}
-              label={CAPABILITY_LABELS[capability]}
+              label={t(CAPABILITY_LABELS[capability])}
               maxLength={MAX_CANVAS_NAME_LENGTH}
               onClick={() => api.toggle(key)}
               open={open}
@@ -450,7 +452,7 @@ function BoardBranch({
                 ))}
                 {entries.length === 0 && (
                   <li className="tree-empty" role="presentation">
-                    No {CAPABILITY_LABELS[capability].toLowerCase()} on this
+                    No {t(CAPABILITY_LABELS[capability]).toLowerCase()} on this
                     board
                   </li>
                 )}
@@ -629,6 +631,7 @@ function TreeMenu({
  * only thing here that changes what is stored.
  */
 export function ProjectTree() {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const activeCanvasId = useProjectStore((state) => state.activeCanvasId);
   // Watched rather than read when asked, so the tree stops offering a board at
@@ -864,7 +867,7 @@ export function ProjectTree() {
       const { canvasId, capability } = target;
       items.push(
         {
-          title: `The ${CAPABILITY_LABELS[capability].toLowerCase()} this board uses`,
+          title: `The ${t(CAPABILITY_LABELS[capability]).toLowerCase()} this board uses`,
           label: "Show in assets",
           action: () => useEditorStore.getState().setAssetKind(capability),
         },

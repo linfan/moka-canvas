@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   AssetCategory,
   AssetId,
@@ -500,12 +501,13 @@ function TextExcerpt({ entry }: { entry: ResourceEntry }) {
 
 /** What a node asks a provider to make, as it stands now. */
 function GenerationSection({ node }: { node: WorkflowNode }) {
+  const { t } = useTranslation();
   const spec = (node.data as { generation?: GenerationSpec }).generation;
   if (!spec) return null;
   return (
     <section className="inspector-section">
       <h3>Generation</h3>
-      <Row label="Capability" value={CAPABILITY_LABELS[spec.capability]} />
+      <Row label="Capability" value={t(CAPABILITY_LABELS[spec.capability])} />
       <Row label="Mode" value={spec.mode} />
       <Row label="Model" value={spec.model || "Provider default"} />
       <Row label="Inputs from" value={spec.inputMode} />
@@ -1053,6 +1055,7 @@ function CanvasViewSection({ canvas }: { canvas: CanvasDocument }) {
  * reading once.
  */
 function AssetInspector({ entry }: { entry: ResourceEntry }) {
+  const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
   const selfCheck = useProjectStore((state) => state.selfCheck);
   const activeCanvas = useActiveCanvas();
@@ -1096,12 +1099,12 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
           label="Shelf"
           value={
             shelf
-              ? `${ASSET_CATEGORY_LABELS[shelf]} · ${CAPABILITY_LABELS[kindOfShelf(shelf)]}`
+              ? `${t(ASSET_CATEGORY_LABELS[shelf])} · ${t(CAPABILITY_LABELS[kindOfShelf(shelf)])}`
               : ""
           }
         />
         <AssetRows entry={entry} />
-        <Row label="Origin" value={SHELF_WHERE_LABELS[shelfWhere(entry)]} />
+        <Row label="Origin" value={t(SHELF_WHERE_LABELS[shelfWhere(entry)])} />
         <Row label="Kept to hand" value={keeper ? "Yes" : ""} />
         <Row label="Words" value={(entry.tags ?? []).join(", ")} />
         <Row label="About" value={entry.keyword ?? ""} />

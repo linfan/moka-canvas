@@ -11,6 +11,7 @@ import {
   TRANSITION_KINDS,
 } from "./constants";
 import { CommandError } from "./commands";
+import { i18n } from "../i18n";
 import type {
   ClipPatch,
   MokaFile,
@@ -28,7 +29,10 @@ import type {
 
 export function checkHexColor(value: string) {
   if (!/^#[0-9a-fA-F]{6}$/.test(value))
-    throw new CommandError("VALIDATION_FAILED", "Colour is not #rrggbb");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:timeline.colourNotHex"),
+    );
 }
 
 /** Whether a track can hold clips of this kind, which is whether they match. */
@@ -84,7 +88,10 @@ function findAsset(moka: MokaFile, assetId: string) {
     const found = list.find((entry) => entry.id === assetId);
     if (found) return found;
   }
-  throw new CommandError("ASSET_MISSING", "Clip's asset is not in the project");
+  throw new CommandError(
+    "ASSET_MISSING",
+    i18n.t("errors:timeline.clipAssetMissing"),
+  );
 }
 
 /**
@@ -98,16 +105,22 @@ export function checkClip(
 ): TimelineClip {
   const track = timeline.tracks.find((t) => t.id === clip.trackId);
   if (!track)
-    throw new CommandError("TRACK_NOT_FOUND", "Clip's track not found");
+    throw new CommandError(
+      "TRACK_NOT_FOUND",
+      i18n.t("errors:timeline.clipTrackNotFound"),
+    );
   if (!trackAccepts(track, clip.kind))
     throw new CommandError(
       "VALIDATION_FAILED",
-      `A ${clip.kind} clip cannot sit on a ${track.kind} track`,
+      i18n.t("errors:timeline.clipOnWrongTrack", {
+        kind: clip.kind,
+        trackKind: track.kind,
+      }),
     );
   if (!Number.isInteger(clip.startMs) || clip.startMs < 0)
     throw new CommandError(
       "VALIDATION_FAILED",
-      "Clip start is not a whole number of milliseconds",
+      i18n.t("errors:timeline.clipStartNotWholeMs"),
     );
   if (
     !Number.isInteger(clip.durationMs) ||
@@ -115,19 +128,25 @@ export function checkClip(
   )
     throw new CommandError(
       "VALIDATION_FAILED",
-      `Clips run at least ${MIN_CLIP_DURATION_MS}ms`,
+      i18n.t("errors:timeline.clipTooShort", { count: MIN_CLIP_DURATION_MS }),
     );
   if (!Number.isInteger(clip.inPointMs) || clip.inPointMs < 0)
-    throw new CommandError("VALIDATION_FAILED", "Clip in point is negative");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:timeline.clipInPointNegative"),
+    );
   if (!Number.isInteger(clip.outPointMs) || clip.outPointMs <= clip.inPointMs)
     throw new CommandError(
       "VALIDATION_FAILED",
-      "Clip out point is at or before its in point",
+      i18n.t("errors:timeline.clipOutPointNotAfterIn"),
     );
   if (clip.speed < MIN_CLIP_SPEED || clip.speed > MAX_CLIP_SPEED)
     throw new CommandError(
       "VALIDATION_FAILED",
-      `Clip speed is outside ${MIN_CLIP_SPEED}–${MAX_CLIP_SPEED}`,
+      i18n.t("errors:timeline.clipSpeedOutside", {
+        min: MIN_CLIP_SPEED,
+        max: MAX_CLIP_SPEED,
+      }),
     );
   // The timing identity: duration on the timeline is the material window
   // over speed, so a clip that breaks it would play back the wrong material.
@@ -137,13 +156,19 @@ export function checkClip(
   ) {
     throw new CommandError(
       "VALIDATION_FAILED",
-      "Clip duration does not match its in/out window over its speed",
+      i18n.t("errors:timeline.clipDurationMismatch"),
     );
   }
   if (clip.volume < 0 || clip.volume > MAX_CLIP_VOLUME)
-    throw new CommandError("VALIDATION_FAILED", "Clip volume is outside 0–2");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:timeline.clipVolumeOutside"),
+    );
   if (clip.opacity < 0 || clip.opacity > 1)
-    throw new CommandError("VALIDATION_FAILED", "Clip opacity is outside 0–1");
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:timeline.clipOpacityOutside"),
+    );
   if (
     !Number.isInteger(clip.fadeInMs) ||
     clip.fadeInMs < 0 ||
@@ -153,17 +178,17 @@ export function checkClip(
   )
     throw new CommandError(
       "VALIDATION_FAILED",
-      "Clip fades are negative or longer than the clip",
+      i18n.t("errors:timeline.clipFadesInvalid"),
     );
   if (clip.label.length === 0 || clip.label.length > CLIP_LABEL_MAX)
     throw new CommandError(
       "VALIDATION_FAILED",
-      "Clip label is empty or too long",
+      i18n.t("errors:timeline.clipLabelInvalid"),
     );
   if (clip.filter !== undefined && !CLIP_FILTER_PRESETS.includes(clip.filter))
     throw new CommandError(
       "VALIDATION_FAILED",
-      "Clip filter is not one of the presets",
+      i18n.t("errors:timeline.clipFilterUnknown"),
     );
   if (clip.kind === "text") {
     if (!clip.text) {
@@ -171,21 +196,24 @@ export function checkClip(
       // documents (none yet) would not, but a caller making one must.
       throw new CommandError(
         "VALIDATION_FAILED",
-        "A text clip carries no text",
+        i18n.t("errors:timeline.textClipNoText"),
       );
     }
     if (clip.text.content.length > MAX_TIMELINE_TEXT_CONTENT)
       throw new CommandError(
         "VALIDATION_FAILED",
-        "Text clip content is too long",
+        i18n.t("errors:timeline.textClipTooLong"),
       );
     if (clip.assetId !== undefined)
-      throw new CommandError("VALIDATION_FAILED", "A text clip names no asset");
+      throw new CommandError(
+        "VALIDATION_FAILED",
+        i18n.t("errors:timeline.textClipNamesAsset"),
+      );
     // A text clip's material clock is its own duration, nothing else.
     if (clip.inPointMs !== 0 || clip.outPointMs !== clip.durationMs)
       throw new CommandError(
         "VALIDATION_FAILED",
-        "A text clip's window is its own duration",
+        i18n.t("errors:timeline.textClipWindow"),
       );
     // The outline is what keeps white words readable over a bright picture,
     // so its width is a whole count of pixels and its colour a real one. A
@@ -197,14 +225,14 @@ export function checkClip(
     )
       throw new CommandError(
         "VALIDATION_FAILED",
-        "Text outline width is not a whole count of pixels",
+        i18n.t("errors:timeline.textOutlineWidth"),
       );
     checkHexColor(clip.text.style.strokeColor);
   } else {
     if (!clip.assetId)
       throw new CommandError(
         "VALIDATION_FAILED",
-        "A material clip names no asset",
+        i18n.t("errors:timeline.materialClipNoAsset"),
       );
     const asset = findAsset(moka, clip.assetId);
     if (asset.mime?.startsWith("image/")) {
@@ -212,13 +240,13 @@ export function checkClip(
       if (clip.inPointMs !== 0 || clip.outPointMs !== clip.durationMs)
         throw new CommandError(
           "VALIDATION_FAILED",
-          "An image clip's window is its own duration",
+          i18n.t("errors:timeline.imageClipWindow"),
         );
     }
     if (clip.text !== undefined)
       throw new CommandError(
         "VALIDATION_FAILED",
-        "A material clip carries no text",
+        i18n.t("errors:timeline.materialClipCarriesText"),
       );
   }
   return clip;
@@ -247,7 +275,14 @@ function isSeamOverlap(
 }
 
 function describeOverlap(a: TimelineClip, b: TimelineClip): string {
-  return `Clips ${a.id} and ${b.id} hold the same place on one track (${a.startMs}–${a.startMs + a.durationMs}ms and ${b.startMs}–${b.startMs + b.durationMs}ms)`;
+  return i18n.t("errors:timeline.overlap", {
+    aId: a.id,
+    bId: b.id,
+    aStart: a.startMs,
+    aEnd: a.startMs + a.durationMs,
+    bStart: b.startMs,
+    bEnd: b.startMs + b.durationMs,
+  });
 }
 
 /**
@@ -322,7 +357,7 @@ function transitionFacts(
   if (transition.kind === "none" || !TRANSITION_KINDS.includes(transition.kind))
     return {
       code: "VALIDATION_FAILED",
-      message: "Transition kind is not one of the eight",
+      message: i18n.t("errors:timeline.transitionKindUnknown"),
     };
   if (
     !Number.isInteger(transition.durationMs) ||
@@ -331,7 +366,10 @@ function transitionFacts(
   )
     return {
       code: "VALIDATION_FAILED",
-      message: `Transition windows run ${MIN_TRANSITION_MS}–${MAX_TRANSITION_MS}ms`,
+      message: i18n.t("errors:timeline.transitionWindowRange", {
+        min: MIN_TRANSITION_MS,
+        max: MAX_TRANSITION_MS,
+      }),
     };
   return undefined;
 }
@@ -353,12 +391,15 @@ function seamShape(
     (clip) => clip.id === transition.afterClipId,
   );
   if (!after)
-    return { code: "CLIP_NOT_FOUND", message: "Transition's clip not found" };
+    return {
+      code: "CLIP_NOT_FOUND",
+      message: i18n.t("errors:timeline.transitionClipNotFound"),
+    };
   const follower = followerOf(timeline, after);
   if (!follower)
     return {
       code: "VALIDATION_FAILED",
-      message: "A transition needs a clip behind the one it follows",
+      message: i18n.t("errors:timeline.transitionNeedsFollower"),
     };
   const afterEnd = after.startMs + after.durationMs;
   const wantedStart = afterEnd - transition.durationMs;
@@ -371,13 +412,13 @@ function seamShape(
       code: "VALIDATION_FAILED",
       message:
         geometry === "butted"
-          ? "A transition lands on a butted seam; the clip behind is not against the one it follows"
-          : "The clip behind is not pulled back by the transition's window",
+          ? i18n.t("errors:timeline.seamNotButted")
+          : i18n.t("errors:timeline.followerNotPulledBack"),
     };
   if (transition.durationMs > Math.min(after.durationMs, follower.durationMs))
     return {
       code: "VALIDATION_FAILED",
-      message: "A transition cannot outlast the shorter clip it joins",
+      message: i18n.t("errors:timeline.transitionOutlastsClip"),
     };
   return undefined;
 }
@@ -409,10 +450,7 @@ export function checkTransitionLanding(
       (existing) => existing.afterClipId === transition.afterClipId,
     )
   )
-    throw new CommandError(
-      "CONFLICT",
-      "That seam already carries a transition",
-    );
+    throw new CommandError("CONFLICT", i18n.t("errors:timeline.seamTaken"));
   const shape = seamShape(timeline, transition, "butted");
   if (shape) throw new CommandError(shape.code, shape.message);
 }
@@ -444,7 +482,7 @@ export function checkExistingTransition(
   if (failure)
     throw new CommandError(
       "TRANSITION_SEAM",
-      `A stored transition no longer holds its seam: ${failure.message}`,
+      i18n.t("errors:timeline.storedSeamBroken", { message: failure.message }),
     );
 }
 
@@ -563,17 +601,25 @@ export function validateTimeline(
     seen.add(id);
   };
   for (const track of timeline.tracks)
-    duplicate(`track:${track.id}`, `Duplicate track id ${track.id}`, {
-      trackId: track.id,
-    });
+    duplicate(
+      `track:${track.id}`,
+      i18n.t("errors:timeline.duplicateTrackId", { id: track.id }),
+      {
+        trackId: track.id,
+      },
+    );
   for (const clip of timeline.clips)
-    duplicate(`clip:${clip.id}`, `Duplicate clip id ${clip.id}`, {
-      clipId: clip.id,
-    });
+    duplicate(
+      `clip:${clip.id}`,
+      i18n.t("errors:timeline.duplicateClipId", { id: clip.id }),
+      {
+        clipId: clip.id,
+      },
+    );
   for (const transition of timeline.transitions)
     duplicate(
       `transition:${transition.id}`,
-      `Duplicate transition id ${transition.id}`,
+      i18n.t("errors:timeline.duplicateTransitionId", { id: transition.id }),
       { transitionId: transition.id },
     );
   for (const clip of timeline.clips) {
@@ -595,7 +641,9 @@ export function validateTimeline(
     if (failure)
       issues.push({
         code: "TRANSITION_SEAM",
-        message: `A stored transition no longer holds its seam: ${failure.message}`,
+        message: i18n.t("errors:timeline.storedSeamBroken", {
+          message: failure.message,
+        }),
         timelineId: timeline.id,
         transitionId: transition.id,
       });
