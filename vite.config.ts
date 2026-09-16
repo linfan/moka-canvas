@@ -4,6 +4,23 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  build: {
+    rollupOptions: {
+      output: {
+        // The rendering and language machinery is what every room stands on,
+        // so it is the one thing that never belongs to the first page alone:
+        // it ships as chunks of its own rather than padding the entry bundle.
+        manualChunks(id) {
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) {
+            return "react";
+          }
+          if (/node_modules\/(i18next|react-i18next)\//.test(id)) {
+            return "i18n";
+          }
+        },
+      },
+    },
+  },
   server: {
     strictPort: true,
     port: 1420,

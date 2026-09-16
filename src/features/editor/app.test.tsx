@@ -139,7 +139,7 @@ describe("app boot", () => {
 
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Clip" }));
     expect(useAppStore.getState().phase).toBe("clip");
-    expect(screen.getByTestId("clip-page")).toBeTruthy();
+    expect(await screen.findByTestId("clip-page")).toBeTruthy();
     // The board the project was holding no longer stands in for the room: the
     // room itself does, asking for its first timeline.
     expect(screen.getByText("No timelines yet")).toBeTruthy();

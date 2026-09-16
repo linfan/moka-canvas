@@ -3,7 +3,7 @@
   "starting": "正在启动 {{name}}…",
   "bootFailed": "{{name}} 无法启动",
   "unknownError": "未知错误",
-  "tagline": "本地优先的视频工作流画布，以普通项目文件夹保存。",
+  "tagline": "本地优先的视频工作流，让每个人成为自己的导演。",
   "recentProjects": "最近项目",
   "loading": "加载中…",
   "noProjects": "还没有项目。新建一个开始吧。",

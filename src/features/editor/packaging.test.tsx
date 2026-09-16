@@ -262,7 +262,7 @@ describe("missing-asset recovery", () => {
     expect(useAppStore.getState().phase).toBe("editing");
     // The restored asset is no longer flagged broken on the shelf, which is
     // behind the assets face of the left column.
-    fireEvent.click(screen.getByTestId("left-tab-assets"));
+    fireEvent.click(await screen.findByTestId("left-tab-assets"));
     const row = screen.getByText("lake.png").closest(".resource-row");
     expect(row?.textContent).not.toContain("broken");
   });

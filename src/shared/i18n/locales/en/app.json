@@ -3,7 +3,7 @@
   "starting": "Starting {{name}}…",
   "bootFailed": "{{name}} could not start",
   "unknownError": "Unknown error",
-  "tagline": "Local-first video workflow boards, saved as plain project folders.",
+  "tagline": "Local-first video workflow boards, direct your own story fluidly.",
   "recentProjects": "Recent projects",
   "loading": "Loading…",
   "noProjects": "No projects yet. Create one to get started.",

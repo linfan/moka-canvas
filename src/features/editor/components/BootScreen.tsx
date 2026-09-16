@@ -16,6 +16,22 @@ export function BootScreen() {
   );
 }
 
+/** Shown in a room's place while the room's own code is on its way there. */
+export function PageLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="boot-screen">
+      <img
+        alt=""
+        aria-hidden="true"
+        className="brand-mark"
+        src="/favicon.png"
+      />
+      <p>{t("app:loading")}</p>
+    </div>
+  );
+}
+
 export function BootErrorScreen() {
   const { t } = useTranslation();
   const bootError = useAppStore((state) => state.bootError);
