@@ -48,6 +48,7 @@
     "oneStepMovesAtMost": "One step moves at most {{count}} clips",
     "oneStepTouchesAtMost": "One step touches at most {{count}} clips",
     "positionNotFinite": "Position is not finite",
+    "projectNameEmpty": "Project name is empty",
     "seamMissing": "The seam a transition names is not on the timeline",
     "seamTaken": "That seam already carries a transition",
     "sessionIdExists": "Session id already exists",

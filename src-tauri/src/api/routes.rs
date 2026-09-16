@@ -269,10 +269,21 @@ pub async fn apply_commands(
         ));
     }
     let commands: Vec<DocumentCommand> = request.commands;
+    // The launcher's card carries a project's name from the recent list, which
+    // otherwise hears of a project only when one is opened — so a save that
+    // carried the project's own words is the moment to write them down again.
+    let wrote_metadata = commands
+        .iter()
+        .any(|command| matches!(command, DocumentCommand::UpdateProjectMetadata { .. }));
     let result = state
         .store
         .apply_commands(request.expected_revision, commands)
         .await?;
+    if wrote_metadata {
+        if let Some(opened) = state.store.current().await? {
+            upsert_recent(&state, &opened).await;
+        }
+    }
     Ok(Json(SaveResponse {
         revision: result.revision,
         updated_at: result.updated_at,

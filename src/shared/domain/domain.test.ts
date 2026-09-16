@@ -410,6 +410,39 @@ describe("document commands", () => {
     return applyCommands(moka, commands);
   }
 
+  it("sets the project's own words, and the undo puts back exactly what was there", () => {
+    const moka = buildGoldenMokaFile();
+    const { next, inverse } = apply(moka, {
+      type: "updateProjectMetadata",
+      name: "  Autumn campaign  ",
+      description: "  A launch teaser  ",
+    });
+    expect(next.metadata.name).toBe("Autumn campaign");
+    expect(next.metadata.description).toBe("A launch teaser");
+
+    const undone = apply(next, ...inverse).next;
+    expect(undone.metadata.name).toBe(moka.metadata.name);
+    expect(undone.metadata.description).toBe(moka.metadata.description);
+
+    // An emptied description is no description at all, while an emptied name
+    // is refused: the command asks what the settings form asks.
+    const cleared = apply(next, {
+      type: "updateProjectMetadata",
+      name: "Autumn campaign",
+      description: "   ",
+    }).next;
+    expect(cleared.metadata.description).toBeUndefined();
+    expect(
+      codeOf(() =>
+        apply(cleared, {
+          type: "updateProjectMetadata",
+          name: "   ",
+          description: "",
+        }),
+      ),
+    ).toBe("VALIDATION_FAILED");
+  });
+
   it("adds and removes a node with exact inverse", () => {
     const moka = buildGoldenMokaFile();
     const canvasId = moka.canvas[0].id;

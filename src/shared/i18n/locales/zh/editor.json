@@ -744,6 +744,7 @@
     "runningOnCanvasMany": "{{name}} 上仍有 {{count}} 个生成任务在运行"
   },
   "history": {
+    "editProject": "编辑项目信息",
     "addCanvas": "新建画布",
     "addFolder": "新建文件夹",
     "renameCanvas": "重命名画布",

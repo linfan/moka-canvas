@@ -21,8 +21,8 @@ import { i18n } from "../../shared/i18n";
 /** The settings tabs: one per model category, plus the global preferences. */
 export type SettingsTab = Capability | "preferences";
 
-/** The two top-level settings sections: model configuration, and the system. */
-export type SettingsTopTab = "model" | "system";
+/** The three top-level settings sections: the open project, models, the system. */
+export type SettingsTopTab = "project" | "model" | "system";
 
 export interface ModelOption {
   /** The model configuration's own id, which is what a node stores. */

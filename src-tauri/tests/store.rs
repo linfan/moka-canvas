@@ -196,6 +196,58 @@ async fn a_timeline_lands_through_the_pipeline_and_reads_back() {
 }
 
 #[tokio::test]
+async fn the_project_s_own_words_reach_the_disk_and_an_emptied_name_is_refused() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let before = store.current().await.unwrap().unwrap().moka.metadata;
+
+    let saved = store
+        .apply_commands(
+            before.revision,
+            vec![DocumentCommand::UpdateProjectMetadata {
+                name: "  Autumn campaign  ".into(),
+                description: "  A launch teaser  ".into(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    // Trimmed on the way in, and read back off the disk as written.
+    let reopened = store.open_project(&root).await.unwrap();
+    assert_eq!(reopened.moka.metadata.name, "Autumn campaign");
+    assert_eq!(
+        reopened.moka.metadata.description.as_deref(),
+        Some("A launch teaser")
+    );
+
+    // An emptied description is no description at all, and an emptied name is
+    // refused before anything is written.
+    let cleared = store
+        .apply_commands(
+            saved.revision,
+            vec![DocumentCommand::UpdateProjectMetadata {
+                name: "Autumn campaign".into(),
+                description: "   ".into(),
+            }],
+        )
+        .await
+        .unwrap();
+    let reopened = store.open_project(&root).await.unwrap();
+    assert!(reopened.moka.metadata.description.is_none());
+
+    let refused = store
+        .apply_commands(
+            cleared.revision,
+            vec![DocumentCommand::UpdateProjectMetadata {
+                name: "   ".into(),
+                description: String::new(),
+            }],
+        )
+        .await;
+    assert_eq!(refused.unwrap_err().code(), "VALIDATION_FAILED");
+}
+
+#[tokio::test]
 async fn stale_revision_is_rejected() {
     let tmp = TempDir::new().unwrap();
     let (store, _root) = create_store(&tmp).await;

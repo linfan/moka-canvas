@@ -556,6 +556,17 @@ export interface ClipPatchEntry {
 }
 
 export type DocumentCommand =
+  /**
+   * The project's own words: what it is called and what it is about. The two
+   * are set together, which is how the settings form submits them, so the
+   * undo of an edit puts back exactly what was there; an empty description is
+   * no description at all.
+   */
+  | {
+      type: "updateProjectMetadata";
+      name: string;
+      description: string;
+    }
   | { type: "addNode"; canvasId: CanvasId; node: WorkflowNode }
   | {
       type: "updateNode";

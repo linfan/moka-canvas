@@ -13,23 +13,27 @@ import {
   type SettingsTopTab,
 } from "./modelStore";
 import { PreferencesTab } from "./PreferencesTab";
+import { ProjectTab } from "./ProjectTab";
 import { SystemTab } from "./SystemTab";
 
-/** The two top-level sections: model configuration, and the system. */
+/** The three top-level sections: the open project, model configuration, and the system. */
 const TOP_TABS: { id: SettingsTopTab; label: string }[] = [
+  { id: "project", label: "settings:topTab.project" },
   { id: "model", label: "settings:topTab.model" },
   { id: "system", label: "settings:topTab.system" },
 ];
 
 /**
- * Model configuration and system settings.
+ * What the open project is, model configuration, and system settings.
  *
  * Reachable from the launcher as well as the editor, because a model has to
- * be set up before any project exists for it to be used from. The Model
- * section keeps a tab per category — the models that serve one kind of node
- * are listed, added, copied, tested, and defaulted together — and the System
- * section holds what is global: the language the interface is drawn in, where
- * the master key lives, and which credentials it protects.
+ * be set up before any project exists for it to be used from. The Project
+ * section holds the document's own words — what it is called and what it is
+ * about — and says so plainly when there is no project to write them on. The
+ * Model section keeps a tab per category — the models that serve one kind of
+ * node are listed, added, copied, tested, and defaulted together — and the
+ * System section holds what is global: the language the interface is drawn in,
+ * where the master key lives, and which credentials it protects.
  */
 export function SettingsDialog() {
   const { t } = useTranslation();
@@ -119,7 +123,16 @@ export function SettingsDialog() {
           ))}
         </div>
 
-        {topTab === "model" ? (
+        {topTab === "project" ? (
+          <div
+            aria-labelledby="settings-toptab-project"
+            className="settings-body"
+            id="settings-panel-project"
+            role="tabpanel"
+          >
+            <ProjectTab />
+          </div>
+        ) : topTab === "model" ? (
           <div
             aria-labelledby="settings-toptab-model"
             className="settings-panel"

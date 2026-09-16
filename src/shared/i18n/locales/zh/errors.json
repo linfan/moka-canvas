@@ -48,6 +48,7 @@
     "oneStepMovesAtMost": "一步最多移动 {{count}} 个片段",
     "oneStepTouchesAtMost": "一步最多修改 {{count}} 个片段",
     "positionNotFinite": "位置不是有限数值",
+    "projectNameEmpty": "项目名称为空",
     "seamMissing": "转场指定的接缝不在时间线上",
     "seamTaken": "该接缝已有转场",
     "sessionIdExists": "会话 ID 已存在",

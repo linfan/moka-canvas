@@ -384,6 +384,59 @@ async fn commands_apply_and_revision_conflicts_surface() {
 }
 
 #[tokio::test]
+async fn saving_the_project_s_own_words_refreshes_the_card_the_launcher_shows() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    let created = create_project(&app, &temp.path().join("projects"), "My Film").await;
+    let revision = created["moka"]["metadata"]["revision"].as_i64().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/recent-projects")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let recent = body_json(response).await;
+    assert_eq!(recent[0]["name"], "My Film");
+
+    // A save that carried the project's own words is written down again in the
+    // recent list, which otherwise hears of a project only when one is opened.
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/commands",
+            json!({
+                "expectedRevision": revision,
+                "commands": [{
+                    "type": "updateProjectMetadata",
+                    "name": "Autumn campaign",
+                    "description": "A launch teaser"
+                }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/recent-projects")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let recent = body_json(response).await;
+    assert_eq!(recent[0]["name"], "Autumn campaign");
+}
+
+#[tokio::test]
 async fn canvas_settings_change_a_part_and_keep_the_rest() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());

@@ -1175,6 +1175,12 @@ pub struct ClipMove {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DocumentCommand {
+    /// The project's own words: what it is called and what it is about. The two
+    /// are set together, which is how the settings form submits them, so the
+    /// undo of an edit puts back exactly what was there; an empty description
+    /// is no description at all.
+    #[serde(rename_all = "camelCase")]
+    UpdateProjectMetadata { name: String, description: String },
     #[serde(rename_all = "camelCase")]
     AddNode {
         canvas_id: CanvasId,

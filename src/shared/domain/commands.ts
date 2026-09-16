@@ -354,6 +354,34 @@ function applyOne(
   command: DocumentCommand,
 ): { next: MokaFile; inverse: DocumentCommand[] } {
   switch (command.type) {
+    case "updateProjectMetadata": {
+      const name = command.name.trim();
+      if (name.length === 0)
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.projectNameEmpty"),
+        );
+      const description = command.description.trim();
+      const previous = moka.metadata;
+      return {
+        next: {
+          ...moka,
+          metadata: {
+            ...previous,
+            name,
+            description: description.length === 0 ? undefined : description,
+          },
+        },
+        inverse: [
+          {
+            type: "updateProjectMetadata",
+            name: previous.name,
+            description: previous.description ?? "",
+          },
+        ],
+      };
+    }
+
     case "addNode": {
       const canvas = canvasOf(moka, command.canvasId);
       if (findNode(canvas, command.node.id))

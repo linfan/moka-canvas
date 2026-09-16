@@ -222,6 +222,31 @@ fn apply_one(
     command: &DocumentCommand,
 ) -> Result<(MokaFile, Vec<DocumentCommand>), CommandError> {
     match command {
+        DocumentCommand::UpdateProjectMetadata { name, description } => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Project name is empty",
+                ));
+            }
+            let description = description.trim();
+            let mut next = moka.clone();
+            next.metadata.name = name.to_string();
+            next.metadata.description = if description.is_empty() {
+                None
+            } else {
+                Some(description.to_string())
+            };
+            Ok((
+                next,
+                vec![DocumentCommand::UpdateProjectMetadata {
+                    name: moka.metadata.name.clone(),
+                    description: moka.metadata.description.clone().unwrap_or_default(),
+                }],
+            ))
+        }
+
         DocumentCommand::AddNode { canvas_id, node } => {
             let canvas = canvas_of(moka, canvas_id)?;
             if canvas.node(&node.id).is_some() {

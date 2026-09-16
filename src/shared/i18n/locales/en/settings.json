@@ -11,6 +11,7 @@
   "sections": "Settings sections",
   "modelSections": "Model sections",
   "topTab": {
+    "project": "Project",
     "model": "Model",
     "system": "System"
   },
@@ -23,6 +24,14 @@
   "duplicate": "Duplicate",
   "delete": "Delete",
   "keyFallback": "key",
+  "project": {
+    "noProject": "No project is open yet. Open one to write down what it is called and what it is about.",
+    "name": "Name",
+    "needsName": "A project needs a name",
+    "description": "Description",
+    "descriptionPlaceholder": "What this project is about",
+    "hint": "The name stands in the working page's bar and on the card in the launcher."
+  },
   "models": {
     "new": "New {{category}} model",
     "empty": "No {{category}} models yet. Add one: a complete endpoint URL, the protocol it speaks, and its own key.",

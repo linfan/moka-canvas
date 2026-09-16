@@ -744,6 +744,7 @@
     "runningOnCanvasMany": "{{count}} generations are still running on {{name}}"
   },
   "history": {
+    "editProject": "Edit project details",
     "addCanvas": "Add canvas",
     "addFolder": "Add folder",
     "renameCanvas": "Rename canvas",
