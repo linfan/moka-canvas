@@ -366,6 +366,103 @@ test("the magnet catches a head on the block ahead, and its absence does not", a
   rmSync(home, { recursive: true, force: true });
 });
 
+/**
+ * Hangs one shelf file over the canvas at a point, the way a drag would.
+ *
+ * The drag states itself the way a real one does: begun on the row that
+ * carries the file, its data riding the shelf's own type. What the room
+ * writes down as the block it would land as is read back after the frame
+ * that draws it.
+ */
+async function hoverAssetOnTimeline(
+  page: Page,
+  assetId: string,
+  at: { x: number; y: number },
+): Promise<string> {
+  const box = await canvasBox(page);
+  return page.evaluate(
+    async ({ assetId, clientX, clientY }) => {
+      const Browser = globalThis as unknown as {
+        DataTransfer: new () => DragData;
+        DragEvent: new (type: string, init: Record<string, unknown>) => unknown;
+        document: {
+          querySelector(selector: string): {
+            dispatchEvent(event: unknown): boolean;
+            getAttribute(name: string): string | null;
+          } | null;
+        };
+        requestAnimationFrame(callback: () => void): number;
+      };
+      const row = Browser.document.querySelector(
+        `[data-asset-id="${assetId}"]`,
+      );
+      const canvas = Browser.document.querySelector(".clip-tl-canvas");
+      const room = Browser.document.querySelector(".clip-timeline");
+      if (!row || !canvas || !room) {
+        throw new Error("the row or the timeline is not there");
+      }
+      const data = new Browser.DataTransfer();
+      row.dispatchEvent(
+        new Browser.DragEvent("dragstart", {
+          bubbles: true,
+          dataTransfer: data,
+        }),
+      );
+      canvas.dispatchEvent(
+        new Browser.DragEvent("dragover", {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY,
+          dataTransfer: data,
+        }),
+      );
+      // The ghost is drawn on the frame the room schedules; this is that frame.
+      await new Promise<void>((settle) =>
+        Browser.requestAnimationFrame(() => settle()),
+      );
+      return room.getAttribute("data-drop-preview") ?? "";
+    },
+    { assetId, clientX: box.x + at.x, clientY: box.y + at.y },
+  );
+}
+
+test("a file dragged over the rows wears the block it would land as", async ({
+  page,
+}) => {
+  const home = await clipRoom(page, "Editing Ghost");
+  await newTimeline(page, "Timeline 1");
+  await importPicture(page, "one.png");
+  const assetId = await filedId(page, "one.png");
+  expect(assetId).not.toBe("");
+  const box = await canvasBox(page);
+  const video = await rowCenter(page, "Video 1");
+  const at = (canvasX: number) => ({ x: canvasX, y: video.y - box.y });
+
+  // The pointer's own frame, and the picture's own four seconds.
+  const drawn = await hoverAssetOnTimeline(page, assetId, at(DROP_X));
+  const [trackId, startMs, durationMs] = drawn.split(":");
+  expect(trackId).not.toBe("");
+  expect(Math.abs(Number(startMs) - 5_000)).toBeLessThanOrEqual(50);
+  expect(Number(durationMs)).toBe(4_000);
+
+  // The ghost follows the pointer, and the release lands the very block it
+  // wore — not a block a frame away from it.
+  const moved = await hoverAssetOnTimeline(page, assetId, at(SECOND_DROP_X));
+  expect(Math.abs(Number(moved.split(":")[1]) - 10_000)).toBeLessThanOrEqual(
+    50,
+  );
+  await dropAssetOnTimeline(page, assetId, at(SECOND_DROP_X));
+  await expect(timeline(page)).toHaveAttribute("data-clip-count", "1");
+  const landed = (await spans(page))[0];
+  expect(`${landed.trackId}:${landed.startMs}:${landed.durationMs}`).toBe(
+    moved,
+  );
+  await expect(timeline(page)).toHaveAttribute("data-drop-preview", "");
+
+  rmSync(home, { recursive: true, force: true });
+});
+
 test("a marquee catches the blocks it covers, and Delete clears them", async ({
   page,
 }) => {

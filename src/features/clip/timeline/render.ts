@@ -669,6 +669,25 @@ function drawDraft(
     drawSeamDraft(ctx, model, rows, draft, palette);
     return;
   }
+  if (draft.kind === "drop") {
+    // The block a release would lay down, drawn from the very arithmetic the
+    // drop lands through: where it would sit, how long it would run, and the
+    // moment its head was caught on. A ghost over a piece already there draws
+    // the overlap the reader is about to ask for, which is the one thing a
+    // drop's own words could only say after the fact.
+    drawGhost(ctx, model, rows, draft.clip, palette);
+    if (draft.guideMs !== null)
+      drawGuide(ctx, model, rows, draft.guideMs, [draft.clip], palette);
+    drawDurationBubble(
+      ctx,
+      model,
+      draft.clip.trackId,
+      draft.clip.startMs + draft.clip.durationMs / 2,
+      draft.clip.durationMs,
+      palette,
+    );
+    return;
+  }
   if (draft.kind === "move" && draft.rowTrackId !== null) {
     // The row the group is landing on is lit from underneath: the one piece
     // of feedback a cross-track drag needs, and the reason a refused row
@@ -852,9 +871,11 @@ function drawGuide(
 /**
  * How long the thing being dragged would run, read as the clock does.
  *
- * One bubble for the trim's new length and one for the seam's new window:
- * `ms` is the moment the bubble centres on — a trimmed edge's own place, or
- * the seam the window will keep — and `durationMs` is what it reads out.
+ * One bubble for the trim's new length, one for the seam's new window, and
+ * one for the block a drop would lay down: `ms` is the moment the bubble
+ * centres on — a trimmed edge's own place, the seam the window will keep, or
+ * the middle of the block about to land — and `durationMs` is what it reads
+ * out.
  */
 function drawDurationBubble(
   ctx: CanvasRenderingContext2D,

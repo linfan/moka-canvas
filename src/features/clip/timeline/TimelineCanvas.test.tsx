@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useRef } from "react";
 import type { TimelineDocument } from "../../../shared/domain";
-import { buildCutMokaFile } from "../../../shared/domain/fixtures";
+import {
+  buildCutMokaFile,
+  cutFixtureIds,
+} from "../../../shared/domain/fixtures";
+import { ASSET_DRAG_MIME } from "../../editor/interactions/actions";
+import { useProjectStore } from "../../editor/stores/projectStore";
 import { useClipStore } from "../stores/clipStore";
 import { TimelineCanvas } from "./TimelineCanvas";
 
@@ -15,10 +20,10 @@ function cut(): TimelineDocument {
 function Harness({ timeline }: { timeline: TimelineDocument }) {
   const headersRef = useRef<HTMLDivElement>(null);
   return (
-    <>
+    <div className="clip-timeline">
       <div data-testid="headers" ref={headersRef} />
       <TimelineCanvas headersRef={headersRef} timeline={timeline} />
-    </>
+    </div>
   );
 }
 
@@ -164,4 +169,63 @@ describe("the timeline canvas", () => {
     });
     expect(viewport.scrollLeft).toBe(50);
   });
+
+  it("hangs the block a dragged file would land as, and lets it go with the drag", async () => {
+    const ids = cutFixtureIds();
+    useProjectStore.getState().hydrate({
+      root: "/tmp/moka-test",
+      moka: buildCutMokaFile(),
+      selfCheck: { ok: true, issues: [] },
+    });
+    useClipStore.setState({ activeTimelineId: ids.timeline });
+    const { container } = render(<Harness timeline={cut()} />);
+    const room = container.querySelector(".clip-timeline") as HTMLElement;
+    const canvas = canvasOf(container);
+    // A window with room in it, so the frame that draws also writes down what
+    // it drew: the room's own attributes are where a test reads the pixels.
+    const viewport = viewportOf(container);
+    Object.defineProperty(viewport, "clientWidth", { value: 800 });
+    Object.defineProperty(viewport, "clientHeight", { value: 600 });
+
+    // The drag begins on a shelf row: the row's own contract says which file
+    // is in flight, since a drag's data is private to the drop that ends it.
+    const row = document.createElement("li");
+    row.setAttribute("data-asset-id", ids.videoAssetA);
+    document.body.append(row);
+    row.dispatchEvent(new Event("dragstart", { bubbles: true }));
+
+    // Six and a half seconds in on the video row, clear of every edge: the
+    // head stands on the pointer's own frame and the file's four seconds run
+    // from there.
+    dragover(canvas, 390, 150);
+    await waitFor(() =>
+      expect(room.getAttribute("data-drop-preview")).toBe(
+        `${ids.videoTrack}:6500:4000`,
+      ),
+    );
+
+    // The pointer wandering off the rows is the drag letting go of it.
+    canvas.dispatchEvent(new Event("dragleave", { bubbles: true }));
+    await waitFor(() =>
+      expect(room.getAttribute("data-drop-preview")).toBe(""),
+    );
+    row.remove();
+  });
 });
+
+/**
+ * A drag hovering the canvas at a point, as the platform delivers one.
+ *
+ * The drag data is written onto the event rather than built by the test
+ * library: what a drag carries is the browser's own store, and a pointer and
+ * that data arrive on one event.
+ */
+function dragover(node: HTMLElement, x: number, y: number) {
+  const event = new Event("dragover", { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    clientX: { value: x },
+    clientY: { value: y },
+    dataTransfer: { value: { dropEffect: "", types: [ASSET_DRAG_MIME] } },
+  });
+  node.dispatchEvent(event);
+}
