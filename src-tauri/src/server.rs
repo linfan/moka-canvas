@@ -16,7 +16,7 @@ use tower_http::{
     set_header::SetResponseHeaderLayer,
 };
 
-use crate::api::ApiState;
+use crate::api::{problem::ProblemMessage, ApiState};
 use crate::config::{AppConfig, RuntimeMode};
 use crate::project::ProjectStore;
 
@@ -227,6 +227,13 @@ async fn log_api_request(req: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string();
+    // A code says a request failed, not why; the sentence that does travels
+    // beside the body, since the body itself is never read here.
+    let error_message = response
+        .extensions()
+        .get::<ProblemMessage>()
+        .map(|message| message.0.clone())
+        .unwrap_or_default();
     if let Ok(value) = HeaderValue::from_str(&request_id) {
         response.headers_mut().insert("x-request-id", value);
     }
@@ -241,6 +248,7 @@ async fn log_api_request(req: Request, next: Next) -> Response {
                 status,
                 duration_ms = started.elapsed().as_millis() as u64,
                 error_code = %error_code,
+                error_message = %error_message,
                 "api request"
             )
         };

@@ -25,6 +25,15 @@ struct ProblemInner {
 #[derive(Debug)]
 pub struct Problem(Box<ProblemInner>);
 
+/// The sentence a problem body carries, for the request log.
+///
+/// The log sees this response and not the body inside it, and a code like
+/// "INTERNAL" says a request failed without saying why. Carried beside the
+/// body rather than read back out of it, so logging never buffers a response
+/// body — some of them are streams.
+#[derive(Clone)]
+pub struct ProblemMessage(pub String);
+
 impl Problem {
     pub fn new(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
         Self(Box::new(ProblemInner {
@@ -185,6 +194,7 @@ impl IntoResponse for Problem {
     fn into_response(self) -> Response {
         let inner = *self.0;
         let code = inner.body.code.clone();
+        let message = inner.body.message.clone();
         let mut response = (
             inner.status,
             [(
@@ -199,6 +209,7 @@ impl IntoResponse for Problem {
         if let Ok(value) = header::HeaderValue::from_str(&code) {
             response.headers_mut().insert("x-error-code", value);
         }
+        let _ = response.extensions_mut().insert(ProblemMessage(message));
         response
     }
 }

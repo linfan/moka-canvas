@@ -85,16 +85,33 @@ impl FsProjectStore {
     fn write_json(dir: &Path, id: &str, bytes: &[u8]) -> Result<(), ProjectError> {
         std::fs::create_dir_all(dir)?;
         let tmp = dir.join(format!(".{id}.{}.tmp", uuid::Uuid::now_v7()));
-        std::fs::write(&tmp, bytes)?;
-        {
-            let file = std::fs::File::open(&tmp)?;
-            file.sync_all()?;
-        }
-        std::fs::rename(&tmp, dir.join(format!("{id}.json")))?;
+        Self::write_and_rename(&tmp, &dir.join(format!("{id}.json")), bytes)?;
         if let Ok(dir_handle) = std::fs::File::open(dir) {
             let _ = dir_handle.sync_all();
         }
         Ok(())
+    }
+
+    /// Writes a scratch file, flushes it, and renames it into place; a failure
+    /// leaves the target as it was and takes the scratch file with it.
+    ///
+    /// The flush goes through the handle that wrote the bytes. A read-only
+    /// reopen cannot be flushed on Windows — the operation requires write
+    /// access there, unlike on Unix — so the rename would never be reached.
+    fn write_and_rename(tmp: &Path, target: &Path, bytes: &[u8]) -> Result<(), ProjectError> {
+        use std::io::Write;
+
+        let outcome = (|| -> std::io::Result<()> {
+            let mut file = std::fs::File::create(tmp)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(tmp, target)
+        })();
+        if outcome.is_err() {
+            let _ = std::fs::remove_file(tmp);
+        }
+        outcome.map_err(ProjectError::Io)
     }
 
     fn write_run(root: &Path, run: &RunRecord) -> Result<(), ProjectError> {
@@ -224,12 +241,7 @@ impl FsProjectStore {
         let tmp = root
             .join("tmp")
             .join(format!("canvas.moka.{}.tmp", uuid::Uuid::now_v7()));
-        std::fs::write(&tmp, &bytes)?;
-        {
-            let file = std::fs::File::open(&tmp)?;
-            file.sync_all()?;
-        }
-        std::fs::rename(&tmp, Self::moka_path(root))?;
+        Self::write_and_rename(&tmp, &Self::moka_path(root), &bytes)?;
         if let Ok(dir) = std::fs::File::open(root) {
             let _ = dir.sync_all();
         }
