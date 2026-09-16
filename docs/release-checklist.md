@@ -309,6 +309,11 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     kind and confirm the panel names the kind that is missing and offers the
     settings instead of answering the ask badly. The automated equivalents
     are `npm test` and `npx playwright test assistant`.
+15. Switch the interface's language: Settings → Preferences → Language,
+    pick 中文 — the screens, the messages, and the browser tab's title all
+    change with it — then pick English and confirm they change back; leave
+    it on Follow system and confirm the choice survives a reload. The
+    automated equivalent is `npx playwright test e2e/i18n.spec.ts`.
 
 ## macOS (`make package-macos`)
 
@@ -326,6 +331,11 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
 6. Audio/video previews play; media blob URLs are allowed by the app CSP.
 7. Check the embedded config is used: no `config/` file next to the app
    changes its behavior.
+8. Locale name: on a Chinese-language system, Finder, the Dock, and the
+   menu bar show the app as 摩卡画布; on any other system they read
+   Moka Canvas. The bundle folder itself keeps its English name
+   ("Moka Canvas.app") in both cases, and
+   `codesign --verify --strict` still passes.
 
 ## Windows (`make package-windows` on Windows, or
 
@@ -339,6 +349,16 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
 4. Double-click a `.moka` file in Explorer: the NSIS-registered
    association opens it with the document icon (not the app icon).
 5. `.moka` uninstall removes the association (NSIS `APP_UNASSOCIATE`).
+6. The installer's first step is the language picker (English /
+   中文(简体)), and the welcome page, finish page, and progress text
+   follow the choice.
+7. Install in Chinese: the desktop and start-menu shortcuts read
+   摩卡画布, Settings → Apps lists the app as 摩卡画布, and the `.moka`
+   association says it opens with 摩卡画布. Run the installer again in
+   English (upgrade/repair): the names become English, and no 摩卡画布
+   shortcut is left behind.
+8. Uninstall in either language: the programs-list entry and both name
+   variants of the shortcuts are removed, none left as a dead link.
 
 ## Metadata store (all platforms)
 

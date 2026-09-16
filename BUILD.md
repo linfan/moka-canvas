@@ -42,6 +42,12 @@ make set-version 1.2.3
 
 Sets the version of all build outputs in one place: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the `moka-canvas` entry in `src-tauri/Cargo.lock`. Windows installer metadata and the DMG/setup filenames derive from these, so run this before packaging a release.
 
+## Localization
+
+The interface carries English and Simplified Chinese side by side. The catalogues live under `src/shared/i18n/locales/en/` and `.../zh/`, one file per area (`editor`, `clip`, `settings`, `assistant`, `app`, `common`, `domain`, `errors`, `problems`); the code names its words by key and the catalogues hold them. The interface follows the machine's language, and a reader can pin English or Chinese in Settings → Preferences → Language, remembered on that machine. The automated suites pin English, so their assertions read the English catalogue word for word.
+
+The packaged app names each have their own rule, described in the Windows installer and macOS DMG sections below.
+
 ## Package targets
 
 ### Web (any host)
@@ -64,6 +70,8 @@ make package-macos
 
 Produces `Moka Canvas_<version>_<arch>.dmg` (`aarch64` on Apple Silicon, `x64` on Intel), copied into `release/` (the tauri-bundler output remains under `src-tauri/target/release/bundle/dmg/`), with the branded background and app/Applications drop slots configured via `bundle.macOS.dmg` in `src-tauri/tauri.conf.json`. The `.app` bundle is ad-hoc signed (`bundle.macOS.signingIdentity` = `"-"`); the DMG itself is left unsigned, which Tauri does deliberately for self-signed identities. Gatekeeper still warns on first launch because ad-hoc signatures are not notarized — right-click and choose Open.
 
+The bundle keeps its English name — the `.app` folder, the executable, and the DMG file name. On a Chinese system Finder, the Dock, and the menu bar show 摩卡画布 instead: `bundle.macOS.files` ships `Contents/Resources/zh-Hans.lproj/InfoPlist.strings` (and `zh-Hant` beside it), and macOS reads the localized `CFBundleDisplayName`/`CFBundleName` from there; every other language falls back to the bundle's own name. The files are copied before the bundle is signed, so the ad-hoc signature still verifies.
+
 > Rebuilding deletes the previous DMG, so eject any mounted copy before running `make package-macos` again — otherwise the DMG stays mounted as a leftover volume and the Finder styling step fails with a generic `error running bundle_dmg.sh`.
 
 ### Windows installers (Windows host)
@@ -75,6 +83,8 @@ make package-windows
 Produces MSI and NSIS installers under `src-tauri/target/release/bundle/` and copies them into `release/`. Requires Microsoft C++ Build Tools, WebView2, and WiX/NSIS tooling per Tauri's Windows prerequisites.
 
 The NSIS installer is built from a custom template (`src-tauri/installer/installer.nsi`, forked from the Tauri default) that provides branded welcome and finish pages plus header bitmaps from `src-tauri/installer/`; it is selected via `bundle.windows.nsis.template` in `src-tauri/tauri.conf.json`. Because the template is forked, it does not automatically pick up upstream Tauri fixes — re-diff it against the [upstream template](https://github.com/tauri-apps/tauri/blob/dev/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi) whenever the Tauri CLI is upgraded.
+
+The installer is bilingual. `bundle.windows.nsis.languages` lists `English` and `SimpChinese`, and an interactive install opens on the standard MUI language picker as its first step; `/P` and `/UPDATE` runs instead reuse the language the previous install stored, so what is already on disk keeps its name. The texts the template adds are NSIS `LangString`s near its bottom (the file must stay UTF-8 without BOM) and must be defined for every language in that list — a missing one is only a compile-time warning (6040) and renders as an empty string. The app's visible name follows the chosen language: the desktop and start-menu shortcuts, the entry in the programs list, and the `.moka` association texts read 摩卡画布 on Chinese and "Moka Canvas" otherwise. The compile-time `${PRODUCTNAME}` ("Moka Canvas") stays the identity behind it all — install folder, registry keys, `uninstall.exe`, and the setup file name — so upgrades and uninstalls keep matching, and a run in the other language replaces the old-named shortcuts rather than leaving them beside the new ones.
 
 ### Windows installer cross-compile (macOS host)
 
@@ -119,7 +129,7 @@ or run `make clean` once. Afterwards, Windows may still show the old icon from i
 
 - **macOS**: `src-tauri/Info.plist` (auto-merged into the bundle's Info.plist by Tauri) declares the `app.canvas.moka` UTI and document type with `CFBundleTypeIconFile` = `moka-file`.
 - **Windows (NSIS)**: the forked `installer/installer.nsi` hardcodes `APP_ASSOCIATE`/`APP_UNASSOCIATE` for `.moka` with `DefaultIcon` = `$INSTDIR\moka-file.ico`. This replaces the upstream `{{#each file_associations}}` loop, which cannot use a separate document icon — re-apply the divergence when re-diffing against the upstream template.
-- The MSI bundle (built by `package-windows` on a Windows host) does **not** register the association; distribute the NSIS setup exe.
+- The MSI bundle (built by `package-windows` on a Windows host) does **not** register the association, and its texts stay English; distribute the NSIS setup exe for both.
 
 ## Clean
 
