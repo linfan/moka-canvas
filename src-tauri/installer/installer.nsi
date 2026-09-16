@@ -571,8 +571,37 @@ LangString PageAdvancedSettings ${LANG_ENGLISH}    "Advanced Settings"
 LangString PageAdvancedSettings ${LANG_SIMPCHINESE} "高级设置"
 LangString PageFinishTitle      ${LANG_ENGLISH}    "Installation complete."
 LangString PageFinishTitle      ${LANG_SIMPCHINESE} "安装完成。"
-LangString PageFinishLaunch     ${LANG_ENGLISH}    "Launch ${PRODUCTNAME}"
-LangString PageFinishLaunch     ${LANG_SIMPCHINESE} "启动 ${PRODUCTNAME}"
+LangString PageFinishLaunch     ${LANG_ENGLISH}    "Launch $(AppDisplayName)"
+LangString PageFinishLaunch     ${LANG_SIMPCHINESE} "启动 $(AppDisplayName)"
+
+; The name the reader meets after the install: shortcuts, the programs list,
+; and the file-association texts. ${PRODUCTNAME} stays the compile-time
+; identity behind them all — install folder, registry keys, uninstall.exe,
+; and the setup file name — so upgrades and uninstalls keep matching.
+LangString AppDisplayName       ${LANG_ENGLISH}    "Moka Canvas"
+LangString AppDisplayName       ${LANG_SIMPCHINESE} "摩卡画布"
+; The other language's name: lets a run delete shortcuts left behind by an
+; install that ran in the other language (including the English-only builds).
+LangString AppDisplayNameAlt    ${LANG_ENGLISH}    "摩卡画布"
+LangString AppDisplayNameAlt    ${LANG_SIMPCHINESE} "Moka Canvas"
+
+LangString AssocFileType        ${LANG_ENGLISH}    "Moka Canvas Document"
+LangString AssocFileType        ${LANG_SIMPCHINESE} "摩卡画布 文档"
+LangString AssocOpenWith        ${LANG_ENGLISH}    "Open with $(AppDisplayName)"
+LangString AssocOpenWith        ${LANG_SIMPCHINESE} "使用 $(AppDisplayName) 打开"
+
+; Deletes a shortcut (and unpins it) when it points at this installation's
+; main binary; sets $R0 to 1 when it did. Nothing else is touched, so a
+; shortcut that is not this installation's is left alone.
+!macro DeleteShortcutIfOurs PATH
+  !insertmacro IsShortcutTarget "${PATH}" "$INSTDIR\${MAINBINARYNAME}.exe"
+  Pop $0
+  ${If} $0 = 1
+    !insertmacro UnpinShortcut "${PATH}"
+    Delete "${PATH}"
+    StrCpy $R0 1
+  ${EndIf}
+!macroend
 
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode
@@ -778,7 +807,9 @@ Section Install
 
   ; Create file associations
   ; .moka documents use their own icon (moka-file.ico, installed via bundle resources), not the app exe icon
-  !insertmacro APP_ASSOCIATE "moka" "app.canvas.moka" "Moka Canvas Document" "$INSTDIR\moka-file.ico,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
+  ; The ProgID stays `app.canvas.moka` whatever the language: it is the
+  ; identity the uninstaller and the macOS bundle's UTI already know.
+  !insertmacro APP_ASSOCIATE "moka" "app.canvas.moka" "$(AssocFileType)" "$INSTDIR\moka-file.ico,0" "$(AssocOpenWith)" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
   !insertmacro UPDATEFILEASSOC
 
   ; Register deep links
@@ -812,7 +843,7 @@ Section Install
   WriteRegStr SHCTX "${UNINSTKEY}" "MainBinaryName" "${MAINBINARYNAME}.exe"
 
   ; Registry information for add/remove programs
-  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayName" "${PRODUCTNAME}"
+  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayName" "$(AppDisplayName)"
   WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\""
   WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr SHCTX "${UNINSTKEY}" "Publisher" "${MANUFACTURER}"
@@ -930,33 +961,25 @@ Section Uninstall
   {{/each}}
   RMDir "$INSTDIR"
 
-  ; Remove shortcuts if not updating
+  ; Remove shortcuts if not updating. Both language variants go: the
+  ; uninstaller's own language is the stored installer language, but a
+  ; shortcut named in the other language must not survive as a dead link.
   ${If} $UpdateMode <> 1
     !insertmacro DeleteAppUserModelId
 
-    ; Remove start menu shortcut
+    ; Remove start menu shortcuts
     !insertmacro MUI_STARTMENU_GETFOLDER Application $AppStartMenuFolder
-    !insertmacro IsShortcutTarget "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    Pop $0
-    ${If} $0 = 1
-      !insertmacro UnpinShortcut "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk"
-      Delete "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk"
+    ${If} $AppStartMenuFolder != ""
+      !insertmacro DeleteShortcutIfOurs "$SMPROGRAMS\$AppStartMenuFolder\$(AppDisplayName).lnk"
+      !insertmacro DeleteShortcutIfOurs "$SMPROGRAMS\$AppStartMenuFolder\$(AppDisplayNameAlt).lnk"
       RMDir "$SMPROGRAMS\$AppStartMenuFolder"
     ${EndIf}
-    !insertmacro IsShortcutTarget "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    Pop $0
-    ${If} $0 = 1
-      !insertmacro UnpinShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk"
-      Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
-    ${EndIf}
+    !insertmacro DeleteShortcutIfOurs "$SMPROGRAMS\$(AppDisplayName).lnk"
+    !insertmacro DeleteShortcutIfOurs "$SMPROGRAMS\$(AppDisplayNameAlt).lnk"
 
     ; Remove desktop shortcuts
-    !insertmacro IsShortcutTarget "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    Pop $0
-    ${If} $0 = 1
-      !insertmacro UnpinShortcut "$DESKTOP\${PRODUCTNAME}.lnk"
-      Delete "$DESKTOP\${PRODUCTNAME}.lnk"
-    ${EndIf}
+    !insertmacro DeleteShortcutIfOurs "$DESKTOP\$(AppDisplayName).lnk"
+    !insertmacro DeleteShortcutIfOurs "$DESKTOP\$(AppDisplayNameAlt).lnk"
   ${EndIf}
 
   ; Remove registry information for add/remove programs
@@ -1054,22 +1077,36 @@ Function CreateOrUpdateStartMenuShortcut
     Return
   ${EndIf}
 
+  ; Normalize the shortcut name to the installer language: a shortcut left by
+  ; an install that ran in the other language is replaced rather than kept
+  ; beside the new one, so an update in a new language leaves no dead link.
+  ; $R0 = 1 then forces the creation even in update mode.
+  ${If} $NoShortcutMode = 0
+    StrCpy $R0 0
+    !if "${STARTMENUFOLDER}" != ""
+      !insertmacro DeleteShortcutIfOurs "$SMPROGRAMS\$AppStartMenuFolder\$(AppDisplayNameAlt).lnk"
+    !endif
+    !insertmacro DeleteShortcutIfOurs "$SMPROGRAMS\$(AppDisplayNameAlt).lnk"
+  ${EndIf}
+
   ; Skip creating shortcut if in update mode or no shortcut mode
   ; but always create if migrating from wix
-  ${If} $WixMode = 0
-    ${If} $UpdateMode = 1
-    ${OrIf} $NoShortcutMode = 1
-      Return
+  ${If} $R0 = 0
+    ${If} $WixMode = 0
+      ${If} $UpdateMode = 1
+      ${OrIf} $NoShortcutMode = 1
+        Return
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 
   !if "${STARTMENUFOLDER}" != ""
     CreateDirectory "$SMPROGRAMS\$AppStartMenuFolder"
-    CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk"
+    CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\$(AppDisplayName).lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\$AppStartMenuFolder\$(AppDisplayName).lnk"
   !else
-    CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    CreateShortcut "$SMPROGRAMS\$(AppDisplayName).lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\$(AppDisplayName).lnk"
   !endif
 FunctionEnd
 
@@ -1083,15 +1120,24 @@ Function CreateOrUpdateDesktopShortcut
     Return
   ${EndIf}
 
+  ; Normalize the shortcut name to the installer language, like the start
+  ; menu function above.
+  ${If} $NoShortcutMode = 0
+    StrCpy $R0 0
+    !insertmacro DeleteShortcutIfOurs "$DESKTOP\$(AppDisplayNameAlt).lnk"
+  ${EndIf}
+
   ; Skip creating shortcut if in update mode or no shortcut mode
   ; but always create if migrating from wix
-  ${If} $WixMode = 0
-    ${If} $UpdateMode = 1
-    ${OrIf} $NoShortcutMode = 1
-      Return
+  ${If} $R0 = 0
+    ${If} $WixMode = 0
+      ${If} $UpdateMode = 1
+      ${OrIf} $NoShortcutMode = 1
+        Return
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 
-  CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-  !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
+  CreateShortcut "$DESKTOP\$(AppDisplayName).lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  !insertmacro SetLnkAppUserModelId "$DESKTOP\$(AppDisplayName).lnk"
 FunctionEnd
