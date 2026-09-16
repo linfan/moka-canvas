@@ -28,31 +28,6 @@ interface DragData {
   getData(type: string): string;
 }
 
-/**
- * A small valid WAV: a header, then a few seconds of silence, so a preview
- * has something long enough to be seen playing and stopping.
- */
-function tinyWav(seconds = 5): Buffer {
-  const rate = 8000;
-  const samples = rate * seconds;
-  const dataBytes = samples * 2;
-  const wav = Buffer.alloc(44 + dataBytes);
-  wav.write("RIFF", 0, "ascii");
-  wav.writeUInt32LE(36 + dataBytes, 4);
-  wav.write("WAVE", 8, "ascii");
-  wav.write("fmt ", 12, "ascii");
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20); // PCM
-  wav.writeUInt16LE(1, 22); // mono
-  wav.writeUInt32LE(rate, 24);
-  wav.writeUInt32LE(rate * 2, 28);
-  wav.writeUInt16LE(2, 32);
-  wav.writeUInt16LE(16, 34);
-  wav.write("data", 36, "ascii");
-  wav.writeUInt32LE(dataBytes, 40);
-  return wav;
-}
-
 /** A fresh project already standing in the cutting room. */
 async function clipRoom(page: Page, name: string): Promise<string> {
   const home = projectHome("clip-media");
@@ -98,7 +73,7 @@ async function filedId(page: Page, name: string): Promise<string> {
   }, name);
 }
 
-test("the six faces read one shelf, each asking its own question", async ({
+test("the two faces read one shelf, each asking its own question", async ({
   page,
 }) => {
   const home = await clipRoom(page, "Media Faces");
@@ -113,19 +88,11 @@ test("the six faces read one shelf, each asking its own question", async ({
 
   // The same shelf is read by the project face, open on every origin.
   await page.getByTestId("clip-face-project").click();
+  await expect(
+    page.getByRole("heading", { name: "Project media" }),
+  ).toBeVisible();
   await expect(rowFor(page, "one.png")).toBeVisible();
   await expect(page.getByTestId("shelf-where")).toHaveCount(0);
-
-  // Nothing was generated, and no board holds anything: each face says so.
-  await page.getByTestId("clip-face-runs").click();
-  await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
-  await expect(page.getByText("Nothing made by the models yet.")).toBeVisible();
-
-  await page.getByTestId("clip-face-canvas").click();
-  await expect(page.getByRole("heading", { name: "On canvas" })).toBeVisible();
-  await expect(
-    page.getByText("No canvas is holding a file yet."),
-  ).toBeVisible();
 
   rmSync(home, { recursive: true, force: true });
 });
@@ -156,33 +123,6 @@ test("the search narrows the face and says so when nothing says it", async ({
   await expect(rowFor(page, "one.png")).toBeVisible();
   await page.getByTestId("shelf-clear").click();
   await expect(rowFor(page, "one.png")).toBeVisible();
-
-  rmSync(home, { recursive: true, force: true });
-});
-
-test("the library face offers the whole shelf and the audio face only sound", async ({
-  page,
-}) => {
-  const home = await clipRoom(page, "Media Library");
-  await importFile(page, "one.png", "image/png", TINY_PNG);
-
-  await page.getByTestId("clip-face-library").click();
-  for (const kind of ["text", "image", "audio", "video"]) {
-    await expect(page.getByTestId(`asset-kind-${kind}`)).toBeVisible();
-  }
-  // The library is the editor's shelf whole, origin question included.
-  await expect(page.getByTestId("shelf-where")).toHaveCount(1);
-  await expect(rowFor(page, "one.png")).toBeVisible();
-
-  // The audio face reads the two sound books only: the picture is on the
-  // shelf, and it is not a row here.
-  await page.getByTestId("clip-face-audio").click();
-  await expect(page.getByTestId("asset-kind-audio")).toBeVisible();
-  await expect(page.getByTestId("asset-kind-image")).toHaveCount(0);
-  await expect(
-    page.getByText("No sound yet — import audio to build the mix."),
-  ).toBeVisible();
-  await expect(rowFor(page, "one.png")).toHaveCount(0);
 
   rmSync(home, { recursive: true, force: true });
 });
@@ -221,9 +161,9 @@ test("files dropped over the column are imported, and the column turns to Local"
 }) => {
   const home = await clipRoom(page, "Media Drop");
   // Turned away from Local first: the drop is what should bring it back.
-  await page.getByTestId("clip-face-canvas").click();
+  await page.getByTestId("clip-face-project").click();
   await expect(
-    page.getByText("No canvas is holding a file yet."),
+    page.getByRole("heading", { name: "Project media" }),
   ).toBeVisible();
 
   const carried = await page.evaluateHandle((base64) => {
@@ -249,41 +189,6 @@ test("files dropped over the column are imported, and the column turns to Local"
     "true",
   );
   await expect(rowFor(page, "dropped.png")).toBeVisible({ timeout: 10_000 });
-
-  rmSync(home, { recursive: true, force: true });
-});
-
-test("a sound on the audio face can be heard before it is used, one at a time", async ({
-  page,
-}) => {
-  const home = await clipRoom(page, "Media Sound");
-  // A shelf opens on pictures, so the arriving sound is waited for under the
-  // audio tab of the face it lands on: turning the column over to the audio
-  // face before the import settled would be undone by the import finishing.
-  await page.getByLabel("Import files", { exact: true }).setInputFiles({
-    name: "tiny.wav",
-    mimeType: "audio/wav",
-    buffer: tinyWav(),
-  });
-  await page.getByTestId("asset-kind-audio").click();
-  await expect(rowFor(page, "tiny.wav")).toBeVisible({ timeout: 10_000 });
-
-  await page.getByTestId("clip-face-audio").click();
-  await expect(page.getByRole("heading", { name: "Audio" })).toBeVisible();
-  await expect(rowFor(page, "tiny.wav")).toBeVisible();
-
-  await page.getByRole("button", { name: "Play tiny.wav" }).click();
-  const pause = page.getByRole("button", { name: "Pause tiny.wav" });
-  await expect(pause).toHaveClass(/is-playing/);
-
-  // The same button stops it again.
-  await pause.click();
-  await expect(
-    page.getByRole("button", { name: "Play tiny.wav" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Play tiny.wav" }),
-  ).not.toHaveClass(/is-playing/);
 
   rmSync(home, { recursive: true, force: true });
 });

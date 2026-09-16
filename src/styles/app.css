@@ -3628,7 +3628,7 @@ button.danger:hover:not(:disabled) {
   left: var(--clip-rail-width);
 }
 
-/* The rail: nine faces of the column beside it, sources above tools. */
+/* The rail: five faces of the column beside it, sources above tools. */
 .clip-rail {
   align-items: center;
   background: var(--surface);

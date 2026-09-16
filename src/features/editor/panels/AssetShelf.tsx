@@ -60,11 +60,10 @@ import {
  *
  * One shelf read by two pages rather than two shelves that agree: the canvas
  * column reads it whole, and the cutting room reads it through lenses — the
- * files brought in, what the models made, what the boards are holding, the
- * whole library, the sounds. Everything that makes the shelf a shelf (the
- * import and its jobs, the kind tabs, the search and its words, the keepers,
- * the rows with their drag-out and their words and notes, the paging) lives
- * here once; what a page differs on arrives as props.
+ * files brought in, and everything the project holds. Everything that makes
+ * the shelf a shelf (the import and its jobs, the kind tabs, the search and
+ * its words, the keepers, the rows with their drag-out and their words and
+ * notes, the paging) lives here once; what a page differs on arrives as props.
  *
  * A row's contract for being dragged onto a timeline — `draggable`, an
  * `data-asset-id`, and an id written under `ASSET_DRAG_MIME` on dragstart — is
@@ -142,8 +141,7 @@ function opensOn(kinds: readonly Capability[]): Capability {
 
 /** Whether an entry is on the shelf a lens reads. */
 function onLens(entry: ResourceEntry, lens: ShelfLens): boolean {
-  if (lens.where != null && shelfWhere(entry) !== lens.where) return false;
-  return lens.narrow ? lens.narrow(entry) : true;
+  return lens.where == null || shelfWhere(entry) === lens.where;
 }
 
 /** The files of one kind as a face reads them, in filing order. */
@@ -461,9 +459,9 @@ function ShelfFilterBar({
         )}
         {/*
           The origin question is not offered where the face behind the shelf
-          already answers it: Local is what was brought, Runs is what the
-          models made, and asking again on top of that could only empty the
-          shelf. A face with no origin of its own keeps the question.
+          already answers it: Local is what was brought, and asking again on
+          top of that could only empty the shelf. A face with no origin of its
+          own keeps the question.
         */}
         {!whereLocked && (
           <select

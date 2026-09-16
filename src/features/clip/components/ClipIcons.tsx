@@ -2,8 +2,8 @@
  * The marks the cutting room speaks in.
  *
  * Drawn here rather than taken from a set, one per face of the left column and
- * one per thing the room itself is made of, so a rail of nine reads as nine
- * different drawers rather than nine copies of the same glyph. All of them are
+ * one per thing the room itself is made of, so a rail of five reads as five
+ * different drawers rather than five copies of the same glyph. All of them are
  * the same hand: a 24 box, one and a half strokes, round ends.
  */
 
@@ -50,26 +50,7 @@ export function ProjectIcon({ size = 18 }: IconProps) {
   );
 }
 
-/** A bolt: what a generation run made. */
-export function RunsIcon({ size = 18 }: IconProps) {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height={size}
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.6"
-      viewBox="0 0 24 24"
-      width={size}
-    >
-      <path d="M13 3 5.5 13h5.4l-.9 8 7.5-10h-5.4l.9-8Z" />
-    </svg>
-  );
-}
-
-/** A framed picture: material that came off the boards. */
+/** A framed picture: the mark a video track wears. */
 export function ClipCanvasIcon({ size = 18 }: IconProps) {
   return (
     <svg
@@ -86,26 +67,6 @@ export function ClipCanvasIcon({ size = 18 }: IconProps) {
       <rect height="15" rx="2" width="17" x="3.5" y="4.5" />
       <circle cx="9.4" cy="10.4" r="1.8" />
       <path d="M6.5 16.6 10 13.2l3 2.6 2.6-2.1 1.9 1.9" />
-    </svg>
-  );
-}
-
-/** Books on a shelf: the library of pieces the app can lay in. */
-export function LibraryIcon({ size = 18 }: IconProps) {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height={size}
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.6"
-      viewBox="0 0 24 24"
-      width={size}
-    >
-      <path d="M4.5 5.5h3v14h-3zM9.5 5.5h3v14h-3z" />
-      <path d="m15.4 6.3 2.9-.8 3.5 13.2-2.9.8z" />
     </svg>
   );
 }
