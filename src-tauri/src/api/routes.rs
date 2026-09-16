@@ -176,6 +176,7 @@ pub async fn create_project(
             &root,
             CreateProject {
                 name: name.to_string(),
+                first_canvas_name: request.first_canvas_name,
             },
         )
         .await?;

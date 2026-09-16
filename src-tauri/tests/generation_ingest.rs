@@ -24,6 +24,7 @@ async fn create_store(tmp: &TempDir) -> (FsProjectStore, PathBuf, String) {
             &root,
             CreateProject {
                 name: "Demo".into(),
+                first_canvas_name: None,
             },
         )
         .await

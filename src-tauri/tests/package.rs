@@ -546,6 +546,7 @@ async fn stage_generated_project(root: &Path) -> StagedProject {
             &root.join("projects"),
             CreateProject {
                 name: "Made".to_string(),
+                first_canvas_name: None,
             },
         )
         .await

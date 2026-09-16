@@ -40,10 +40,14 @@ export interface ExportOptions {
 }
 
 export const projectsApi = {
-  create(directory: string, name: string): Promise<OpenProjectResult> {
+  create(
+    directory: string,
+    name: string,
+    firstCanvasName?: string,
+  ): Promise<OpenProjectResult> {
     return http.request<OpenProjectResult>("/api/v1/projects", {
       method: "POST",
-      body: { directory, name },
+      body: { directory, name, firstCanvasName },
     });
   },
 

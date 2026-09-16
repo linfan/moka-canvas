@@ -148,7 +148,15 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
     },
 
     async create(directory, name) {
-      return get().hydrate(await projectsApi.create(directory, name));
+      // The scaffold makes the first canvas, but its name is the interface's
+      // to give, so a project made in Chinese says 画布 1.
+      return get().hydrate(
+        await projectsApi.create(
+          directory,
+          name,
+          i18n.t("domain:canvas.defaultName", { n: 1 }),
+        ),
+      );
     },
 
     async importFromPath(archivePath, directory, name) {

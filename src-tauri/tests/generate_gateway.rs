@@ -193,6 +193,7 @@ async fn rig() -> Rig {
             &project,
             CreateProject {
                 name: "Demo".into(),
+                first_canvas_name: None,
             },
         )
         .await

@@ -37,6 +37,7 @@ async fn create_store(tmp: &TempDir) -> (Arc<FsProjectStore>, PathBuf) {
             &project_root,
             CreateProject {
                 name: "Demo".into(),
+                first_canvas_name: None,
             },
         )
         .await
@@ -57,12 +58,51 @@ async fn create_scaffolds_the_project_tree_and_reopen_is_idempotent() {
             &root,
             CreateProject {
                 name: "Ignored".into(),
+                first_canvas_name: None,
             },
         )
         .await
         .unwrap();
     assert_eq!(reopened.moka.metadata.id, first.moka.metadata.id);
     assert_eq!(reopened.moka.metadata.name, "Demo");
+}
+
+/// A project made from an interface drawn in Chinese carries Chinese words; a
+/// caller with no language of its own keeps the scaffold's own English name.
+#[tokio::test]
+async fn the_first_canvas_takes_the_name_the_interface_gave_it() {
+    let tmp = TempDir::new().unwrap();
+    let config = Arc::new(test_config(tmp.path()));
+    let store = Arc::new(FsProjectStore::new(config));
+
+    let spoken_root = tmp.path().join("spoken");
+    let spoken = store
+        .create_project(
+            &spoken_root,
+            CreateProject {
+                name: "Spoken".into(),
+                first_canvas_name: Some("画布 1".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(spoken.moka.canvas[0].name, "画布 1");
+
+    // The name reaches the file and not only the answer.
+    let reopened = store.open_project(&spoken_root).await.unwrap();
+    assert_eq!(reopened.moka.canvas[0].name, "画布 1");
+
+    let quiet = store
+        .create_project(
+            &tmp.path().join("quiet"),
+            CreateProject {
+                name: "Quiet".into(),
+                first_canvas_name: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(quiet.moka.canvas[0].name, "Canvas 1");
 }
 
 #[tokio::test]
@@ -710,6 +750,7 @@ async fn filing_a_text_node_writes_its_words_once() {
             &root,
             CreateProject {
                 name: "Ignored".into(),
+                first_canvas_name: None,
             },
         )
         .await

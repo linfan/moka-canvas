@@ -44,6 +44,10 @@ pub struct OpenProject {
 
 pub struct CreateProject {
     pub name: String,
+    /// What the interface calls a new project's first canvas, in the language
+    /// it is being drawn in. Absent when the caller has no language to give:
+    /// the scaffold then falls back to its own English name.
+    pub first_canvas_name: Option<String>,
 }
 
 #[derive(Debug)]

@@ -1505,6 +1505,7 @@ async fn removing_an_asset_still_referenced_by_a_clip_is_refused() {
             &root,
             CreateProject {
                 name: "Demo".into(),
+                first_canvas_name: None,
             },
         )
         .await

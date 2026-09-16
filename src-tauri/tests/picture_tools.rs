@@ -30,6 +30,7 @@ async fn opened_project(tmp: &TempDir) -> (FsProjectStore, PathBuf) {
             &root,
             CreateProject {
                 name: "Studio".into(),
+                first_canvas_name: None,
             },
         )
         .await

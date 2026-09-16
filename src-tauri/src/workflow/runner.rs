@@ -2222,6 +2222,7 @@ mod tests {
                 &tmp.path().join("demo"),
                 CreateProject {
                     name: "Demo".to_string(),
+                    first_canvas_name: None,
                 },
             )
             .await

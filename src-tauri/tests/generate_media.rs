@@ -24,6 +24,7 @@ async fn open_project(tmp: &TempDir) -> (Arc<FsProjectStore>, std::path::PathBuf
             &root,
             CreateProject {
                 name: "Demo".into(),
+                first_canvas_name: None,
             },
         )
         .await

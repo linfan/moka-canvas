@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 pub struct CreateProjectRequest {
     pub directory: String,
     pub name: String,
+    /// What the interface calls a new project's first canvas, in the language
+    /// it is drawn in; absent callers get the scaffold's English name.
+    #[serde(default)]
+    pub first_canvas_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -4,6 +4,7 @@ import {
   goldenNodeIds,
 } from "../../../shared/domain/fixtures";
 import { HISTORY_LIMIT, type MokaFile } from "../../../shared/domain";
+import { i18n } from "../../../shared/i18n";
 import { execute, historyBoundary, redo, undo } from "../commands/execute";
 import { useAppStore } from "./appStore";
 import { useHistoryStore, isBoundary } from "./historyStore";
@@ -218,5 +219,36 @@ describe("asset registry integration", () => {
       "asset-1",
     );
     expect(state.moka?.metadata.revision).toBe(5);
+  });
+});
+
+describe("project creation", () => {
+  it("asks for the first canvas under the name the interface speaks", async () => {
+    await i18n.changeLanguage("zh");
+    try {
+      const opened = buildGoldenMokaFile();
+      opened.canvas[0].name = "画布 1";
+      fetchMock.mockResolvedValue(
+        jsonResponse(201, {
+          root: "/tmp/moka-test",
+          moka: opened,
+          selfCheck: { ok: true, issues: [] },
+        }),
+      );
+
+      await useProjectStore.getState().create("/tmp/projects", "Spoken");
+
+      const [path, init] = fetchMock.mock.calls[0];
+      expect(path).toBe("/api/v1/projects");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        directory: "/tmp/projects",
+        name: "Spoken",
+        firstCanvasName: "画布 1",
+      });
+      expect(useProjectStore.getState().moka?.canvas[0].name).toBe("画布 1");
+    } finally {
+      // The catalogue is shared with the cases after this one.
+      await i18n.changeLanguage("en");
+    }
   });
 });

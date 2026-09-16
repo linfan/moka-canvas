@@ -480,6 +480,15 @@ fn shelf_tags(tags: &[String]) -> Result<Vec<String>, ProjectError> {
     Ok(kept)
 }
 
+/// What a new project's first canvas wears: the name the interface gave it, so
+/// a document made in Chinese says 画布 1 rather than Canvas 1. A caller with
+/// no language to give keeps the scaffold's own English name.
+fn first_canvas_name(given: Option<String>) -> String {
+    given
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "Canvas 1".to_string())
+}
+
 #[async_trait::async_trait]
 impl ProjectStore for FsProjectStore {
     async fn create_project(
@@ -515,7 +524,10 @@ impl ProjectStore for FsProjectStore {
             resources: ResourceRegistry::default(),
             folders: None,
             timelines: None,
-            canvas: vec![CanvasDocument::empty(new_id(), "Canvas 1".to_string())],
+            canvas: vec![CanvasDocument::empty(
+                new_id(),
+                first_canvas_name(input.first_canvas_name),
+            )],
         };
         self.atomic_write(root, &moka)?;
         Self::clean_tmp(root);
