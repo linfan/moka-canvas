@@ -1,0 +1,5 @@
+/* Moka Canvas — the name Finder, the Dock, and the menu bar show on a
+   Simplified Chinese system. Other languages fall back to the bundle's own
+   name ("Moka Canvas") through CFBundleDevelopmentRegion. */
+"CFBundleDisplayName" = "摩卡画布";
+"CFBundleName" = "摩卡画布";

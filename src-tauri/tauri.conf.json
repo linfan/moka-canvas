@@ -31,6 +31,10 @@
     },
     "macOS": {
       "signingIdentity": "-",
+      "files": {
+        "Resources/zh-Hans.lproj/InfoPlist.strings": "macos/zh-Hans.lproj/InfoPlist.strings",
+        "Resources/zh-Hant.lproj/InfoPlist.strings": "macos/zh-Hant.lproj/InfoPlist.strings"
+      },
       "dmg": {
         "background": "installer/dmg-background.png",
         "windowSize": {
