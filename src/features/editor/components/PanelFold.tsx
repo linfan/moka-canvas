@@ -16,12 +16,14 @@ interface FoldProps {
 }
 
 /**
- * The half triangle in a column's own corner, which folds the column away.
+ * The half triangle in the corner of a column beside the canvas, which folds
+ * the column away.
  *
  * A corner cut rather than a button hung on the head: the column's head is
  * already given over to the choice of what it shows, and a fold is about the
- * column as a whole rather than about the face it is showing. The mark on it
- * points the way the column would go, which is away from the canvas.
+ * column as a whole rather than about the face it is showing. It fills the
+ * corner nearest the canvas, and the mark on it points the way the column
+ * would go, which is away from the canvas.
  */
 export function PanelFold({ side }: FoldProps) {
   const toggle = usePanelFolds((state) => state.toggle);
@@ -44,10 +46,10 @@ export function PanelFold({ side }: FoldProps) {
 /**
  * The half triangle left in the corner of the page once a column is away.
  *
- * The same corner the column stood in, with the triangle turned the other way
- * round and its mark pointing back into the window: what was folded away is
- * one click from standing here again, and the click is offered where the
- * column was rather than somewhere to be looked for.
+ * The corner the column stood against, its triangle filling that corner and
+ * its mark pointing back into the window: what was folded away is one click
+ * from standing here again, and the click is offered where the column was
+ * rather than somewhere to be looked for.
  */
 export function PanelUnfold({ side }: FoldProps) {
   const toggle = usePanelFolds((state) => state.toggle);

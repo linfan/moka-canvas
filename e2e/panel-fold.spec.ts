@@ -1,8 +1,9 @@
 import { join } from "node:path";
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   createProject,
   forgetProjects,
+  openClipRoom,
   openRecent,
   projectHome,
 } from "./helpers";
@@ -16,6 +17,39 @@ async function cornerOf(mark: Locator) {
     y: Math.round(box!.y),
     right: Math.round(box!.x + box!.width),
   };
+}
+
+/**
+ * Whether the window answers a click at a point of a mark's square: the half
+ * triangle fills one top corner of it, and the half cut away is not there to
+ * be answered. The points told apart are the two sides of that diagonal.
+ */
+async function filledHalf(page: Page, mark: Locator, side: "left" | "right") {
+  const box = await mark.boundingBox();
+  expect(box).not.toBeNull();
+  const testid = await mark.getAttribute("data-testid");
+  expect(testid).not.toBeNull();
+  return page.evaluate(
+    ({ x, y, testid }) => {
+      const Browser = globalThis as unknown as {
+        document: {
+          elementFromPoint(
+            x: number,
+            y: number,
+          ): {
+            closest(selector: string): unknown;
+          } | null;
+        };
+      };
+      const hit = Browser.document.elementFromPoint(x, y);
+      return !!hit?.closest(`[data-testid="${testid}"]`);
+    },
+    {
+      x: box!.x + (side === "left" ? 5 : 19),
+      y: box!.y + 10,
+      testid: testid!,
+    },
+  );
 }
 
 async function widthOf(column: Locator): Promise<number> {
@@ -38,17 +72,25 @@ test("both columns fold away from a corner and come back to it", async ({
   const foldLeft = page.getByTestId("panel-fold-left");
   const foldRight = page.getByTestId("panel-fold-right");
 
-  // Each column carries its fold in the corner it stands in: the left one at
-  // the left edge of the window, the right one at the right edge of its column.
+  // Each column carries its fold in the corner it keeps beside the canvas —
+  // the left one at the right edge of its column, the right one at the left
+  // edge of its own — cut from that corner and not the other. The hairline
+  // each column wears against the canvas is the column's own edge, so the
+  // fold stands just inside it.
   await expect(foldLeft).toBeVisible();
   await expect(foldRight).toBeVisible();
-  expect((await cornerOf(foldLeft)).x).toBe(0);
   const leftPanel = await left.boundingBox();
-  expect((await cornerOf(foldLeft)).y).toBe(Math.round(leftPanel!.y));
+  const leftFold = await cornerOf(foldLeft);
+  expect(leftFold.y).toBe(Math.round(leftPanel!.y));
+  expect(leftFold.right).toBe(Math.round(leftPanel!.x + leftPanel!.width) - 1);
+  expect(await filledHalf(page, foldLeft, "right")).toBe(true);
+  expect(await filledHalf(page, foldLeft, "left")).toBe(false);
   const rightPanel = await right.boundingBox();
-  expect((await cornerOf(foldRight)).right).toBe(
-    Math.round(rightPanel!.x + rightPanel!.width),
-  );
+  const rightFold = await cornerOf(foldRight);
+  expect(rightFold.y).toBe(Math.round(rightPanel!.y));
+  expect(rightFold.x).toBe(Math.round(rightPanel!.x) + 1);
+  expect(await filledHalf(page, foldRight, "left")).toBe(true);
+  expect(await filledHalf(page, foldRight, "right")).toBe(false);
 
   // The fold stands clear of the tabs beside it, which still answer to a click.
   await page.getByTestId("left-tab-assets").click();
@@ -76,6 +118,10 @@ test("both columns fold away from a corner and come back to it", async ({
   const corner = await cornerOf(unfoldLeft);
   expect(corner.x).toBe(0);
   expect(corner.y).toBe(Math.round(leftPanel!.y));
+  // Its triangle fills the window corner it stands in, the straight edges
+  // along the window's own.
+  expect(await filledHalf(page, unfoldLeft, "left")).toBe(true);
+  expect(await filledHalf(page, unfoldLeft, "right")).toBe(false);
   expect(await widthOf(canvas)).toBe(
     canvasBefore + Math.round(leftPanel!.width),
   );
@@ -99,6 +145,8 @@ test("both columns fold away from a corner and come back to it", async ({
   expect((await cornerOf(unfoldRight)).right).toBe(
     Math.round(body!.x + body!.width),
   );
+  expect(await filledHalf(page, unfoldRight, "right")).toBe(true);
+  expect(await filledHalf(page, unfoldRight, "left")).toBe(false);
 
   // With both columns away the canvas has the whole row to itself.
   await foldLeft.click();
@@ -118,5 +166,52 @@ test("both columns fold away from a corner and come back to it", async ({
   // And one click on a corner stands the column back up.
   await page.getByTestId("panel-unfold-left").click();
   await expect(left).toBeVisible();
+  await expect(page.getByTestId("panel-fold-left")).toBeVisible();
+});
+
+test("the cutting room folds its columns beside its rail", async ({ page }) => {
+  const home = projectHome("panel-fold-clip");
+
+  await forgetProjects();
+  await page.goto("/");
+  await createProject(page, join(home, "project"), "Folded Cut");
+  await openClipRoom(page);
+
+  // The column the rail turns over carries its fold in the corner it keeps
+  // beside the stage, cut from that corner, just inside its own hairline.
+  const foldLeft = page.getByTestId("panel-fold-left");
+  await expect(foldLeft).toBeVisible();
+  const column = await page.locator(".clip-column").boundingBox();
+  const fold = await cornerOf(foldLeft);
+  expect(fold.y).toBe(Math.round(column!.y));
+  expect(fold.right).toBe(Math.round(column!.x + column!.width) - 1);
+  expect(await filledHalf(page, foldLeft, "right")).toBe(true);
+  expect(await filledHalf(page, foldLeft, "left")).toBe(false);
+
+  // The inspector on the other side of the stage folds the same way round.
+  const foldRight = page.getByTestId("panel-fold-right");
+  await expect(foldRight).toBeVisible();
+  const inspector = await page.locator(".clip-inspector").boundingBox();
+  const right = await cornerOf(foldRight);
+  expect(right.y).toBe(Math.round(inspector!.y));
+  expect(right.x).toBe(Math.round(inspector!.x) + 1);
+  expect(await filledHalf(page, foldRight, "left")).toBe(true);
+  expect(await filledHalf(page, foldRight, "right")).toBe(false);
+
+  // Folding the column away leaves the way back at the rail's right edge,
+  // where the column stood, rather than over the faces the rail carries.
+  await foldLeft.click();
+  const unfoldLeft = page.getByTestId("panel-unfold-left");
+  await expect(unfoldLeft).toBeVisible();
+  const rail = await page.locator(".clip-rail").boundingBox();
+  const back = await cornerOf(unfoldLeft);
+  expect(back.x).toBe(Math.round(rail!.x + rail!.width));
+  expect(back.y).toBe(Math.round(rail!.y));
+  expect(await filledHalf(page, unfoldLeft, "left")).toBe(true);
+  expect(await filledHalf(page, unfoldLeft, "right")).toBe(false);
+
+  // And the click there stands the column up again.
+  await unfoldLeft.click();
+  await expect(page.locator(".clip-column")).toBeVisible();
   await expect(page.getByTestId("panel-fold-left")).toBeVisible();
 });
