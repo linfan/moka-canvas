@@ -169,11 +169,17 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
+; Interactive installs always offer the language picker as their first step;
+; the language a previous installation stored, or the machine's own, is
+; preselected. Uninstallers never prompt: MUI_UNGETLANGUAGE restores the
+; stored language by itself.
+!define MUI_LANGDLL_ALWAYSSHOW
+
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page (custom branded full-window page)
 ;
 ; Replaces the stock MUI2 welcome page with a full-bleed branded page.
-; Button texts are English-only; the bundled installer only ships English.
+; Every text goes through a LangString, so it follows the installer language.
 !insertmacro MUI_PAGE_INIT
 !insertmacro MUI_PAGE_FUNCTION_FULLWINDOW
 Page custom PageWelcome LeaveWelcome
@@ -188,10 +194,10 @@ Function PageWelcome
   ${NSD_CreateBitmap} 0u 0u 100% 100% ""
   Pop $PageImage
   ${NSD_SetStretchedImage} $PageImage "$PLUGINSDIR\moka-page.bmp" $PageImage.Bitmap
-  ${NSD_CreateButton} 165u 166u 68u 14u "Quick Install"
+  ${NSD_CreateButton} 165u 166u 68u 14u "$(PageQuickInstall)"
   Pop $0
   ${NSD_OnClick} $0 WelcomeQuickInstall
-  ${NSD_CreateButton} 239u 166u 84u 14u "Advanced Settings"
+  ${NSD_CreateButton} 239u 166u 84u 14u "$(PageAdvancedSettings)"
   Pop $0
   ${NSD_OnClick} $0 WelcomeAdvancedSettings
   Call muiPageLoadFullWindow
@@ -450,7 +456,7 @@ Var AppStartMenuFolder
 ;
 ; Replaces the stock MUI2 finish page. The desktop-shortcut checkbox and
 ; launch button reproduce the behavior of the MUI_FINISHPAGE defines they
-; replaced. Button texts are English-only; the bundled installer only ships English.
+; replaced. Every text goes through a LangString, like the welcome page.
 Page custom PageFinish LeaveFinish
 
 Function PageFinish
@@ -462,14 +468,14 @@ Function PageFinish
   ${NSD_CreateBitmap} 0u 0u 100% 100% ""
   Pop $PageImage
   ${NSD_SetStretchedImage} $PageImage "$PLUGINSDIR\moka-page.bmp" $PageImage.Bitmap
-  ${NSD_CreateLabel} 65u 140u 200u 11u "Installation complete."
+  ${NSD_CreateLabel} 65u 140u 200u 11u "$(PageFinishTitle)"
   Pop $0
   SetCtlColors $0 "D3E7F3" "transparent"
   ${NSD_CreateCheckBox} 12u 168u 120u 10u "$(createDesktop)"
   Pop $FinishShortcutCheckbox
   SetCtlColors $FinishShortcutCheckbox "D3E7F3" "transparent"
   SendMessage $FinishShortcutCheckbox ${BM_SETCHECK} ${BST_CHECKED} 0
-  ${NSD_CreateButton} 239u 166u 84u 14u "Launch ${PRODUCTNAME}"
+  ${NSD_CreateButton} 239u 166u 84u 14u "$(PageFinishLaunch)"
   Pop $0
   ${NSD_OnClick} $0 FinishLaunch
   Call muiPageLoadFullWindow
@@ -552,6 +558,22 @@ FunctionEnd
   !include "{{this}}"
 {{/each}}
 
+; ---------------------------------------------------------------------------
+; The installer's own texts.
+;
+; Every LangString this template uses must be defined for EVERY language in
+; `bundle > windows > nsis > languages`: a missing definition is only a
+; compile-time warning (6040) and renders as an empty string.
+; ---------------------------------------------------------------------------
+LangString PageQuickInstall     ${LANG_ENGLISH}    "Quick Install"
+LangString PageQuickInstall     ${LANG_SIMPCHINESE} "快速安装"
+LangString PageAdvancedSettings ${LANG_ENGLISH}    "Advanced Settings"
+LangString PageAdvancedSettings ${LANG_SIMPCHINESE} "高级设置"
+LangString PageFinishTitle      ${LANG_ENGLISH}    "Installation complete."
+LangString PageFinishTitle      ${LANG_SIMPCHINESE} "安装完成。"
+LangString PageFinishLaunch     ${LANG_ENGLISH}    "Launch ${PRODUCTNAME}"
+LangString PageFinishLaunch     ${LANG_SIMPCHINESE} "启动 ${PRODUCTNAME}"
+
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
@@ -569,7 +591,23 @@ Function .onInit
   ${EndIf}
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
-    !insertmacro MUI_LANGDLL_DISPLAY
+    ; Interactive installs: standard MUI language picker, preselected with the
+    ; stored or machine language. Unattended and update runs stay quiet and
+    ; reuse the stored language, so what an earlier run created on disk keeps
+    ; matching. The picker cannot be shown for them: /P is unattended and a
+    ; modal first step would hang it. (Silent runs never show it either; the
+    ; macro reads the stored language on its own.)
+    ${If} $PassiveMode = 1
+    ${OrIf} $UpdateMode = 1
+      ClearErrors
+      ReadRegStr $R9 HKCU "${MANUPRODUCTKEY}" "Installer Language"
+      ${If} $R9 != ""
+        StrCpy $LANGUAGE $R9
+      ${EndIf}
+      ClearErrors
+    ${Else}
+      !insertmacro MUI_LANGDLL_DISPLAY
+    ${EndIf}
   !endif
 
   !insertmacro SetContext
