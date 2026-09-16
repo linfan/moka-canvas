@@ -492,6 +492,7 @@
     "preview": "Preview",
     "previewHint": "What a run of this node would actually hand over",
     "close": "Close the generation panel",
+    "starting": "Starting…",
     "foldAway": "Fold the prompt away and take what is given from the wiring",
     "unfold": "Unfold the prompt and say in words what is given",
     "noModel": "No {{kind}} model is configured yet",

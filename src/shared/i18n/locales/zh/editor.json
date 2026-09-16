@@ -363,8 +363,7 @@
     "thisAskDidNotFinish": "此请求未完成",
     "stopHint": "停止这次运行",
     "stoppingHint": "已请求停止，运行尚未响应",
-    "stopping": "停止中…",
-    "failedToStart": "运行启动失败"
+    "stopping": "停止中…"
   },
   "menu": {
     "contextMenu": "右键菜单",
@@ -493,6 +492,7 @@
     "preview": "预览",
     "previewHint": "此节点运行时实际会提交的内容",
     "close": "关闭生成面板",
+    "starting": "启动中…",
     "foldAway": "收起提示词，改为采用连线提供的内容",
     "unfold": "展开提示词，用文字说明提供什么",
     "noModel": "还没有配置{{kind}}模型",
