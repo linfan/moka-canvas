@@ -274,6 +274,163 @@ test("the right edge pulled left shortens the block", async ({ page }) => {
   rmSync(home, { recursive: true, force: true });
 });
 
+/**
+ * A small valid WAV: a header, then a few seconds of silence.
+ *
+ * A file with a real length, which the server's probe measures on import —
+ * what a trim is bounded by is part of what the test below is about.
+ */
+function toneWav(seconds: number): Buffer {
+  const rate = 8000;
+  const samples = rate * seconds;
+  const dataBytes = samples * 2;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20); // PCM
+  wav.writeUInt16LE(1, 22); // mono
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(dataBytes, 40);
+  return wav;
+}
+
+/** The block's own window into its file, as the document has it written down. */
+interface ClipWindow {
+  startMs: number;
+  durationMs: number;
+  inPointMs: number;
+  outPointMs: number;
+}
+
+async function clipWindow(page: Page): Promise<ClipWindow | null> {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/v1/projects/current");
+    const body = (await response.json()) as {
+      moka?: {
+        timelines?: {
+          clips?: {
+            startMs: number;
+            durationMs: number;
+            inPointMs: number;
+            outPointMs: number;
+          }[];
+        }[];
+      };
+    };
+    const clip = body.moka?.timelines?.[0]?.clips?.[0];
+    return clip
+      ? {
+          startMs: clip.startMs,
+          durationMs: clip.durationMs,
+          inPointMs: clip.inPointMs,
+          outPointMs: clip.outPointMs,
+        }
+      : null;
+  });
+}
+
+/** Waits for the document to read the block's window as wanted, within a frame. */
+async function expectWindow(
+  page: Page,
+  wanted: Partial<ClipWindow>,
+): Promise<void> {
+  const keys = Object.keys(wanted) as (keyof ClipWindow)[];
+  await expect
+    .poll(async () => {
+      const window = await clipWindow(page);
+      if (!window) return false;
+      return keys.every((key) => Math.abs(window[key] - wanted[key]!) <= 40);
+    })
+    .toBe(true);
+}
+
+test("a sound block is trimmed to a piece of its own file", async ({
+  page,
+}) => {
+  const home = await clipRoom(page, "Editing Sound Trim");
+  await newTimeline(page, "Timeline 1");
+  await page.getByLabel("Import files", { exact: true }).setInputFiles({
+    name: "tone.wav",
+    mimeType: "audio/wav",
+    buffer: toneWav(5),
+  });
+  await page.getByTestId("asset-kind-audio").click();
+  await expect(page.getByRole("button", { name: /^tone\.wav / })).toBeVisible({
+    timeout: 10_000,
+  });
+  const assetId = await filedId(page, "tone.wav");
+  expect(assetId).not.toBe("");
+  const box = await canvasBox(page);
+  const audio = await rowCenter(page, "Audio 1");
+  await dropAssetOnTimeline(page, assetId, { x: DROP_X, y: audio.y - box.y });
+  await expect(timeline(page)).toHaveAttribute("data-clip-count", "1");
+
+  // Dropped whole: the block reads its file from head to tail.
+  await expectWindow(page, { inPointMs: 0, outPointMs: 5_000 });
+  const dropped = (await clipWindow(page))!;
+  expect(dropped.startMs).toBe(5_000);
+  const tailX = (window: ClipWindow) =>
+    box.x + ((window.startMs + window.durationMs) / 1_000) * PX_PER_SEC - 4;
+  const headX = (window: ClipWindow) =>
+    box.x + (window.startMs / 1_000) * PX_PER_SEC + 4;
+
+  // The tail pulled left leaves the block reading less of the file: the
+  // block shrinks and the window's far end moves in with it.
+  await drag(
+    page,
+    { x: tailX(dropped), y: audio.y },
+    { x: tailX(dropped) - 120, y: audio.y },
+  );
+  await expectWindow(page, {
+    startMs: 5_000,
+    inPointMs: 0,
+    outPointMs: 3_000,
+  });
+
+  // The same edge pulled right stops at the file's own end, whatever the
+  // pointer asks for.
+  const shortened = (await clipWindow(page))!;
+  await drag(
+    page,
+    { x: tailX(shortened), y: audio.y },
+    { x: tailX(shortened) + 240, y: audio.y },
+  );
+  await expectWindow(page, { outPointMs: 5_000, durationMs: 5_000 });
+
+  // The head pulled right skips into the file: the block starts later on
+  // the cut and reads from further in...
+  const whole = (await clipWindow(page))!;
+  await drag(
+    page,
+    { x: headX(whole), y: audio.y },
+    { x: headX(whole) + 60, y: audio.y },
+  );
+  await expectWindow(page, {
+    startMs: 6_000,
+    durationMs: 4_000,
+    inPointMs: 1_000,
+    outPointMs: 5_000,
+  });
+
+  // ...and pulled left it stops where the file's own head is.
+  const skipped = (await clipWindow(page))!;
+  await drag(
+    page,
+    { x: headX(skipped), y: audio.y },
+    { x: headX(skipped) - 120, y: audio.y },
+  );
+  await expectWindow(page, { startMs: 5_000, inPointMs: 0 });
+
+  rmSync(home, { recursive: true, force: true });
+});
+
 test("a block is dragged onto another row of the same kind", async ({
   page,
 }) => {
