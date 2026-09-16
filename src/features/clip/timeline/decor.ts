@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type {
   AssetId,
   ResourceRegistry,
@@ -169,4 +169,27 @@ export function useTimelineDecor(): TimelineDecor {
   // on it — the canvas does — redraws exactly when something lands: an arrival
   // is a new object, and nothing else is.
   return useSyncExternalStore(subscribe, () => live);
+}
+
+/**
+ * One asset's sound, as the timeline measures it, for a reader outside the
+ * timeline — the material card draws the same shape where the picture of a
+ * file would be. The measurement is asked for here as well as from a block,
+ * since a file read in the card may never have been laid on a track.
+ */
+export function useAssetWaveform(
+  assetId: AssetId | null,
+): WaveformDrawing | null {
+  // Subscribed for the same news the canvas gets: an arrival re-reads below.
+  useSyncExternalStore(subscribe, () => live);
+  useEffect(() => {
+    if (assetId) measure(assetId);
+  }, [assetId]);
+  if (!assetId) return null;
+  const measured = peaks.get(assetId);
+  if (measured) return { kind: "peaks", peaks: measured };
+  if (flat.has(assetId)) return { kind: "flat" };
+  // Still being measured: the card draws nothing yet, and the version above
+  // brings the shape back when it is there.
+  return null;
 }

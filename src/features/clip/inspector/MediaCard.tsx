@@ -4,6 +4,7 @@ import {
   MAX_ASSET_NOTE_LENGTH,
   MAX_ASSET_TAGS,
   MAX_ASSET_TAG_LENGTH,
+  type AssetId,
   type ResourceEntry,
   type TimelineDocument,
 } from "../../../shared/domain";
@@ -24,6 +25,8 @@ import {
   stopMediaPreviewFor,
   useMediaPreview,
 } from "../panels/mediaPreview";
+import { useAssetWaveform } from "../timeline/decor";
+import { downsample } from "../timeline/waveform";
 
 /**
  * A file read on its own: what it is, and what can be done with it.
@@ -90,12 +93,66 @@ function PreviewVideo({ entry }: { entry: ResourceEntry }) {
   );
 }
 
+/** How wide a sound's shape is drawn before the column scales it. */
+const WAVEFORM_WIDTH = 480;
+/** How tall the strip stands: the height the picture leads with. */
+const WAVEFORM_HEIGHT = 120;
+
+/**
+ * A sound, drawn as the shape it is.
+ *
+ * The same buckets the timeline's blocks are drawn from, the whole file at
+ * once rather than the span of a cut, since the card is where the file is met
+ * rather than where a piece of it is trimmed. The ink is the canvas's own
+ * colour from the stylesheet, so the strip follows the room's palette like any
+ * text; a sound the browser will not decode draws as the flat line it will be
+ * on the timeline.
+ */
+function WaveformStrip({ assetId }: { assetId: AssetId }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawing = useAssetWaveform(assetId);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = getComputedStyle(canvas).color;
+    const centre = canvas.height / 2;
+    const half = Math.max(1, canvas.height / 2 - 4);
+    if (drawing?.kind === "flat") {
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(0, centre - 1, canvas.width, 2);
+      return;
+    }
+    if (drawing?.kind !== "peaks") return;
+    const columns = Math.max(1, Math.floor(canvas.width));
+    const { min, max } = downsample(drawing.peaks, columns);
+    for (let column = 0; column < columns; column += 1) {
+      const low = centre - max[column] * half;
+      const high = centre - min[column] * half;
+      ctx.fillRect(column, low, 1, Math.max(1, high - low));
+    }
+  }, [drawing]);
+
+  return (
+    <canvas
+      className="clip-inspector-waveform"
+      data-testid="clip-media-preview-waveform"
+      data-waveform={drawing?.kind ?? "measuring"}
+      height={WAVEFORM_HEIGHT}
+      ref={canvasRef}
+      width={WAVEFORM_WIDTH}
+    />
+  );
+}
+
 export interface MediaCardProps {
   entry: ResourceEntry;
   /** The cut the file would land on, or null when the project has none. */
   timeline: TimelineDocument | null;
 }
-
 export function MediaCard({ entry, timeline }: MediaCardProps) {
   const { t } = useTranslation();
   const still = stillUrl(entry);
@@ -126,6 +183,8 @@ export function MediaCard({ entry, timeline }: MediaCardProps) {
         <h3 className="inspector-asset-name">{entry.name}</h3>
         {previewKind === "video" ? (
           <PreviewVideo entry={entry} />
+        ) : previewKind === "audio" ? (
+          <WaveformStrip assetId={entry.id} />
         ) : (
           still !== null && (
             <img alt="" className="clip-inspector-still" src={still} />

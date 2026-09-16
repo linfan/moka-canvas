@@ -4497,6 +4497,19 @@ body.is-dragging-split {
   width: 100%;
 }
 
+/* A sound read in the card: the shape of the file, drawn on the canvas's own
+   colour so the strip follows the room's palette like any text. */
+.clip-inspector-waveform {
+  background: #000;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: 100%;
+}
+
 /* The Filters page: six tiles, each carrying its own wash rather than a
    thumbnail, since a look is a decision about the whole cut. */
 .clip-filter-page,

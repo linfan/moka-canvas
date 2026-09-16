@@ -275,6 +275,15 @@ test("a sound on a row is tried before it is used, one at a time", async ({
     page.getByRole("button", { name: "Play tiny.wav" }),
   ).not.toHaveClass(/is-playing/);
 
+  // The row's own click reads the file, and the card leads with the sound's
+  // own shape, measured from the file itself.
+  await rowFor(page, "tiny.wav").click();
+  const wave = page.getByTestId("clip-media-preview-waveform");
+  await expect(wave).toBeVisible();
+  await expect(wave).toHaveAttribute("data-waveform", "peaks", {
+    timeout: 10_000,
+  });
+
   rmSync(home, { recursive: true, force: true });
 });
 
