@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { AssetId, ResourceEntry } from "../../../shared/domain";
+import type {
+  AssetId,
+  MediaNodeData,
+  ResourceEntry,
+  WorkflowNode,
+} from "../../../shared/domain";
+import { createNode } from "../../../shared/domain/factories";
+import {
+  buildShelfMokaFile,
+  goldenNodeIds,
+} from "../../../shared/domain/fixtures";
 import {
   MEDIA_FACES,
+  canvasHeldIds,
   faceShelf,
   isMediaFace,
   newestFirst,
+  projectLens,
 } from "./mediaLenses";
 
 /** A row on the shelf, with what the lenses read: an id and a filed time. */
@@ -19,6 +31,39 @@ function entry(id: AssetId, updatedAt: string): ResourceEntry {
     updatedAt,
   };
 }
+
+/** A card on a board, filled with the file (and poster) it points at. */
+function holding(kind: "image" | "video", data: MediaNodeData): WorkflowNode {
+  return { ...createNode(kind, { x: 0, y: 0 }), data };
+}
+
+describe("what the boards are holding", () => {
+  it("gathers what every board points at, posters included", () => {
+    const moka = buildShelfMokaFile();
+    moka.canvas[0].nodes.push(holding("image", { assetId: "image-main" }));
+    moka.canvas[1].nodes.push(
+      holding("video", {
+        assetId: "video-second",
+        posterAssetId: "image-poster",
+      }),
+    );
+
+    const held = canvasHeldIds(moka);
+    expect([...held].sort()).toEqual(
+      [
+        "image-main",
+        "image-poster",
+        "video-second",
+        goldenNodeIds().assetImage,
+      ].sort(),
+    );
+    // A file that no card points at is not held, and neither is anything on a
+    // document with no boards at all.
+    expect(held.has("image-unheld")).toBe(false);
+    expect(canvasHeldIds(buildShelfMokaFile()).has("image-unheld")).toBe(false);
+    expect(canvasHeldIds(null).size).toBe(0);
+  });
+});
 
 describe("what each face asks the shelf", () => {
   it("stands the local face on what was brought in", () => {
@@ -52,6 +97,41 @@ describe("what each face asks the shelf", () => {
     for (const face of ["text", "filters", "adjust"] as const) {
       expect(isMediaFace(face)).toBe(false);
     }
+  });
+});
+
+describe("what the project face narrows to", () => {
+  it("stands on what the models made when the face asks for the made", () => {
+    expect(faceShelf("project", { project: "made" }).lens?.where).toBe("made");
+  });
+
+  it("holds the canvas narrowing to the files the boards are using", () => {
+    const shelf = faceShelf("project", {
+      project: "canvas",
+      held: new Set(["image-held"]),
+    });
+    expect(
+      shelf.lens?.narrow?.(entry("image-held", "2026-01-01T00:00:00.000Z")),
+    ).toBe(true);
+    expect(
+      shelf.lens?.narrow?.(entry("image-loose", "2026-01-01T00:00:00.000Z")),
+    ).toBe(false);
+  });
+
+  it("reads open on origin when nothing narrows it", () => {
+    const lens = projectLens("all", new Set());
+    expect(lens.where).toBeNull();
+    expect(lens.narrow).toBeUndefined();
+  });
+
+  it("says its own words when a narrowing of its own holds nothing", () => {
+    expect(faceShelf("project", { project: "made" }).emptyText).toBe(
+      "clip:mediaLenses.made",
+    );
+    expect(faceShelf("project", { project: "canvas" }).emptyText).toBe(
+      "clip:mediaLenses.canvas",
+    );
+    expect(faceShelf("project").emptyText).toBe("clip:mediaLenses.project");
   });
 });
 

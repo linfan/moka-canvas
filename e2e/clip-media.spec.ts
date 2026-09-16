@@ -97,6 +97,36 @@ test("the two faces read one shelf, each asking its own question", async ({
   rmSync(home, { recursive: true, force: true });
 });
 
+test("the project face filters to what was made and what the boards hold", async ({
+  page,
+}) => {
+  const home = await clipRoom(page, "Media Project Filter");
+  await importFile(page, "one.png", "image/png", TINY_PNG);
+
+  // The filter is the project face's own question, asked where it is read.
+  await expect(page.getByTestId("clip-project-filter-all")).toHaveCount(0);
+  await page.getByTestId("clip-face-project").click();
+  await expect(rowFor(page, "one.png")).toBeVisible();
+
+  // Nothing was generated, so the made narrowing stands empty and says so.
+  await page.getByTestId("clip-project-filter-made").click();
+  await expect(page.getByText("Nothing made by the models yet.")).toBeVisible();
+  await expect(rowFor(page, "one.png")).toHaveCount(0);
+
+  // No board holds anything either.
+  await page.getByTestId("clip-project-filter-canvas").click();
+  await expect(
+    page.getByText("No canvas is holding a file yet."),
+  ).toBeVisible();
+  await expect(rowFor(page, "one.png")).toHaveCount(0);
+
+  // Everything brings the brought-in file back.
+  await page.getByTestId("clip-project-filter-all").click();
+  await expect(rowFor(page, "one.png")).toBeVisible();
+
+  rmSync(home, { recursive: true, force: true });
+});
+
 test("the search narrows the face and says so when nothing says it", async ({
   page,
 }) => {

@@ -1,5 +1,6 @@
-import type { Capability } from "../../../shared/domain";
+import type { AssetId, Capability, MokaFile } from "../../../shared/domain";
 import { MODEL_CAPABILITIES } from "../../../shared/domain";
+import { canvasAssetIds } from "../../editor/panels/canvasAssets";
 import type { ShelfLens } from "../../editor/panels/shelfFilter";
 import type { ClipFace } from "../stores/clipStore";
 
@@ -37,10 +38,53 @@ const MEDIA_KINDS: readonly Capability[] = MODEL_CAPABILITIES.filter(
 
 export { newestFirst } from "../../editor/panels/shelfFilter";
 
+/**
+ * What the project face narrows its shelf to: everything the project holds,
+ * what the models made, or what the boards are holding.
+ */
+export type ProjectNarrowing = "all" | "made" | "canvas";
+
+/** The narrowings in the order the project face offers them. */
+export const PROJECT_NARROWINGS = ["all", "made", "canvas"] as const;
+
+/** Every file the boards are holding, once each. */
+export function canvasHeldIds(moka: MokaFile | null): Set<AssetId> {
+  const held = new Set<AssetId>();
+  for (const canvas of moka?.canvas ?? []) {
+    for (const id of canvasAssetIds(canvas)) held.add(id);
+  }
+  return held;
+}
+
+/** The held set a caller that named none stands on: no board holds anything. */
+const NOTHING_HELD: ReadonlySet<AssetId> = new Set();
+
+/** What the project face reads the shelf through under each narrowing. */
+export function projectLens(
+  narrowing: ProjectNarrowing,
+  held: ReadonlySet<AssetId>,
+): ShelfLens {
+  switch (narrowing) {
+    case "all":
+      return { where: null };
+    case "made":
+      return { where: "made" };
+    case "canvas":
+      return { where: null, narrow: (entry) => held.has(entry.id) };
+  }
+}
+
 /** What a face has the shelf say when the face itself holds nothing. */
 const EMPTY_TEXT: Record<MediaFace, string> = {
   project: "clip:mediaLenses.project",
   local: "clip:mediaLenses.local",
+};
+
+/** What the project face says when a narrowing of its own holds nothing. */
+const PROJECT_EMPTY: Record<ProjectNarrowing, string> = {
+  all: EMPTY_TEXT.project,
+  made: "clip:mediaLenses.made",
+  canvas: "clip:mediaLenses.canvas",
 };
 
 /** Everything a face passes to the shelf, apart from its own row actions. */
@@ -63,8 +107,19 @@ export interface FaceShelfProps {
   canvasActions: false;
 }
 
+/** What the project face's own filter says, for the face to read the shelf by. */
+export interface FaceShelfOptions {
+  /** Which narrowing the project face stands on; the local face has no say. */
+  project?: ProjectNarrowing;
+  /** Every file the boards are holding, which the canvas narrowing reads. */
+  held?: ReadonlySet<AssetId>;
+}
+
 /** What one face of the media column asks of the shelf. */
-export function faceShelf(face: MediaFace): FaceShelfProps {
+export function faceShelf(
+  face: MediaFace,
+  options: FaceShelfOptions = {},
+): FaceShelfProps {
   const common = {
     emptyText: EMPTY_TEXT[face],
     order: "newest",
@@ -82,7 +137,14 @@ export function faceShelf(face: MediaFace): FaceShelfProps {
     */
     case "local":
       return { ...common, kinds: MEDIA_KINDS, lens: { where: "brought" } };
-    case "project":
-      return { ...common, kinds: MEDIA_KINDS, lens: { where: null } };
+    case "project": {
+      const narrowing = options.project ?? "all";
+      return {
+        ...common,
+        kinds: MEDIA_KINDS,
+        emptyText: PROJECT_EMPTY[narrowing],
+        lens: projectLens(narrowing, options.held ?? NOTHING_HELD),
+      };
+    }
   }
 }

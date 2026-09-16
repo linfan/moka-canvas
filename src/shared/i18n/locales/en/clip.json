@@ -155,13 +155,19 @@
   "mediaColumn": {
     "addAria": "Add {{name}} at the playhead",
     "adjust": "Adjust",
+    "filterAll": "All",
+    "filterCanvas": "On canvas",
+    "filterLabel": "Filter the project's material",
+    "filterMade": "Made",
     "filters": "Filters",
     "local": "Local media",
     "project": "Project media",
     "text": "Text"
   },
   "mediaLenses": {
+    "canvas": "No canvas is holding a file yet.",
     "local": "Nothing brought in yet — import files, or drop them here.",
+    "made": "Nothing made by the models yet.",
     "project": "No media in this project yet."
   },
   "filters": {

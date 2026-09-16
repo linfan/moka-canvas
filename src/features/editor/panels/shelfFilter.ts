@@ -75,14 +75,17 @@ export function shelfWhere(entry: ResourceEntry): ShelfWhere {
 /**
  * A question a shelf stands behind on its own.
  *
- * A lens is a preset of the reader's own filter — the origin a face is about —
- * applied under whatever the reader then asks. It is deliberately not part of
- * `ShelfFilter`: a lens does not show up in the filter bar, does not light the
- * Clear button, and is not the reader's to take off.
+ * A lens is a preset of the reader's own filter — the origin a face is about,
+ * or the files a board is holding — applied under whatever the reader then
+ * asks. It is deliberately not part of `ShelfFilter`: a lens does not show up
+ * in the filter bar, does not light the Clear button, and is not the reader's
+ * to take off.
  */
 export interface ShelfLens {
   /** The origin the face reads, or null for a face that is open on origin. */
   where?: ShelfWhere | null;
+  /** Anything else the face will not show. */
+  narrow?: (entry: ResourceEntry) => boolean;
 }
 
 /**

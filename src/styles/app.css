@@ -3702,24 +3702,31 @@ button.danger:hover:not(:disabled) {
   overflow-y: auto;
 }
 
-/* A face whose shelf has not arrived yet says so once, in the column's own
-   voice, rather than showing the head of a search nobody can use. */
-.clip-placeholder {
-  align-items: center;
-  background: var(--surface-raised);
-  border: 1px dashed var(--stroke);
-  border-radius: var(--radius-md);
-  color: var(--muted);
-  display: grid;
-  gap: 8px;
-  justify-items: center;
-  padding: 22px 16px;
-  text-align: center;
+/* A face's own question, asked above the shelf rather than inside its filter
+   bar: the chips change the lens the face reads through, so they are the
+   face's own offer and are marked like the face is turned to them. */
+.clip-media-filter {
+  display: flex;
+  flex: none;
+  gap: 4px;
 }
 
-.clip-placeholder p {
-  font-size: 12px;
-  margin: 0;
+.clip-media-filter button {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+.clip-media-filter button:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.clip-media-filter button.is-active {
+  border-color: var(--primary);
+  color: var(--ink);
 }
 
 /* A media face's head, and the shelf filling what the head leaves. The shelf

@@ -155,13 +155,19 @@
   "mediaColumn": {
     "addAria": "在播放头处添加 {{name}}",
     "adjust": "调整",
+    "filterAll": "全部",
+    "filterCanvas": "画布",
+    "filterLabel": "筛选项目素材",
+    "filterMade": "生成",
     "filters": "滤镜",
     "local": "本地素材",
     "project": "项目素材",
     "text": "文字"
   },
   "mediaLenses": {
+    "canvas": "还没有画板使用任何文件。",
     "local": "还没有导入任何内容——导入文件，或把文件拖到这里。",
+    "made": "模型还没有生成任何内容。",
     "project": "此项目中还没有素材。"
   },
   "filters": {

@@ -141,7 +141,8 @@ function opensOn(kinds: readonly Capability[]): Capability {
 
 /** Whether an entry is on the shelf a lens reads. */
 function onLens(entry: ResourceEntry, lens: ShelfLens): boolean {
-  return lens.where == null || shelfWhere(entry) === lens.where;
+  if (lens.where != null && shelfWhere(entry) !== lens.where) return false;
+  return lens.narrow ? lens.narrow(entry) : true;
 }
 
 /** The files of one kind as a face reads them, in filing order. */
