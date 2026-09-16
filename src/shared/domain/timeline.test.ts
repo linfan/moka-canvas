@@ -11,7 +11,9 @@ import {
   createTextClip,
   createTimeline,
   defaultTimelineTracks,
+  nextTimelineName,
 } from "./factories";
+import { i18n } from "../i18n";
 import {
   buildCutMokaFile,
   buildGoldenMokaFile,
@@ -85,6 +87,23 @@ function imageAsset(): ResourceEntry {
     updatedAt: NOW,
   };
 }
+
+describe("the name a timeline is offered", () => {
+  it("is spoken in the interface's own language, one past the count and any name taken", async () => {
+    await i18n.changeLanguage("zh");
+    try {
+      const moka = buildGoldenMokaFile();
+      expect(nextTimelineName(moka)).toBe("时间线 1");
+      const taken = apply(moka, {
+        type: "addTimeline",
+        timeline: createTimeline("时间线 1"),
+      }).next;
+      expect(nextTimelineName(taken)).toBe("时间线 2");
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+});
 
 describe("timeline lifecycle commands", () => {
   it("is born at the frame it is asked for, and 1080p30 when asked for nothing", () => {

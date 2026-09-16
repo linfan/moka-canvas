@@ -61,6 +61,21 @@ test("the interface follows the language chosen in settings", async ({
   });
   expect(root.endsWith("中文项目")).toBe(true);
 
+  // The cutting room offers the first timeline under the interface's own
+  // name, and the tab that arrives carries it.
+  await page.getByTestId("home-menu-button").click();
+  await page.getByRole("menuitem", { name: "剪辑" }).click();
+  await expect(page.getByTestId("clip-page")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "新建时间线" }).click();
+  const asked = page.getByRole("dialog", { name: "新建时间线" });
+  await expect(asked.getByLabel("名称")).toHaveValue("时间线 1");
+  await asked.getByRole("button", { name: "创建时间线" }).click();
+  await expect(
+    page
+      .getByRole("tablist", { name: "时间线" })
+      .getByRole("tab", { name: "时间线 1" }),
+  ).toBeVisible({ timeout: 10_000 });
+
   // Back through the launcher to put the language back: a language picked
   // outright is not a trap.
   await page.getByTestId("home-menu-button").click();
