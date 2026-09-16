@@ -35,6 +35,12 @@ function strip(page: Page) {
   return page.getByRole("tablist", { name: "Timelines" });
 }
 
+// A tiny valid PNG (1x1 transparent pixel), as the other specs use.
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 test("a project without timelines opens onto the first-run question", async ({
   page,
 }) => {
@@ -132,6 +138,68 @@ test("a timeline is taken off the strip, and the room asks again when none is le
   ).toHaveAttribute("aria-selected", "true");
 
   await page.getByRole("button", { name: "Delete Timeline 1" }).click();
+  await expect(strip(page).getByRole("tab")).toHaveCount(0);
+  await expect(page.getByText("No timelines yet")).toBeVisible();
+
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("a timeline holding work is deleted only after a question that stands inside the window", async ({
+  page,
+}) => {
+  const home = await clippedProject(page);
+  await newTimeline(page, "Timeline 1");
+
+  // A timeline with something on it asks first, where the empty one above goes
+  // in a single click. The clip goes on through the shelf's own button, since
+  // only the question that follows is what this test reads.
+  await page.getByLabel("Import files", { exact: true }).setInputFiles({
+    name: "one.png",
+    mimeType: "image/png",
+    buffer: TINY_PNG,
+  });
+  await page
+    .getByRole("button", { name: "Add one.png at the playhead" })
+    .click();
+  await expect(page.locator(".clip-timeline")).toHaveAttribute(
+    "data-clip-count",
+    "1",
+  );
+
+  await page.getByRole("button", { name: "Delete Timeline 1" }).click();
+  const asked = page.getByRole("alertdialog", { name: "Delete timeline?" });
+  await expect(asked).toBeVisible({ timeout: 10_000 });
+
+  // The question covers the window and stands in the middle of it. An element
+  // that blurs what is behind it is the box its fixed children are laid out
+  // in, so a question rendered from the blurred bar the strip stands on used
+  // to be centred on the bar instead — hanging off the top of the window.
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  const backdrop = await page.locator(".dialog-backdrop").boundingBox();
+  const box = await asked.boundingBox();
+  expect(backdrop).not.toBeNull();
+  expect(box).not.toBeNull();
+  expect(backdrop!.y).toBe(0);
+  expect(backdrop!.height).toBe(viewport!.height);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+  expect(Math.abs(box!.y - (viewport!.height - box!.height) / 2)).toBeLessThan(
+    2,
+  );
+
+  // Cancel leaves it alone; answering takes the whole timeline away.
+  await asked.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(asked).toHaveCount(0);
+  await expect(
+    strip(page).getByRole("tab", { name: "Timeline 1" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete Timeline 1" }).click();
+  await expect(asked).toBeVisible({ timeout: 10_000 });
+  await asked
+    .getByRole("button", { name: "Delete timeline", exact: true })
+    .click();
   await expect(strip(page).getByRole("tab")).toHaveCount(0);
   await expect(page.getByText("No timelines yet")).toBeVisible();
 

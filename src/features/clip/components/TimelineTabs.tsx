@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   TIMELINE_NAME_MAX,
@@ -191,16 +192,23 @@ export function TimelineTabs() {
           +
         </button>
       </div>
-      {asked && (
-        <RemoveTimelineDialog
-          onCancel={() => setRemoving(null)}
-          onConfirm={() => {
-            setRemoving(null);
-            removeTimeline(asked.id);
-          }}
-          timeline={asked}
-        />
-      )}
+      {asked &&
+        // The question covers the whole window, so it is asked from the
+        // window's own box rather than from the bar the strip stands on: the
+        // bar blurs what is behind it, and a blur makes an element the box its
+        // fixed children are laid out in — a dialog left inside it would hang
+        // off the top of the window instead of sitting in the middle of it.
+        createPortal(
+          <RemoveTimelineDialog
+            onCancel={() => setRemoving(null)}
+            onConfirm={() => {
+              setRemoving(null);
+              removeTimeline(asked.id);
+            }}
+            timeline={asked}
+          />,
+          document.body,
+        )}
     </>
   );
 }
