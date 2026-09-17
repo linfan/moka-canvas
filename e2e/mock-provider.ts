@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -20,13 +21,40 @@ export const PROVIDER_ADDRESS = `${PROVIDER_ORIGIN}/v1`;
 export const PAINTER = "painter";
 export const STORYTELLER = "storyteller";
 
-/** What the stand-in says, whole and in the pieces it arrives in. */
-export const SENTENCE = "A lantern drifts over a quiet lake.";
-const PIECES = ["A lantern ", "drifts over ", "a quiet lake."];
+/**
+ * What the stand-in says, whole and in the pieces it arrives in.
+ *
+ * MOKA_E2E_TEXT swaps in another sentence — the website screenshot capture is
+ * the only caller — and the default the tests assert against is untouched by it.
+ */
+export const SENTENCE =
+  process.env.MOKA_E2E_TEXT ?? "A lantern drifts over a quiet lake.";
+const PIECES = (() => {
+  if (!process.env.MOKA_E2E_TEXT) {
+    return ["A lantern ", "drifts over ", "a quiet lake."];
+  }
+  const third = Math.ceil(SENTENCE.length / 3);
+  return [
+    SENTENCE.slice(0, third),
+    SENTENCE.slice(third, third * 2),
+    SENTENCE.slice(third * 2),
+  ];
+})();
 
-/** One 1x1 transparent PNG, which is all an ingest path needs to be real. */
-const PICTURE =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+/**
+ * One 1x1 transparent PNG, which is all an ingest path needs to be real.
+ *
+ * MOKA_E2E_PICTURE points at a picture the stand-in should paint with instead —
+ * the website screenshot capture is the only caller, and the default the tests
+ * run against is untouched by it.
+ */
+const PICTURE = (() => {
+  const custom = process.env.MOKA_E2E_PICTURE;
+  if (!custom) {
+    return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  }
+  return readFileSync(custom).toString("base64");
+})();
 
 /** What the stand-in was asked for, holding nothing a credential could be in. */
 export interface ProviderCall {
@@ -159,9 +187,16 @@ export async function startMockProvider(): Promise<MockProvider> {
 
     // A marker word in a prompt is a direction to the stand-in rather than part
     // of it: refuse, so that a run which gave up exists to be looked at.
+    // MOKA_E2E_REFUSAL_STATUS and MOKA_E2E_REFUSAL_MESSAGE swap in another
+    // refusal — the website screenshot capture is the only caller — and the
+    // defaults the tests assert against are untouched by them.
     if (prompt.includes("[refuse]")) {
-      return send(500, {
-        error: { message: "the stand-in will not paint that" },
+      return send(Number(process.env.MOKA_E2E_REFUSAL_STATUS ?? 500), {
+        error: {
+          message:
+            process.env.MOKA_E2E_REFUSAL_MESSAGE ??
+            "the stand-in will not paint that",
+        },
       });
     }
 
