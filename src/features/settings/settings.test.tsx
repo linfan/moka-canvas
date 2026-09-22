@@ -770,15 +770,13 @@ describe("model settings", () => {
     expect(readsOf("/api/v1/models")).toBeGreaterThan(readsBefore);
   });
 
-  it("says how strongly the stored keys are protected", async () => {
+  it("says nothing about where the file tier keeps its key", async () => {
     await openSettings();
     await screen.findByText("Writer");
 
-    // The file tier is the weaker one, so the warning belongs where a key is
-    // typed, not only in the deployment docs.
-    const note = screen.getByTestId("secret-storage-note");
-    expect(note.textContent).toContain("master.key");
-    expect(note.textContent).toContain("MOKA_METADATA_KEY");
+    // Where the file tier's master key sits is a deployment matter, so the
+    // settings page leaves it to the docs.
+    expect(screen.queryByTestId("secret-storage-note")).toBeNull();
   });
 
   it("moves the master key to another tier only when explicitly asked", async () => {

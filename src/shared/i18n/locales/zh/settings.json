@@ -100,7 +100,6 @@
   "secretNotes": {
     "keyring": "已存储的密钥由操作系统钥匙链中的主密钥加密保护。",
     "env": "已存储的密钥由服务器启动时使用的主密钥（MOKA_METADATA_KEY）加密保护。",
-    "file": "已存储的密钥由元数据目录中 master.key 里的主密钥加密保护。能读取该目录的任何东西都能读取它；请用 MOKA_METADATA_KEY 启动服务器，以获得不在磁盘上的密钥。`moka-server --generate-key` 会打印一个值。",
     "unset": "尚未存储任何密钥，因此目前没有主密钥保护任何内容。"
   },
   "generation": {
