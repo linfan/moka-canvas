@@ -436,12 +436,13 @@ pub fn gemini_root(url: &str) -> Option<String> {
     Some(url[..cut].to_string())
 }
 
-fn defaults_by_capability(defaults: &Defaults) -> [(Capability, Option<&str>); 4] {
+fn defaults_by_capability(defaults: &Defaults) -> [(Capability, Option<&str>); 5] {
     [
         (Capability::Text, defaults.text.as_deref()),
         (Capability::Image, defaults.image.as_deref()),
         (Capability::Audio, defaults.audio.as_deref()),
         (Capability::Video, defaults.video.as_deref()),
+        (Capability::Asr, defaults.asr.as_deref()),
     ]
 }
 
@@ -463,6 +464,7 @@ fn clear_references(defaults: &mut Defaults, model_id: &str) -> bool {
         &mut defaults.image,
         &mut defaults.audio,
         &mut defaults.video,
+        &mut defaults.asr,
     ] {
         if slot.as_deref().map(str::trim) == Some(model_id) {
             *slot = None;

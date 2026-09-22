@@ -15,10 +15,11 @@
     "defaultName": "画布 {{n}}"
   },
   "capability": {
-    "audio": "音频",
-    "image": "图像",
     "text": "文本",
-    "video": "视频"
+    "image": "图像",
+    "audio": "音频",
+    "video": "视频",
+    "asr": "语音识别"
   },
   "nodeTitle": {
     "audio": "音频",

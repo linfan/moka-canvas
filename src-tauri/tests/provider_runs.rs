@@ -125,6 +125,7 @@ impl Harness {
                 Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
                 Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
                 Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
+                Capability::Asr => (Protocol::Custom, "/v1/transcription"),
             };
             self.state
                 .models
@@ -150,6 +151,7 @@ impl Harness {
                 Capability::Image => defaults.image = Some((*id).to_string()),
                 Capability::Audio => defaults.audio = Some((*id).to_string()),
                 Capability::Video => defaults.video = Some((*id).to_string()),
+                Capability::Asr => defaults.asr = Some((*id).to_string()),
             }
         }
         self.state

@@ -28,7 +28,7 @@ use crate::telemetry::GenerationNote;
 use super::adapters::{for_protocol, ModelCall};
 use super::error::ProviderError;
 use super::jobs::TaskRegistry;
-use super::media::{load_inputs, MediaInput};
+use super::media::{load_inputs, AudioWindow, MediaInput};
 use super::models::{resolve_within, ModelRepo, ResolvedModel};
 use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskState};
 
@@ -48,6 +48,11 @@ pub struct Gateway {
     models: Arc<ModelRepo>,
     assets: Arc<dyn ProjectStore>,
     budgets: GenerateConfig,
+    /// What cuts a window out of a recording, where the deployment has one. A
+    /// caller that named a window and got a whole file instead would be
+    /// answered about audio it never asked about, so a window with nothing to
+    /// cut it is refused.
+    audio: Option<Arc<dyn AudioWindow>>,
     tasks: TaskRegistry,
 }
 
@@ -56,11 +61,13 @@ impl Gateway {
         models: Arc<ModelRepo>,
         assets: Arc<dyn ProjectStore>,
         budgets: GenerateConfig,
+        audio: Option<Arc<dyn AudioWindow>>,
     ) -> Self {
         Self {
             models,
             assets,
             budgets,
+            audio,
             tasks: TaskRegistry::new(),
         }
     }
@@ -119,9 +126,31 @@ impl Gateway {
         request: GenerateRequest,
         cancel: &Cancel,
     ) -> Result<AsyncTask, ProviderError> {
-        let placement = self
-            .place(stamped(request, Capability::Video), cancel)
-            .await?;
+        self.start_job(stamped(request, Capability::Video), cancel)
+            .await
+    }
+
+    /// A recording, read back as words.
+    ///
+    /// A job for the same reason a shot is: an hour of speech takes minutes to
+    /// recognize, and the request carries the audio itself rather than a body
+    /// of a few words.
+    pub async fn transcribe(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<AsyncTask, ProviderError> {
+        self.start_job(stamped(request, Capability::Asr), cancel)
+            .await
+    }
+
+    /// One job started, whichever capability asked for it.
+    async fn start_job(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<AsyncTask, ProviderError> {
+        let placement = self.place(request, cancel).await?;
         let adapter = for_protocol(placement.call.protocol.clone());
         let started = Instant::now();
         let task = self
@@ -334,7 +363,13 @@ impl Gateway {
         let capability = request.capability;
         let request = merged(request, &snapshot.preferences);
         let resolved = resolve_within(&snapshot, &request.model, capability)?;
-        let inputs = load_inputs(self.assets.as_ref(), &request, &self.budgets).await?;
+        let inputs = load_inputs(
+            self.assets.as_ref(),
+            &request,
+            &self.budgets,
+            self.audio.as_deref(),
+        )
+        .await?;
         let call = self.address(&resolved).await?;
         Ok(Placement {
             call,
@@ -429,6 +464,10 @@ fn merged(mut request: GenerateRequest, preferences: &Preferences) -> GenerateRe
             offer_value(params, "generateAudio", preferences.video.generate_audio);
             offer_value(params, "watermark", preferences.video.watermark);
         }
+        // Recognition has no global preferences: what a recording is read for —
+        // which language, how many speakers — belongs to the clip being
+        // transcribed rather than to the model, and the request states it.
+        Capability::Asr => {}
     }
     request
 }

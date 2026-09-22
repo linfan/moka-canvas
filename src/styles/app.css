@@ -4811,6 +4811,37 @@ body.is-dragging-split {
   display: none;
 }
 
+.clip-text-transcribe {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clip-text-transcribe > .clip-text-field {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.clip-text-check {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+  padding-bottom: 2px;
+}
+
+.clip-text-check > input {
+  margin: 0;
+}
+
+.clip-text-transcribe-go {
+  font-size: 11px;
+  margin-left: auto;
+  padding: 3px 7px;
+}
+
 .clip-subtitle-list {
   display: flex;
   flex-direction: column;

@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import type {
   AssetCategory,
   AssetId,
-  Capability,
+  AssetKind,
   MokaFile,
   NodeId,
   ResourceEntry,
@@ -78,7 +78,7 @@ interface ImportJob {
 
 export interface AssetShelfProps {
   /** The kind tabs offered; defaults to the editor's four. */
-  kinds?: readonly Capability[];
+  kinds?: readonly AssetKind[];
   /** The question the face behind the shelf asks; not shown on the shelf. */
   lens?: ShelfLens;
   /** Within a group: filing order (default), or newest first. */
@@ -90,8 +90,8 @@ export interface AssetShelfProps {
   /** Whether files dropped anywhere over the column are imported. */
   acceptFileDrops?: boolean;
   /** The kind being read, when the caller owns it; a tab writes it back. */
-  kind?: Capability;
-  onKindChange?: (kind: Capability) => void;
+  kind?: AssetKind;
+  onKindChange?: (kind: AssetKind) => void;
   /** The row being read: the inspector's file, or the material panel's. */
   selectedId?: AssetId | null;
   onSelect?: (id: AssetId) => void;
@@ -135,7 +135,7 @@ function thumbOf(entry: ResourceEntry): string | null {
 }
 
 /** The kind a shelf opens on: pictures, or the first kind a face has. */
-function opensOn(kinds: readonly Capability[]): Capability {
+function opensOn(kinds: readonly AssetKind[]): AssetKind {
   return kinds.includes("image") ? "image" : (kinds[0] ?? "image");
 }
 
@@ -148,7 +148,7 @@ function onLens(entry: ResourceEntry, lens: ShelfLens): boolean {
 /** The files of one kind as a face reads them, in filing order. */
 function kindEntries(
   moka: MokaFile,
-  kind: Capability,
+  kind: AssetKind,
   lens?: ShelfLens,
 ): ResourceEntry[] {
   return KIND_SHELVES[kind].flatMap((shelf) => {
@@ -165,7 +165,7 @@ function kindEntries(
  * are pictures to narrow. Read through the face's lens, since a face that will
  * not show a file should not count it either.
  */
-function kindCount(moka: MokaFile, kind: Capability, lens?: ShelfLens): number {
+function kindCount(moka: MokaFile, kind: AssetKind, lens?: ShelfLens): number {
   return kindEntries(moka, kind, lens).length;
 }
 
@@ -563,7 +563,7 @@ export function AssetShelf({
   const fileInput = useRef<HTMLInputElement | null>(null);
   const shelfRef = useRef<HTMLElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [ownKind, setOwnKind] = useState<Capability>(() => opensOn(kinds));
+  const [ownKind, setOwnKind] = useState<AssetKind>(() => opensOn(kinds));
   const [addNodesToCanvas, setAddNodesToCanvas] = useState(addNodes);
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [filter, setFilter] = useState<ShelfFilter>(OPEN_SHELF_FILTER);
@@ -725,7 +725,7 @@ export function AssetShelf({
   const filed = held.length;
   const visible = matched.slice(0, pages * SHELF_PAGE);
 
-  const chooseKind = (next: Capability) => {
+  const chooseKind = (next: AssetKind) => {
     setOwnKind(next);
     onKindChange?.(next);
   };

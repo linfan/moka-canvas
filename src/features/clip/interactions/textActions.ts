@@ -192,6 +192,17 @@ export function addTextClipAtPlayhead(
 // A subtitle file
 // ---------------------------------------------------------------------------
 
+/**
+ * Which row a batch of cues is laid on.
+ *
+ * `firstTextTrack` is what bringing a file in does: the subtitles of a cut go
+ * to its first text row, and a cut with none grows one. `newTrack` is what a
+ * transcript does — it is a second reading of the same sound rather than a
+ * replacement of the first, so it is given a row of its own and never touches
+ * what is already written.
+ */
+export type SrtPlacement = "firstTextTrack" | "newTrack";
+
 export type SrtImportPlan =
   | {
       ok: true;
@@ -215,11 +226,15 @@ export type SrtImportPlan =
  * document order, exactly as §3 states, and a cut with none grows one as the
  * plan's first command. The batch is cut into `addClips` steps no larger than
  * one command may hold, all of them in the single entry `execute` records.
+ *
+ * A row of its own carries no clash to check: nothing is on it yet, and the
+ * cues are already known to keep out of each other's way.
  */
 export function srtImportPlan(
   timeline: TimelineDocument,
   cues: readonly SrtCue[],
   style: TextClipStyle,
+  placement: SrtPlacement = "firstTextTrack",
 ): SrtImportPlan {
   const fps = timeline.settings.fps;
   const aligned: SrtCue[] = [];
@@ -251,7 +266,10 @@ export function srtImportPlan(
       }),
     };
   }
-  const target = timeline.tracks.find((track) => track.kind === "text") ?? null;
+  const target =
+    placement === "newTrack"
+      ? null
+      : (timeline.tracks.find((track) => track.kind === "text") ?? null);
   if (target) {
     for (const cue of aligned) {
       const collision = timeline.clips.some(
@@ -340,4 +358,26 @@ export function importSrt(text: string, style: TextClipStyle): void {
       ? i18n.t("clip:subtitles.importedWithSkipped", { cues, skipped })
       : i18n.t("clip:subtitles.imported", { cues }),
   );
+}
+
+/**
+ * A transcript laid down: a row of its own, in one step of history.
+ *
+ * A transcript never stands in for what is already written, so the plan is
+ * asked for a new row and the room's own clash check has nothing to say. The
+ * verdict comes back rather than being spoken here: the caller knows how many
+ * cues were dropped before the plan ever saw them and says both counts in one
+ * breath. Null is a step that never landed at all.
+ */
+export function landTranscribedCues(
+  cues: readonly SrtCue[],
+  style: TextClipStyle,
+): { ok: true; clips: TimelineClip[] } | { ok: false; message: string } | null {
+  const timeline = activeTimeline();
+  if (!timeline) return null;
+  const plan = srtImportPlan(timeline, cues, style, "newTrack");
+  if (!plan.ok) return { ok: false, message: plan.message };
+  const done = execute(i18n.t("clip:history.transcribe"), plan.commands);
+  if (!done) return null;
+  return { ok: true, clips: plan.clips };
 }

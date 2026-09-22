@@ -1,5 +1,5 @@
-import type { AssetId, Capability, MokaFile } from "../../../shared/domain";
-import { MODEL_CAPABILITIES } from "../../../shared/domain";
+import type { AssetId, AssetKind, MokaFile } from "../../../shared/domain";
+import { ASSET_KINDS } from "../../../shared/domain";
 import { canvasAssetIds } from "../../editor/panels/canvasAssets";
 import type { ShelfLens } from "../../editor/panels/shelfFilter";
 import type { ClipFace } from "../stores/clipStore";
@@ -32,7 +32,7 @@ export function isMediaFace(face: ClipFace): face is MediaFace {
  * The cutting room cuts what is seen and heard, and words have a page of their
  * own where they are written rather than laid on a track.
  */
-const MEDIA_KINDS: readonly Capability[] = MODEL_CAPABILITIES.filter(
+const MEDIA_KINDS: readonly AssetKind[] = ASSET_KINDS.filter(
   (kind) => kind !== "text",
 );
 
@@ -90,7 +90,7 @@ const PROJECT_EMPTY: Record<ProjectNarrowing, string> = {
 /** Everything a face passes to the shelf, apart from its own row actions. */
 export interface FaceShelfProps {
   /** Which kind tabs the face offers. */
-  kinds: readonly Capability[];
+  kinds: readonly AssetKind[];
   /** The question the face stands behind, if it stands behind one. */
   lens?: ShelfLens;
   /** What the face says when it holds nothing, as a translation key. */

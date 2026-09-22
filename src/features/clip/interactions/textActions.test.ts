@@ -25,6 +25,7 @@ import {
   clampTextContent,
   cueSummary,
   importSrt,
+  landTranscribedCues,
   legalStyle,
   sameText,
   srtImportPlan,
@@ -363,6 +364,76 @@ describe("srtImportPlan", () => {
       ok: false,
       message: "The timeline holds at most 400 clips — delete 2 first.",
     });
+  });
+
+  it("grows a row of its own for a transcript, clear of what is written", () => {
+    const timeline = withTextClips([
+      textClip("existing", ids.textTrack, 0, 4_000, "already here"),
+    ]);
+    // The moment is one the first text row is already speaking at, which is
+    // exactly what a transcript must not be refused for.
+    const plan = srtImportPlan(
+      timeline,
+      [cue(1_000, 2_000, "new")],
+      style,
+      "newTrack",
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const [first, second] = plan.commands;
+    expect(first.type).toBe("addTrack");
+    if (first.type !== "addTrack") return;
+    expect(first.track.kind).toBe("text");
+    expect(first.track.name).toBe("Text 2");
+    expect(second.type).toBe("addClips");
+    if (second.type !== "addClips") return;
+    expect(second.clips[0].trackId).toBe(first.track.id);
+    expect(second.clips[0].trackId).not.toBe(ids.textTrack);
+    expect(plan.clips[0].startMs).toBe(1_000);
+    expect(plan.clips[0].text?.content).toBe("new");
+  });
+
+  it("still refuses a transcript whose own cues run into each other", () => {
+    const plan = srtImportPlan(
+      withTextClips([]),
+      [cue(1_000, 5_000, "one"), cue(4_400, 8_000, "two")],
+      style,
+      "newTrack",
+    );
+    expect(plan).toEqual({
+      ok: false,
+      message: "The subtitles overlap each other at 00:00:04:12.",
+    });
+  });
+});
+
+describe("landTranscribedCues", () => {
+  it("writes a transcript on a row of its own in one step of history", () => {
+    open(buildTimelineMokaFile(), ids.timeline);
+    const landed = landTranscribedCues([cue(1_000, 3_000, "hello")], style);
+    expect(landed).not.toBeNull();
+    if (!landed || !landed.ok) return;
+    const after = cut();
+    const landedClip = after.clips.find(
+      (each) => each.id === landed.clips[0].id,
+    );
+    const track = after.tracks.find((each) => each.id === landedClip?.trackId);
+    expect(track?.kind).toBe("text");
+    expect(track?.id).not.toBe(ids.textTrack);
+    expect(landedClip?.text?.content).toBe("hello");
+    expect(landedClip?.startMs).toBe(1_000);
+    expect(landedClip?.durationMs).toBe(2_000);
+    expect(entryCount()).toBe(1);
+  });
+
+  it("says why nothing landed when every cue was too short", () => {
+    open(buildTimelineMokaFile(), ids.timeline);
+    expect(landTranscribedCues([cue(1_000, 1_050)], style)).toEqual({
+      ok: false,
+      message: "No cues were long enough to import.",
+    });
+    expect(cut().clips).toHaveLength(1);
+    expect(entryCount()).toBe(0);
   });
 });
 

@@ -126,6 +126,19 @@ pub const BUILTIN_GROUPS: &[ScriptGroup] = &[
             },
         ],
     },
+    // Batch 3: Bailian speech recognition
+    ScriptGroup {
+        batch: 3,
+        scripts: &[ScriptDef {
+            protocol_id: "bailianAsr",
+            capability: "asr",
+            display_name: "Alibaba Cloud · Bailian Speech Recognition (recording file)",
+            url_example: "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription",
+            subdir: "asr",
+            filename: "bailian-asr.lua",
+            source: include_str!("../../converter-scripts/asr/bailian-asr.lua"),
+        }],
+    },
 ];
 
 /// Ensures all built-in converter scripts are deployed to the converter

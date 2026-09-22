@@ -830,6 +830,17 @@ export function materialOf(clip: TimelineClip): ClipMaterial {
   };
 }
 
+/**
+ * Whether a clip's material is something a listening can be asked of.
+ *
+ * A still picture rides the video track and looks exactly like a shot; what
+ * tells the two apart is what the registry says the file is, which is the same
+ * question the trim tools ask as "a still reads its own clock".
+ */
+export function materialHoldsSound(clip: TimelineClip): boolean {
+  return !materialOf(clip).ownClock;
+}
+
 /** One switch of a row's own state, as one step of history. */
 export type TrackFlag = "muted" | "hidden" | "locked";
 

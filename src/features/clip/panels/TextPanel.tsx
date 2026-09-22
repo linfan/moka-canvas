@@ -9,6 +9,7 @@ import { trackClipsInOrder } from "../../../shared/domain/timeline";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { TextFields } from "../inspector/TextFields";
+import { materialHoldsSound } from "../interactions/clipActions";
 import {
   MAX_SUBTITLE_FILE_BYTES,
   addTextClipAtPlayhead,
@@ -16,7 +17,9 @@ import {
   importSrt,
 } from "../interactions/textActions";
 import { useClipStore } from "../stores/clipStore";
+import { useTranscribeStore } from "../stores/transcribeStore";
 import { cueOfClip, serializeSrt } from "../subtitles/srt";
+import { sourceClip } from "../subtitles/transcribe";
 import {
   TEXT_STYLE_PRESETS,
   presetById,
@@ -35,9 +38,15 @@ import { formatTimecode } from "../timeline/timecode";
  * without setting the same look again for each line.
  *
  * Below it the subtitle tools: an `.srt` brought in as a whole batch of clips
- * in one step of history, the first text track written back out as an `.srt`,
- * and the cue list — every text clip of that track, in time order — where a
- * click chooses the clip and takes the playhead to its words.
+ * in one step of history, a speech recognizer asked to write one, the text
+ * track being read written back out as an `.srt`, and the cue list — every
+ * text clip of that track, in time order — where a click chooses the clip and
+ * takes the playhead to its words.
+ *
+ * The tools read one track: the one a chosen text clip stands on, and the
+ * first text row otherwise. That is what makes a transcript visible the moment
+ * it lands — it is put on a row of its own, and its first cue is chosen for
+ * it — while bringing a file in and writing one out keep meaning the same row.
  *
  * The page reads the selection and never writes back to the composer: editing
  * a chosen clip is the inspector's job, and two forms over one clip would
@@ -57,6 +66,22 @@ const PRESET_LABELS: Record<TextStylePresetId, string> = {
   caption: "clip:textPresets.caption",
 };
 
+/**
+ * The languages a recording can be said to be in, by the code a recognizer
+ * knows. `auto` is the absence of an answer rather than one of them, which is
+ * why it is the first choice and why nothing is sent when it stands.
+ */
+const LANGUAGES = ["auto", "zh", "en", "ja", "ko", "yue"] as const;
+
+const LANGUAGE_LABELS: Record<(typeof LANGUAGES)[number], string> = {
+  auto: "clip:textPanel.languageAuto",
+  zh: "clip:textPanel.languageZh",
+  en: "clip:textPanel.languageEn",
+  ja: "clip:textPanel.languageJa",
+  ko: "clip:textPanel.languageKo",
+  yue: "clip:textPanel.languageYue",
+};
+
 function toast(kind: "info" | "success" | "error", message: string): void {
   useAppStore.getState().pushToast(kind, message);
 }
@@ -66,6 +91,9 @@ export function TextPanel() {
   const moka = useProjectStore((state) => state.moka);
   const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const clipIds = useClipStore((state) => state.selection.clipIds);
+  const playheadMs = useClipStore((state) => state.playheadMs);
+  const phase = useTranscribeStore((state) => state.phase);
+  const transcribeError = useTranscribeStore((state) => state.error);
   const timeline =
     (moka?.timelines ?? []).find((each) => each.id === activeTimelineId) ??
     null;
@@ -74,19 +102,40 @@ export function TextPanel() {
     style: defaultTextStyle(),
   }));
   const [presetId, setPresetId] = useState<string>("basic");
+  const [language, setLanguage] = useState<string>("auto");
+  const [diarize, setDiarize] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // The subtitle tools read the first text track, which is the one a batch of
-  // cues lands on and the one the list writes down.
-  const textTrack =
-    timeline?.tracks.find((track) => track.kind === "text") ?? null;
+  // The subtitle tools read one text track: the one a chosen text clip is on,
+  // and the first of them otherwise. A transcript lands on a row of its own,
+  // so following the selection is what lets the reader see what just arrived.
+  const shownTrack = useMemo(() => {
+    const textTracks = (timeline?.tracks ?? []).filter(
+      (track) => track.kind === "text",
+    );
+    if (!timeline || textTracks.length === 0) return null;
+    const chosen = timeline.clips.find(
+      (clip) => clipIds.includes(clip.id) && clip.kind === "text",
+    );
+    const holder = textTracks.find((track) => track.id === chosen?.trackId);
+    return holder ?? textTracks[0];
+  }, [timeline, clipIds]);
   const cues = useMemo(() => {
-    if (!timeline || !textTrack) return [];
-    return trackClipsInOrder(timeline, textTrack.id).filter(
+    if (!timeline || !shownTrack) return [];
+    return trackClipsInOrder(timeline, shownTrack.id).filter(
       (clip) => clip.kind === "text",
     );
-  }, [timeline, textTrack]);
+  }, [timeline, shownTrack]);
   const fps = timeline?.settings.fps ?? 30;
+  // What recognition would be asked about, by the rule the ask itself uses.
+  const source = useMemo(
+    () =>
+      timeline
+        ? sourceClip(timeline, clipIds, playheadMs, materialHoldsSound)
+        : null,
+    [timeline, clipIds, playheadMs],
+  );
+  const busy = phase !== "idle";
 
   const applyPreset = (id: string) => {
     setPresetId(id);
@@ -142,6 +191,30 @@ export function TextPanel() {
     useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
     useClipStore.getState().setPlayhead(clip.startMs);
   };
+
+  // Why the one button of the transcription row cannot be pressed, if it
+  // cannot: the reading itself is the store's from the moment it starts.
+  const blocked = !timeline
+    ? t("clip:textPanel.noTimeline")
+    : source === null
+      ? t("clip:textPanel.noSourceClip")
+      : null;
+  const ask = () => {
+    void useTranscribeStore.getState().start({
+      style: composer.style,
+      language: language === "auto" ? "" : language,
+      // The words around the speaker's number belong to whoever is reading,
+      // and a recognizer only knows how to count.
+      speakerLabel: diarize ? t("clip:textPanel.speakerLabel") : "",
+    });
+  };
+  const busyLabel = t(
+    phase === "submitting"
+      ? "clip:textPanel.transcribingSubmit"
+      : phase === "landing"
+        ? "clip:textPanel.transcribingLand"
+        : "clip:textPanel.transcribing",
+  );
 
   return (
     <div className="clip-text-page" data-testid="clip-text-panel">
@@ -203,6 +276,50 @@ export function TextPanel() {
           ref={fileRef}
           type="file"
         />
+
+        <div className="clip-text-transcribe">
+          <label className="clip-text-field">
+            <span className="clip-text-label">
+              {t("clip:textPanel.language")}
+            </span>
+            <select
+              aria-label={t("clip:textPanel.language")}
+              disabled={busy}
+              onChange={(event) => setLanguage(event.target.value)}
+              value={language}
+            >
+              {LANGUAGES.map((code) => (
+                <option key={code} value={code}>
+                  {t(LANGUAGE_LABELS[code])}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="clip-text-check">
+            <input
+              checked={diarize}
+              disabled={busy}
+              onChange={(event) => setDiarize(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{t("clip:textPanel.diarize")}</span>
+          </label>
+          <button
+            className="clip-text-transcribe-go"
+            disabled={busy || blocked !== null}
+            onClick={ask}
+            title={busy ? busyLabel : (blocked ?? undefined)}
+            type="button"
+          >
+            {busy ? busyLabel : t("clip:textPanel.transcribe")}
+          </button>
+        </div>
+        {transcribeError ? (
+          <p className="clip-text-hint" role="alert">
+            {transcribeError}
+          </p>
+        ) : null}
+
         {cues.length === 0 ? (
           <p className="clip-text-hint">{t("clip:textPanel.noClips")}</p>
         ) : (

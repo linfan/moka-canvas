@@ -27,6 +27,9 @@ generate:
   textTimeoutSeconds: 120
   imageTimeoutSeconds: 300
   audioTimeoutSeconds: 120
+  # Speech recognition is usually an upload of the audio being transcribed, so
+  # its budget is far above the others.
+  asrTimeoutSeconds: 600
   videoTaskTimeoutSeconds: 60
   videoPollTimeoutSeconds: 30
   # Attempts for a failure that waiting can fix, counting the first. The wait

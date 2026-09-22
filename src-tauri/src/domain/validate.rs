@@ -139,6 +139,13 @@ pub fn generation_param_keys(capability: Capability) -> &'static [&'static str] 
             "watermark",
             "mode",
         ],
+        Capability::Asr => &[
+            "language",
+            "channelId",
+            "speakerCount",
+            "disfluency",
+            "speakerLabel",
+        ],
     }
 }
 

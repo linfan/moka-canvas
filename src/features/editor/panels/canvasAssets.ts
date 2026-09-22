@@ -1,7 +1,7 @@
 import type {
   AssetCategory,
   AssetId,
-  Capability,
+  AssetKind,
   CanvasDocument,
   CanvasId,
   MokaFile,
@@ -87,10 +87,10 @@ export function canvasNodesUsing(
 export function canvasAssetsByKind(
   moka: MokaFile,
   canvasId: CanvasId,
-): Record<Capability, ResourceEntry[]> {
+): Record<AssetKind, ResourceEntry[]> {
   const empty = Object.fromEntries(
     SHELF_KINDS.map((kind) => [kind, [] as ResourceEntry[]]),
-  ) as Record<Capability, ResourceEntry[]>;
+  ) as Record<AssetKind, ResourceEntry[]>;
   const canvas = moka.canvas.find((item) => item.id === canvasId);
   if (!canvas) return empty;
   const used = canvasAssetIds(canvas);

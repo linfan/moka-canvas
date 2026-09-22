@@ -113,7 +113,7 @@ async fn a_fresh_install_reports_an_empty_configuration() {
     assert_eq!(view["models"], json!([]));
     assert_eq!(
         view["defaults"],
-        json!({ "text": null, "image": null, "audio": null, "video": null })
+        json!({ "text": null, "image": null, "audio": null, "video": null, "asr": null })
     );
     assert_eq!(view["preferences"]["reasoningEffort"], "auto");
     // The harness wrote a master key file up front, so the tier is the file.

@@ -47,6 +47,9 @@ fn draft(id: &str, category: Capability) -> ModelDraft {
             "https://provider.test/v1/audio/speech/",
         ),
         Capability::Video => (Protocol::OpenaiVideos, "https://provider.test/v1/videos/"),
+        // Nothing built in serves recognition: a suite that configures one
+        // places a converter script, and the reserved protocol stands in here.
+        Capability::Asr => (Protocol::Custom, "https://provider.test/v1/transcription/"),
     };
     ModelDraft {
         id: id.to_string(),
@@ -282,6 +285,49 @@ async fn a_lua_protocol_the_converter_registry_offers_is_accepted() {
     };
     assert_eq!(
         repo.upsert(invented).await.unwrap_err().code(),
+        "VALIDATION_FAILED"
+    );
+}
+
+#[tokio::test]
+async fn recognition_is_served_by_its_script_and_by_nothing_else() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo(root.path());
+
+    // The registry's recognition script, on the same leaked directory the
+    // other script test deploys to.
+    let converter = tempfile::tempdir().unwrap();
+    let path: &'static Path = Box::leak(converter.keep().into_boxed_path());
+    moka_canvas::converter::deploy::ensure_deployed(path)
+        .await
+        .unwrap();
+
+    // Recognition has no built-in protocol, so the script is the whole of
+    // what a recognition model can be pointed at.
+    let listener = ModelDraft {
+        protocol: Protocol::from_wire_name("bailianAsr"),
+        ..draft("listener", Capability::Asr)
+    };
+    repo.upsert(listener).await.unwrap();
+
+    // A script is filed under one capability: the recognition one cannot
+    // serve a shot.
+    let mismatched = ModelDraft {
+        protocol: Protocol::from_wire_name("bailianAsr"),
+        ..draft("listener", Capability::Video)
+    };
+    let error = repo.upsert(mismatched).await.unwrap_err();
+    assert_eq!(error.code(), "VALIDATION_FAILED");
+    assert!(error.to_string().contains("bailianAsr"), "{error}");
+
+    // And what recognition does offer is the script alone: a protocol built
+    // for another category is refused rather than stored and never reached.
+    let borrowed = ModelDraft {
+        protocol: Protocol::OpenaiChat,
+        ..draft("borrowed", Capability::Asr)
+    };
+    assert_eq!(
+        repo.upsert(borrowed).await.unwrap_err().code(),
         "VALIDATION_FAILED"
     );
 }

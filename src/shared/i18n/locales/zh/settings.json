@@ -61,6 +61,7 @@
     "identifierTaken": "已有另一个模型使用此标识符。",
     "identifierSpaces": "标识符不能包含空格。",
     "protocol": "协议",
+    "noProtocols": "这类模型暂时没有可用的协议：它的接口形状来自转换脚本，而当前没有部署任何脚本。",
     "url": "URL",
     "urlAria": "端点 URL",
     "urlHint": "请求发送到的完整端点地址——不是基础 URL。",

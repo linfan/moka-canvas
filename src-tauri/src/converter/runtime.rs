@@ -8,10 +8,44 @@
 //! | `build_request(call, req, inputs)` | 3 tables | `{method, url, headers, body}` | text, image, audio |
 //! | `parse_response(status, headers, body)` | number, table, string | `{text, items, usage}` | text, image, audio |
 //! | `parse_event(event_json)` | string | `{text, complete, usage}` | text streaming |
-//! | `build_task_request(call, req, inputs)` | 3 tables | `{method, url, headers, body}` | video |
-//! | `parse_task_response(status, headers, body)` | number, table, string | `{reference, poll_interval_ms}` | video |
-//! | `build_poll_request(call, task)` | 2 tables | `{method, url, headers}` | video |
-//! | `parse_poll_response(status, headers, body)` | number, table, string | `{status, result, error}` | video |
+//! | `build_task_request(call, req, inputs)` | 3 tables | `{method, url, headers, body}` | video, asr |
+//! | `parse_task_response(status, headers, body)` | number, table, string | `{reference, poll_interval_ms}` | video, asr |
+//! | `build_poll_request(call, task)` | 2 tables | `{method, url, headers}` | video, asr |
+//! | `parse_poll_response(status, headers, body)` | number, table, string | `{status, result, error}` | video, asr |
+//!
+//! # Asking for another exchange
+//!
+//! A protocol that needs more than one call per step — an upload before a
+//! submit, a document behind a poll — says so instead of the host knowing it.
+//! Any hook may return
+//!
+//! ```lua
+//! { request = {method = "GET", url = ..., headers = ..., body = ...},
+//!   handler = "parse_something",  -- optional: the hook that reads this answer
+//!   state = { ... } }             -- optional: handed to the next handler
+//! ```
+//!
+//! as its reply, or may carry one under `next` beside the rest of what it
+//! answers. The host sends that request, calls `handler` with
+//! `(status, headers, body, state)`, and repeats until a reply carries no
+//! `next`; the reply that ends the chain is that step's answer. Handlers are
+//! looked up before each request goes out, so a script that names a function it
+//! never wrote is refused rather than sending an upload nobody will read. What
+//! one step learns is only what it wrote into `state`: every step runs in a
+//! runtime of its own. A chain is capped, so a reply that asks for itself again
+//! is an error rather than a loop.
+//!
+//! A `body` is text, or a form whose file part is one of the inputs the request
+//! carried — Lua counts from one:
+//!
+//! ```lua
+//! body = {multipart = {fields = {key = "a-value"}, file = {part = "file", input = 1}}}
+//! ```
+//!
+//! Requests are sent to the address the script named. The credential follows
+//! the address rather than the script: an upload host or a link a provider
+//! handed back is a different origin from the configured endpoint, and a key
+//! sent there would not be going to the provider.
 
 use std::path::Path;
 
@@ -327,6 +361,251 @@ mod tests {
         // The API only takes the tiers with a trailing P, so the bare tier the
         // request carries is dressed before it travels.
         assert_eq!(body["parameters"]["resolution"], "720P");
+    }
+
+    /// A policy answer as the provider writes one, and the state step one left.
+    fn policy() -> serde_json::Value {
+        serde_json::json!({
+            "data": {
+                "upload_host": "https://dashscope-file.oss-cn-beijing.aliyuncs.com",
+                "upload_dir": "dashscope-instant/2026/09/22/abc",
+                "oss_access_key_id": "LTAm5xxx",
+                "policy": "eyJleHBpcmF0aW9u",
+                "signature": "Sm/tv7DcZuTZftFVvt5yOoSETsc=",
+                "x_oss_object_acl": "private",
+                "x_oss_forbid_overwrite": "true"
+            }
+        })
+    }
+
+    /// A transcription document as the provider writes one: two speakers, and
+    /// two sentences from the first of them.
+    fn transcript() -> serde_json::Value {
+        serde_json::json!({
+            "transcripts": [{
+                "channel_id": 0,
+                "text": "Hello world, 这里是阿里巴巴语音实验室。第二句。换人了。",
+                "sentences": [
+                    {"begin_time": 100, "end_time": 3820, "speaker_id": 0,
+                     "text": "Hello world, 这里是阿里巴巴语音实验室。"},
+                    {"begin_time": 4000, "end_time": 5200, "speaker_id": 0,
+                     "text": "第二句。"},
+                    {"begin_time": 6000, "end_time": 7000, "speaker_id": 1,
+                     "text": "换人了。"}
+                ]
+            }]
+        })
+    }
+
+    #[test]
+    fn the_bailian_recognition_script_uploads_submits_and_reads_the_transcript() {
+        let rt = test_runtime();
+        let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
+        let asr = rt.load(&scripts.join("asr/bailian-asr.lua")).unwrap();
+        let endpoint = "https://ws.test/api/v1/services/audio/asr/transcription";
+
+        // Step one: ask where the audio may be put. What the caller asked for
+        // rides along, because nothing after this call can see the request.
+        let asked = rt
+            .call_json_value(
+                &asr,
+                "build_task_request",
+                vec![
+                    serde_json::json!({"url": endpoint, "model": "fun-asr"}),
+                    serde_json::json!({"prompt": "", "params": {
+                        "language": "zh", "speakerCount": 2, "speakerLabel": "说话人{id}："
+                    }}),
+                    serde_json::json!([{
+                        "role": "controlAudio", "filename": "take-1.wav", "mime": "audio/wav"
+                    }]),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            asked["request"]["url"],
+            "https://ws.test/api/v1/uploads?action=getPolicy&model=fun-asr"
+        );
+        assert_eq!(asked["handler"], "parse_policy");
+        assert_eq!(asked["state"]["parameters"]["language_hints"][0], "zh");
+        assert_eq!(asked["state"]["parameters"]["diarization_enabled"], true);
+        assert_eq!(asked["state"]["parameters"]["speaker_count"], 2);
+
+        // Step two: the policy names a host, and the audio goes there as a
+        // form whose file part is the input this request carried.
+        let upload = rt
+            .call_json_value(
+                &asr,
+                "parse_policy",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!(""),
+                    serde_json::Value::String(policy().to_string()),
+                    asked["state"].clone(),
+                ],
+            )
+            .unwrap();
+        let out = &upload["next"]["request"];
+        assert_eq!(
+            out["url"],
+            "https://dashscope-file.oss-cn-beijing.aliyuncs.com"
+        );
+        assert_eq!(out["body"]["multipart"]["file"]["part"], "file");
+        assert_eq!(out["body"]["multipart"]["file"]["input"], 1);
+        let fields = &out["body"]["multipart"]["fields"];
+        assert_eq!(fields["key"], "dashscope-instant/2026/09/22/abc/take-1.wav");
+        assert_eq!(fields["success_action_status"], 200);
+        assert_eq!(fields["x-oss-forbid-overwrite"], "true");
+
+        // Step three: with the audio uploaded, the job is submitted against
+        // the address the provider can fetch it from.
+        let submit = rt
+            .call_json_value(
+                &asr,
+                "parse_upload",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!(""),
+                    serde_json::json!(""),
+                    upload["state"].clone(),
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_str(
+            submit["next"]["request"]["body"]
+                .as_str()
+                .expect("a JSON body"),
+        )
+        .unwrap();
+        assert_eq!(body["model"], "fun-asr");
+        assert_eq!(
+            body["input"]["file_urls"][0],
+            "oss://dashscope-instant/2026/09/22/abc/take-1.wav"
+        );
+        assert_eq!(body["parameters"]["language_hints"][0], "zh");
+        assert_eq!(
+            submit["next"]["request"]["headers"]["X-DashScope-OssResourceResolve"],
+            "enable"
+        );
+        assert_eq!(
+            submit["next"]["request"]["headers"]["X-DashScope-Async"],
+            "enable"
+        );
+
+        // The job's answer names the document with the words in it, which is
+        // one more call rather than a field of the answer.
+        let polled = rt
+            .call_json_value(
+                &asr,
+                "parse_poll_response",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!(""),
+                    serde_json::Value::String(
+                        serde_json::json!({"output": {
+                            "task_status": "SUCCEEDED",
+                            "results": [{"transcription_url": "https://result.test/1.json"}]
+                        }})
+                        .to_string(),
+                    ),
+                ],
+            )
+            .unwrap();
+        assert_eq!(polled["next"]["handler"], "parse_transcription");
+        assert_eq!(
+            polled["next"]["request"]["url"],
+            "https://result.test/1.json"
+        );
+
+        // And the document becomes a subtitle file, its times measured from
+        // the beginning of the audio that was sent.
+        let done = rt
+            .call_json_value(
+                &asr,
+                "parse_transcription",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!(""),
+                    serde_json::json!(transcript().to_string()),
+                    submit["state"].clone(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(done["status"], "succeeded");
+        assert_eq!(
+            done["result"]["text"],
+            "1\n00:00:00,100 --> 00:00:05,200\n\
+             说话人1：Hello world, 这里是阿里巴巴语音实验室。 第二句。\n\n\
+             2\n00:00:06,000 --> 00:00:07,000\n说话人2：换人了。\n"
+        );
+    }
+
+    #[test]
+    fn a_recognition_without_speakers_gives_one_cue_per_sentence() {
+        let rt = test_runtime();
+        let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
+        let asr = rt.load(&scripts.join("asr/bailian-asr.lua")).unwrap();
+
+        let asked = rt
+            .call_json_value(
+                &asr,
+                "build_task_request",
+                vec![
+                    serde_json::json!({"url": "https://ws.test/asr", "model": "fun-asr"}),
+                    serde_json::json!({"prompt": "", "params": {}}),
+                    serde_json::json!([{"role": "controlAudio", "filename": "a.wav"}]),
+                ],
+            )
+            .unwrap();
+        // Nothing was asked about speakers, so nothing is asked of the
+        // recognizer either: a channel list and nothing else.
+        assert_eq!(
+            asked["state"]["parameters"]["diarization_enabled"],
+            serde_json::Value::Null
+        );
+
+        let done = rt
+            .call_json_value(
+                &asr,
+                "parse_transcription",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!(""),
+                    serde_json::json!(transcript().to_string()),
+                    asked["state"].clone(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            done["result"]["text"],
+            "1\n00:00:00,100 --> 00:00:03,820\nHello world, 这里是阿里巴巴语音实验室。\n\n\
+             2\n00:00:04,000 --> 00:00:05,200\n第二句。\n\n\
+             3\n00:00:06,000 --> 00:00:07,000\n换人了。\n"
+        );
+    }
+
+    #[test]
+    fn a_recording_with_nothing_said_is_refused_rather_than_answered() {
+        let rt = test_runtime();
+        let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
+        let asr = rt.load(&scripts.join("asr/bailian-asr.lua")).unwrap();
+        let done = rt
+            .call_json_value(
+                &asr,
+                "parse_transcription",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!(""),
+                    serde_json::Value::String(
+                        serde_json::json!({"transcripts": [{"sentences": []}]}).to_string(),
+                    ),
+                    serde_json::json!({}),
+                ],
+            )
+            .unwrap();
+        assert!(
+            done["error"].as_str().unwrap().contains("no speech"),
+            "{done}"
+        );
     }
 
     #[test]

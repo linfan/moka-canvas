@@ -15,10 +15,11 @@
     "defaultName": "Canvas {{n}}"
   },
   "capability": {
-    "audio": "Audio",
-    "image": "Image",
     "text": "Text",
-    "video": "Video"
+    "image": "Image",
+    "audio": "Audio",
+    "video": "Video",
+    "asr": "Speech recognition"
   },
   "nodeTitle": {
     "audio": "Audio",

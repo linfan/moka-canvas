@@ -182,6 +182,10 @@ pub fn protocols_for(capability: Capability) -> &'static [Protocol] {
         Capability::Image => &[Protocol::OpenaiImages],
         Capability::Audio => &[Protocol::OpenaiSpeech],
         Capability::Video => &[Protocol::OpenaiVideos, Protocol::GeminiVideo],
+        // Speech recognition is a Lua script's business: no built-in protocol
+        // speaks a transcription endpoint, so the registry is the whole list
+        // and a deployment with no such script offers nothing to choose.
+        Capability::Asr => &[],
     }
 }
 
@@ -243,6 +247,7 @@ pub struct Defaults {
     pub image: Option<String>,
     pub audio: Option<String>,
     pub video: Option<String>,
+    pub asr: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

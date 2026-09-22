@@ -267,7 +267,7 @@ fn generation_config(request: &GenerateRequest) -> Option<Value> {
         Capability::Audio => {
             config.insert("responseModalities".into(), json!(["AUDIO"]));
         }
-        Capability::Text | Capability::Video => {}
+        Capability::Text | Capability::Video | Capability::Asr => {}
     }
     if let Some(temperature) = request.float_param("temperature") {
         config.insert("temperature".into(), json!(temperature));

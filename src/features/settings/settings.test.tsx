@@ -136,7 +136,7 @@ function fixture(): ModelsView {
       model("scribe", "text", "openaiChat", "Scribe", false),
       model("painter", "image", "openaiImages", "Painter", true),
     ],
-    defaults: { text: null, image: null, audio: null, video: null },
+    defaults: { text: null, image: null, audio: null, video: null, asr: null },
     preferences: {
       systemPrompt: "",
       reasoningEffort: "auto",

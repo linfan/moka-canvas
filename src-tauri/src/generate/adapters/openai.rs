@@ -62,6 +62,12 @@ impl ProviderAdapter for OpenAiAdapter {
             Capability::Video => Err(ProviderError::invalid(
                 "video generation runs as a task rather than in one call",
             )),
+            // Recognition answers about media rather than with it, and no
+            // OpenAI-shaped endpoint here takes a recording: it is spoken by a
+            // Lua converter script.
+            Capability::Asr => Err(ProviderError::invalid(
+                "speech recognition is served by a converter script, not by this protocol",
+            )),
         }
     }
 

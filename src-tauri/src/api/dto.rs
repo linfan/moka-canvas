@@ -260,7 +260,7 @@ pub struct ModelKeyRequest {
 ///
 /// Absent means leave it alone and `null` means clear it, which is the whole
 /// reason this is not just the stored `Defaults` shape: setting the image
-/// default from a model picker must not wipe the other three.
+/// default from a model picker must not wipe the others.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultsPatch {
@@ -272,6 +272,8 @@ pub struct DefaultsPatch {
     pub audio: Option<Option<String>>,
     #[serde(default, deserialize_with = "present_value")]
     pub video: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present_value")]
+    pub asr: Option<Option<String>>,
     #[serde(default)]
     pub expected_revision: Option<u64>,
 }

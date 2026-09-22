@@ -63,10 +63,17 @@ impl ApiState {
         let config = Arc::new(config);
         let store = Arc::new(FsProjectStore::new(Arc::clone(&config)));
         let models = Arc::new(ModelRepo::new(Arc::clone(&metadata)));
+        // The same renderer the cutting room exports with, asked for one cut
+        // instead: a recognition request names a window of a recording, and a
+        // window is made with the program this deployment already has.
+        let clip_probe = Arc::new(CapabilityProbe::new(&config.clip));
         let gateway = Arc::new(Gateway::new(
             Arc::clone(&models),
             Arc::clone(&store) as Arc<dyn ProjectStore>,
             config.generate.clone(),
+            Some(Arc::new(crate::clip::audio::Windows::new(Arc::clone(
+                &clip_probe,
+            )))),
         ));
         let executors: Vec<Arc<dyn WorkflowExecutor>> = vec![
             Arc::new(DeterministicExecutor::new()),
@@ -78,7 +85,6 @@ impl ApiState {
             config.active_executors(),
             config.generate.concurrent_runs(),
         );
-        let clip_probe = Arc::new(CapabilityProbe::new(&config.clip));
         Self {
             mode,
             store,
@@ -206,6 +212,7 @@ fn generate_router() -> axum::Router<ApiState> {
         .route("/api/v1/generate/image", post(routes::generate_image))
         .route("/api/v1/generate/audio", post(routes::generate_audio))
         .route("/api/v1/generate/video", post(routes::generate_video))
+        .route("/api/v1/generate/asr", post(routes::generate_asr))
         .route(
             "/api/v1/generate/tasks/{id}",
             get(routes::poll_generation_task),

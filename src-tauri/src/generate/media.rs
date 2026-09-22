@@ -5,12 +5,14 @@
 //! travel as they are. Paths stay here — an adapter is handed bytes, a mime
 //! type, and the name a multipart part needs.
 
+use std::path::Path;
+
 use crate::config::GenerateConfig;
 use crate::domain::{AssetId, Capability, ResourceEntry};
 use crate::project::ProjectStore;
 
 use super::error::ProviderError;
-use super::{GenerateInput, GenerateRequest, InputRole};
+use super::{GenerateInput, GenerateRequest, InputRole, InputWindow};
 
 /// Formats sent as they are. Anything else that still decodes is re-encoded,
 /// because a provider that cannot read a format rarely says which one it wanted.
@@ -126,19 +128,47 @@ impl Default for MultipartBody {
     }
 }
 
+/// Turning a window of a stored asset into audio.
+///
+/// The cutting room owns how a window becomes audio — which program runs, what
+/// form it is asked for, where the result lands — and this module asks for a
+/// cut rather than knowing any of it. A caller that has none refuses a window
+/// rather than sending the file whole: a request that asked about a minute of
+/// a recording and was sent two hours of it would be answered about audio
+/// nobody asked about.
+#[async_trait::async_trait]
+pub trait AudioWindow: Send + Sync {
+    /// Cuts `window` out of `source`, answering with the audio itself: the
+    /// bytes and the mime type that names them. Bytes rather than a path,
+    /// because a window may be seconds out of a file of gigabytes, and nothing
+    /// beyond the cut has any use for the rest of it.
+    async fn cut(
+        &self,
+        source: &Path,
+        window: InputWindow,
+    ) -> Result<(Vec<u8>, String), ProviderError>;
+}
+
 /// Reads every reference a request names, in the request's own order, so an
 /// adapter can rely on position where a role does not tell two inputs apart.
 pub async fn load_inputs(
     store: &dyn ProjectStore,
     request: &GenerateRequest,
     budgets: &GenerateConfig,
+    audio: Option<&dyn AudioWindow>,
 ) -> Result<Vec<MediaInput>, ProviderError> {
     let mut loaded = Vec::with_capacity(request.inputs.len());
     for input in &request.inputs {
         let file = store.asset_file(&input.asset_id, None).await?;
+        if let Some(window) = input.window {
+            loaded.push(cut(input, &file.entry, &file.path, window, budgets, audio).await?);
+            continue;
+        }
         // Checked against the size recorded at upload, before the read: a
         // reference that cannot be sent should not be copied into memory to
-        // discover that.
+        // discover that. A window is not checked here because what travels is
+        // the cut rather than the file, so the file's own weight says nothing
+        // about it.
         if let (Some(mime), Some(size)) = (recorded_mime(&file.entry), recorded_size(&file.entry)) {
             refuse_if_over(&file.entry.name, mime, size, budgets)?;
         }
@@ -146,6 +176,37 @@ pub async fn load_inputs(
         loaded.push(prepare(input, &file.entry, bytes, budgets)?);
     }
     Ok(loaded)
+}
+
+/// One reference that names a window: the window is cut out, and the cut is
+/// what travels.
+async fn cut(
+    input: &GenerateInput,
+    entry: &ResourceEntry,
+    source: &Path,
+    window: InputWindow,
+    budgets: &GenerateConfig,
+    audio: Option<&dyn AudioWindow>,
+) -> Result<MediaInput, ProviderError> {
+    let audio = audio.ok_or_else(|| {
+        ProviderError::Rejected(format!(
+            "{} has to be cut to the window that was asked for, and this machine has no \
+             renderer to cut it — install ffmpeg, or detach its sound first",
+            entry.name
+        ))
+    })?;
+    let (bytes, mime) = audio.cut(source, window).await?;
+    // Bounded after the cut rather than before it, because the file the cut
+    // came out of may be far larger than what was asked for.
+    let media = MediaInput {
+        role: input.role,
+        asset_id: input.asset_id.clone(),
+        name: entry.name.clone(),
+        bytes,
+        mime,
+    };
+    refuse_if_over(&media.name, &media.mime, media.bytes.len() as u64, budgets)?;
+    Ok(media)
 }
 
 /// Applies the format and size rules to one loaded asset.
@@ -349,6 +410,7 @@ mod tests {
         GenerateInput {
             role,
             asset_id: asset_id.into(),
+            window: None,
         }
     }
 

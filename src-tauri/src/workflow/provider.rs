@@ -158,6 +158,11 @@ async fn answered(
         Capability::Video => Err(ProviderError::invalid(
             "a shot is a job rather than an answer waited out",
         )),
+        // Recognition is asked for by the cutting room, which starts and
+        // collects the job itself; no node generates in it.
+        Capability::Asr => Err(ProviderError::invalid(
+            "speech recognition is not something a node generates",
+        )),
     }
 }
 
@@ -410,6 +415,7 @@ mod tests {
             inputs: vec![GenerateInput {
                 role: InputRole::Reference,
                 asset_id: "asset-1".into(),
+                window: None,
             }],
             ..blank.clone()
         };

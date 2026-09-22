@@ -207,14 +207,32 @@ export type ClipFilterPreset = (typeof CLIP_FILTER_PRESETS)[number];
  */
 export const MAX_ASSET_KEYWORD_LENGTH = 2_000;
 
-export const MODEL_CAPABILITIES = ["text", "image", "audio", "video"] as const;
+export const MODEL_CAPABILITIES = [
+  "text",
+  "image",
+  "audio",
+  "video",
+  "asr",
+] as const;
 export type Capability = (typeof MODEL_CAPABILITIES)[number];
+
+/**
+ * The kinds of card a project holds.
+ *
+ * Left out of the kinds a card is filed under is recognition: it reads a
+ * recording and answers with words, so nothing is ever filed under it. It is a
+ * kind of model rather than a kind of material, which is why a shelf, a lens
+ * and a node never offer it.
+ */
+export const ASSET_KINDS = ["text", "image", "audio", "video"] as const;
+export type AssetKind = (typeof ASSET_KINDS)[number];
 
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   text: "domain:capability.text",
   image: "domain:capability.image",
   audio: "domain:capability.audio",
   video: "domain:capability.video",
+  asr: "domain:capability.asr",
 };
 
 /**
@@ -249,6 +267,9 @@ export const PROTOCOLS_BY_CATEGORY: Record<
   image: ["openaiImages"],
   audio: ["openaiSpeech"],
   video: ["openaiVideos", "geminiVideo"],
+  // Nothing built in speaks a recognition endpoint, so this list is empty on
+  // purpose: the converter registry is the whole of what a reader may choose.
+  asr: [],
 };
 
 /** What each protocol is called where a reader picks one. */
@@ -414,6 +435,7 @@ export const GENERATION_PARAM_KEYS: Record<Capability, readonly string[]> = {
     "watermark",
     "mode",
   ],
+  asr: ["language", "channelId", "speakerCount", "disfluency", "speakerLabel"],
 };
 
 /**

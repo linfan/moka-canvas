@@ -6,7 +6,7 @@ import type {
 } from "react";
 import type {
   AssetId,
-  Capability,
+  AssetKind,
   CanvasId,
   FolderId,
   MokaFile,
@@ -79,12 +79,12 @@ type TreeTarget =
   | { kind: "root" }
   | { kind: "folder"; id: FolderId }
   | { kind: "canvas"; id: CanvasId }
-  | { kind: "branch"; canvasId: CanvasId; capability: Capability }
+  | { kind: "branch"; canvasId: CanvasId; capability: AssetKind }
   | {
       kind: "asset";
       id: AssetId;
       canvasId: CanvasId;
-      capability: Capability;
+      capability: AssetKind;
     };
 
 /** What is being dragged about the tree. */
@@ -491,7 +491,7 @@ function AssetRow({
   api: TreeApi;
   entry: ResourceEntry;
   canvasId: CanvasId;
-  capability: Capability;
+  capability: AssetKind;
   /** How many cards on this board hold it. */
   uses: number;
   depth: number;

@@ -85,6 +85,10 @@ pub struct GenerateConfig {
     pub image_timeout_seconds: u64,
     #[serde(default = "default_audio_timeout_seconds")]
     pub audio_timeout_seconds: u64,
+    /// One speech-recognition exchange, which is usually an upload of the
+    /// audio being transcribed rather than a handful of words.
+    #[serde(default = "default_asr_timeout_seconds")]
+    pub asr_timeout_seconds: u64,
     /// Starting an upstream video job, which answers with a handle at once.
     #[serde(default = "default_video_task_timeout_seconds")]
     pub video_task_timeout_seconds: u64,
@@ -159,6 +163,7 @@ impl Default for GenerateConfig {
             text_timeout_seconds: default_text_timeout_seconds(),
             image_timeout_seconds: default_image_timeout_seconds(),
             audio_timeout_seconds: default_audio_timeout_seconds(),
+            asr_timeout_seconds: default_asr_timeout_seconds(),
             video_task_timeout_seconds: default_video_task_timeout_seconds(),
             video_poll_timeout_seconds: default_video_poll_timeout_seconds(),
             max_attempts: default_max_attempts(),
@@ -185,6 +190,7 @@ impl GenerateConfig {
             crate::domain::Capability::Image => self.image_timeout_seconds,
             crate::domain::Capability::Audio => self.audio_timeout_seconds,
             crate::domain::Capability::Video => self.video_task_timeout_seconds,
+            crate::domain::Capability::Asr => self.asr_timeout_seconds,
         };
         std::time::Duration::from_secs(secs)
     }
@@ -201,9 +207,9 @@ impl GenerateConfig {
             crate::domain::Capability::Image | crate::domain::Capability::Text => {
                 self.max_image_input_bytes
             }
-            crate::domain::Capability::Audio | crate::domain::Capability::Video => {
-                self.max_media_input_bytes
-            }
+            crate::domain::Capability::Audio
+            | crate::domain::Capability::Video
+            | crate::domain::Capability::Asr => self.max_media_input_bytes,
         }
     }
 
@@ -363,6 +369,11 @@ fn default_image_timeout_seconds() -> u64 {
 }
 fn default_audio_timeout_seconds() -> u64 {
     120
+}
+/// Room for one upload of the audio being transcribed, which for a long clip is
+/// tens of megabytes rather than the few kilobytes a JSON body weighs.
+fn default_asr_timeout_seconds() -> u64 {
+    600
 }
 fn default_video_task_timeout_seconds() -> u64 {
     60

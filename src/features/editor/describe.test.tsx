@@ -83,6 +83,7 @@ function providers(): ModelsView {
       image: "painter",
       audio: null,
       video: null,
+      asr: null,
     },
     preferences: {
       systemPrompt: "",

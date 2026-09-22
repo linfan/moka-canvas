@@ -16,6 +16,14 @@ export type InputRole =
 export interface GenerateInput {
   role: InputRole;
   assetId: AssetId;
+  /**
+   * The part of the asset this reference means, when it means a part of one.
+   *
+   * A timeline clip reads a window of the file it points at, and a window is
+   * what gets sent: the whole of a two-hour recording is not what a subtitle
+   * for one of its minutes was asked for.
+   */
+  window?: { startMs: number; durationMs: number };
 }
 
 /**
@@ -233,6 +241,21 @@ export const generateApi = {
   /** Starts a shot rather than waiting it out; poll the handle it returns. */
   video(request: GenerateRequest, signal?: AbortSignal) {
     return http.request<GenerateResponse>(path("video"), {
+      method: "POST",
+      body: request,
+      signal,
+    });
+  },
+
+  /**
+   * Starts the reading of a recording rather than waiting it out.
+   *
+   * A job like a shot: an hour of speech takes minutes to recognize, and the
+   * request carries the audio itself. What the handle answers with is the
+   * transcript, in `text`.
+   */
+  asr(request: GenerateRequest, signal?: AbortSignal) {
+    return http.request<GenerateResponse>(path("asr"), {
       method: "POST",
       body: request,
       signal,

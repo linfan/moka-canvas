@@ -89,6 +89,7 @@ function providers(): ModelsView {
       image: protocol === null ? null : "painter",
       audio: null,
       video: null,
+      asr: null,
     },
     preferences: {
       systemPrompt: "",

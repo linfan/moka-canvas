@@ -1,12 +1,12 @@
 import type {
   AssetCategory,
-  Capability,
+  AssetKind,
   ResourceEntry,
   ResourceRegistry,
 } from "../../../shared/domain";
 import {
+  ASSET_KINDS,
   ASSET_ORIGIN_LABELS,
-  MODEL_CAPABILITIES,
   PROJECT_ASSET_CATEGORIES,
 } from "../../../shared/domain";
 
@@ -20,7 +20,7 @@ import {
  * makes the four tabs a way of reading the whole shelf rather than a way of
  * losing part of it.
  */
-export const KIND_SHELVES: Record<Capability, readonly AssetCategory[]> = {
+export const KIND_SHELVES: Record<AssetKind, readonly AssetCategory[]> = {
   text: ["texts"],
   image: ["images"],
   audio: ["music", "voice"],
@@ -28,7 +28,7 @@ export const KIND_SHELVES: Record<Capability, readonly AssetCategory[]> = {
 };
 
 /** The kinds, in the order the tabs read them. */
-export const SHELF_KINDS: readonly Capability[] = MODEL_CAPABILITIES;
+export const SHELF_KINDS: readonly AssetKind[] = ASSET_KINDS;
 
 /** What a row shows when there is no picture of the file to show. */
 export const SHELF_GLYPHS: Record<AssetCategory, string> = {
@@ -40,7 +40,7 @@ export const SHELF_GLYPHS: Record<AssetCategory, string> = {
 };
 
 /** Which kind a shelf is read under. */
-export function kindOfShelf(shelf: AssetCategory): Capability {
+export function kindOfShelf(shelf: AssetCategory): AssetKind {
   return (
     SHELF_KINDS.find((kind) => KIND_SHELVES[kind].includes(shelf)) ?? "image"
   );
@@ -117,7 +117,7 @@ export interface ShelfFilter {
    * sound is one kind filed on two shelves, so narrowing to the kind leaves
    * both of them standing.
    */
-  kind: Capability | null;
+  kind: AssetKind | null;
 }
 
 export const OPEN_SHELF_FILTER: ShelfFilter = {

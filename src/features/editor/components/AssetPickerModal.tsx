@@ -5,7 +5,7 @@ import {
   CAPABILITY_LABELS,
   PROJECT_ASSET_CATEGORIES,
   type AssetId,
-  type Capability,
+  type AssetKind,
   type ResourceEntry,
 } from "../../../shared/domain";
 import { addAssetNodes, attachAssetsToNode } from "../interactions/actions";
@@ -23,7 +23,7 @@ import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 
 /** Which kind of thing a file is, read off the shelf it is filed on. */
-function kindOf(entry: ResourceEntry): Capability {
+function kindOf(entry: ResourceEntry): AssetKind {
   const shelf = entry.path.split("/")[1];
   const category = PROJECT_ASSET_CATEGORIES.find((name) => name === shelf);
   return kindOfShelf(category ?? "texts");
@@ -108,7 +108,7 @@ function RowWords({
   glyph,
 }: {
   entry: ResourceEntry;
-  kind: Capability;
+  kind: AssetKind;
   glyph: string;
 }) {
   const [fetched, setFetched] = useState<string | null>(
@@ -288,7 +288,7 @@ export function AssetPickerModal() {
             onChange={(event) =>
               setFilter((seen) => ({
                 ...seen,
-                kind: (event.target.value || null) as Capability | null,
+                kind: (event.target.value || null) as AssetKind | null,
               }))
             }
             value={filter.kind ?? ""}

@@ -120,6 +120,9 @@ fn channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall 
         Capability::Image => Protocol::OpenaiImages,
         Capability::Audio => Protocol::OpenaiSpeech,
         Capability::Video => Protocol::OpenaiVideos,
+        // Recognition is a converter script's job; the reserved protocol is
+        // what a call to it stands in as here.
+        Capability::Asr => Protocol::Custom,
     };
     speaking(protocol, base_url, model_id, capability)
 }

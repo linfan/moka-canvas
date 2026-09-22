@@ -160,3 +160,28 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
     "https://api.openai.com/v1/videos",
   );
 });
+
+test("speech recognition offers the script that serves it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+
+  await dialog.getByRole("tab", { name: "Speech recognition" }).click();
+
+  await dialog
+    .getByRole("button", { name: "New speech recognition model" })
+    .click();
+  const protocol = dialog.getByLabel("Protocol");
+  // Nothing built in speaks a transcription endpoint, so the deployed script
+  // is the whole of what the category offers — there is no fallback for it to
+  // fall back to.
+  await expect(protocol).toHaveValue("bailianAsr");
+  await expect(protocol.locator("option")).toHaveText([
+    "Alibaba Cloud · Bailian Speech Recognition (recording file)",
+  ]);
+  await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
+    "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription",
+  );
+});

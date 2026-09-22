@@ -167,6 +167,25 @@ impl InputRole {
 pub struct GenerateInput {
     pub role: InputRole,
     pub asset_id: AssetId,
+    /// The part of the asset this reference means, when it means a part of one.
+    ///
+    /// Nothing else in a request can say where on a timeline the reference
+    /// sits, so a caller that wants one window of a long recording says so
+    /// here rather than sending hours nobody asked about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<InputWindow>,
+}
+
+/// A stretch of an asset, measured from its own beginning.
+///
+/// Both ends are milliseconds into the file rather than into a timeline: where
+/// the window sits on a timeline is the caller's business, and a provider that
+/// is told about a minute of a recording has no use for the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputWindow {
+    pub start_ms: u64,
+    pub duration_ms: u64,
 }
 
 /// One answer. Text and media are alternatives rather than a union because a
@@ -397,14 +416,17 @@ mod tests {
             GenerateInput {
                 role: InputRole::FirstFrame,
                 asset_id: "a1".into(),
+                window: None,
             },
             GenerateInput {
                 role: InputRole::Reference,
                 asset_id: "a2".into(),
+                window: None,
             },
             GenerateInput {
                 role: InputRole::FirstFrame,
                 asset_id: "a3".into(),
+                window: None,
             },
         ];
         let frames: Vec<&str> = request

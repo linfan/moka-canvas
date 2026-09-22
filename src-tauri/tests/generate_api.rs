@@ -61,7 +61,8 @@ fn harness() -> Harness {
 /// Points the app at throwaway models and makes them the defaults, which is
 /// what Settings does before a generation can be placed at all. One model
 /// configuration per entry, addressed at the endpoint its category speaks on
-/// the throwaway provider.
+/// the throwaway provider. Recognition is served by the deployed converter
+/// script, so a test that configures it deploys the scripts first.
 async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capability)]) {
     let mut defaults = Defaults::default();
     for (id, capability) in models {
@@ -70,6 +71,10 @@ async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capabili
             Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
             Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
             Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
+            Capability::Asr => (
+                Protocol::from_wire_name("bailianAsr"),
+                "/v1/services/audio/asr/transcription",
+            ),
         };
         harness
             .state
@@ -97,6 +102,7 @@ async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capabili
             Capability::Image => defaults.image = Some((*id).to_string()),
             Capability::Audio => defaults.audio = Some((*id).to_string()),
             Capability::Video => defaults.video = Some((*id).to_string()),
+            Capability::Asr => defaults.asr = Some((*id).to_string()),
         }
     }
     harness
@@ -792,4 +798,89 @@ async fn a_provider_credential_never_appears_in_an_answer() {
         message.contains("abcd"),
         "the tail of the masked form tells the user which key failed: {message}"
     );
+}
+
+// ------------------------------------------------------------- recognition
+
+/// Deploys the built-in converter scripts, which is also what points the
+/// process-wide converter root at them. Recognition is served by a script, and
+/// a script is only found through that root. The root is set once per process,
+/// so the directory is leaked to outlive the test.
+async fn deploy_scripts() {
+    let converter = TempDir::new().expect("a converter directory");
+    let path: &'static std::path::Path = Box::leak(converter.keep().into_boxed_path());
+    moka_canvas::converter::deploy::ensure_deployed(path)
+        .await
+        .expect("the built-in scripts deploy");
+}
+
+/// A recognition request that carries no recording is refused by the script
+/// rather than by the route: nothing about the wire knows what a transcription
+/// endpoint wants, which is why the category is served by a converter at all.
+///
+/// What this pins is that the endpoint reaches that script, and that the
+/// script's own words come back as the problem rather than as something the
+/// transport invented.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recognition_without_a_recording_is_refused_by_its_script() {
+    deploy_scripts().await;
+    let harness = harness();
+    // Routed but never reached: the refusal happens before anything is sent,
+    // because there is nothing to send.
+    let base_url = serve(Router::new().route("/anything", get(|| async { StatusCode::OK }))).await;
+    configured(&harness, &base_url, &[("a-asr-model", Capability::Asr)]).await;
+
+    let (status, body) = send_json(
+        &harness.app,
+        generation("asr", json!({ "params": { "language": "zh" } })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(code(&body), "PROVIDER_BAD_REQUEST");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("no recording"),
+        "{body}"
+    );
+}
+
+/// A recording is what recognition is asked about, and one the project cannot
+/// hand over stops the request here: nothing leaves this process, and nothing
+/// is asked of a provider, for audio nobody can read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recognition_naming_a_recording_that_cannot_be_read_never_leaves() {
+    deploy_scripts().await;
+    let harness = harness();
+    let watched = Watch::default();
+    let seen = watched.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/services/audio/asr/transcription",
+        post(move || {
+            let seen = seen.clone();
+            async move {
+                seen.note();
+                Json(json!({ "output": { "task_id": "trans-1" } }))
+            }
+        }),
+    ))
+    .await;
+    configured(&harness, &base_url, &[("a-asr-model", Capability::Asr)]).await;
+
+    let (status, body) = send_json(
+        &harness.app,
+        generation(
+            "asr",
+            json!({ "inputs": [{ "role": "controlAudio", "assetId": "asset-that-is-not-here" }] }),
+        ),
+    )
+    .await;
+
+    // This app has no project open, so the store's own refusal is what comes
+    // back — the same one every other route gives for it.
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(code(&body), "PROJECT_NOT_OPEN");
+    assert_eq!(watched.times(), 0, "the provider was never asked");
 }

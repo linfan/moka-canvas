@@ -303,6 +303,10 @@ pub enum DataType {
 
 /// The generation modality a provider model serves. Narrower than
 /// [`DataType`], which also covers port payloads that are never generated.
+///
+/// [`Capability::Asr`] reads the other way round from the rest: it takes audio
+/// in and answers with words, so no node generates in it and it is configured
+/// for callers that transcribe rather than for the canvas.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Capability {
@@ -311,6 +315,7 @@ pub enum Capability {
     Image,
     Audio,
     Video,
+    Asr,
 }
 
 impl Capability {
@@ -320,6 +325,7 @@ impl Capability {
             Capability::Image => "image",
             Capability::Audio => "audio",
             Capability::Video => "video",
+            Capability::Asr => "asr",
         }
     }
 }

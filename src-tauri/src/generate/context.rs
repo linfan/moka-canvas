@@ -302,7 +302,13 @@ fn finish(
                 body.push_str(kept);
             }
             Share::Media { role, asset_id } => {
-                inputs.push(GenerateInput { role, asset_id });
+                // A node hands along a whole card rather than a window of one:
+                // what part of it to use is the generation's business.
+                inputs.push(GenerateInput {
+                    role,
+                    asset_id,
+                    window: None,
+                });
                 input_sources.push(node_id.clone());
             }
         }

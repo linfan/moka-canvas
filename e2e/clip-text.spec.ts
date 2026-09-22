@@ -484,3 +484,80 @@ test("a stroke width and colour are one command each, and survive the save", asy
     retryDelay: 100,
   });
 });
+
+/** A playable WAV of a few seconds, so the shelf takes it as a real sound. */
+function tinyWav(seconds = 5): Buffer {
+  const rate = 8000;
+  const samples = rate * seconds;
+  const dataBytes = samples * 2;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(dataBytes, 40);
+  return wav;
+}
+
+test("auto subtitles read the sound on the cut, and a missing model is a place to go", async ({
+  page,
+}) => {
+  const home = await clipRoom(page, "Text Transcribe");
+  await textPage(page);
+
+  // Nothing on the cut is audible yet, so the row says what it would need
+  // rather than asking a provider about a text clip.
+  const go = page.locator(".clip-text-transcribe-go");
+  await expect(go).toBeDisabled();
+  await expect(go).toHaveAttribute(
+    "title",
+    "Nothing to recognize — choose a sound or a shot, or move the playhead onto one.",
+  );
+
+  // A sound laid at the playhead is what the ask is about. The shelf is a
+  // face of the same column the text page is, so the file is brought in from
+  // the Local face and the page is turned back to afterwards.
+  await page.getByTestId("clip-face-local").click();
+  await page.getByLabel("Import files", { exact: true }).setInputFiles({
+    name: "tiny.wav",
+    mimeType: "audio/wav",
+    buffer: tinyWav(),
+  });
+  await page.getByTestId("asset-kind-audio").click();
+  await page
+    .getByRole("button", { name: "Add tiny.wav at the playhead" })
+    .click();
+  await page.getByTestId("clip-face-text").click();
+  await expect(go).toBeEnabled();
+
+  // No recognition model is set up, and the refusal is answered with the
+  // place one is set up rather than with a sentence and a dead end.
+  await go.click();
+  const told = page.locator(".toast").last();
+  await expect(told).toContainText(
+    "No speech recognition model is set up yet.",
+  );
+  await expect(told).toContainText("Set up models");
+  await told.click();
+
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("tab", { name: "Speech recognition" }),
+  ).toHaveAttribute("aria-selected", "true");
+
+  rmSync(home, {
+    force: true,
+    maxRetries: 5,
+    recursive: true,
+    retryDelay: 100,
+  });
+});

@@ -126,6 +126,7 @@ impl Rig {
             Capability::Image => defaults.image = Some(reference.into()),
             Capability::Audio => defaults.audio = Some(reference.into()),
             Capability::Video => defaults.video = Some(reference.into()),
+            Capability::Asr => defaults.asr = Some(reference.into()),
         }
         self.models
             .set_defaults(&defaults, None)
@@ -203,6 +204,9 @@ async fn rig() -> Rig {
         Arc::clone(&models),
         Arc::clone(&assets) as Arc<dyn ProjectStore>,
         budgets,
+        // No cutter: a request that names a window is refused here, and a test
+        // that transcribes places its own.
+        None,
     ));
     Rig {
         gateway,
@@ -243,6 +247,10 @@ fn default_protocol(capability: Capability) -> Protocol {
         Capability::Image => Protocol::OpenaiImages,
         Capability::Audio => Protocol::OpenaiSpeech,
         Capability::Video => Protocol::OpenaiVideos,
+        // Nothing built in speaks a recognition endpoint, so a test that wants
+        // one places a converter script by hand; until then the reserved
+        // protocol is what a recognition model is configured with.
+        Capability::Asr => Protocol::Custom,
     }
 }
 
@@ -537,6 +545,7 @@ async fn a_reference_is_read_out_of_the_project_and_sent_along() {
     generation.inputs = vec![GenerateInput {
         role: InputRole::Reference,
         asset_id: asset,
+        window: None,
     }];
     let result = rig
         .gateway
@@ -1150,4 +1159,404 @@ async fn a_job_the_provider_has_forgotten_ends_the_tracking() {
         rig.gateway.tasks().is_empty(),
         "a job the provider forgot cannot answer again"
     );
+}
+
+/// Starts a throwaway provider whose routes know the address they are served
+/// on, which a protocol that hands out links of its own needs.
+async fn serve_aware(build: impl FnOnce(String) -> Router) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("an ephemeral port is available");
+    let address = listener.local_addr().expect("the socket has an address");
+    let base = format!("http://{address}");
+    let routes = build(base.clone());
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, routes).await;
+    });
+    base
+}
+
+/// The credential a request carried, if any: what the rule about which hosts
+/// may see the key is read in.
+fn auth_of(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
+        .get(header::AUTHORIZATION)
+        .map(|value| value.to_str().unwrap_or_default().to_string())
+}
+
+/// Deploys the built-in converter scripts, which is also what points the
+/// process-wide converter root at them. The root is set once per process, so
+/// the directory is leaked to outlive the test.
+async fn deploy_scripts() {
+    let converter = TempDir::new().expect("a converter directory");
+    let path: &'static std::path::Path = Box::leak(converter.keep().into_boxed_path());
+    moka_canvas::converter::deploy::ensure_deployed(path)
+        .await
+        .expect("the built-in scripts deploy");
+}
+
+/// A few milliseconds of silence, as a RIFF header says it is: a recording the
+/// store will recognise as audio rather than as bytes nobody knows.
+fn recorded() -> Vec<u8> {
+    let samples = vec![0u8; 32];
+    let mut bytes = Vec::with_capacity(44 + samples.len());
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&((36 + samples.len()) as u32).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&16_000u32.to_le_bytes());
+    bytes.extend_from_slice(&32_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&samples);
+    bytes
+}
+
+/// A recording read back as words, over the whole conversation the upstream
+/// protocol needs: where to put the file, the file, the job, and the document
+/// behind it.
+///
+/// The legs are checked as well as the answer. A chain that answered with a
+/// subtitle file without ever uploading anything would pass a test that read
+/// only the text, and the rule about credentials — sent to the address somebody
+/// configured, never to a host the provider names later — is only visible in
+/// what each leg received.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recognition_script_runs_its_whole_conversation_and_answers_with_words() {
+    deploy_scripts().await;
+
+    let policy = Watch::default();
+    let submit = Watch::default();
+    let job = Watch::default();
+    let document = Watch::default();
+    // What reached the upload host, and the credential it arrived with.
+    let uploads: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let submits: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let heard = Arc::clone(&uploads);
+    // The host itself, which is where the protocol puts the file: the policy
+    // names a host and a key, not a path.
+    let bucket_url = serve(Router::new().route(
+        "/",
+        post(move |headers: axum::http::HeaderMap| {
+            let heard = Arc::clone(&heard);
+            async move {
+                heard.lock().expect("not poisoned").push(auth_of(&headers));
+                StatusCode::OK
+            }
+        }),
+    ))
+    .await;
+
+    let heard = Arc::clone(&submits);
+    let seen = submit.clone();
+    let answering = policy.clone();
+    let asking = job.clone();
+    let reading = document.clone();
+    let base_url = serve_aware(move |base| {
+        Router::new()
+            .route(
+                "/api/v1/uploads",
+                get(move || {
+                    let seen = answering.clone();
+                    let host = bucket_url.clone();
+                    async move {
+                        seen.note(None);
+                        Json(json!({ "data": {
+                            "policy": "a-policy",
+                            "signature": "a-signature",
+                            "upload_dir": "dashscope-instant/2026/09/22/abc",
+                            "upload_host": host,
+                            "oss_access_key_id": "an-access-key",
+                            "x_oss_object_acl": "private",
+                            "x_oss_forbid_overwrite": "true",
+                        }}))
+                    }
+                }),
+            )
+            .route(
+                "/v1/lua/listener",
+                post(
+                    move |headers: axum::http::HeaderMap, body: Bytes| {
+                        let seen = seen.clone();
+                        let heard = Arc::clone(&heard);
+                        async move {
+                            seen.note(Some(body));
+                            heard.lock().expect("not poisoned").push(auth_of(&headers));
+                            Json(json!({ "output": { "task_id": "trans-1" } }))
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/tasks/trans-1",
+                get(move || {
+                    let seen = asking.clone();
+                    let base = base.clone();
+                    async move {
+                        seen.note(None);
+                        Json(json!({ "output": {
+                            "task_status": "SUCCEEDED",
+                            "results": [{ "transcription_url": format!("{base}/transcript") }],
+                        }}))
+                    }
+                }),
+            )
+            .route(
+                "/transcript",
+                get(move || {
+                    let seen = reading.clone();
+                    async move {
+                        seen.note(None);
+                        Json(json!({ "transcripts": [{ "sentences": [
+                            { "begin_time": 100, "end_time": 3820, "text": "a lantern over the lake" },
+                            { "begin_time": 4000, "end_time": 5200, "text": "and the rowing stopped" },
+                        ]}]}))
+                    }
+                }),
+            )
+    })
+    .await;
+
+    let rig = rig().await;
+    rig.serving(
+        &base_url,
+        vec![model_via(
+            "listener",
+            Capability::Asr,
+            Protocol::from_wire_name("bailianAsr"),
+        )],
+    )
+    .await;
+    rig.default(Capability::Asr, "listener").await;
+    let recording = rig.upload("take-1.wav", "audio/wav", &recorded()).await;
+
+    let request = GenerateRequest {
+        capability: Capability::Asr,
+        inputs: vec![GenerateInput {
+            role: InputRole::ControlAudio,
+            asset_id: recording,
+            window: None,
+        }],
+        params: json!({ "language": "zh" })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        ..GenerateRequest::default()
+    };
+    let cancel = Cancel::new();
+    let task = rig
+        .gateway
+        .transcribe(request, &cancel)
+        .await
+        .expect("the reading starts");
+    assert_eq!(task.capability, Capability::Asr);
+    assert_eq!(task.model, "listener");
+
+    let state = rig
+        .gateway
+        .poll(&task.id, &cancel)
+        .await
+        .expect("the job is tracked");
+    let TaskState::Succeeded(result) = state else {
+        panic!("expected the finished reading, got {state:?}");
+    };
+    // The words come back as a subtitle document: times measured from the
+    // beginning of the audio that was sent. Where that audio sits on a
+    // timeline is the caller's business, not the script's.
+    assert_eq!(
+        result.text.as_deref(),
+        Some(
+            "1\n00:00:00,100 --> 00:00:03,820\na lantern over the lake\n\n\
+             2\n00:00:04,000 --> 00:00:05,200\nand the rowing stopped"
+        )
+    );
+    assert!(result.items.is_empty(), "a reading is words, not a file");
+
+    // Every leg of the conversation was reached, once.
+    assert_eq!(policy.times(), 1, "the upload policy was asked for");
+    assert_eq!(submit.times(), 1, "the job was submitted");
+    assert_eq!(job.times(), 1, "the job was looked at");
+    assert_eq!(document.times(), 1, "the transcript was read");
+    // The file went to the host the provider named, and the submission names
+    // the location of its own copy rather than a link anybody could follow.
+    assert_eq!(uploads.lock().expect("not poisoned").len(), 1);
+    let submitted = &submit.body(0);
+    assert_eq!(submitted["model"], "listener");
+    assert_eq!(submitted["parameters"]["language_hints"][0], "zh");
+    assert_eq!(
+        submitted["input"]["file_urls"][0],
+        "oss://dashscope-instant/2026/09/22/abc/take-1.wav"
+    );
+    // The credential goes where it was configured to and nowhere else: the
+    // upload host is the provider's own storage, and a key sent there would
+    // travel to a machine nobody chose.
+    assert_eq!(
+        *submits.lock().expect("not poisoned").first().unwrap(),
+        Some(format!("Bearer {API_KEY}"))
+    );
+    assert_eq!(uploads.lock().expect("not poisoned")[0], None);
+}
+
+/// A build hook that names a reader it never wrote.
+const ORPHANED: &str = r#"
+function build_task_request(call, req, inputs)
+    return {
+        request = { method = "GET", url = call.url .. "/anything", headers = {} },
+        handler = "never_written",
+    }
+end
+"#;
+
+/// A step that never ends: every reply asks for the same exchange again, and
+/// carries the address it asks at, which is what `state` is for.
+const ENDLESS: &str = r#"
+function build_task_request(call, req, inputs)
+    return {
+        state = { url = call.url .. "/loop" },
+        request = { method = "GET", url = call.url .. "/loop", headers = {} },
+        handler = "again",
+    }
+end
+
+function again(status, headers, body, state)
+    return {
+        state = state,
+        next = {
+            request = { method = "GET", url = state.url, headers = {} },
+            handler = "again",
+        },
+    }
+end
+"#;
+
+/// Writes a converter script of the test's own into the directory the adapter
+/// reads, and registers it under one capability, the way a script somebody
+/// added by hand would be.
+async fn place_script(capability: &str, protocol: &str, source: &str) {
+    let root = moka_canvas::converter::converter_root().expect("the scripts are deployed");
+    let name = format!("{protocol}.lua");
+    std::fs::write(root.join(&name), source).expect("the script is written");
+    let mut registry = moka_canvas::converter::ConverterRegistry::load(root).await;
+    registry
+        .add_protocol(
+            capability,
+            protocol,
+            moka_canvas::converter::registry::ProtocolEntry {
+                script: name,
+                display_name: protocol.to_string(),
+                url_example: "https://provider.test/transcription".to_string(),
+            },
+        )
+        .await
+        .expect("the protocol is registered");
+}
+
+/// A script that names a handler it never wrote is refused before anything
+/// leaves this process: an upload of tens of megabytes is a heavy way to
+/// discover a typo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_script_naming_a_handler_it_never_wrote_is_refused_before_anything_is_sent() {
+    deploy_scripts().await;
+    place_script("asr", "orphanHandlers", ORPHANED).await;
+
+    let watched = Watch::default();
+    let seen = watched.clone();
+    let base_url = serve(Router::new().route(
+        "/anything",
+        get(move || {
+            let seen = seen.clone();
+            async move {
+                seen.note(None);
+                StatusCode::OK
+            }
+        }),
+    ))
+    .await;
+
+    let rig = rig().await;
+    rig.serving(
+        &base_url,
+        vec![model_via(
+            "orphan",
+            Capability::Asr,
+            Protocol::from_wire_name("orphanHandlers"),
+        )],
+    )
+    .await;
+    rig.default(Capability::Asr, "orphan").await;
+
+    let error = rig
+        .gateway
+        .transcribe(
+            GenerateRequest {
+                capability: Capability::Asr,
+                ..GenerateRequest::default()
+            },
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the handler is not there");
+    assert!(error.to_string().contains("does not export"), "{error}");
+    assert!(error.to_string().contains("never_written"), "{error}");
+    assert_eq!(watched.times(), 0, "nothing was sent to the provider");
+}
+
+/// A step that keeps asking for one more exchange is stopped rather than run
+/// forever, and the address it asked at travelled from one handler to the next
+/// in `state` — a value nobody wrote down is a value nobody has.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_step_that_never_ends_is_stopped_at_the_ceiling() {
+    deploy_scripts().await;
+    place_script("asr", "endlessExchanges", ENDLESS).await;
+
+    let watched = Watch::default();
+    let seen = watched.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/lua/endless/loop",
+        get(move || {
+            let seen = seen.clone();
+            async move {
+                seen.note(None);
+                // An address the hook derived rather than one that was
+                // configured, so the state it travelled in is the only reason
+                // the second exchange reaches this provider at all.
+                Json(json!({ "still": true }))
+            }
+        }),
+    ))
+    .await;
+
+    let rig = rig().await;
+    rig.serving(
+        &base_url,
+        vec![model_via(
+            "endless",
+            Capability::Asr,
+            Protocol::from_wire_name("endlessExchanges"),
+        )],
+    )
+    .await;
+    rig.default(Capability::Asr, "endless").await;
+
+    let error = rig
+        .gateway
+        .transcribe(
+            GenerateRequest {
+                capability: Capability::Asr,
+                ..GenerateRequest::default()
+            },
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the chain never ends");
+    assert!(
+        error.to_string().contains("more than 8 exchanges"),
+        "{error}"
+    );
+    assert_eq!(watched.times(), 8, "one exchange per step and no more");
 }

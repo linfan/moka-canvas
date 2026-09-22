@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ModelDraft, ModelView, ProtocolGroups } from "../../api";
 import {
@@ -63,12 +63,15 @@ function initialForm(
     };
   }
   if (model === null) {
-    const choice = protocolChoices(protocols, category)[0];
+    // A category whose shapes all come from the converter registry has
+    // nothing to offer until that has been read — recognition is one — so the
+    // form may start with no protocol at all and adopt one when it arrives.
+    const choice = protocolChoices(protocols, category)[0] ?? null;
     return {
       id: "",
       idTouched: false,
-      protocol: choice.id,
-      url: choice.urlExample,
+      protocol: choice?.id ?? "",
+      url: choice?.urlExample ?? "",
       model: "",
       displayName: "",
       enabled: true,
@@ -151,6 +154,18 @@ export function ModelEditor({
     edit({ protocol, url });
   };
 
+  // The registry may land after the form was opened, which is the only case a
+  // form begins with no shape chosen. Adopted here rather than left to the
+  // picker's default, because a picker with nothing in it cannot be saved.
+  useEffect(() => {
+    if (form.protocol !== "" || choices.length === 0) return;
+    setForm((state) => ({
+      ...state,
+      protocol: choices[0].id,
+      url: choices[0].urlExample,
+    }));
+  }, [choices, form.protocol]);
+
   /** Whether a stored configuration already answers to an identifier. */
   const isTaken = useCallback(
     (candidate: string) =>
@@ -195,6 +210,7 @@ export function ModelEditor({
     !saving &&
     !idTaken &&
     idShaped &&
+    form.protocol !== "" &&
     form.displayName.trim() !== "" &&
     form.model.trim() !== "" &&
     urlShaped;
@@ -306,6 +322,11 @@ export function ModelEditor({
           ))}
         </select>
       </label>
+      {choices.length === 0 && (
+        <p className="settings-hint" role="alert">
+          {t("settings:editor.noProtocols")}
+        </p>
+      )}
 
       <label className="dialog-field">
         <span>{t("settings:editor.url")}</span>

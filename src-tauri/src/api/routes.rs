@@ -1091,6 +1091,9 @@ pub async fn patch_defaults(
     if let Some(video) = patch.video {
         defaults.video = video;
     }
+    if let Some(asr) = patch.asr {
+        defaults.asr = asr;
+    }
     state
         .models
         .set_defaults(&defaults, patch.expected_revision)
@@ -1184,6 +1187,21 @@ pub async fn generate_video(
 ) -> Result<Json<GenerateResponse>, Problem> {
     let Json(request) = json_or_problem(json)?;
     let task = state.gateway.video(request, &Cancel::new()).await?;
+    Ok(Json(GenerateResponse::started(&task, None)))
+}
+
+/// A recording, read back as words.
+///
+/// A job like a shot rather than a call waited out: recognizing an hour of
+/// speech takes minutes, and the request carries the audio itself. What the
+/// handle eventually answers with is text — the transcript — so a caller polls
+/// it the same way it polls a shot.
+pub async fn generate_asr(
+    State(state): State<ApiState>,
+    json: Result<Json<GenerateRequest>, JsonRejection>,
+) -> Result<Json<GenerateResponse>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let task = state.gateway.transcribe(request, &Cancel::new()).await?;
     Ok(Json(GenerateResponse::started(&task, None)))
 }
 

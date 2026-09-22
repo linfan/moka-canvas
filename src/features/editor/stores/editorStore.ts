@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type {
   AssetId,
-  Capability,
+  AssetKind,
   EdgeId,
   NodeId,
   Point,
@@ -143,7 +143,7 @@ interface EditorState {
   /** Which of its two faces the left column is showing. */
   leftPanelTab: LeftPanelTab;
   /** Which kind of asset the assets column is listing. */
-  assetKind: Capability;
+  assetKind: AssetKind;
   /**
    * The asset a reader was taken to, when one was asked for by name.
    *
@@ -215,13 +215,13 @@ interface EditorState {
   setGesture: (gesture: ActiveGesture) => void;
   setPointerWorld: (point: Point | null) => void;
   setLeftPanelTab: (tab: LeftPanelTab) => void;
-  setAssetKind: (kind: Capability) => void;
+  setAssetKind: (kind: AssetKind) => void;
   /**
    * Opens the assets column on the kind an asset is filed under, with that one
    * marked. The kind travels with the ask rather than being worked out here,
    * since what asked is a row of the tree that was already grouping by it.
    */
-  showAssetOnShelf: (assetId: AssetId, kind: Capability) => void;
+  showAssetOnShelf: (assetId: AssetId, kind: AssetKind) => void;
   clearAssetFocus: () => void;
   /**
    * Turns the column beside the canvas to its inspector and gives it a file to

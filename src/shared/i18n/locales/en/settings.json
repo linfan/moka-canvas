@@ -61,6 +61,7 @@
     "identifierTaken": "Another model already uses this identifier.",
     "identifierSpaces": "An identifier cannot contain spaces.",
     "protocol": "Protocol",
+    "noProtocols": "No protocol is available for this kind of model. Its shapes come from converter scripts, and none are deployed.",
     "url": "URL",
     "urlAria": "Endpoint URL",
     "urlHint": "The complete endpoint address requests are sent to — not a base URL.",

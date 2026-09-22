@@ -123,6 +123,7 @@ export interface DefaultsPatch {
   image?: string | null;
   audio?: string | null;
   video?: string | null;
+  asr?: string | null;
   expectedRevision?: number | null;
 }
 

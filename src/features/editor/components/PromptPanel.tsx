@@ -71,6 +71,7 @@ const SHAPE_PARAM: Record<Capability, string | null> = {
   video: "ratio",
   text: null,
   audio: null,
+  asr: null,
 };
 
 /** Whether a node already holds something rather than waiting to be filled. */

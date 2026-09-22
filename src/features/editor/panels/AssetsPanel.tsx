@@ -1,4 +1,4 @@
-import type { AssetId, Capability } from "../../../shared/domain";
+import type { AssetId, AssetKind } from "../../../shared/domain";
 import { useEditorStore } from "../stores/editorStore";
 import { AssetShelf } from "./AssetShelf";
 import { SHELF_KINDS } from "./shelfFilter";
@@ -19,7 +19,7 @@ function inspectOnShelf(id: AssetId) {
 }
 
 /** Turns the shelf to a kind, which both the tabs and the tree ask for. */
-function chooseKind(kind: Capability) {
+function chooseKind(kind: AssetKind) {
   useEditorStore.getState().setAssetKind(kind);
 }
 

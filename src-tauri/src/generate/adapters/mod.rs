@@ -130,7 +130,23 @@ impl ModelCall {
     /// is on the same origin: an image left on a third-party CDN is public by
     /// nature, and a key sent after it would not be.
     pub(crate) fn fetch(&self, address: &str) -> reqwest::RequestBuilder {
-        let request = self.client.get(address);
+        self.described("GET", address)
+    }
+
+    /// A request to an address somebody other than this module chose — a
+    /// converter script's, which may name an upload host or a document the
+    /// provider handed back.
+    ///
+    /// The credential follows the same rule as [`fetch`]: only inside the
+    /// configured origin, because an endpoint the script derived is the
+    /// provider's and a link it was given is nobody's. Every method but a GET
+    /// goes out as a POST, which is all a script has been able to ask for.
+    pub(crate) fn described(&self, method: &str, address: &str) -> reqwest::RequestBuilder {
+        let request = if method.eq_ignore_ascii_case("GET") {
+            self.client.get(address.to_string())
+        } else {
+            self.client.post(address.to_string())
+        };
         if origin_of(address).is_some() && origin_of(address) == self.origin() {
             self.credentialed(request)
         } else {
@@ -235,14 +251,14 @@ pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
 ///
 /// The body is read on both paths because a provider explains a failure in it,
 /// and kept as bytes because audio and video arrive as neither text nor JSON.
-struct Reply {
-    status: u16,
-    headers: HeaderMap,
-    body: Vec<u8>,
+pub(crate) struct Reply {
+    pub(crate) status: u16,
+    pub(crate) headers: HeaderMap,
+    pub(crate) body: Vec<u8>,
 }
 
 impl Reply {
-    fn text(&self) -> Result<&str, ProviderError> {
+    pub(crate) fn text(&self) -> Result<&str, ProviderError> {
         std::str::from_utf8(&self.body)
             .map_err(|_| ProviderError::Rejected("the answer is not valid UTF-8 text".to_string()))
     }
@@ -366,7 +382,10 @@ async fn send(
     call.client.execute(request).await.map_err(transport)
 }
 
-async fn drain(response: reqwest::Response, ceiling: u64) -> Result<Reply, ProviderError> {
+pub(crate) async fn drain(
+    response: reqwest::Response,
+    ceiling: u64,
+) -> Result<Reply, ProviderError> {
     let status = response.status().as_u16();
     let headers = response.headers().clone();
     let mut response = response;

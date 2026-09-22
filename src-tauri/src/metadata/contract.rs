@@ -337,6 +337,7 @@ async fn defaults_and_preferences(store: &dyn MetadataStore) -> Result<(), Strin
         image: Some("other-image".to_string()),
         audio: None,
         video: None,
+        asr: Some("hears-audio".to_string()),
     };
     describe("set defaults", store.set_defaults(&defaults, None)).await?;
     let preferences = Preferences {
