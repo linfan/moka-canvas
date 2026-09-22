@@ -29,11 +29,12 @@ pub struct ModelConfig {
     pub display_name: String,
     pub url_example: String,
     pub script: String,
-    /// The built-in batch this converter was deployed from. A directory a
-    /// reader wrote by hand need not say; zero, so a built-in of any batch
-    /// may overtake it.
+    /// The version of the built-in converter this document was deployed
+    /// from, written for a built-in and absent for a directory a reader
+    /// wrote by hand. Zero when absent, so any built-in version may take the
+    /// place of a document that does not claim one.
     #[serde(default)]
-    pub batch: u32,
+    pub version: u32,
 }
 
 /// One protocol entry, as the rest of the program reads it: the converter's
@@ -158,13 +159,13 @@ mod tests {
         write(
             &dir.path().join("text"),
             "gemini",
-            r#"{"displayName": "Gemini", "urlExample": "https://example.com", "script": "gemini.lua", "batch": 1}"#,
+            r#"{"displayName": "Gemini", "urlExample": "https://example.com", "script": "gemini.lua", "version": 1}"#,
             Some("gemini.lua"),
         );
         write(
             &dir.path().join("video"),
             "bailianVideo",
-            r#"{"displayName": "Bailian Video", "urlExample": "https://example.com/bailian", "script": "bailian-video.lua", "batch": 2}"#,
+            r#"{"displayName": "Bailian Video", "urlExample": "https://example.com/bailian", "script": "bailian-video.lua", "version": 2}"#,
             Some("bailian-video.lua"),
         );
         // A converter whose document does not parse is left out, and the rest

@@ -2,5 +2,5 @@
   "displayName": "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
   "urlExample": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer",
   "script": "bailian-speech.lua",
-  "batch": 2
+  "version": 2
 }

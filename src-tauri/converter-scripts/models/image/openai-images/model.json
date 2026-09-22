@@ -2,5 +2,5 @@
   "displayName": "OpenAI-compatible · Images API",
   "urlExample": "https://api.openai.com/v1/images/generations",
   "script": "openai-images.lua",
-  "batch": 1
+  "version": 1
 }

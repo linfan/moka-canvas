@@ -2,5 +2,5 @@
   "displayName": "Alibaba Cloud · Bailian Video",
   "urlExample": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
   "script": "bailian-video.lua",
-  "batch": 2
+  "version": 2
 }

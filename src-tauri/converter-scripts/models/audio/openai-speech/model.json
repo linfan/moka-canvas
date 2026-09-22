@@ -2,5 +2,5 @@
   "displayName": "OpenAI-compatible · Speech API",
   "urlExample": "https://api.openai.com/v1/audio/speech",
   "script": "openai-speech.lua",
-  "batch": 1
+  "version": 1
 }

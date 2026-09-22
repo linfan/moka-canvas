@@ -2,5 +2,5 @@
   "displayName": "Google Gemini · generateContent",
   "urlExample": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
   "script": "gemini.lua",
-  "batch": 1
+  "version": 1
 }
