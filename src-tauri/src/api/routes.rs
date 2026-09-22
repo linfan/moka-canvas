@@ -1442,12 +1442,13 @@ async fn frame(
         .await
 }
 
-/// Returns the list of available converter protocols from meta.json.
+/// Returns the list of available converter protocols, read from the models
+/// directory so a converter added or removed under it shows up here.
 pub async fn converter_protocols(
     State(state): State<ApiState>,
 ) -> Result<Json<serde_json::Value>, Problem> {
     use crate::converter::registry::ConverterRegistry;
-    let registry = ConverterRegistry::load(state.converter_root()).await;
+    let registry = ConverterRegistry::load(state.converter_root());
     let protocols = registry.protocols();
     Ok(Json(serde_json::json!({ "protocols": protocols })))
 }

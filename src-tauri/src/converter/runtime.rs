@@ -319,7 +319,9 @@ mod tests {
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
 
         // Audio: the non-streaming CosyVoice TTS shape.
-        let speech = rt.load(&scripts.join("audio/bailian-speech.lua")).unwrap();
+        let speech = rt
+            .load(&scripts.join("models/audio/bailian-speech/bailian-speech.lua"))
+            .unwrap();
         let out = rt
             .call_json_value(
                 &speech,
@@ -339,7 +341,9 @@ mod tests {
         assert_eq!(body["input"]["voice"], "longxiaochun");
 
         // Video: the async DashScope task shape.
-        let video = rt.load(&scripts.join("video/bailian-video.lua")).unwrap();
+        let video = rt
+            .load(&scripts.join("models/video/bailian-video/bailian-video.lua"))
+            .unwrap();
         let out = rt
             .call_json_value(
                 &video,
@@ -401,7 +405,9 @@ mod tests {
     fn the_bailian_recognition_script_uploads_submits_and_reads_the_transcript() {
         let rt = test_runtime();
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
-        let asr = rt.load(&scripts.join("asr/bailian-asr.lua")).unwrap();
+        let asr = rt
+            .load(&scripts.join("models/asr/bailian-asr/bailian-asr.lua"))
+            .unwrap();
         let endpoint = "https://ws.test/api/v1/services/audio/asr/transcription";
 
         // Step one: ask where the audio may be put. What the caller asked for
@@ -543,7 +549,9 @@ mod tests {
     fn a_recognition_without_speakers_gives_one_cue_per_sentence() {
         let rt = test_runtime();
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
-        let asr = rt.load(&scripts.join("asr/bailian-asr.lua")).unwrap();
+        let asr = rt
+            .load(&scripts.join("models/asr/bailian-asr/bailian-asr.lua"))
+            .unwrap();
 
         let asked = rt
             .call_json_value(
@@ -587,7 +595,9 @@ mod tests {
     fn a_recording_with_nothing_said_is_refused_rather_than_answered() {
         let rt = test_runtime();
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
-        let asr = rt.load(&scripts.join("asr/bailian-asr.lua")).unwrap();
+        let asr = rt
+            .load(&scripts.join("models/asr/bailian-asr/bailian-asr.lua"))
+            .unwrap();
         let done = rt
             .call_json_value(
                 &asr,

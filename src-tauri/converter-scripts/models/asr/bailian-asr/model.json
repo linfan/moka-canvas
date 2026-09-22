@@ -1,0 +1,6 @@
+{
+  "displayName": "Alibaba Cloud · Bailian Speech Recognition (recording file)",
+  "urlExample": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription",
+  "script": "bailian-asr.lua",
+  "batch": 3
+}

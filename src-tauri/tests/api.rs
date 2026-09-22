@@ -1237,12 +1237,7 @@ fn desktop_test_app(root: &Path) -> axum::Router {
         .expect("the test configuration sets a metadata directory");
     let metadata = moka_canvas::metadata::open(&dir, &config.metadata, RuntimeMode::Web)
         .expect("the metadata store opens");
-    let state = ApiState::with_metadata(
-        config,
-        RuntimeMode::Native,
-        metadata,
-        root.join("converter"),
-    );
+    let state = ApiState::with_metadata(config, RuntimeMode::Native, metadata, root.join("models"));
     moka_canvas::server::router(state)
 }
 

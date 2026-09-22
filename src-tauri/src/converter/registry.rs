@@ -1,21 +1,44 @@
-//! Converter registry: manages the converter directory, meta.json, and the
-//! list of available converter protocols.
+//! Converter registry: the model directories on disk, read as a list of
+//! available converter protocols.
 //!
-//! The registry reads meta.json at startup and provides the protocol list
-//! that the settings page uses to populate the protocol dropdown.
-//!
-//! Protocols are grouped by capability — `text`, `image`, `audio`, `video` —
-//! as the second level under `protocols`, so the document reads as "for this
-//! kind of model, these are the shapes on offer". An older flat document,
-//! where each entry carried its own `capability` field, is migrated on load.
+//! The models root holds one directory per capability — `text`, `image`,
+//! `audio`, `video`, `asr` — and each of those holds one directory per
+//! converter. A converter directory is self-contained: its `model.json`
+//! carries the metadata and names the protocol adapter script beside it, so a
+//! script is added by dropping a directory in and removed by taking one out.
+//! A directory without a readable `model.json` is skipped rather than failing
+//! the read: the rest of the directory is still worth showing.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// One entry in the converter meta.json protocol list. The capability it
-/// serves is the key it hangs under, not a field of its own.
+/// The capability directories a models root holds, in the order a list reads.
+pub const CAPABILITY_DIRS: [&str; 5] = ["text", "image", "audio", "video", "asr"];
+
+/// One converter's `model.json`.
+///
+/// The identifier is the name of the directory the document sits in, so the
+/// document does not repeat it. `script` locates the protocol adapter Lua file
+/// relative to that same directory — usually a bare filename beside the
+/// document, which is what this module joins it onto.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelConfig {
+    pub display_name: String,
+    pub url_example: String,
+    pub script: String,
+    /// The built-in batch this converter was deployed from. A directory a
+    /// reader wrote by hand need not say; zero, so a built-in of any batch
+    /// may overtake it.
+    #[serde(default)]
+    pub batch: u32,
+}
+
+/// One protocol entry, as the rest of the program reads it: the converter's
+/// capability is the group key it hangs under, its identifier is the map key,
+/// and `script` is the path from the models root to the adapter script.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolEntry {
@@ -24,143 +47,95 @@ pub struct ProtocolEntry {
     pub url_example: String,
 }
 
-/// Protocols grouped by capability: `text`, `image`, `audio`, `video`.
+/// Protocols grouped by capability: `text`, `image`, `audio`, `video`, `asr`.
 pub type ProtocolGroups = HashMap<String, HashMap<String, ProtocolEntry>>;
 
-/// The converter directory metadata document.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConverterMeta {
-    #[serde(default)]
-    pub current_batch: u32,
-    #[serde(default)]
-    pub protocols: ProtocolGroups,
-}
-
-/// The document as it looked before capabilities became keys: a flat map of
-/// protocol id to entry, each entry naming its own capability. Read only to
-/// migrate; every write goes out in the nested shape.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyMeta {
-    #[serde(default)]
-    current_batch: u32,
-    #[serde(default)]
-    protocols: HashMap<String, LegacyEntry>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyEntry {
-    capability: String,
-    script: String,
-    display_name: String,
-    url_example: String,
-}
-
-impl LegacyMeta {
-    fn into_current(self) -> ConverterMeta {
-        let mut protocols: ProtocolGroups = HashMap::new();
-        for (id, entry) in self.protocols {
-            protocols.entry(entry.capability).or_default().insert(
-                id,
-                ProtocolEntry {
-                    script: entry.script,
-                    display_name: entry.display_name,
-                    url_example: entry.url_example,
-                },
-            );
-        }
-        ConverterMeta {
-            current_batch: self.current_batch,
-            protocols,
-        }
-    }
+/// Whether a `model.json` `script` value names a file in the document's own
+/// directory: a bare filename, and not the document itself.
+pub fn script_name_beside(script: &str) -> bool {
+    let file_name = Path::new(script).file_name();
+    file_name == Some(std::ffi::OsStr::new(script)) && !script.is_empty() && script != "model.json"
 }
 
 /// Holds the loaded registry state.
 pub struct ConverterRegistry {
-    meta: ConverterMeta,
-    root: PathBuf,
+    protocols: ProtocolGroups,
 }
 
 impl ConverterRegistry {
-    /// Load or create the registry from disk. A document in the old flat
-    /// shape is migrated on the way in and written straight back in the
-    /// nested shape; an unreadable or unparseable document starts empty
-    /// rather than failing the caller.
-    pub async fn load(root: &Path) -> Self {
-        let meta_path = root.join("meta.json");
-        let (meta, migrated) = match tokio::fs::read_to_string(&meta_path).await {
-            Ok(text) => match serde_json::from_str::<ConverterMeta>(&text) {
-                Ok(meta) => (meta, false),
-                Err(_) => match serde_json::from_str::<LegacyMeta>(&text) {
-                    Ok(legacy) => (legacy.into_current(), true),
-                    Err(_) => (ConverterMeta::default(), false),
-                },
-            },
-            Err(_) => (ConverterMeta::default(), false),
-        };
-        let registry = Self {
-            meta,
-            root: root.to_path_buf(),
-        };
-        if migrated {
-            // Best effort: a write would persist the new shape anyway, and a
-            // read-only directory is that write's problem to report.
-            let _ = registry.save().await;
+    /// Reads every capability directory under the models root and every
+    /// converter directory inside them. Never fails: an unreadable directory,
+    /// a missing `model.json`, or one that does not parse is left out, and a
+    /// root that does not exist yet yields an empty registry.
+    pub fn load(root: &Path) -> Self {
+        let mut protocols: ProtocolGroups = HashMap::new();
+        for capability in CAPABILITY_DIRS {
+            let group = Self::load_capability(&root.join(capability));
+            if !group.is_empty() {
+                protocols.insert(capability.to_string(), group);
+            }
         }
-        registry
+        Self { protocols }
     }
 
-    /// Persist the current metadata to disk.
-    pub async fn save(&self) -> Result<(), std::io::Error> {
-        let meta_path = self.root.join("meta.json");
-        let text = serde_json::to_string_pretty(&self.meta).map_err(std::io::Error::other)?;
-        tokio::fs::write(&meta_path, text).await
+    /// Reads one capability directory: each subdirectory that holds a
+    /// readable `model.json` becomes an entry, keyed by the directory name.
+    fn load_capability(dir: &Path) -> HashMap<String, ProtocolEntry> {
+        let mut group = HashMap::new();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return group;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let Some(id) = entry.file_name().into_string().ok() else {
+                continue;
+            };
+            if let Some(entry) = Self::load_converter(&entry.path(), dir) {
+                group.insert(id, entry);
+            }
+        }
+        group
     }
 
-    /// Returns the current batch number.
-    pub fn current_batch(&self) -> u32 {
-        self.meta.current_batch
-    }
-
-    /// Sets the current batch number and persists.
-    pub async fn set_batch(&mut self, batch: u32) -> Result<(), std::io::Error> {
-        self.meta.current_batch = batch;
-        self.save().await
-    }
-
-    /// Adds a protocol entry under its capability and persists.
-    pub async fn add_protocol(
-        &mut self,
-        capability: &str,
-        id: &str,
-        entry: ProtocolEntry,
-    ) -> Result<(), std::io::Error> {
-        self.meta
-            .protocols
-            .entry(capability.to_string())
-            .or_default()
-            .insert(id.to_string(), entry);
-        self.save().await
+    /// Reads one converter directory's `model.json`. `capability_dir` is the
+    /// directory it sits in, named in the script path so every entry can be
+    /// resolved against the models root alone.
+    ///
+    /// The script is a bare filename beside the document — one that climbs
+    /// out of the converter's own directory, or names the document itself,
+    /// is refused rather than followed.
+    fn load_converter(dir: &Path, capability_dir: &Path) -> Option<ProtocolEntry> {
+        let text = std::fs::read_to_string(dir.join("model.json")).ok()?;
+        let config: ModelConfig = serde_json::from_str(&text).ok()?;
+        if !script_name_beside(&config.script) {
+            return None;
+        }
+        let capability = capability_dir.file_name()?.to_str()?;
+        let id = dir.file_name()?.to_str()?;
+        Some(ProtocolEntry {
+            script: format!("{capability}/{id}/{}", config.script),
+            display_name: config.display_name,
+            url_example: config.url_example,
+        })
     }
 
     /// The protocols grouped by capability: `text` → id → entry.
     pub fn protocols(&self) -> &ProtocolGroups {
-        &self.meta.protocols
+        &self.protocols
     }
 
     /// The protocols one capability offers, empty when it offers none.
     pub fn protocols_for(&self, capability: &str) -> Option<&HashMap<String, ProtocolEntry>> {
-        self.meta.protocols.get(capability)
+        self.protocols.get(capability)
     }
 
     /// Finds a protocol entry by id across every capability. Ids are unique
     /// in practice — one script speaks one endpoint shape — so the first hit
     /// is the hit.
     pub fn find(&self, id: &str) -> Option<&ProtocolEntry> {
-        self.meta.protocols.values().find_map(|group| group.get(id))
+        self.protocols.values().find_map(|group| group.get(id))
     }
 }
 
@@ -168,89 +143,112 @@ impl ConverterRegistry {
 mod tests {
     use super::*;
 
-    fn entry(script: &str) -> ProtocolEntry {
-        ProtocolEntry {
-            script: script.to_string(),
-            display_name: script.to_string(),
-            url_example: "https://example.com".to_string(),
+    fn write(dir: &Path, converter: &str, model_json: &str, script: Option<&str>) {
+        let converter_dir = dir.join(converter);
+        std::fs::create_dir_all(&converter_dir).unwrap();
+        std::fs::write(converter_dir.join("model.json"), model_json).unwrap();
+        if let Some(name) = script {
+            std::fs::write(converter_dir.join(name), "-- lua").unwrap();
         }
     }
 
-    #[tokio::test]
-    async fn migrates_a_flat_legacy_document_into_capability_groups() {
+    #[test]
+    fn reads_every_converter_directory_under_its_capability() {
         let dir = tempfile::tempdir().unwrap();
-        let legacy = serde_json::json!({
-            "currentBatch": 2,
-            "protocols": {
-                "gemini": {
-                    "capability": "text",
-                    "script": "text/gemini.lua",
-                    "displayName": "Gemini",
-                    "urlExample": "https://example.com/gemini"
-                },
-                "bailianVideo": {
-                    "capability": "video",
-                    "script": "video/bailian-video.lua",
-                    "displayName": "Bailian Video",
-                    "urlExample": "https://example.com/bailian"
-                }
-            }
-        });
-        tokio::fs::write(dir.path().join("meta.json"), legacy.to_string())
-            .await
-            .unwrap();
+        write(
+            &dir.path().join("text"),
+            "gemini",
+            r#"{"displayName": "Gemini", "urlExample": "https://example.com", "script": "gemini.lua", "batch": 1}"#,
+            Some("gemini.lua"),
+        );
+        write(
+            &dir.path().join("video"),
+            "bailianVideo",
+            r#"{"displayName": "Bailian Video", "urlExample": "https://example.com/bailian", "script": "bailian-video.lua", "batch": 2}"#,
+            Some("bailian-video.lua"),
+        );
+        // A converter whose document does not parse is left out, and the rest
+        // of the directory is still read.
+        write(&dir.path().join("text"), "broken", "{not json", None);
 
-        let registry = ConverterRegistry::load(dir.path()).await;
-        assert_eq!(registry.current_batch(), 2);
+        let registry = ConverterRegistry::load(dir.path());
+        assert_eq!(registry.protocols().len(), 2);
         assert!(registry
             .protocols_for("text")
             .unwrap()
             .contains_key("gemini"));
-        assert!(registry
-            .protocols_for("video")
+        assert!(!registry
+            .protocols_for("text")
             .unwrap()
-            .contains_key("bailianVideo"));
+            .contains_key("broken"));
+        assert!(registry.find("broken").is_none());
         assert_eq!(
             registry.find("bailianVideo").unwrap().script,
-            "video/bailian-video.lua"
+            "video/bailianVideo/bailian-video.lua"
         );
-
-        // The migrated shape was written straight back to disk.
-        let text = tokio::fs::read_to_string(dir.path().join("meta.json"))
-            .await
-            .unwrap();
-        let on_disk: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert!(on_disk["protocols"]["text"]["gemini"].is_object());
-        assert!(on_disk["protocols"]["text"]["gemini"]["capability"].is_null());
+        assert_eq!(registry.find("gemini").unwrap().display_name, "Gemini");
     }
 
-    #[tokio::test]
-    async fn reads_and_writes_the_nested_shape() {
+    #[test]
+    fn a_converter_without_a_readable_document_is_skipped() {
         let dir = tempfile::tempdir().unwrap();
-        let mut registry = ConverterRegistry::load(dir.path()).await;
-        registry
-            .add_protocol("audio", "bailianSpeech", entry("audio/bailian-speech.lua"))
-            .await
-            .unwrap();
-        registry.set_batch(7).await.unwrap();
+        std::fs::create_dir_all(dir.path().join("audio/no-document")).unwrap();
+        // A loose file where a converter directory is expected is not one.
+        std::fs::write(dir.path().join("audio").join("stray.lua"), "-- lua").unwrap();
 
-        let reloaded = ConverterRegistry::load(dir.path()).await;
-        assert_eq!(reloaded.current_batch(), 7);
-        let group = reloaded.protocols_for("audio").unwrap();
-        assert_eq!(group.len(), 1);
-        assert_eq!(group["bailianSpeech"].script, "audio/bailian-speech.lua");
-        assert!(reloaded.find("bailianSpeech").is_some());
-        assert!(reloaded.find("missing").is_none());
-    }
-
-    #[tokio::test]
-    async fn an_unparseable_document_starts_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        tokio::fs::write(dir.path().join("meta.json"), "{not json")
-            .await
-            .unwrap();
-        let registry = ConverterRegistry::load(dir.path()).await;
-        assert_eq!(registry.current_batch(), 0);
+        let registry = ConverterRegistry::load(dir.path());
         assert!(registry.protocols().is_empty());
+        assert!(registry.find("no-document").is_none());
+    }
+
+    #[test]
+    fn a_root_that_does_not_exist_reads_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ConverterRegistry::load(&dir.path().join("models"));
+        assert!(registry.protocols().is_empty());
+        assert!(registry.protocols_for("text").is_none());
+    }
+
+    #[test]
+    fn a_directory_left_in_the_root_is_not_a_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("script-backup"),
+            "gemini",
+            r#"{"displayName": "Gemini", "urlExample": "https://example.com", "script": "gemini.lua"}"#,
+            None,
+        );
+        let registry = ConverterRegistry::load(dir.path());
+        assert!(registry.protocols().is_empty());
+    }
+
+    #[test]
+    fn a_script_that_would_climb_out_of_its_directory_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("text"),
+            "wanderer",
+            r#"{"displayName": "Wanderer", "urlExample": "https://example.com", "script": "../../../etc/passwd"}"#,
+            None,
+        );
+        write(
+            &dir.path().join("text"),
+            "absolute",
+            r#"{"displayName": "Absolute", "urlExample": "https://example.com", "script": "/etc/passwd"}"#,
+            None,
+        );
+        let registry = ConverterRegistry::load(dir.path());
+        assert!(registry.find("wanderer").is_none());
+        assert!(registry.find("absolute").is_none());
+    }
+
+    #[test]
+    fn only_a_bare_filename_sits_beside_the_document() {
+        assert!(script_name_beside("bailian-video.lua"));
+        assert!(!script_name_beside("../bailian-video.lua"));
+        assert!(!script_name_beside("sub/bailian-video.lua"));
+        assert!(!script_name_beside("/etc/passwd"));
+        assert!(!script_name_beside("model.json"));
+        assert!(!script_name_beside(""));
     }
 }

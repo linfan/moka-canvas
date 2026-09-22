@@ -191,8 +191,8 @@ interface ModelState {
   /**
    * The converter registry's protocols, grouped by capability. Null until
    * the read lands — or forever, if it failed, and the built-in list stands
-   * in. Fetched once per session: it changes when the app deploys scripts,
-   * which is a restart, not a setting.
+   * in. Re-read whenever settings opens: a converter is added by dropping a
+   * directory into the models tree, and that happens while the app runs.
    */
   protocols: ProtocolGroups | null;
   loading: boolean;
@@ -217,7 +217,8 @@ interface ModelState {
     reference?: string | null,
   ) => void;
   load: () => Promise<void>;
-  loadProtocols: () => Promise<void>;
+  /** Reads the registry's protocols. `force` re-reads one already held. */
+  loadProtocols: (force?: boolean) => Promise<void>;
   saveModel: (draft: ModelDraft) => Promise<boolean>;
   removeModel: (id: string) => Promise<boolean>;
   /** Opens a new-model editor pre-filled as a copy of one configuration. */
@@ -271,6 +272,9 @@ export const useModelStore = create<ModelState>()((set, get) => {
     errorCode: null,
 
     openSettings(tab = "text") {
+      // The registry read rides along, so a converter directory added since
+      // the last open is on offer by the time a tab is picked.
+      void get().loadProtocols(true);
       set({ open: true, topTab: "model", tab });
     },
 
@@ -336,9 +340,6 @@ export const useModelStore = create<ModelState>()((set, get) => {
 
     async load() {
       if (get().loading) return;
-      // The registry read rides along but never holds the view up, and a
-      // failed read leaves the built-in protocol list standing in.
-      void get().loadProtocols();
       set({ loading: true });
       try {
         set({
@@ -355,8 +356,8 @@ export const useModelStore = create<ModelState>()((set, get) => {
       }
     },
 
-    async loadProtocols() {
-      if (get().protocols !== null) return;
+    async loadProtocols(force = false) {
+      if (!force && get().protocols !== null) return;
       try {
         const response = await modelsApi.fetchProtocols();
         set({ protocols: response.protocols });

@@ -42,8 +42,8 @@ pub fn set_converter_root(root: PathBuf) {
     let _ = CONVERTER_ROOT.set(root);
 }
 
-/// The converter root directory, once startup has set it. Model validation
-/// reads the registry through it to learn which Lua protocols exist.
+/// The models directory, once startup has set it. Model validation reads the
+/// registry through it to learn which Lua protocols exist.
 pub fn converter_root() -> Option<&'static Path> {
     CONVERTER_ROOT.get().map(PathBuf::as_path)
 }
@@ -72,7 +72,7 @@ impl LuaAdapter {
         let root = CONVERTER_ROOT
             .get()
             .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
-        let registry = ConverterRegistry::load(root).await;
+        let registry = ConverterRegistry::load(root);
         registry.find(protocol).cloned().ok_or_else(|| {
             ProviderError::invalid(format!("no converter script for protocol '{protocol}'"))
         })

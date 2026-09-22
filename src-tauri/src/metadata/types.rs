@@ -72,8 +72,8 @@ pub enum Protocol {
     /// Google Gemini long-running prediction (`POST ...:predictLongRunning`).
     GeminiVideo,
     Custom,
-    /// A protocol backed by a Lua converter script. The string is the protocol
-    /// identifier from the converter meta.json (e.g. `"wan3Video"`).
+    /// A protocol backed by a Lua converter script. The string is the name of
+    /// the converter's directory in the models tree (e.g. `"wan3Video"`).
     LuaScript(String),
 }
 

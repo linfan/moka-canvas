@@ -32,7 +32,8 @@ pub struct ApiState {
     /// The one render this process may be running, and the handles it is
     /// polled with.
     pub exports: Arc<ExportRegistry>,
-    /// Root directory for converter scripts (meta.json is here).
+    /// Root directory of the models tree: one directory per converter, each
+    /// carrying its own `model.json`.
     converter_root: PathBuf,
 }
 
@@ -49,8 +50,8 @@ impl ApiState {
         let metadata = metadata::open(root, &config.metadata, mode)?;
         let converter_root = root
             .parent()
-            .map(|p| p.join("converter"))
-            .unwrap_or_else(|| PathBuf::from("converter"));
+            .map(|p| p.join("models"))
+            .unwrap_or_else(|| PathBuf::from("models"));
         Ok(Self::with_metadata(config, mode, metadata, converter_root))
     }
 
@@ -104,8 +105,9 @@ impl ApiState {
         self.clip_probe.capabilities()
     }
 
-    /// The directory where converter scripts live. Used during startup to deploy
-    /// built-in scripts and by the API to list available protocols.
+    /// The models directory: where converter scripts live. Used during
+    /// startup to deploy built-in converters and by the API to list the
+    /// available protocols.
     pub fn converter_root(&self) -> &Path {
         &self.converter_root
     }

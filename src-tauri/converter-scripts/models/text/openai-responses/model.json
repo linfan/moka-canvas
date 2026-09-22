@@ -1,0 +1,6 @@
+{
+  "displayName": "OpenAI-compatible · Responses API",
+  "urlExample": "https://api.openai.com/v1/responses",
+  "script": "openai-responses.lua",
+  "batch": 1
+}

@@ -1434,26 +1434,25 @@ function again(status, headers, body, state)
 end
 "#;
 
-/// Writes a converter script of the test's own into the directory the adapter
-/// reads, and registers it under one capability, the way a script somebody
-/// added by hand would be.
+/// Writes a converter directory of the test's own into the models tree the
+/// adapter reads, the way a converter somebody added by hand would be: a
+/// script and the self-contained document that names it.
 async fn place_script(capability: &str, protocol: &str, source: &str) {
     let root = moka_canvas::converter::converter_root().expect("the scripts are deployed");
+    let dir = root.join(capability).join(protocol);
+    std::fs::create_dir_all(&dir).expect("the converter directory is created");
     let name = format!("{protocol}.lua");
-    std::fs::write(root.join(&name), source).expect("the script is written");
-    let mut registry = moka_canvas::converter::ConverterRegistry::load(root).await;
-    registry
-        .add_protocol(
-            capability,
-            protocol,
-            moka_canvas::converter::registry::ProtocolEntry {
-                script: name,
-                display_name: protocol.to_string(),
-                url_example: "https://provider.test/transcription".to_string(),
-            },
-        )
-        .await
-        .expect("the protocol is registered");
+    std::fs::write(dir.join(&name), source).expect("the script is written");
+    let document = serde_json::json!({
+        "displayName": protocol,
+        "urlExample": "https://provider.test/transcription",
+        "script": name,
+    });
+    std::fs::write(
+        dir.join("model.json"),
+        serde_json::to_string_pretty(&document).unwrap(),
+    )
+    .expect("the document is written");
 }
 
 /// A script that names a handler it never wrote is refused before anything

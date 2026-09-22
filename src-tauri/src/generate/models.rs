@@ -244,16 +244,16 @@ impl ModelRepo {
     }
 
     /// Every protocol name a category accepts: the built-ins plus whatever
-    /// the converter registry deploys under that category. When the
-    /// converter root is not set — a unit test, or a startup that failed
-    /// before deploy — only the built-ins are on offer.
+    /// the models directory holds under that category. When the converter
+    /// root is not set — a unit test, or a startup that failed before deploy
+    /// — only the built-ins are on offer.
     async fn offered_protocols(category: Capability) -> Vec<String> {
         let mut offered: Vec<String> = protocols_for(category)
             .iter()
             .map(|protocol| protocol.as_str().to_string())
             .collect();
         if let Some(root) = crate::converter::converter_root() {
-            let registry = crate::converter::ConverterRegistry::load(root).await;
+            let registry = crate::converter::ConverterRegistry::load(root);
             if let Some(group) = registry.protocols_for(category.as_str()) {
                 offered.extend(group.keys().cloned());
             }

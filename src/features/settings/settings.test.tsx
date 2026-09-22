@@ -31,7 +31,8 @@ const MASKED = "sk-…abcd";
 
 /**
  * The converter registry as the server reports it: protocols grouped by the
- * capability they serve, the way deploy writes meta.json.
+ * capability they serve — one entry per converter directory, read from the
+ * model.json it carries.
  */
 const REGISTRY = {
   text: {
@@ -878,5 +879,19 @@ describe("model settings", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  });
+
+  it("re-reads the converter registry each time it opens", async () => {
+    await openSettings();
+    await screen.findByText("Writer");
+    expect(readsOf("/api/v1/converter/protocols")).toBe(1);
+
+    // A converter added under the models tree while the app runs is on the
+    // next open's list; leaving the list read once would hide it until a
+    // restart nobody asked for.
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    await screen.findByRole("dialog", { name: "Settings" });
+    await waitFor(() => expect(readsOf("/api/v1/converter/protocols")).toBe(2));
   });
 });

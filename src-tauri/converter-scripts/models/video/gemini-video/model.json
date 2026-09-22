@@ -1,0 +1,6 @@
+{
+  "displayName": "Google Gemini · long-running (Veo)",
+  "urlExample": "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
+  "script": "gemini-video.lua",
+  "batch": 1
+}

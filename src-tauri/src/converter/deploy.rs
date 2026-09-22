@@ -1,36 +1,63 @@
-//! Built-in converter script deployment.
+//! Built-in converter deployment.
 //!
-//! On startup, reads the converter meta.json and deploys any built-in scripts
-//! whose batch number is higher than the currently recorded batch. This lets
-//! the app ship updated converter scripts without overwriting user-customised
-//! ones.
+//! On startup, every built-in converter whose batch is newer than the batch
+//! recorded in its deployed `model.json` is written out — the protocol adapter
+//! script and the self-contained document that names it. A converter the
+//! reader customised carries a batch of its own, so it is left as it is until
+//! the next built-in batch overtakes what it says.
 
 use std::path::Path;
 
 use super::adapter::set_converter_root;
-use super::registry::{ConverterRegistry, ProtocolEntry};
+use super::registry::{script_name_beside, ModelConfig};
 
-/// One batch of built-in scripts.
+/// One batch of built-in converters.
 pub struct ScriptGroup {
     pub batch: u32,
     pub scripts: &'static [ScriptDef],
 }
 
-/// A single built-in converter script definition.
+/// A single built-in converter, embedded at compile time.
 pub struct ScriptDef {
-    pub protocol_id: &'static str,
     pub capability: &'static str,
-    pub display_name: &'static str,
-    pub url_example: &'static str,
-    /// The subdirectory under converter/ (e.g. "text", "image", "audio", "video")
-    pub subdir: &'static str,
-    /// The filename within that subdirectory (e.g. "openai-chat.lua")
-    pub filename: &'static str,
-    /// The Lua source code, embedded at compile time via include_str!
-    pub source: &'static str,
+    pub id: &'static str,
+    /// The `model.json` source, deployed verbatim.
+    pub config: &'static str,
+    /// The Lua source of the protocol adapter the document names.
+    pub script: &'static str,
 }
 
-/// The built-in scripts grouped by batch. Batch 1 covers all existing
+impl ScriptDef {
+    /// The converter directory's location under the models root.
+    pub fn subdir(&self) -> String {
+        format!("{}/{}", self.capability, self.id)
+    }
+
+    /// The embedded `model.json`, parsed.
+    ///
+    /// A document that does not parse, or that does not name a script beside
+    /// itself, is a fault in this build rather than in anything a reader can
+    /// fix, so it is refused here rather than deployed.
+    pub fn model(&self) -> Result<ModelConfig, std::io::Error> {
+        let invalid = |reason: &str, id: &str| {
+            std::io::Error::other(format!("built-in converter '{id}': {reason}"))
+        };
+        let config: ModelConfig = serde_json::from_str(self.config)
+            .map_err(|e| invalid(&format!("model.json does not parse: {e}"), self.id))?;
+        if !script_name_beside(&config.script) {
+            return Err(invalid(
+                &format!(
+                    "script '{}' is not a filename beside model.json",
+                    config.script
+                ),
+                self.id,
+            ));
+        }
+        Ok(config)
+    }
+}
+
+/// The built-in converters grouped by batch. Batch 1 covers all existing
 /// protocols. Higher batches are added when new converter scripts ship.
 pub const BUILTIN_GROUPS: &[ScriptGroup] = &[
     // Batch 1: all current built-in protocols
@@ -38,67 +65,68 @@ pub const BUILTIN_GROUPS: &[ScriptGroup] = &[
         batch: 1,
         scripts: &[
             ScriptDef {
-                protocol_id: "openaiChat",
                 capability: "text",
-                display_name: "OpenAI-compatible · Chat Completions",
-                url_example: "https://api.openai.com/v1/chat/completions",
-                subdir: "text",
-                filename: "openai-chat.lua",
-                source: include_str!("../../converter-scripts/text/openai-chat.lua"),
+                id: "openaiChat",
+                config: include_str!("../../converter-scripts/models/text/openai-chat/model.json"),
+                script: include_str!(
+                    "../../converter-scripts/models/text/openai-chat/openai-chat.lua"
+                ),
             },
             ScriptDef {
-                protocol_id: "openaiResponses",
                 capability: "text",
-                display_name: "OpenAI-compatible · Responses API",
-                url_example: "https://api.openai.com/v1/responses",
-                subdir: "text",
-                filename: "openai-responses.lua",
-                source: include_str!("../../converter-scripts/text/openai-responses.lua"),
+                id: "openaiResponses",
+                config: include_str!(
+                    "../../converter-scripts/models/text/openai-responses/model.json"
+                ),
+                script: include_str!(
+                    "../../converter-scripts/models/text/openai-responses/openai-responses.lua"
+                ),
             },
             ScriptDef {
-                protocol_id: "openaiImages",
                 capability: "image",
-                display_name: "OpenAI-compatible · Images API",
-                url_example: "https://api.openai.com/v1/images/generations",
-                subdir: "image",
-                filename: "openai-images.lua",
-                source: include_str!("../../converter-scripts/image/openai-images.lua"),
+                id: "openaiImages",
+                config: include_str!(
+                    "../../converter-scripts/models/image/openai-images/model.json"
+                ),
+                script: include_str!(
+                    "../../converter-scripts/models/image/openai-images/openai-images.lua"
+                ),
             },
             ScriptDef {
-                protocol_id: "openaiSpeech",
                 capability: "audio",
-                display_name: "OpenAI-compatible · Speech API",
-                url_example: "https://api.openai.com/v1/audio/speech",
-                subdir: "audio",
-                filename: "openai-speech.lua",
-                source: include_str!("../../converter-scripts/audio/openai-speech.lua"),
+                id: "openaiSpeech",
+                config: include_str!(
+                    "../../converter-scripts/models/audio/openai-speech/model.json"
+                ),
+                script: include_str!(
+                    "../../converter-scripts/models/audio/openai-speech/openai-speech.lua"
+                ),
             },
             ScriptDef {
-                protocol_id: "openaiVideos",
                 capability: "video",
-                display_name: "OpenAI-compatible · Videos API",
-                url_example: "https://api.openai.com/v1/videos",
-                subdir: "video",
-                filename: "openai-videos.lua",
-                source: include_str!("../../converter-scripts/video/openai-videos.lua"),
+                id: "openaiVideos",
+                config: include_str!(
+                    "../../converter-scripts/models/video/openai-videos/model.json"
+                ),
+                script: include_str!(
+                    "../../converter-scripts/models/video/openai-videos/openai-videos.lua"
+                ),
             },
             ScriptDef {
-                protocol_id: "gemini",
                 capability: "text",
-                display_name: "Google Gemini · generateContent",
-                url_example: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-                subdir: "text",
-                filename: "gemini.lua",
-                source: include_str!("../../converter-scripts/text/gemini.lua"),
+                id: "gemini",
+                config: include_str!("../../converter-scripts/models/text/gemini/model.json"),
+                script: include_str!("../../converter-scripts/models/text/gemini/gemini.lua"),
             },
             ScriptDef {
-                protocol_id: "geminiVideo",
                 capability: "video",
-                display_name: "Google Gemini · long-running (Veo)",
-                url_example: "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
-                subdir: "video",
-                filename: "gemini-video.lua",
-                source: include_str!("../../converter-scripts/video/gemini-video.lua"),
+                id: "geminiVideo",
+                config: include_str!(
+                    "../../converter-scripts/models/video/gemini-video/model.json"
+                ),
+                script: include_str!(
+                    "../../converter-scripts/models/video/gemini-video/gemini-video.lua"
+                ),
             },
         ],
     },
@@ -107,22 +135,24 @@ pub const BUILTIN_GROUPS: &[ScriptGroup] = &[
         batch: 2,
         scripts: &[
             ScriptDef {
-                protocol_id: "bailianVideo",
                 capability: "video",
-                display_name: "Alibaba Cloud · Bailian Video",
-                url_example: "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
-                subdir: "video",
-                filename: "bailian-video.lua",
-                source: include_str!("../../converter-scripts/video/bailian-video.lua"),
+                id: "bailianVideo",
+                config: include_str!(
+                    "../../converter-scripts/models/video/bailian-video/model.json"
+                ),
+                script: include_str!(
+                    "../../converter-scripts/models/video/bailian-video/bailian-video.lua"
+                ),
             },
             ScriptDef {
-                protocol_id: "bailianSpeech",
                 capability: "audio",
-                display_name: "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
-                url_example: "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer",
-                subdir: "audio",
-                filename: "bailian-speech.lua",
-                source: include_str!("../../converter-scripts/audio/bailian-speech.lua"),
+                id: "bailianSpeech",
+                config: include_str!(
+                    "../../converter-scripts/models/audio/bailian-speech/model.json"
+                ),
+                script: include_str!(
+                    "../../converter-scripts/models/audio/bailian-speech/bailian-speech.lua"
+                ),
             },
         ],
     },
@@ -130,57 +160,127 @@ pub const BUILTIN_GROUPS: &[ScriptGroup] = &[
     ScriptGroup {
         batch: 3,
         scripts: &[ScriptDef {
-            protocol_id: "bailianAsr",
             capability: "asr",
-            display_name: "Alibaba Cloud · Bailian Speech Recognition (recording file)",
-            url_example: "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription",
-            subdir: "asr",
-            filename: "bailian-asr.lua",
-            source: include_str!("../../converter-scripts/asr/bailian-asr.lua"),
+            id: "bailianAsr",
+            config: include_str!("../../converter-scripts/models/asr/bailian-asr/model.json"),
+            script: include_str!("../../converter-scripts/models/asr/bailian-asr/bailian-asr.lua"),
         }],
     },
 ];
 
-/// Ensures all built-in converter scripts are deployed to the converter
-/// directory, creating or updating the meta.json as needed.
+/// The batch a deployed `model.json` records, zero when it does not say or
+/// cannot be read — either way a built-in of any batch may take its place.
+fn deployed_batch(path: &Path) -> u32 {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<ModelConfig>(&text).ok())
+        .map(|config| config.batch)
+        .unwrap_or(0)
+}
+
+/// Ensures every built-in converter is deployed to the models root, creating
+/// or updating its directory and `model.json` as needed.
 ///
-/// Called once at startup. Only deploys script groups whose batch number
-/// is greater than the currently recorded batch in meta.json.
+/// Called once at startup. A converter whose deployed batch is already at
+/// least the built-in batch is left untouched, so a script the reader
+/// customised survives until the next batch overtakes it.
 pub async fn ensure_deployed(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut registry = ConverterRegistry::load(root).await;
-    let current_batch = registry.current_batch();
-    let mut max_deployed = current_batch;
-
+    // Each document is parsed before its own write, so a converter whose
+    // embedded document does not parse deploys nothing at all. The documents
+    // ship with the binary, so this is a build defect and the tests that read
+    // every one of them are where it should be caught.
     for group in BUILTIN_GROUPS {
-        if group.batch <= current_batch {
-            continue;
-        }
         for def in group.scripts {
-            let subdir = root.join(def.subdir);
-            tokio::fs::create_dir_all(&subdir).await?;
-
-            let script_path = subdir.join(def.filename);
-            tokio::fs::write(&script_path, def.source).await?;
-
-            let entry = ProtocolEntry {
-                script: format!("{}/{}", def.subdir, def.filename),
-                display_name: def.display_name.to_string(),
-                url_example: def.url_example.to_string(),
-            };
-            registry
-                .add_protocol(def.capability, def.protocol_id, entry)
-                .await
-                .map_err(|e| format!("failed to update meta.json: {e}"))?;
-        }
-        if group.batch > max_deployed {
-            max_deployed = group.batch;
+            let config = def.model()?;
+            if deployed_batch(&root.join(def.subdir()).join("model.json")) >= group.batch {
+                continue;
+            }
+            let dir = root.join(def.subdir());
+            tokio::fs::create_dir_all(&dir).await?;
+            tokio::fs::write(dir.join(&config.script), def.script).await?;
+            tokio::fs::write(dir.join("model.json"), def.config).await?;
         }
     }
-
-    if max_deployed > current_batch {
-        registry.set_batch(max_deployed).await?;
-    }
-
     set_converter_root(root.to_path_buf());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::converter::registry::ConverterRegistry;
+
+    async fn deploy(dir: &Path) {
+        ensure_deployed(dir).await.unwrap();
+    }
+
+    /// Every embedded document parses and names the script embedded beside it.
+    /// The script itself cannot be checked here — the adapter only runs it —
+    /// so its emptiness is what a build defect would leave behind.
+    #[test]
+    fn every_built_in_document_is_well_formed() {
+        let mut count = 0;
+        for group in BUILTIN_GROUPS {
+            for def in group.scripts {
+                let config = def.model().unwrap_or_else(|e| panic!("{e}"));
+                assert_eq!(config.batch, group.batch, "{}", def.id);
+                assert!(!config.display_name.is_empty(), "{}", def.id);
+                assert!(!config.url_example.is_empty(), "{}", def.id);
+                assert!(!def.script.is_empty(), "{}", def.id);
+                count += 1;
+            }
+        }
+        assert_eq!(count, 10);
+    }
+
+    #[tokio::test]
+    async fn deploys_every_built_in_converter_under_its_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        deploy(dir.path()).await;
+
+        let registry = ConverterRegistry::load(dir.path());
+        assert!(registry.find("openaiChat").is_some());
+        assert!(registry.find("bailianAsr").is_some());
+        assert_eq!(registry.protocols_for("asr").unwrap().len(), 1);
+        // What the registry reports is what is on the disk: the document and
+        // the script it names both sit in the converter's own directory.
+        let entry = registry.find("bailianVideo").unwrap();
+        let script = dir.path().join(&entry.script);
+        assert!(script.is_file(), "{}", script.display());
+        assert!(dir.path().join("video/bailianVideo/model.json").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_customised_converter_keeps_its_document_until_the_next_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        deploy(dir.path()).await;
+
+        let document = dir.path().join("text/openaiChat/model.json");
+        std::fs::write(
+            &document,
+            r#"{"displayName": "Mine", "urlExample": "https://mine.example.com", "script": "openai-chat.lua", "batch": 7}"#,
+        )
+        .unwrap();
+        deploy(dir.path()).await;
+
+        let text = std::fs::read_to_string(&document).unwrap();
+        assert!(text.contains("Mine"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_document_that_does_not_say_its_batch_is_taken_over() {
+        let dir = tempfile::tempdir().unwrap();
+        deploy(dir.path()).await;
+
+        let document = dir.path().join("text/gemini/model.json");
+        std::fs::write(
+            &document,
+            r#"{"displayName": "Anonymous", "urlExample": "https://example.com", "script": "gemini.lua"}"#,
+        )
+        .unwrap();
+        deploy(dir.path()).await;
+
+        let text = std::fs::read_to_string(&document).unwrap();
+        assert!(text.contains("Google Gemini"), "{text}");
+    }
 }
