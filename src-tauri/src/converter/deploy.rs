@@ -125,6 +125,14 @@ pub const BUILTIN_SCRIPTS: &[ScriptDef] = &[
         ),
     },
     ScriptDef {
+        capability: "audio",
+        id: "bailianMusic",
+        config: include_str!("../../converter-scripts/models/audio/bailian-music/model.json"),
+        script: include_str!(
+            "../../converter-scripts/models/audio/bailian-music/bailian-music.lua"
+        ),
+    },
+    ScriptDef {
         capability: "asr",
         id: "bailianAsr",
         config: include_str!("../../converter-scripts/models/asr/bailian-asr/model.json"),
@@ -191,7 +199,7 @@ mod tests {
             assert!(!config.url_example.is_empty(), "{}", def.id);
             assert!(!def.script.is_empty(), "{}", def.id);
         }
-        assert_eq!(BUILTIN_SCRIPTS.len(), 10);
+        assert_eq!(BUILTIN_SCRIPTS.len(), 11);
     }
 
     #[tokio::test]
@@ -202,6 +210,7 @@ mod tests {
         let registry = ConverterRegistry::load(dir.path());
         assert!(registry.find("openaiChat").is_some());
         assert!(registry.find("bailianAsr").is_some());
+        assert!(registry.find("bailianMusic").is_some());
         assert_eq!(registry.protocols_for("asr").unwrap().len(), 1);
         // What the registry reports is what is on the disk: the document and
         // the script it names both sit in the converter's own directory.

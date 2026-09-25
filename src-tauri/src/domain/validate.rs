@@ -130,7 +130,20 @@ pub fn generation_param_keys(capability: Capability) -> &'static [&'static str] 
             "instructions",
         ],
         Capability::Image => &["size", "quality", "background", "count"],
-        Capability::Audio => &["voice", "format", "speed", "instructions", "music"],
+        Capability::Audio => &[
+            "voice",
+            "format",
+            "speed",
+            "instructions",
+            // Kept for a score rather than for a voice: the flag that says the
+            // piece is music rather than speech, and the fields a music service
+            // is asked with.
+            "music",
+            "lyrics",
+            "gender",
+            "instrumental",
+            "watermark",
+        ],
         Capability::Video => &[
             "seconds",
             "resolution",

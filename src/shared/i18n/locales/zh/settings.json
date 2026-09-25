@@ -35,7 +35,8 @@
   "models": {
     "new": "新建{{category}}模型",
     "empty": "还没有{{category}}模型。添加一个：完整的端点 URL、它使用的协议，以及它自己的密钥。",
-    "gap": "没有已启用的{{category}}模型：未指定自身模型的{{category}}节点会被拒绝。请在上方启用一个，或添加一个。"
+    "gap": "没有已启用的{{category}}模型：未指定自身模型的{{category}}节点会被拒绝。请在上方启用一个，或添加一个。",
+    "musicGap": "尚未选定配乐模型：故事的配乐会交给音频默认模型。"
   },
   "card": {
     "off": "已停用",
@@ -46,7 +47,9 @@
     "deleteConfirm": "删除“{{name}}”？已存储的密钥也会一并删除。",
     "key": "密钥 {{masked}}",
     "stored": "已存储",
-    "noKey": "未存储密钥"
+    "noKey": "未存储密钥",
+    "music": "配乐",
+    "useAsMusic": "用 {{name}} 生成配乐（故事里各幕的音乐与音效）"
   },
   "editor": {
     "headingEdit": "编辑“{{name}}” · {{category}}",

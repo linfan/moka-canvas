@@ -24,6 +24,7 @@ export const PAINTER = "painter";
 export const STORYTELLER = "storyteller";
 export const VIDEOGRAPHER = "videographer";
 export const SPEAKER = "speaker";
+export const MUSICIAN = "musician";
 
 /**
  * What the stand-in says, whole and in the pieces it arrives in.
@@ -382,6 +383,17 @@ export async function startMockProvider(): Promise<MockProvider> {
       });
       return response.end(bytes);
     }
+    // A song travels the other way round from a clip: the composition answers
+    // with a link, and the link is what the runtime fetches next. Both halves
+    // are served here, so the second request is a real one.
+    if (path === "/song.mp3" && request.method === "GET") {
+      const bytes = wav(1);
+      response.writeHead(200, {
+        "Content-Type": "audio/wav",
+        "Content-Length": String(bytes.length),
+      });
+      return response.end(bytes);
+    }
     if (request.method !== "POST") return missing();
 
     const raw = await bodyOf(request);
@@ -445,6 +457,19 @@ export async function startMockProvider(): Promise<MockProvider> {
         "Content-Length": String(bytes.length),
       });
       return response.end(bytes);
+    }
+    // A song is asked for at a music service's own address, and the answer
+    // names the song rather than carrying it.
+    if (path === "/api/v1/services/audio/music/generation") {
+      const host = request.headers.host ?? "127.0.0.1";
+      return send(200, {
+        output: {
+          audio: { url: `http://${host}/song.mp3?sig=stand-in` },
+          extra_info: { channels: 2, sample_rate: 48000 },
+          finish_reason: "stop",
+        },
+        usage: { duration: 1 },
+      });
     }
     if (path === "/v1/chat/completions") {
       const json = jsonAnswer(prompt);

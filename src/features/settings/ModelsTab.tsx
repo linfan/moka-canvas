@@ -2,17 +2,25 @@ import { useTranslation } from "react-i18next";
 import type { ModelView } from "../../api";
 import { CAPABILITY_LABELS, type Capability } from "../../shared/domain";
 import { ModelEditor } from "./ModelEditor";
-import { effectiveDefaultId, protocolLabel, useModelStore } from "./modelStore";
+import {
+  effectiveDefaultId,
+  musicDefaultId,
+  protocolLabel,
+  useModelStore,
+} from "./modelStore";
 import { SecretStorageNote } from "./SecretStorageNote";
 
 function ModelCard({
   model,
   category,
   isDefault,
+  isMusic,
 }: {
   model: ModelView;
   category: Capability;
   isDefault: boolean;
+  /** Whether this audio model is the one that composes the scores. */
+  isMusic: boolean;
 }) {
   const { t } = useTranslation();
   const saving = useModelStore((state) => state.saving);
@@ -58,6 +66,28 @@ function ModelCard({
           />
           <span>{t("settings:card.default")}</span>
         </label>
+        {category === "audio" && (
+          // A second question about an audio model, because a telling asks two
+          // of them: which one reads its lines aloud, and which one plays
+          // under them. Unchosen, a score is asked of the audio default.
+          <label className="settings-check">
+            <input
+              aria-label={t("settings:card.useAsMusic", {
+                name: model.displayName,
+              })}
+              checked={isMusic}
+              disabled={saving}
+              onChange={() =>
+                void useModelStore
+                  .getState()
+                  .setDefault("music", isMusic ? null : model.id)
+              }
+              type="radio"
+              name="default-music"
+            />
+            <span>{t("settings:card.music")}</span>
+          </label>
+        )}
       </div>
       <p className="model-card-detail">
         {model.model} · <code>{model.url}</code>
@@ -144,6 +174,7 @@ export function ModelsTab({ category }: { category: Capability }) {
   // and the first enabled model otherwise — the same fallback the server
   // resolves a generation through.
   const defaultId = effectiveDefaultId(view, category);
+  const musicId = category === "audio" ? musicDefaultId(view) : null;
 
   return (
     <div className="settings-section">
@@ -169,6 +200,7 @@ export function ModelsTab({ category }: { category: Capability }) {
               <ModelCard
                 category={category}
                 isDefault={model.id === defaultId}
+                isMusic={model.id === musicId}
                 key={model.id}
                 model={model}
               />
@@ -177,6 +209,11 @@ export function ModelsTab({ category }: { category: Capability }) {
           {defaultId === null && (
             <p className="settings-hint" data-testid={`${category}-gap`}>
               {t("settings:models.gap", { category: lower })}
+            </p>
+          )}
+          {category === "audio" && musicId === null && (
+            <p className="settings-hint" data-testid="audio-music-gap">
+              {t("settings:models.musicGap")}
             </p>
           )}
         </>

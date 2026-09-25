@@ -240,12 +240,19 @@ pub struct ModelDraft {
 pub type ModelRecord = ModelConfig;
 
 /// Default model per capability, addressed by model configuration id.
+///
+/// `music` is not a capability: the model that composes a score is an audio
+/// model like the one that reads a line aloud, and the two are told apart by
+/// what they were kept for rather than by what they can do. A story asks the
+/// music default for a score and the audio default for a voice, and a
+/// deployment that keeps one audio model answers both from it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Defaults {
     pub text: Option<String>,
     pub image: Option<String>,
     pub audio: Option<String>,
+    pub music: Option<String>,
     pub video: Option<String>,
     pub asr: Option<String>,
 }

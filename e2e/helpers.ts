@@ -4,8 +4,10 @@ import { join } from "node:path";
 import process from "node:process";
 import { expect, type Locator, type Page } from "@playwright/test";
 import {
+  MUSICIAN,
   PAINTER,
   PROVIDER_ADDRESS,
+  PROVIDER_ORIGIN,
   SPEAKER,
   STORYTELLER,
   VIDEOGRAPHER,
@@ -266,6 +268,16 @@ function endpoint(capability: Capability): string {
   }
 }
 
+/**
+ * Where a script-backed protocol is spoken to on the stand-in. The built-in
+ * shapes are derived from the capability; a converter's shape is the path its
+ * own model.json gives as an example, which the stand-in serves too — measured
+ * from the origin, since a converter's address is the whole endpoint.
+ */
+const CONVERTER_ENDPOINTS: Record<string, string> = {
+  bailianMusic: "/api/v1/services/audio/music/generation",
+};
+
 /** How each category is spoken to, which is one protocol per shape. */
 function protocolOf(capability: Capability): string {
   switch (capability) {
@@ -292,17 +304,33 @@ export async function configureModels(
     id: string;
     capability: Capability;
     alias: string;
+    /**
+     * The converter a script-backed model speaks, where it is not the built-in
+     * shape of its category. The address follows from it, since the converter's
+     * model.json is what says which endpoint it is asked at.
+     */
+    converter?: keyof typeof CONVERTER_ENDPOINTS;
+    /**
+     * What the model is kept for. `default` is the category's own choice;
+     * `music` is the one place that is not a category — the model a telling's
+     * score is composed with, which leaves the audio default to the voice.
+     */
+    role?: "default" | "music";
   }[],
 ): Promise<void> {
   for (const model of models) {
+    const url =
+      model.converter === undefined
+        ? endpoint(model.capability)
+        : `${PROVIDER_ORIGIN}${CONVERTER_ENDPOINTS[model.converter]}`;
     const put = await fetch(`${APP}/api/v1/models`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: model.id,
         category: model.capability,
-        protocol: protocolOf(model.capability),
-        url: endpoint(model.capability),
+        protocol: model.converter ?? protocolOf(model.capability),
+        url,
         model: model.id,
         displayName: model.alias,
         enabled: true,
@@ -316,7 +344,10 @@ export async function configureModels(
     }
   }
   const defaults = Object.fromEntries(
-    models.map((model) => [model.capability, model.id]),
+    models.map((model) => [
+      model.role === "music" ? "music" : model.capability,
+      model.id,
+    ]),
   );
   const patched = await fetch(`${APP}/api/v1/models/defaults`, {
     method: "PATCH",
@@ -347,7 +378,9 @@ export async function configureWordsAndPictures(): Promise<void> {
 
 /**
  * Pictures, words, clips and sound: everything a telling is made of, up to the
- * point where the shots are filmed.
+ * point where the shots are filmed. Two audio models, because a telling asks
+ * two things of sound — a voice reads its lines and a converter composes the
+ * music under them.
  */
 export async function configureTheWholeStudio(): Promise<void> {
   await configureModels([
@@ -355,6 +388,13 @@ export async function configureTheWholeStudio(): Promise<void> {
     { id: STORYTELLER, capability: "text", alias: "Storyteller" },
     { id: VIDEOGRAPHER, capability: "video", alias: "Videographer" },
     { id: SPEAKER, capability: "audio", alias: "Speaker" },
+    {
+      id: MUSICIAN,
+      capability: "audio",
+      alias: "Musician",
+      converter: "bailianMusic",
+      role: "music",
+    },
   ]);
 }
 

@@ -88,6 +88,7 @@ function providers(): ModelsView {
       text: null,
       image: protocol === null ? null : "painter",
       audio: null,
+      music: null,
       video: null,
       asr: null,
     },

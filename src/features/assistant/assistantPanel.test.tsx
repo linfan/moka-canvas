@@ -113,7 +113,14 @@ function bare(): ModelsView {
     version: 1,
     revision: 1,
     models: [],
-    defaults: { text: null, image: null, audio: null, video: null, asr: null },
+    defaults: {
+      text: null,
+      image: null,
+      audio: null,
+      music: null,
+      video: null,
+      asr: null,
+    },
     preferences: {
       systemPrompt: "",
       reasoningEffort: "auto",

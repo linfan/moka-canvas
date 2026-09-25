@@ -367,6 +367,17 @@ impl ModelRepo {
         resolve_within(&snapshot, "", capability)
     }
 
+    /// Resolves the model a score is composed with.
+    ///
+    /// A deployment that keeps a music model answers from it; one that keeps a
+    /// single audio model answers from that, since a voice model asked for a
+    /// tune is at worst a refusal and at best a tune. The two are the same
+    /// capability, so the music default is resolved as an audio model.
+    pub async fn resolve_music(&self) -> Result<ResolvedModel, ProviderError> {
+        let snapshot = self.metadata.models_snapshot().await?;
+        resolve_music_within(&snapshot)
+    }
+
     /// The plaintext credential, fetched as late as possible. A caller must
     /// not put this in anything that outlives the request.
     pub async fn credential(&self, config_id: &str) -> Result<String, ProviderError> {
@@ -463,6 +474,7 @@ fn clear_references(defaults: &mut Defaults, model_id: &str) -> bool {
         &mut defaults.text,
         &mut defaults.image,
         &mut defaults.audio,
+        &mut defaults.music,
         &mut defaults.video,
         &mut defaults.asr,
     ] {
@@ -512,6 +524,29 @@ pub fn resolve_within(
             "no default model is set",
         )),
     }
+}
+
+/// The model a score is composed with, from a snapshot already in hand.
+///
+/// The stored music default is used while it still names a model that can sing
+/// or play; a deployment that chose none — or whose choice has since gone —
+/// answers with the audio default, which is the one model a telling with no
+/// music model of its own has for both its voice and its score.
+pub fn resolve_music_within(snapshot: &ModelsSnapshot) -> Result<ResolvedModel, ProviderError> {
+    let stored = snapshot
+        .defaults
+        .music
+        .as_deref()
+        .map(str::trim)
+        .filter(|music| !music.is_empty());
+    if let Some(music) = stored {
+        // The same courtesy a stale default gets anywhere else: a choice that
+        // no longer serves is passed over rather than refused.
+        if let Ok(resolved) = resolve_in(snapshot, music, Capability::Audio) {
+            return Ok(resolved);
+        }
+    }
+    resolve_within(snapshot, "", Capability::Audio)
 }
 
 fn resolve_in(
@@ -742,6 +777,7 @@ mod tests {
         let mut defaults = Defaults {
             image: Some("painter".to_string()),
             text: Some("backup".to_string()),
+            music: Some("musician".to_string()),
             ..Default::default()
         };
         assert_eq!(default_for(&defaults, Capability::Image), Some("painter"));
@@ -751,6 +787,38 @@ mod tests {
         assert!(clear_references(&mut defaults, "painter"));
         assert_eq!(defaults.image, None);
         assert_eq!(defaults.text.as_deref(), Some("backup"));
+
+        // A music model is a default like any other: removing it clears the
+        // place that named it, and leaving it alone keeps the score's model.
+        assert!(clear_references(&mut defaults, "musician"));
+        assert_eq!(defaults.music, None);
+    }
+
+    #[test]
+    fn a_score_is_asked_of_the_music_model_and_a_voice_of_the_audio_one() {
+        let mut snapshot = configured();
+        snapshot.models.push(model("musician", Capability::Audio));
+        snapshot.models.push(model("speaker", Capability::Audio));
+        snapshot.defaults.audio = Some("speaker".to_string());
+
+        // No music model chosen: the audio default composes, because one audio
+        // model is a deployment that answers both.
+        snapshot.defaults.music = None;
+        let music = resolve_music_within(&snapshot).unwrap();
+        assert_eq!(music.config_id, "speaker");
+
+        // One chosen: the score goes there and the voice stays where it was.
+        snapshot.defaults.music = Some("musician".to_string());
+        let music = resolve_music_within(&snapshot).unwrap();
+        assert_eq!(music.config_id, "musician");
+        let voice = resolve_within(&snapshot, "", Capability::Audio).unwrap();
+        assert_eq!(voice.config_id, "speaker");
+
+        // A music model deleted since it was chosen falls back to the audio
+        // default rather than refusing the score.
+        snapshot.defaults.music = Some("gone".to_string());
+        let music = resolve_music_within(&snapshot).unwrap();
+        assert_eq!(music.config_id, "speaker");
     }
 
     #[test]

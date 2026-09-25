@@ -71,6 +71,11 @@ const REGISTRY = {
       displayName: "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
       urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/tts",
     },
+    bailianMusic: {
+      script: "audio/bailian-music.lua",
+      displayName: "Alibaba Cloud · Music Generation (fun-music)",
+      urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/music",
+    },
   },
   video: {
     openaiVideos: {
@@ -137,7 +142,14 @@ function fixture(): ModelsView {
       model("scribe", "text", "openaiChat", "Scribe", false),
       model("painter", "image", "openaiImages", "Painter", true),
     ],
-    defaults: { text: null, image: null, audio: null, video: null, asr: null },
+    defaults: {
+      text: null,
+      image: null,
+      audio: null,
+      music: null,
+      video: null,
+      asr: null,
+    },
     preferences: {
       systemPrompt: "",
       reasoningEffort: "auto",
@@ -550,6 +562,7 @@ describe("model settings", () => {
     expect([...protocol.options].map((option) => option.value)).toEqual([
       "openaiSpeech",
       "bailianSpeech",
+      "bailianMusic",
     ]);
   });
 
@@ -690,6 +703,37 @@ describe("model settings", () => {
           }) as HTMLInputElement
         ).checked,
       ).toBe(true),
+    );
+  });
+
+  it("keeps a model for the score beside the one that reads the lines", async () => {
+    view.models.push(
+      model("speaker", "audio", "openaiSpeech", "Speaker", true),
+      model("musician", "audio", "bailianMusic", "Musician", true),
+    );
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    // Nothing composes yet, and the tab says what a score falls back to.
+    expect(await screen.findByText("Speaker")).toBeTruthy();
+    expect(screen.getByTestId("audio-music-gap")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("radio", {
+        name: "Use Musician to compose scores and the music under a telling's acts",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(writesTo("/api/v1/models/defaults")).toHaveLength(1),
+    );
+    expect(writesTo("/api/v1/models/defaults")[0].body).toEqual({
+      music: "musician",
+      expectedRevision: 1,
+    });
+    // Chosen: the hint about the fallback goes away.
+    await waitFor(() =>
+      expect(screen.queryByTestId("audio-music-gap")).toBeNull(),
     );
   });
 

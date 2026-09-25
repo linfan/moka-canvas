@@ -26,7 +26,7 @@ use crate::metadata::RecentProject;
 use crate::project::{
     AssetShelfEdit, ByteRange, CreateProject, OpenProject, PackageScope, ProjectStore, StagedAsset,
 };
-use crate::story::{StoryJobItem, StoryJobRecord};
+use crate::story::{StoryJobItem, StoryJobKind, StoryJobRecord};
 use crate::workflow::events::RunEvent;
 use axum::{
     body::Body,
@@ -972,11 +972,18 @@ pub async fn start_story_job(
         ));
     }
 
-    let resolved = state
-        .models
-        .resolve_default(request.kind.capability())
-        .await
-        .map_err(Problem::from)?;
+    // A telling's score is asked of the music model rather than of whatever
+    // reads its lines aloud: the two are the same capability, and a deployment
+    // that keeps both says which one composes.
+    let resolved = if request.kind == StoryJobKind::Music {
+        state.models.resolve_music().await
+    } else {
+        state
+            .models
+            .resolve_default(request.kind.capability())
+            .await
+    }
+    .map_err(Problem::from)?;
     let job = state
         .story_jobs
         .start(request.story_id, request.kind, resolved.config_id, items)
@@ -1209,6 +1216,9 @@ pub async fn patch_defaults(
     }
     if let Some(audio) = patch.audio {
         defaults.audio = audio;
+    }
+    if let Some(music) = patch.music {
+        defaults.music = music;
     }
     if let Some(video) = patch.video {
         defaults.video = video;

@@ -53,7 +53,14 @@ function models(models: ModelsView["models"]): ModelsView {
     version: 1,
     revision: 7,
     models,
-    defaults: { text: null, image: null, audio: null, video: null, asr: null },
+    defaults: {
+      text: null,
+      image: null,
+      audio: null,
+      music: null,
+      video: null,
+      asr: null,
+    },
     preferences: {
       systemPrompt: "",
       reasoningEffort: "auto",

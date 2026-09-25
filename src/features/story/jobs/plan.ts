@@ -632,7 +632,10 @@ export function planActMusic(
         seconds,
       }),
       inputs: [],
-      params: { music: true, ...audioParams() },
+      // The score plays under the lines rather than being sung over them, so a
+      // service that can write words for a song is told not to; a voice model
+      // asked for music ignores the flag.
+      params: { music: true, instrumental: true, ...audioParams() },
     },
   ];
 }

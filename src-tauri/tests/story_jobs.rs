@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::Path as Route;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -26,6 +26,25 @@ use serde_json::{json, Value};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
+/// The models tree every test in this binary shares, deployed once.
+///
+/// The converter registry is process-wide and is what model validation reads to
+/// learn which script-backed protocols exist, so the tree is deployed into a
+/// directory that outlives every test here: the first deploy wins the global
+/// root, and one that went away with the test that made it would leave the rest
+/// of the binary with no script protocols at all.
+async fn converters() {
+    static ROOT: tokio::sync::OnceCell<TempDir> = tokio::sync::OnceCell::const_new();
+    ROOT.get_or_init(|| async {
+        let dir = TempDir::new().expect("a temporary models root");
+        moka_canvas::converter::deploy::ensure_deployed(dir.path())
+            .await
+            .expect("the built-in converters deploy");
+        dir
+    })
+    .await;
+}
+
 /// The story every test here tells, and the chapter of it a piece is aimed at.
 const STORY: &str = "story-1";
 const NOW: &str = "2026-01-01T00:00:00.000Z";
@@ -35,6 +54,7 @@ const WRITER: &str = "scribe-1";
 const PAINTER: &str = "painter-1";
 const SHOOTER: &str = "shooter-1";
 const SPEAKER: &str = "speaker-1";
+const COMPOSER: &str = "composer-1";
 
 const API_KEY: &str = "sk-test-1234567890abcd";
 
@@ -151,6 +171,46 @@ impl Harness {
             .set_defaults(&defaults, None)
             .await
             .expect("the defaults are stored");
+    }
+
+    /// Keeps a music model beside the models already configured and points the
+    /// score at it, which is what a deployment with a composer looks like.
+    async fn compose_with(&self, base_url: &str, id: &str) {
+        converters().await;
+        self.state
+            .models
+            .upsert(ModelDraft {
+                id: id.into(),
+                category: Capability::Audio,
+                // A converter script's protocol: the model names it, and what
+                // it speaks is the script's business.
+                protocol: Protocol::LuaScript("bailianMusic".into()),
+                url: format!("{base_url}/api/v1/services/audio/music/generation"),
+                model: "fun-music-v1".into(),
+                display_name: id.into(),
+                enabled: true,
+                expected_revision: None,
+            })
+            .await
+            .expect("the music model is stored");
+        self.state
+            .models
+            .set_key(id, Some(API_KEY))
+            .await
+            .expect("the credential is stored");
+        let mut defaults = self
+            .state
+            .models
+            .snapshot()
+            .await
+            .expect("the models are readable")
+            .defaults;
+        defaults.music = Some(id.to_string());
+        self.state
+            .models
+            .set_defaults(&defaults, None)
+            .await
+            .expect("the music default is stored");
     }
 
     /// Creates the project a batch happens in, tells it one story, and answers
@@ -478,6 +538,13 @@ impl Recorded {
         self.asks.lock().expect("the notes are not poisoned").len()
     }
 
+    fn asks(&self) -> Vec<Value> {
+        self.asks
+            .lock()
+            .expect("the notes are not poisoned")
+            .clone()
+    }
+
     fn placed(&self) -> Vec<String> {
         self.placed
             .lock()
@@ -493,12 +560,13 @@ impl Recorded {
     }
 }
 
-/// A provider that writes words, paints a picture, films a shot and speaks a
-/// line: everything one story step could ask for.
+/// A provider that writes words, paints a picture, films a shot, speaks a line
+/// and composes a song: everything one story step could ask for.
 fn answering(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
     let writing = recorded.clone();
     let painting = recorded.clone();
     let speaking = recorded.clone();
+    let composing = recorded.clone();
     let starting = recorded;
     let asking = starting.clone();
     Router::new()
@@ -534,6 +602,34 @@ fn answering(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
                     ([(header::CONTENT_TYPE, "audio/wav")], speech(1))
                 }
             }),
+        )
+        // A song is asked for at the service's own address and answered with a
+        // link to it, on this same stand-in: the second request is the one that
+        // carries the music.
+        .route(
+            "/api/v1/services/audio/music/generation",
+            post(move |headers: HeaderMap, body: Bytes| {
+                let recorded = composing.clone();
+                async move {
+                    recorded.note(&body);
+                    let host = headers
+                        .get(header::HOST)
+                        .and_then(|host| host.to_str().ok())
+                        .unwrap_or("127.0.0.1");
+                    Json(json!({
+                        "output": {
+                            "audio": { "url": format!("http://{host}/song.mp3?sig=stand-in") },
+                            "extra_info": { "channels": 2, "sample_rate": 48_000 },
+                            "finish_reason": "stop",
+                        },
+                        "usage": { "duration": 1 },
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/song.mp3",
+            get(|| async { ([(header::CONTENT_TYPE, "audio/wav")], speech(1)) }),
         )
         .route(
             "/v1/videos",
@@ -764,6 +860,64 @@ async fn a_batch_of_sound_is_filed_as_voice_on_the_shelf_and_as_music_beside_it(
         music["name"]
     );
     assert_eq!(recorded.count(), 2, "two pieces are two calls");
+}
+
+#[tokio::test]
+async fn a_score_is_composed_by_the_model_kept_for_music() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
+    harness
+        .configure(&provider, &[(SPEAKER, Capability::Audio)])
+        .await;
+    harness.compose_with(&provider, COMPOSER).await;
+    harness.project("Story Score").await;
+
+    // A telling's music, asked for the way the fourth step asks for it: audio,
+    // under the music flag, with no vocals — the lines are read by a voice.
+    let mut scored = piece(
+        "music:1",
+        act_music_target("act-1"),
+        "audio",
+        "雨夜站台，低音提琴，缓慢",
+    );
+    scored["params"] = json!({ "music": true, "instrumental": true, "format": "mp3" });
+    let job = harness.start_ok(batch("music", vec![scored])).await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    // The batch is driven by the composer rather than by the voice, which is
+    // the whole point of keeping one.
+    assert_eq!(settled["model"], COMPOSER);
+
+    // The service was asked in its own words, at its own address.
+    let asked = recorded
+        .asks()
+        .into_iter()
+        .find(|asked| asked["input"]["prompt"] == json!("雨夜站台，低音提琴，缓慢"))
+        .expect("the service was asked for a song");
+    assert_eq!(asked["model"], "fun-music-v1");
+    assert_eq!(asked["input"]["is_instrumental"], true);
+    assert_eq!(asked["input"]["format"], "mp3");
+    assert!(asked["input"].get("music").is_none(), "{asked}");
+    assert!(asked["input"].get("voice").is_none(), "{asked}");
+
+    // And the song it pointed at is what landed on the shelf.
+    let item = &settled["items"][0];
+    let asset_id = item["assetIds"][0]
+        .as_str()
+        .expect("the answer became a file")
+        .to_string();
+    let document = harness.document().await;
+    assert!(
+        document["moka"]["resources"]["music"]
+            .as_array()
+            .expect("the shelf keeps music")
+            .iter()
+            .any(|entry| entry["id"] == json!(asset_id)),
+        "the song is filed as music"
+    );
 }
 
 #[tokio::test]

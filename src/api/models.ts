@@ -35,8 +35,14 @@ export interface ModelView {
   apiKey: ApiKeyView;
 }
 
-/** The default model of each category, by model configuration id. */
-export type ModelDefaults = Record<Capability, string | null>;
+/**
+ * The default model of each category, by model configuration id — plus the one
+ * choice that is not a category of its own: the audio model that composes a
+ * telling's score rather than reading its lines aloud.
+ */
+export type ModelDefaults = Record<Capability, string | null> & {
+  music: string | null;
+};
 
 export interface ImagePreferences {
   size: string;
@@ -122,6 +128,7 @@ export interface DefaultsPatch {
   text?: string | null;
   image?: string | null;
   audio?: string | null;
+  music?: string | null;
   video?: string | null;
   asr?: string | null;
   expectedRevision?: number | null;

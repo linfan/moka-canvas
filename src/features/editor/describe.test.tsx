@@ -82,6 +82,7 @@ function providers(): ModelsView {
       text: offersText ? "reader" : null,
       image: "painter",
       audio: null,
+      music: null,
       video: null,
       asr: null,
     },

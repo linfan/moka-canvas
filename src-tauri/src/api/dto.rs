@@ -346,6 +346,8 @@ pub struct DefaultsPatch {
     #[serde(default, deserialize_with = "present_value")]
     pub audio: Option<Option<String>>,
     #[serde(default, deserialize_with = "present_value")]
+    pub music: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present_value")]
     pub video: Option<Option<String>>,
     #[serde(default, deserialize_with = "present_value")]
     pub asr: Option<Option<String>>,

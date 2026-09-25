@@ -21,6 +21,13 @@ import { i18n } from "../../shared/i18n";
 /** The settings tabs: one per model category, plus the global preferences. */
 export type SettingsTab = Capability | "preferences";
 
+/**
+ * A place a model may be made the default of. `music` is the odd one out: not a
+ * category of its own, but the audio model a telling's score is composed with
+ * rather than the one that reads its lines aloud.
+ */
+export type DefaultPlace = Capability | "music";
+
 /** The three top-level settings sections: the open project, models, the system. */
 export type SettingsTopTab = "project" | "model" | "system";
 
@@ -63,6 +70,23 @@ export function effectiveDefaultId(
     return stored;
   }
   return serving[0]?.id ?? null;
+}
+
+/**
+ * The audio model a telling's score is composed with: the stored choice while
+ * it still names an enabled model of that category, and none otherwise. None
+ * is not a refusal — the server answers a score from the audio default when no
+ * music model was chosen, and the tab says as much.
+ */
+export function musicDefaultId(view: ModelsView | null): string | null {
+  if (!view) return null;
+  const stored = view.defaults.music;
+  if (stored === null) return null;
+  const serves = view.models.some(
+    (model) =>
+      model.id === stored && model.enabled && model.category === "audio",
+  );
+  return serves ? stored : null;
 }
 
 /** One protocol the form may offer for a category. */
@@ -226,8 +250,8 @@ interface ModelState {
   setKey: (id: string, apiKey: string | null) => Promise<boolean>;
   /** Moves the master key protecting every stored credential to another tier. */
   setSecretStorage: (storage: SecretStorageChoice) => Promise<boolean>;
-  /** Makes one model its category's default, or clears the default. */
-  setDefault: (capability: Capability, id: string | null) => Promise<boolean>;
+  /** Makes one model the default of a place, or clears that place. */
+  setDefault: (place: DefaultPlace, id: string | null) => Promise<boolean>;
   savePreferences: (patch: PreferencesPatch) => Promise<boolean>;
   reset: () => void;
 }
@@ -410,8 +434,8 @@ export const useModelStore = create<ModelState>()((set, get) => {
       );
     },
 
-    setDefault(capability, id) {
-      const patch: DefaultsPatch = { [capability]: id };
+    setDefault(place, id) {
+      const patch: DefaultsPatch = { [place]: id };
       return write(i18n.t("settings:errors.saveDefault"), (revision) =>
         modelsApi.setDefaults({ ...patch, expectedRevision: revision }),
       );

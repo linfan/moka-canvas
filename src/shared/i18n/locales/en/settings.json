@@ -35,7 +35,8 @@
   "models": {
     "new": "New {{category}} model",
     "empty": "No {{category}} models yet. Add one: a complete endpoint URL, the protocol it speaks, and its own key.",
-    "gap": "No enabled {{category}} model: a {{category}} node that names no model of its own will be refused. Enable one above, or add one."
+    "gap": "No enabled {{category}} model: a {{category}} node that names no model of its own will be refused. Enable one above, or add one.",
+    "musicGap": "No music model chosen: a telling's score is asked of the audio default."
   },
   "card": {
     "off": "off",
@@ -46,7 +47,9 @@
     "deleteConfirm": "Delete “{{name}}”? The stored key goes with it.",
     "key": "Key {{masked}}",
     "stored": "stored",
-    "noKey": "No key stored"
+    "noKey": "No key stored",
+    "music": "Music",
+    "useAsMusic": "Use {{name}} to compose scores and the music under a telling's acts"
   },
   "editor": {
     "headingEdit": "Edit “{{name}}” · {{category}}",

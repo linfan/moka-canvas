@@ -361,6 +361,7 @@ describe("planning the clips", () => {
           text: null,
           image: null,
           audio: null,
+          music: null,
           video: null,
           asr: null,
         },
@@ -517,6 +518,9 @@ describe("the sound of an act", () => {
     // The flag is what the server files the answer by: without it a score
     // would land on the voice shelf.
     expect(items[0]?.params?.music).toBe(true);
+    // A score plays under the lines rather than being sung over them: the
+    // service that can write words for a song is told not to.
+    expect(items[0]?.params?.instrumental).toBe(true);
   });
 
   it("asks for nothing when the board says nothing about the sound", () => {

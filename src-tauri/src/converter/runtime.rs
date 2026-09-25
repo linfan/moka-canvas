@@ -365,6 +365,101 @@ mod tests {
         // The API only takes the tiers with a trailing P, so the bare tier the
         // request carries is dressed before it travels.
         assert_eq!(body["parameters"]["resolution"], "720P");
+
+        // Music: the one-shot composition shape, whose answer names the song.
+        let music = rt
+            .load(&scripts.join("models/audio/bailian-music/bailian-music.lua"))
+            .unwrap();
+        let out = rt
+            .call_json_value(
+                &music,
+                "build_request",
+                vec![
+                    serde_json::json!({"url": "https://ws.test/music", "model": "fun-music-v1"}),
+                    serde_json::json!({
+                        "prompt": "雨夜站台，低音提琴，缓慢",
+                        "params": {
+                            "music": true,
+                            "instrumental": true,
+                            "format": "mp3",
+                            "voice": "alloy",
+                        },
+                    }),
+                    serde_json::json!([]),
+                ],
+            )
+            .unwrap();
+        assert_eq!(out["url"], "https://ws.test/music");
+        let body: serde_json::Value =
+            serde_json::from_str(out["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["model"], "fun-music-v1");
+        assert_eq!(body["input"]["prompt"], "雨夜站台，低音提琴，缓慢");
+        assert_eq!(body["input"]["is_instrumental"], true);
+        assert_eq!(body["input"]["format"], "mp3");
+        // A parameter meant for a voice does not travel to a service that
+        // writes songs, and the flag the shelf files by is not a field of its.
+        assert!(body["input"].get("voice").is_none(), "{body}");
+        assert!(body["input"].get("music").is_none(), "{body}");
+
+        // The song arrives as a link rather than as bytes, and the words the
+        // service wrote with it are kept.
+        let answered = rt
+            .call_json_value(
+                &music,
+                "parse_response",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!({}),
+                    serde_json::json!(
+                        r#"{"output":{"audio":{"url":"https://oss.test/song.mp3?sig=x"},"extra_info":{"lyrics":"[verse]\n雨落"},"finish_reason":"stop"},"usage":{"duration":200}}"#
+                    ),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            answered["items"][0]["url"],
+            "https://oss.test/song.mp3?sig=x"
+        );
+        assert_eq!(answered["items"][0]["mime"], "audio/mpeg");
+        assert_eq!(answered["text"], "[verse]\n雨落");
+
+        // A 200 that carries no song says so, in the service's own words.
+        let empty = rt
+            .call_json_value(
+                &music,
+                "parse_response",
+                vec![
+                    serde_json::json!(200),
+                    serde_json::json!({}),
+                    serde_json::json!(r#"{"output":{"audio":{"url":""}}}"#),
+                ],
+            )
+            .unwrap();
+        assert!(
+            empty["error"].as_str().unwrap().contains("no song"),
+            "{empty}"
+        );
+
+        let refused = rt
+            .call_json_value(
+                &music,
+                "parse_response",
+                vec![
+                    serde_json::json!(401),
+                    serde_json::json!({}),
+                    serde_json::json!(
+                        r#"{"code":"InvalidApiKey","message":"the key is not one of ours"}"#
+                    ),
+                ],
+            )
+            .unwrap();
+        assert!(
+            refused["error"]
+                .as_str()
+                .unwrap()
+                .contains("the key is not one of ours"),
+            "{refused}"
+        );
     }
 
     /// A policy answer as the provider writes one, and the state step one left.

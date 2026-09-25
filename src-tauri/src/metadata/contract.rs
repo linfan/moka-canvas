@@ -336,6 +336,7 @@ async fn defaults_and_preferences(store: &dyn MetadataStore) -> Result<(), Strin
         text: Some("locked".to_string()),
         image: Some("other-image".to_string()),
         audio: None,
+        music: Some("composes".to_string()),
         video: None,
         asr: Some("hears-audio".to_string()),
     };
