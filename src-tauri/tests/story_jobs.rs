@@ -433,6 +433,10 @@ fn keyframe_target(chapter: &str, act: &str, keyframe: &str) -> Value {
     })
 }
 
+fn element_target(element: &str, view: &str) -> Value {
+    json!({ "kind": "elementArt", "elementId": element, "view": view })
+}
+
 fn act_video_target(act: &str) -> Value {
     json!({ "kind": "actVideo", "chapterId": "chapter-1", "actId": act })
 }
@@ -717,6 +721,29 @@ fn encoded(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
+/// A provider that paints a picture whose shape says which prompt asked for
+/// it: a batch's drawings are told apart by what is in the files it filed.
+fn painting_by_prompt() -> Router {
+    Router::new().route(
+        "/v1/images/generations",
+        post(|body: Bytes| async move {
+            let prompt = serde_json::from_slice::<Value>(&body)
+                .ok()
+                .and_then(|asked| asked["prompt"].as_str().map(str::to_string))
+                .unwrap_or_default();
+            let drawn = if prompt.contains("第一格") {
+                picture(8, 6)
+            } else {
+                picture(10, 4)
+            };
+            Json(json!({
+                "created": 1_700_000_000u64,
+                "data": [{ "b64_json": encoded(&drawn) }],
+            }))
+        }),
+    )
+}
+
 /// A tiny PNG, sized so a test can tell one drawing from another.
 fn picture(width: u32, height: u32) -> Vec<u8> {
     let mut png = image::RgbaImage::new(width, height);
@@ -790,6 +817,68 @@ async fn a_batch_of_drawings_is_answered_and_filed_under_the_batch_that_asked() 
         entry["name"]
     );
     assert_eq!(recorded.count(), 1, "one piece is one call");
+}
+
+/// A batch of characters drawn at once: every piece is a file of its own.
+///
+/// The pieces of one batch are named alike — one label, one batch — so the
+/// names they are filed under must not be alike: a file written over another
+/// is two characters wearing the same face.
+#[tokio::test]
+async fn a_batch_of_drawings_files_every_piece_in_a_file_of_its_own() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let provider = serve(painting_by_prompt()).await;
+    harness
+        .configure(&provider, &[(PAINTER, Capability::Image)])
+        .await;
+    let root = harness.project("Story Drawings").await;
+
+    let job = harness
+        .start_ok(batch(
+            "elementArt",
+            vec![
+                piece(
+                    "element:main:hero",
+                    element_target("hero", "main"),
+                    "image",
+                    "第一格：雨里的站台",
+                ),
+                piece(
+                    "element:main:other",
+                    element_target("other", "main"),
+                    "image",
+                    "第二格：灯下的人",
+                ),
+            ],
+        ))
+        .await;
+    let job_id = job["id"].as_str().expect("a job has an id").to_string();
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+
+    let document = harness.document().await;
+    let shelf = document["moka"]["resources"]["images"]
+        .as_array()
+        .expect("the shelf is a list");
+    let mut paths = Vec::new();
+    for (at, expected) in [picture(8, 6), picture(10, 4)].iter().enumerate() {
+        let asset_id = settled["items"][at]["assetIds"][0]
+            .as_str()
+            .expect("the answer became a file");
+        let entry = shelf
+            .iter()
+            .find(|entry| entry["id"] == json!(asset_id))
+            .expect("the drawing is on the shelf");
+        let path = entry["path"].as_str().expect("a filed asset has a path");
+        let bytes = std::fs::read(root.join(path)).expect("the file is in the project");
+        assert_eq!(
+            bytes, *expected,
+            "piece {at} keeps the drawing it was answered with"
+        );
+        paths.push(path.to_string());
+    }
+    assert_ne!(paths[0], paths[1], "two drawings are two files");
 }
 
 #[tokio::test]

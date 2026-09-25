@@ -14,8 +14,8 @@
 use super::{GenerateResult, ResolvedInputs};
 use crate::assets::new_tmp_path;
 use crate::domain::{
-    now_iso, AssetId, AssetProvenance, Capability, GenerationSpec, ResourceEntry, RunRecord,
-    WorkflowNode,
+    id_tag, now_iso, AssetId, AssetProvenance, Capability, GenerationSpec, ResourceEntry,
+    RunRecord, WorkflowNode,
 };
 use crate::project::{ProjectError, ProjectStore, StagedAsset};
 
@@ -174,7 +174,7 @@ fn discard(staged: &mut Vec<StagedAsset>) {
 /// from one node apart; the index only appears when there is more than one, so
 /// a single result is never called the first of one.
 fn display_name(node: &WorkflowNode, run: &RunRecord, index: usize, count: usize) -> String {
-    let short: String = run.id.chars().take(RUN_NAME_CHARS).collect();
+    let short = id_tag(&run.id, RUN_NAME_CHARS);
     if count > 1 {
         format!("{}-{short}-{}", node.title, index + 1)
     } else {

@@ -1,4 +1,4 @@
-use crate::domain::{AssetProbe, ASSET_CATEGORIES};
+use crate::domain::{id_tag, AssetProbe, ASSET_CATEGORIES};
 use crate::project::ProjectError;
 use sha2::Digest;
 use std::path::{Path, PathBuf};
@@ -158,14 +158,23 @@ pub fn extension_for(name: &str, mime: &str) -> String {
 }
 
 /// Collision-safe filename: slug derived from the display name plus a short
-/// id suffix, never the raw user-supplied path.
+/// id suffix, never the raw user-supplied path. The suffix is the id's own
+/// end, since two drawings of one batch are made in the same minute and share
+/// their id's head.
 pub fn asset_filename(name: &str, mime: &str, id: &str) -> String {
-    let short: String = id.chars().take(8).collect();
+    let short = id_tag(id, 8);
     format!("{}-{}.{}", slugify(name), short, extension_for(name, mime))
 }
 
 /// Atomically promotes a staged tmp file into its category directory.
 /// Returns the project-relative POSIX path.
+///
+/// The name it was handed is the name it takes wherever that name is free, and
+/// a name already taken is stepped aside from rather than written over: the
+/// file already there is another asset's work, and a name meant to be unique is
+/// not a name that cannot collide. The name is reserved with an exclusive
+/// create before the staged file is renamed onto it, so two promotes racing for
+/// one name end up in two files rather than one.
 pub fn promote(
     project_root: &Path,
     tmp_path: &Path,
@@ -180,9 +189,48 @@ pub fn promote(
     }
     let category_dir = project_root.join("assets").join(category);
     std::fs::create_dir_all(&category_dir)?;
-    let target = category_dir.join(filename);
-    std::fs::rename(tmp_path, &target)?;
-    Ok(format!("assets/{category}/{filename}"))
+    let mut attempt = 0usize;
+    loop {
+        let candidate = stepped_aside(filename, attempt);
+        let target = category_dir.join(&candidate);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(_) => {
+                if let Err(error) = std::fs::rename(tmp_path, &target) {
+                    // Only the name was taken; nothing of this asset is here.
+                    let _ = std::fs::remove_file(&target);
+                    return Err(error.into());
+                }
+                return Ok(format!("assets/{category}/{candidate}"));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                attempt += 1;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+/// The name a file takes when the one it was handed is already somebody's: the
+/// same name with a count in front of its extension, counted from the name it
+/// was asked for rather than from the name before it, so the same request ends
+/// up in the same name however the names around it are taken.
+fn stepped_aside(filename: &str, attempt: usize) -> String {
+    if attempt == 0 {
+        return filename.to_string();
+    }
+    let path = Path::new(filename);
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(filename);
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) => format!("{stem}-{attempt}.{extension}"),
+        None => format!("{stem}-{attempt}"),
+    }
 }
 
 pub fn tmp_dir(project_root: &Path) -> PathBuf {
@@ -197,7 +245,57 @@ pub fn new_tmp_path(project_root: &Path) -> std::io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::slugify;
+    use super::{asset_filename, promote, slugify};
+
+    #[test]
+    fn a_name_already_taken_is_stepped_aside_from() {
+        let root = tempfile::tempdir().unwrap();
+        let held = root.path().join("held.bin");
+        std::fs::write(&held, b"the drawing already there").unwrap();
+        let arriving = root.path().join("arriving.bin");
+        std::fs::write(&arriving, b"the drawing that arrives later").unwrap();
+
+        let first = promote(root.path(), &held, "images", "element-art-019b2f3c.png").unwrap();
+        let second = promote(root.path(), &arriving, "images", "element-art-019b2f3c.png").unwrap();
+
+        assert_eq!(first, "assets/images/element-art-019b2f3c.png");
+        assert_eq!(second, "assets/images/element-art-019b2f3c-1.png");
+        assert_eq!(
+            std::fs::read(root.path().join(&first)).unwrap(),
+            b"the drawing already there"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join(&second)).unwrap(),
+            b"the drawing that arrives later"
+        );
+
+        // A name nobody holds is the name it takes, count and all left off.
+        let alone = root.path().join("alone.bin");
+        std::fs::write(&alone, b"alone").unwrap();
+        assert_eq!(
+            promote(root.path(), &alone, "images", "element-art-7d1e4b2a.png").unwrap(),
+            "assets/images/element-art-7d1e4b2a.png"
+        );
+    }
+
+    #[test]
+    fn two_ids_that_share_a_head_still_name_two_files() {
+        // Two ids issued in the same minute agree in their first characters:
+        // an id spells when it was made. A tag taken from there is one tag for
+        // both, which files one drawing over another.
+        let one = asset_filename(
+            "element art-019b2f3c",
+            "image/png",
+            "019b2f3c-1234-7abc-9def-0123456789ab",
+        );
+        let other = asset_filename(
+            "element art-019b2f3c",
+            "image/png",
+            "019b2f3c-1234-7abc-9def-0123456789cd",
+        );
+        assert_ne!(one, other, "one batch's drawings are not one file");
+        assert!(one.starts_with("element-art-019b2f3c-"), "{one}");
+    }
 
     #[test]
     fn a_slug_keeps_the_words_of_its_name() {

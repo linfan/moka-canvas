@@ -1,5 +1,5 @@
 use crate::config::LimitsConfig;
-use crate::domain::{now_iso, AssetId, ASSET_CATEGORIES};
+use crate::domain::{id_tag, new_id, now_iso, AssetId, ASSET_CATEGORIES};
 use crate::domain::{MokaFile, PACKAGE_MANIFEST_VERSION};
 use crate::metadata::crypto;
 use crate::metadata::docs;
@@ -476,14 +476,7 @@ fn staging_dir_for(target_root: &Path) -> PathBuf {
     target_root
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(format!(
-            ".moka-import-{}",
-            uuid::Uuid::now_v7()
-                .to_string()
-                .chars()
-                .take(8)
-                .collect::<String>()
-        ))
+        .join(format!(".moka-import-{}", id_tag(&new_id(), 8)))
 }
 
 pub fn import_project(

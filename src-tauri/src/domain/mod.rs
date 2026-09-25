@@ -1684,3 +1684,15 @@ pub fn now_iso() -> IsoTimestamp {
 pub fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
+
+/// The few characters of an id that stand for it inside a name.
+///
+/// Read off the end of the id rather than its front, which is the whole of it:
+/// an id spells when it was made in its first characters, so its head is the
+/// same for everything made in the same minute — a tag taken from there is one
+/// tag for two drawings of one batch, and the second file is written over the
+/// first.
+pub fn id_tag(id: &str, keep: usize) -> String {
+    let chars: Vec<char> = id.chars().collect();
+    chars[chars.len().saturating_sub(keep)..].iter().collect()
+}

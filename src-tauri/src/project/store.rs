@@ -5,7 +5,7 @@ use crate::domain::validate::{
     MAX_ASSET_KEYWORD_LENGTH, MAX_ASSET_NOTE_LENGTH, MAX_ASSET_TAGS, MAX_ASSET_TAG_LENGTH,
 };
 use crate::domain::{
-    new_id, now_iso, AssetProvenance, CanvasDocument, DocumentCommand, MokaFile, NodeKind,
+    id_tag, new_id, now_iso, AssetProvenance, CanvasDocument, DocumentCommand, MokaFile, NodeKind,
     ProjectMetadata, ResourceEntry, ResourceRegistry, RunRecord, RunStatus, SelfCheckIssue,
     SelfCheckNodeRef, SelfCheckReason, SelfCheckReport, MOKA_FILE_VERSION,
 };
@@ -1171,11 +1171,7 @@ impl ProjectStore for FsProjectStore {
             None => root.join("output").join(format!(
                 "{}-{}.mokapkg.zip",
                 assets::slugify(&moka.metadata.name),
-                uuid::Uuid::now_v7()
-                    .to_string()
-                    .chars()
-                    .take(8)
-                    .collect::<String>()
+                id_tag(&new_id(), 8)
             )),
         };
         crate::project::package::export_project(

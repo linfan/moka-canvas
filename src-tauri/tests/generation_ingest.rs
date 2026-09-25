@@ -1,8 +1,8 @@
 use moka_canvas::config::parse_test_config;
 use moka_canvas::domain::commands::make_node;
 use moka_canvas::domain::{
-    generation_capability_for, new_id, now_iso, Capability, GenerationInputMode, GenerationMode,
-    GenerationSpec, NodeKind, ResourceEntry, RunRecord, RunStatus, WorkflowNode,
+    generation_capability_for, id_tag, new_id, now_iso, Capability, GenerationInputMode,
+    GenerationMode, GenerationSpec, NodeKind, ResourceEntry, RunRecord, RunStatus, WorkflowNode,
 };
 use moka_canvas::generate::{
     ingest_generated, GenerateInput, GenerateResult, GeneratedItem, InputRole, ResolvedInputs,
@@ -205,7 +205,7 @@ async fn an_image_answer_lands_in_the_project_bearing_its_provenance() {
     assert_eq!(entries.len(), 1);
 
     let entry = &entries[0];
-    assert_eq!(entry.name, format!("Poster-{}", &run.id[..8]));
+    assert_eq!(entry.name, format!("Poster-{}", id_tag(&run.id, 8)));
     assert!(entry.path.starts_with("assets/images/"), "{}", entry.path);
     assert_eq!(entry.mime.as_deref(), Some("image/png"));
     assert!(root.join(&entry.path).is_file());
@@ -289,7 +289,7 @@ async fn several_answers_are_numbered_and_one_is_not() {
     let run = run(&canvas_id);
     let node = asking(NodeKind::Image, "Poster", None);
     let inputs = ResolvedInputs::default();
-    let short = &run.id[..8];
+    let short = id_tag(&run.id, 8);
 
     let pair = ingest_generated(
         &store,

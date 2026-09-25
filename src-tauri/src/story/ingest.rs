@@ -13,7 +13,7 @@
 //! characters are filed as "element art" rather than by name.
 
 use super::jobs::{StoryArtView, StoryJobItem, StoryJobKind, StoryTarget};
-use crate::domain::{now_iso, AssetId, AssetProvenance, ResourceEntry};
+use crate::domain::{id_tag, now_iso, AssetId, AssetProvenance, ResourceEntry};
 use crate::generate::{file_incoming, GenerateResult, Incoming};
 use crate::project::{ProjectError, ProjectStore};
 
@@ -99,7 +99,7 @@ fn pieces(result: &GenerateResult) -> Vec<(Vec<u8>, String)> {
 /// same slot apart; the index appears only when there is more than one file, so
 /// a single answer is never called the first of one.
 fn asset_name(label: &str, job_id: &str, index: usize, count: usize) -> String {
-    let short: String = job_id.chars().take(JOB_NAME_CHARS).collect();
+    let short = id_tag(job_id, JOB_NAME_CHARS);
     if count > 1 {
         format!("{label}-{short}-{}", index + 1)
     } else {
