@@ -10,7 +10,7 @@ mod custom;
 mod gemini;
 mod openai;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderName};
 
@@ -194,6 +194,11 @@ pub trait ProviderAdapter: Send + Sync {
     /// The same generation, with text pushed to `sink` as it arrives. What
     /// comes back is still the aggregate, because the aggregate is what gets
     /// stored: the stream only makes the wait visible.
+    ///
+    /// A protocol that cannot stream still answers a caller who is not reading
+    /// the pieces — a stream is how the answer was to be carried, and this
+    /// caller only ever wanted the answer — and refuses the caller who is
+    /// reading them, whose wait the pieces were for.
     async fn generate_stream(
         &self,
         call: &ModelCall,
@@ -202,8 +207,10 @@ pub trait ProviderAdapter: Send + Sync {
         sink: &DeltaSink,
         cancel: &Cancel,
     ) -> Result<GenerateResult, ProviderError> {
-        let _ = (call, request, inputs, sink, cancel);
-        Err(ProviderError::invalid("this protocol does not stream"))
+        if sink.is_watched() {
+            return Err(ProviderError::invalid("this protocol does not stream"));
+        }
+        self.generate(call, request, inputs, cancel).await
     }
 
     /// Starts a job that outlives this request and returns the handle to poll.
@@ -472,8 +479,12 @@ async fn open_stream(
 /// Reads an opened stream to its end, pushing each piece of text to the sink
 /// and returning the aggregate.
 ///
-/// The deadline is checked between chunks instead of being set on the request:
-/// a request timeout would end a stream that is still producing text.
+/// The deadline is a silence, not a total: a stream that is still producing
+/// text must not be cut off by a budget meant for the whole of it, because a
+/// thinking model may deliberate for minutes before its first word and a long
+/// answer may take longer still — what is wrong is a channel that has gone
+/// quiet, and that is what the budget measures, from the last piece rather
+/// than from the start.
 ///
 /// When the stream is being recorded, the raw events are kept beside the reading
 /// of them, because the interesting failure is the one where the two disagree:
@@ -497,24 +508,26 @@ where
     // Kept only when something is going to be written down: reading a stream
     // twice is work, and most streams are not being recorded.
     let mut raw: Vec<u8> = Vec::new();
-    let started = Instant::now();
     let ended = loop {
-        let chunk = match next_chunk(&mut response).await {
-            Ok(Some(chunk)) => chunk,
-            Ok(None) => break Ok(()),
-            Err(error) => break Err(error),
+        // The wait for the next piece is where the budget bites: a channel that
+        // has gone quiet is what is wrong, and a future left to wait forever on
+        // one would never reach a check stood after it.
+        let chunk = match tokio::time::timeout(deadline, next_chunk(&mut response)).await {
+            Err(_) => {
+                break Err(ProviderError::Timeout(format!(
+                    "the stream went quiet for {} seconds",
+                    deadline.as_secs()
+                )))
+            }
+            Ok(Ok(Some(chunk))) => chunk,
+            Ok(Ok(None)) => break Ok(()),
+            Ok(Err(error)) => break Err(error),
         };
         if keep {
             raw.extend_from_slice(&chunk);
         }
         if let Err(error) = cancel.check() {
             break Err(error);
-        }
-        if started.elapsed() > deadline {
-            break Err(ProviderError::Timeout(format!(
-                "the stream was still open after {} seconds",
-                deadline.as_secs()
-            )));
         }
         reader.feed(&chunk);
         if reader.done {

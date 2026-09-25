@@ -103,6 +103,22 @@ describe("the two numbers a plan turns on", () => {
 });
 
 describe("planning the words", () => {
+  it("asks under the room's standing instruction, which drawings never carry", () => {
+    // A written answer is shaped by it — one json block and nothing around it —
+    // and a picture has no room for a shape that is about words.
+    const words = planOutline(story(), { mode: "expand", chapters: 2 });
+    expect(words[0].system).toContain("Answer with one json shape");
+    expect(planElements(story())[0].system).toContain("json shape");
+    expect(planStoryboard(story(), [ids.chapterFirst])[0].system).toContain(
+      "json shape",
+    );
+
+    const pictures = planElementArt(story(), [
+      { elementId: ids.hero, view: "main" },
+    ]);
+    expect(pictures[0].system).toBeUndefined();
+  });
+
   it("asks for the telling as chapters, from the premise as typed", () => {
     const items = planOutline(story(), { mode: "expand", chapters: 2 });
 

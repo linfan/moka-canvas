@@ -341,6 +341,7 @@ function againFor(
         target: item.target,
         capability: item.capability,
         prompt: item.prompt,
+        system: item.system,
       },
     ];
   }
@@ -378,6 +379,7 @@ export async function redoChapterPart(
       target: { kind: "outline" },
       capability: recorded.capability,
       prompt: recorded.prompt,
+      system: recorded.system,
     },
   ]);
 }

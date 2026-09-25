@@ -330,20 +330,69 @@ pub type DeltaHandler = Arc<dyn Fn(&str) + Send + Sync>;
 ///
 /// Streaming only accelerates the display: the adapter still aggregates the
 /// full answer, because what gets stored is the aggregate.
+///
+/// The two questions a sink answers are not the same one. Whether a provider is
+/// asked for a stream at all is {@link DeltaSink::is_streaming}; whether
+/// anybody is reading the pieces as they arrive is
+/// {@link DeltaSink::is_watched}. A story job asks for a stream nobody reads,
+/// because a long answer carried piece by piece is not the one a gateway gives
+/// up on — and a protocol that can only answer whole still serves it, since
+/// that caller only ever wanted the answer.
 #[derive(Clone, Default)]
 pub struct DeltaSink {
     sink: Option<DeltaHandler>,
+    watched: bool,
 }
 
 impl DeltaSink {
+    /// Pieces pushed to a reader as they arrive.
     pub fn new(sink: DeltaHandler) -> Self {
-        Self { sink: Some(sink) }
+        Self {
+            sink: Some(sink),
+            watched: true,
+        }
     }
 
-    /// True when somebody is watching, which is what decides whether a
-    /// provider is asked for a stream at all.
+    /// A stream nobody is reading.
+    ///
+    /// An answer that is waited out rather than watched still travels as a
+    /// stream, and for a reason that has nothing to do with showing it: a long
+    /// answer sent in one piece is held whole at the far end before the first
+    /// byte comes back, and that is exactly the kind of request a gateway gives
+    /// up on. The pieces arrive, are counted as they arrive, and are dropped.
+    pub fn unwatched() -> Self {
+        Self {
+            sink: Some(Arc::new(|_| {})),
+            watched: false,
+        }
+    }
+
+    /// True when a provider is asked for a stream, whether or not anybody is
+    /// watching the pieces.
     pub fn is_streaming(&self) -> bool {
         self.sink.is_some()
+    }
+
+    /// True when the pieces have a reader, which is what a protocol that cannot
+    /// stream has to refuse rather than answer at the end instead.
+    pub fn is_watched(&self) -> bool {
+        self.watched
+    }
+
+    /// The same sink with `tap` called for every piece as well.
+    ///
+    /// What is asked for does not change: whether the pieces have a reader
+    /// comes along, because a tap is not a reader — counting what arrived is
+    /// what the gateway does on the way to somewhere else.
+    pub fn tapped(&self, tap: DeltaHandler) -> Self {
+        let inner = self.clone();
+        Self {
+            sink: Some(Arc::new(move |chunk: &str| {
+                tap(chunk);
+                inner.push(chunk);
+            })),
+            watched: self.watched,
+        }
     }
 
     pub fn push(&self, text: &str) {
@@ -565,6 +614,35 @@ mod tests {
                 .as_str(),
             "Hello, world"
         );
+    }
+
+    #[test]
+    fn a_stream_nobody_reads_is_still_asked_for_and_still_unwatched() {
+        use std::sync::atomic::AtomicUsize;
+
+        // The story jobs' own ask: a long answer travels as a stream, and
+        // nothing on this side is waiting to read it.
+        let sink = DeltaSink::unwatched();
+        assert!(sink.is_streaming(), "the provider is asked for a stream");
+        assert!(!sink.is_watched(), "nobody is reading the pieces");
+        sink.push("a piece nobody reads");
+
+        // A count of what arrived is not a reader either: the gateway wraps a
+        // caller's sink on the way through, and what the caller asked for
+        // travels with it.
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&seen);
+        let tapped = sink.tapped(Arc::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        }));
+        assert!(tapped.is_streaming());
+        assert!(!tapped.is_watched());
+        tapped.push("another");
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+
+        // And a reader's own sink stays a reader's through the same wrap.
+        let watched = DeltaSink::new(Arc::new(|_| {})).tapped(Arc::new(|_| {}));
+        assert!(watched.is_watched());
     }
 
     #[test]

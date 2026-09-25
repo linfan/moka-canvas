@@ -161,12 +161,20 @@ impl Rig {
 }
 
 async fn rig() -> Rig {
+    rig_under_text_budget(GenerateConfig::default().text_timeout_seconds).await
+}
+
+/// The same rig under a text budget of its own: what that budget measures for a
+/// streamed answer is silence, and a test watching one cannot wait two minutes
+/// for a silence to be long enough.
+async fn rig_under_text_budget(text_timeout_seconds: u64) -> Rig {
     let tmp = TempDir::new().expect("a temporary directory");
     let mut config = parse_test_config(tmp.path());
     // A test waits out its own retries, so a backoff that started at a second
     // would make a single one take three.
     config.generate = GenerateConfig {
         retry_base_ms: 1,
+        text_timeout_seconds,
         ..GenerateConfig::default()
     };
     let budgets = config.generate.clone();
@@ -290,6 +298,16 @@ fn answer(text: &str) -> Json<Value> {
 }
 
 fn events(chunks: &[&str]) -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/event-stream")],
+        events_body(chunks),
+    )
+        .into_response()
+}
+
+/// The same events as a bare body, for a test that sends them on a schedule of
+/// its own rather than all at once.
+fn events_body(chunks: &[&str]) -> String {
     let mut body = String::new();
     for chunk in chunks {
         body.push_str(&format!(
@@ -302,7 +320,7 @@ fn events(chunks: &[&str]) -> Response {
         "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}}\n\n",
     );
     body.push_str("data: [DONE]\n\n");
-    ([(header::CONTENT_TYPE, "text/event-stream")], body).into_response()
+    body
 }
 
 fn encoded(width: u32, height: u32) -> Vec<u8> {
@@ -830,6 +848,180 @@ async fn a_cancelled_generation_never_reaches_the_provider() {
 }
 
 // ---------------------------------------------------------------- streaming
+
+/// A body that says what it has to say in pieces, waiting between them: what a
+/// gateway's answer looks like when the model behind it is thinking as it goes.
+struct Dribble {
+    pieces: Vec<Vec<u8>>,
+    gap: Duration,
+    stall: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
+}
+
+impl Dribble {
+    /// The body's own events, waiting between one and the next: each piece is
+    /// what a provider would push over the wire at once.
+    fn new(body: String, gap: Duration) -> Self {
+        Self {
+            pieces: body
+                .split_inclusive("\n\n")
+                .map(|event| event.as_bytes().to_vec())
+                .collect(),
+            gap,
+            stall: None,
+        }
+    }
+}
+
+impl tokio::io::AsyncRead for Dribble {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if self.pieces.is_empty() {
+            return Poll::Ready(Ok(()));
+        }
+        let gap = self.gap;
+        let stall = self
+            .stall
+            .get_or_insert_with(|| Box::pin(tokio::time::sleep(gap)));
+        if stall.as_mut().poll(cx).is_pending() {
+            return Poll::Pending;
+        }
+        self.stall = None;
+        let piece = self.pieces.remove(0);
+        buf.put_slice(&piece);
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// A body that opens, says nothing, and never ends: a channel that has gone
+/// quiet rather than one that refuses.
+struct Quiet {
+    opening: Option<Vec<u8>>,
+}
+
+impl tokio::io::AsyncRead for Quiet {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.opening.take() {
+            // One piece, so the answer's own headers are on the wire before the
+            // silence begins: a body that never says anything is a refusal at
+            // the opening, which is a different thing from a stream that stops.
+            Some(piece) => {
+                buf.put_slice(&piece);
+                Poll::Ready(Ok(()))
+            }
+            None => Poll::Pending,
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stream_that_keeps_producing_outlives_the_budget_meant_for_the_whole() {
+    let body = events_body(&["\"A \"", "\"lantern.\""]);
+    let base_url = serve(Router::new().route(
+        "/v1/responses",
+        post(move || {
+            let body = body.clone();
+            async move {
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    Body::from_stream(tokio_util::io::ReaderStream::new(Dribble::new(
+                        body,
+                        Duration::from_millis(300),
+                    ))),
+                )
+                    .into_response()
+            }
+        }),
+    ))
+    .await;
+
+    // A budget of a second, an answer that takes several: what the budget
+    // measures is the silence between pieces, and there is none.
+    let rig = rig_under_text_budget(1).await;
+    rig.serving(
+        &base_url,
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
+    )
+    .await;
+    rig.default(Capability::Text, "gpt-5.5").await;
+
+    let result = rig
+        .gateway
+        .text(
+            request(
+                Capability::Text,
+                "describe a lantern",
+                json!({ "stream": true }),
+            ),
+            &DeltaSink::unwatched(),
+            &Cancel::new(),
+        )
+        .await
+        .expect("a stream that is still producing is not cut off");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern."));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stream_that_goes_quiet_is_given_up_on() {
+    let opening =
+        String::from("data: {\"type\":\"response.output_text.delta\",\"delta\":\"A \"}\n\n");
+    let base_url = serve(Router::new().route(
+        "/v1/responses",
+        post(move || {
+            let opening = opening.clone();
+            async move {
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    Body::from_stream(tokio_util::io::ReaderStream::new(Quiet {
+                        opening: Some(opening.into_bytes()),
+                    })),
+                )
+                    .into_response()
+            }
+        }),
+    ))
+    .await;
+
+    let rig = rig_under_text_budget(1).await;
+    rig.serving(
+        &base_url,
+        vec![model_via(
+            "gpt-5.5",
+            Capability::Text,
+            Protocol::OpenaiResponses,
+        )],
+    )
+    .await;
+    rig.default(Capability::Text, "gpt-5.5").await;
+
+    let error = rig
+        .gateway
+        .text(
+            request(
+                Capability::Text,
+                "describe a lantern",
+                json!({ "stream": true }),
+            ),
+            &DeltaSink::unwatched(),
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("a channel that went quiet is a failure");
+
+    assert_eq!(error.code(), "PROVIDER_TIMEOUT");
+    assert!(error.to_string().contains("quiet"), "{error}");
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_streamed_answer_reaches_the_caller_as_it_arrives_and_comes_back_whole() {
@@ -1400,6 +1592,85 @@ async fn a_recognition_script_runs_its_whole_conversation_and_answers_with_words
         Some(format!("Bearer {API_KEY}"))
     );
     assert_eq!(uploads.lock().expect("not poisoned")[0], None);
+}
+
+/// A converter script for a text model: it asks its own address with the
+/// prompt and reads the words back, which is the whole shape of one.
+const SCRIPTED: &str = r#"
+function build_request(call, req, inputs)
+    return {
+        method = "POST",
+        url = call.url,
+        headers = {["Content-Type"] = "application/json"},
+        body = json.encode({ model = call.model, prompt = req.prompt }),
+    }
+end
+
+function parse_response(status, headers, body)
+    local data = json.decode(body)
+    return { text = data.text, items = {} }
+end
+"#;
+
+/// A script answers whole, so a caller who is not reading the pieces is served
+/// the answer and a caller who is reading them is told the protocol cannot
+/// stream.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_script_backed_answer_is_served_whole_to_a_caller_who_is_not_reading_the_pieces() {
+    deploy_scripts().await;
+    place_script("text", "scriptedWords", SCRIPTED).await;
+
+    let base_url = serve(Router::new().route(
+        "/v1/lua/scripted",
+        post(|| async { Json(json!({ "text": "A lantern." })) }),
+    ))
+    .await;
+
+    let rig = rig().await;
+    rig.serving(
+        &base_url,
+        vec![model_via(
+            "scripted",
+            Capability::Text,
+            Protocol::from_wire_name("scriptedWords"),
+        )],
+    )
+    .await;
+    rig.default(Capability::Text, "scripted").await;
+
+    // What a story job asks for: a stream nobody reads, for the length of it.
+    let whole = rig
+        .gateway
+        .text(
+            request(
+                Capability::Text,
+                "describe a lantern",
+                json!({ "stream": true }),
+            ),
+            &DeltaSink::unwatched(),
+            &Cancel::new(),
+        )
+        .await
+        .expect("a script answers whole");
+    assert_eq!(whole.text.as_deref(), Some("A lantern."));
+
+    // What a reader's own ask does: refused rather than answered at the end,
+    // since the pieces were the whole point of the wait.
+    let watching = DeltaSink::new(Arc::new(|_| {}));
+    let error = rig
+        .gateway
+        .text(
+            request(
+                Capability::Text,
+                "describe a lantern",
+                json!({ "stream": true }),
+            ),
+            &watching,
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("a script cannot stream");
+    assert!(error.to_string().contains("Lua-backed"), "{error}");
 }
 
 /// A build hook that names a reader it never wrote.

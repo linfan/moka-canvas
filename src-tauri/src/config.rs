@@ -79,6 +79,10 @@ pub struct WorkflowConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateConfig {
+    /// One text exchange. Words are asked for as a stream, so what this bounds
+    /// is how long a channel may stay silent before it is given up on rather
+    /// than how long the whole answer may take: a thinking model deliberates
+    /// before its first word and a long answer arrives piece by piece.
     #[serde(default = "default_text_timeout_seconds")]
     pub text_timeout_seconds: u64,
     #[serde(default = "default_image_timeout_seconds")]

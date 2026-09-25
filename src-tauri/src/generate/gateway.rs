@@ -589,14 +589,10 @@ fn counting(sink: &DeltaSink) -> (Arc<AtomicUsize>, DeltaSink) {
         return (forwarded, DeltaSink::default());
     }
     let counted = Arc::clone(&forwarded);
-    let inner = sink.clone();
-    (
-        forwarded,
-        DeltaSink::new(Arc::new(move |chunk: &str| {
-            counted.fetch_add(1, Ordering::SeqCst);
-            inner.push(chunk);
-        })),
-    )
+    let tapped = sink.tapped(Arc::new(move |_| {
+        counted.fetch_add(1, Ordering::SeqCst);
+    }));
+    (forwarded, tapped)
 }
 
 #[cfg(test)]

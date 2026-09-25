@@ -503,17 +503,24 @@ impl ProviderAdapter for LuaAdapter {
         })
     }
 
+    /// A script answers whole: there are no pieces to read as they arrive, so a
+    /// caller who is reading them is refused rather than surprised at the end.
+    /// One who is not reading them — a story job waiting an answer out — is
+    /// served the whole answer, which is all it was asking for.
     async fn generate_stream(
         &self,
-        _call: &ModelCall,
-        _request: &GenerateRequest,
-        _inputs: &[MediaInput],
-        _sink: &DeltaSink,
-        _cancel: &Cancel,
+        call: &ModelCall,
+        request: &GenerateRequest,
+        inputs: &[MediaInput],
+        sink: &DeltaSink,
+        cancel: &Cancel,
     ) -> Result<GenerateResult, ProviderError> {
-        Err(ProviderError::invalid(
-            "Lua-backed protocols do not support streaming yet",
-        ))
+        if sink.is_watched() {
+            return Err(ProviderError::invalid(
+                "Lua-backed protocols do not support streaming yet",
+            ));
+        }
+        self.generate(call, request, inputs, cancel).await
     }
 
     async fn create_task(

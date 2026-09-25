@@ -79,9 +79,15 @@ impl ProviderExecutor {
     /// so it brings its own flag and gets the same gateway call a step does.
     /// Everything a step adds around it — the merged preferences, the retries,
     /// the classification of a failure — is here rather than copied.
+    ///
+    /// The sink is the caller's: a step being watched streams its words to the
+    /// screen, and a batch nobody is watching streams them into the void —
+    /// which is still worth asking for, since an answer that travels as it is
+    /// written is not the one a gateway gives up on.
     pub async fn answer_once(
         &self,
         request: GenerateRequest,
+        deltas: &DeltaSink,
         cancel: &Cancel,
     ) -> Result<GenerateResult, ExecutionError> {
         if asks_for_nothing(&request) {
@@ -92,7 +98,7 @@ impl ProviderExecutor {
                 cancelled: false,
             });
         }
-        let result = answered(&self.gateway, &request, &DeltaSink::default(), cancel)
+        let result = answered(&self.gateway, &request, deltas, cancel)
             .await
             .map_err(step_error)?;
         cancel.check().map_err(step_error)?;

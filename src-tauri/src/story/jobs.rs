@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, Semaphore};
 use super::ingest::ingest_story_result;
 use crate::config::StoryConfig;
 use crate::domain::{new_id, now_iso, Capability};
-use crate::generate::{Cancel, GenerateInput, GenerateRequest};
+use crate::generate::{Cancel, DeltaSink, GenerateInput, GenerateRequest};
 use crate::project::store::FsProjectStore;
 use crate::project::{ProjectError, ProjectStore};
 use crate::workflow::provider::ProviderExecutor;
@@ -130,6 +130,12 @@ pub struct StoryJobItem {
     pub target: StoryTarget,
     pub capability: Capability,
     pub prompt: String,
+    /// The standing instruction the answer is written under, when the ask
+    /// carries one — the room's own words about the shape every written answer
+    /// of this kind has. Sent as the request's system half rather than folded
+    /// into the prompt, which is where a provider expects to find it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<GenerateInput>,
     #[serde(default)]
@@ -173,6 +179,7 @@ impl StoryJobItem {
         target: StoryTarget,
         capability: Capability,
         prompt: String,
+        system: Option<String>,
         inputs: Vec<GenerateInput>,
         params: serde_json::Value,
     ) -> Self {
@@ -181,6 +188,7 @@ impl StoryJobItem {
             target,
             capability,
             prompt,
+            system,
             inputs,
             params,
             status: StoryJobStatus::Queued,
@@ -792,7 +800,7 @@ impl StoryJobManager {
             capability: item.capability,
             model: context.model.clone(),
             prompt: item.prompt.clone(),
-            system: None,
+            system: item.system.clone(),
             params: item.params.as_object().cloned().unwrap_or_default(),
             inputs: item.inputs.clone(),
         };
@@ -832,7 +840,16 @@ impl StoryJobManager {
             return self.file(context, item, result).await;
         }
 
-        let result = self.provider.answer_once(request, cancel).await?;
+        // A written answer is asked for as a stream even though nothing here
+        // reads the pieces as they arrive: words are the long answer of the
+        // two, and one a provider writes out as it goes is not the answer a
+        // gateway gives up on for being held whole.
+        let deltas = if item.capability == Capability::Text {
+            DeltaSink::unwatched()
+        } else {
+            DeltaSink::default()
+        };
+        let result = self.provider.answer_once(request, &deltas, cancel).await?;
         if context.kind.is_words() {
             // Words are kept as they came: what they mean is read by the room,
             // which is where the document is.

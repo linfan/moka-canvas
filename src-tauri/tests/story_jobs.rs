@@ -585,7 +585,16 @@ fn answering(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
                 let recorded = writing.clone();
                 async move {
                     recorded.note(&body);
-                    Json(json!({ "output_text": SENTENCE }))
+                    // The room asks for words as a stream, so the stand-in
+                    // answers as one: the events a provider sends as it writes.
+                    let events = format!(
+                        "data: {{\"type\":\"response.output_text.delta\",\"delta\":{}}}\n\n\
+                         data: {{\"type\":\"response.output_text.delta\",\"delta\":{}}}\n\n\
+                         data: [DONE]\n\n",
+                        json!(SENTENCE),
+                        json!(""),
+                    );
+                    ([(header::CONTENT_TYPE, "text/event-stream")], events)
                 }
             }),
         )
@@ -990,19 +999,18 @@ async fn a_batch_of_words_keeps_what_the_provider_said() {
     let tmp = TempDir::new().unwrap();
     let harness = harness_at(&tmp);
     let recorded = Recorded::default();
-    let provider = serve(answering(recorded, Arc::new(AtomicBool::new(true)))).await;
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
     harness
         .configure(&provider, &[(WRITER, Capability::Text)])
         .await;
     harness.project("Story Words").await;
 
     let outline = json!({ "kind": "outline" });
-    let job = harness
-        .start_ok(batch(
-            "outline",
-            vec![piece("outline", outline.clone(), "text", "把它拆成两集")],
-        ))
-        .await;
+    let mut asked = piece("outline", outline.clone(), "text", "把它拆成两集");
+    // The room's standing instruction travels as the ask's system half rather
+    // than folded into the prompt.
+    asked["system"] = json!("Answer with one json shape and nothing else.");
+    let job = harness.start_ok(batch("outline", vec![asked])).await;
     let job_id = job["id"].as_str().unwrap().to_string();
 
     let settled = harness.settled(&job_id).await;
@@ -1010,6 +1018,19 @@ async fn a_batch_of_words_keeps_what_the_provider_said() {
     // Parsing the answer is the room's business: what is kept here is the whole
     // of what the provider said.
     assert_eq!(settled["items"][0]["text"], json!(SENTENCE));
+    assert_eq!(
+        settled["items"][0]["system"],
+        json!("Answer with one json shape and nothing else.")
+    );
+    let heard = recorded
+        .asks()
+        .into_iter()
+        .find(|heard| heard["input"] == json!("把它拆成两集"))
+        .expect("the storyteller was asked");
+    assert_eq!(
+        heard["instructions"],
+        json!("Answer with one json shape and nothing else.")
+    );
     assert!(
         settled["items"][0]["assetIds"]
             .as_array()

@@ -64,6 +64,8 @@ export interface StoryJobItem {
   target: StoryTarget;
   capability: Capability;
   prompt: string;
+  /** The standing instruction a written answer is asked under. */
+  system?: string;
   inputs: StoryJobInput[];
   params: Record<string, unknown>;
   status: StoryJobStatus;
@@ -106,7 +108,7 @@ export type StoryJobItemDraft = Pick<
   StoryJobItem,
   "id" | "target" | "capability" | "prompt"
 > &
-  Partial<Pick<StoryJobItem, "inputs" | "params">>;
+  Partial<Pick<StoryJobItem, "inputs" | "params" | "system">>;
 
 const jobsPath = "/api/v1/projects/current/story/jobs";
 

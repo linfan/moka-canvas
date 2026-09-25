@@ -81,6 +81,9 @@ pub struct StoryJobItemDraft {
     pub target: StoryTarget,
     pub capability: Capability,
     pub prompt: String,
+    /// The standing instruction a written answer is asked under.
+    #[serde(default)]
+    pub system: Option<String>,
     #[serde(default)]
     pub inputs: Vec<StoryJobInput>,
     #[serde(default)]
@@ -115,6 +118,7 @@ impl StoryJobItemDraft {
             self.target,
             self.capability,
             self.prompt,
+            self.system,
             self.inputs
                 .into_iter()
                 .map(StoryJobInput::into_generate_input)

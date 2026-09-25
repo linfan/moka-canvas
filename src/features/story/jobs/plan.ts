@@ -54,6 +54,7 @@ import {
   storyOutlinePrompt,
   storySplitPrompt,
   storyStoryboardPrompt,
+  storySystemPrompt,
   type StoryFacts,
   type StoryLook,
 } from "../../../shared/prompts";
@@ -219,6 +220,7 @@ export function planOutline(
       id: `outline:${index + 1}`,
       target: { kind: "outline" },
       capability: "text",
+      system: storySystemPrompt(),
       prompt: storySplitPrompt({
         // The heading the manuscript itself wrote for this part travels with
         // it: a chapter is asked for by the name it was written under.
@@ -238,6 +240,7 @@ export function planOutline(
       id: "outline",
       target: { kind: "outline" },
       capability: "text",
+      system: storySystemPrompt(),
       prompt: storyOutlinePrompt({
         ...factsOf(story),
         idea: story.brief.idea,
@@ -271,6 +274,7 @@ export function planElements(
       id: options.part === undefined ? "elements" : `elements:${options.part}`,
       target: { kind: "elements" },
       capability: "text",
+      system: storySystemPrompt(),
       prompt: storyElementsPrompt({
         chapters: asked.map((chapter) => ({
           title: chapter.title,
@@ -302,6 +306,7 @@ export function planStoryboard(
         id: jobKey(target),
         target,
         capability: "text",
+        system: storySystemPrompt(),
         prompt: storyStoryboardPrompt({
           ...facts,
           number: number + 1,

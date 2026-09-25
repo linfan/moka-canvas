@@ -24,6 +24,10 @@ workflow:
 generate:
   # How long one provider request may take, per capability. Video is a job:
   # the first budget covers creating it, the second covers a single poll.
+  # Words are asked for as a stream, so for text this is how long the channel
+  # may stay silent — a thinking model may deliberate before its first word,
+  # and a long answer arrives bit by bit, so neither is cut off by a budget
+  # that was meant for the whole of it.
   textTimeoutSeconds: 120
   imageTimeoutSeconds: 300
   audioTimeoutSeconds: 120
