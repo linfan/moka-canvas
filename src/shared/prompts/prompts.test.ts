@@ -164,7 +164,7 @@ describe("story prompts", () => {
     expect(prompt).not.toContain("{{");
   });
 
-  it("lists the chapters an answer is read for elements", () => {
+  it("lists the chapters an answer is read for elements, one person per character", () => {
     const prompt = storyElementsPrompt({
       chapters: [
         { title: "第一章 站台", synopsis: "他在站台上等列车。" },
@@ -175,8 +175,52 @@ describe("story prompts", () => {
     });
     expect(prompt).toContain("1. 第一章 站台 — 他在站台上等列车。");
     expect(prompt).toContain("2. 第二章 车厢 — 车厢比站台更暗。");
+    // A couple or a crowd read as one character cannot be drawn: the
+    // turn-around is four views of one person, and the cast sheet is one face.
+    expect(prompt).toContain("a character is one person");
+    expect(prompt).toContain(
+      "a couple, a pair, a family or any other two or more the telling follows are that many characters",
+    );
+    expect(prompt).toContain("is not a character — keep it out of the cast");
+    expect(prompt).toContain(
+      "name them after the words it uses and what tells them apart",
+    );
     expect(prompt).toContain('"characters"');
     expect(prompt).not.toContain("{{");
+  });
+
+  it("keeps a scene to one place, and its change to its description", () => {
+    const prompt = storyElementsPrompt({
+      chapters: [{ title: "第一章 站台", synopsis: "他在站台上等列车。" }],
+      genre: "对白剧情",
+      style: "现代都市风",
+    });
+    // A scene is drawn once and every shot of that place points at the one
+    // picture, so two places in one entry cannot be drawn and an hour or a
+    // weather of its own is a state the drawing is given, not a second entry.
+    expect(prompt).toContain("one place to an entry");
+    expect(prompt).toContain(
+      "is still the one place, with the change written into its description",
+    );
+  });
+
+  it("asks for props a shot must show, not light or weather", () => {
+    const prompt = storyElementsPrompt({
+      chapters: [{ title: "第一章 站台", synopsis: "他在站台上等列车。" }],
+      genre: "对白剧情",
+      style: "现代都市风",
+    });
+    // A prop is drawn on its own and carried into the shots as a reference
+    // picture, so one nobody has to design — light, a moon, a chair — is a
+    // drawing owed for nothing and a reference the frame must work around.
+    expect(prompt).toContain(
+      "only earns a listing where the story turns on it",
+    );
+    expect(prompt).toContain("are not props");
+    expect(prompt).toContain("Leave out anything no shot would have to show");
+    expect(prompt).toContain(
+      "Do not invent anyone or anything that is not in the telling",
+    );
   });
 
   it("boards a chapter with the names it must be written in", () => {
