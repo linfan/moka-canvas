@@ -27,6 +27,7 @@ import {
   MIN_KEYFRAME_MS,
 } from "../constants";
 import type { StoryChapterDraft, StoryElementDraft } from "../story";
+import { elementKey, mergeElementDrafts } from "../story";
 import type { ActDraft, KeyframeDraft, StoryGuess } from "../story";
 import type {
   StoryActSound,
@@ -306,7 +307,40 @@ export function parseElements(
 
   if (elements.length === 0)
     return fail("no element of the answer had both a name and a description");
-  return { ok: true, value: elements, warnings };
+  return { ok: true, value: readAsOne(elements, warnings), warnings };
+}
+
+/**
+ * The answer's elements with the ones it named twice read as one.
+ *
+ * An answer that names the same thing twice has named one thing twice, and
+ * filing it twice would put two characters who are the same person into the
+ * cast. Only a name of the same kind is the same thing — a place and a character
+ * may share a name — and the words with more in them stand while the chapters
+ * add up. What was folded is said out loud, since the second telling of a name
+ * may have held something the first did not.
+ */
+function readAsOne(
+  elements: StoryElementDraft[],
+  warnings: string[],
+): StoryElementDraft[] {
+  const at = new Map<string, number>();
+  const read: StoryElementDraft[] = [];
+  for (const draft of elements) {
+    const key = elementKey(draft.kind, draft.name);
+    const seen = at.get(key);
+    const held = seen === undefined ? undefined : read[seen];
+    if (seen === undefined || held === undefined) {
+      at.set(key, read.length);
+      read.push(draft);
+      continue;
+    }
+    read[seen] = mergeElementDrafts(held, draft);
+    warnings.push(
+      `the ${GROUPS[draft.kind]}' "${draft.name}" was named twice, and the two were read as one`,
+    );
+  }
+  return read;
 }
 
 // -----------------------------------------------------------------------------

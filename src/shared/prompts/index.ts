@@ -220,10 +220,12 @@ export function storySplitPrompt(input: {
  *
  * A telling whose chapters do not fit in one ask is read a part at a time, and
  * a part is told which part it is: what it names is added to what earlier parts
- * found rather than standing for the whole cast.
+ * found rather than standing for the whole cast. Chapters travel under the
+ * telling's own numbers even where a part holds only some of them, because the
+ * answer says which chapter each thing was noticed in by that number.
  */
 export function storyElementsPrompt(input: {
-  chapters: Array<{ title: string; synopsis: string }>;
+  chapters: Array<{ number: number; title: string; synopsis: string }>;
   genre: string;
   style: string;
   part?: number;

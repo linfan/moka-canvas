@@ -24,6 +24,7 @@ import { undo } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { useModelStore } from "../../settings/modelStore";
 import { StoryPage } from "../StoryPage";
 import { useStoryJobStore } from "../stores/storyJobStore";
 import { useStoryStore } from "../stores/storyStore";
@@ -229,11 +230,62 @@ function chaptersAnswer(...titles: string[]): string {
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
+/**
+ * A deployment whose story room is set to cut the manuscript at a length.
+ *
+ * The boundary is the reader's, since how much of a telling a model can hold is
+ * a property of the model: what a test sets here is what the room reads when it
+ * plans a batch.
+ */
+function cuttingAt(splitChars: number): void {
+  useModelStore.setState({
+    view: {
+      version: 1,
+      revision: 1,
+      models: [],
+      defaults: {
+        text: null,
+        image: null,
+        audio: null,
+        music: null,
+        video: null,
+        asr: null,
+      },
+      preferences: {
+        systemPrompt: "",
+        reasoningEffort: "auto",
+        image: { size: "1:1", quality: "auto", background: "", count: 1 },
+        video: {
+          seconds: 6,
+          resolution: "720",
+          generateAudio: true,
+          watermark: false,
+          mode: "auto",
+          ratio: "",
+        },
+        audio: {
+          voice: "",
+          format: "mp3",
+          speed: 1,
+          instructions: "",
+          sampleRate: 22050,
+          volume: 50,
+          rate: 1,
+          pitch: 1,
+        },
+        story: { splitChars, readChars: 8_000 },
+      },
+      secretStorage: "unset",
+    },
+  });
+}
+
 beforeEach(() => {
   starts = [];
   held = [];
   answers = {};
   manuscript = "";
+  useModelStore.setState({ view: null });
   serving();
   localStorage.clear();
   useProjectStore.getState().close();
@@ -374,6 +426,40 @@ describe("splitting a manuscript", () => {
       "第二章 车厢",
       "第三章 天亮",
     ]);
+  });
+
+  it("cuts a part to the length the settings allow", async () => {
+    // A telling longer than a model can hold is cut before it is asked about,
+    // and how long a part may be is the reader's to set.
+    cuttingAt(120);
+    const moka = atTheOutline();
+    const story = moka.stories![0];
+    story.brief = {
+      ...story.brief,
+      sourceAssetId: "asset-novel",
+      sourceName: "novel.txt",
+    };
+    const sentences = Array.from(
+      { length: 30 },
+      (_, index) => `第${index + 1}句，雨落在站台上。`,
+    );
+    manuscript = `第一章 站台\n${sentences.join("")}`;
+
+    openAtOutline(moka);
+    fireEvent.change(field("story-outline-chapters"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByTestId("story-outline-mode-split"));
+    fireEvent.click(screen.getByTestId("story-outline-start"));
+
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+    const asked = starts[0]?.items[0]?.prompt ?? "";
+    expect(asked).toContain("第1句，雨落在站台上。");
+    // The whole chapter is many times the length it was cut to: what the ask
+    // carries is the part, not the manuscript.
+    expect(asked).not.toContain("第20句");
   });
 
   it("takes a manuscript longer than one batch in waves", async () => {

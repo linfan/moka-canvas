@@ -41,6 +41,12 @@ const MAX_NAME_LEN: usize = 120;
 const MAX_IMAGES_PER_RUN: u32 = 10;
 const MAX_VIDEO_SECONDS: u32 = 600;
 
+/// How much of a telling one ask may carry, in characters. The ceiling leaves
+/// room for the instructions that travel with the telling's own words, since
+/// the whole prompt is what the story room's job validation measures.
+const MIN_STORY_CHARS: u32 = 1_000;
+const MAX_STORY_CHARS: u32 = 16_000;
+
 /// What may be disclosed about a model's credential. Never the credential.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -672,13 +678,23 @@ fn validate_preferences(preferences: &Preferences) -> Result<(), ProviderError> 
             "audio speed must be between 0.25 and 4".to_string(),
         ));
     }
+    for (name, chars) in [
+        ("splitChars", preferences.story.split_chars),
+        ("readChars", preferences.story.read_chars),
+    ] {
+        if !(MIN_STORY_CHARS..=MAX_STORY_CHARS).contains(&chars) {
+            return Err(ProviderError::invalid(format!(
+                "story {name} must be between {MIN_STORY_CHARS} and {MAX_STORY_CHARS} characters"
+            )));
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::{ImagePreferences, VideoPreferences};
+    use crate::metadata::{ImagePreferences, StoryPreferences, VideoPreferences};
 
     fn model(id: &str, category: Capability) -> ModelConfig {
         let protocol = protocols_for(category)[0].clone();
@@ -918,5 +934,23 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_preferences(&endless_video).is_err());
+
+        let overlong_reading = Preferences {
+            story: StoryPreferences {
+                read_chars: MAX_STORY_CHARS + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(validate_preferences(&overlong_reading).is_err());
+
+        let split_finer_than_a_line = Preferences {
+            story: StoryPreferences {
+                split_chars: MIN_STORY_CHARS - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(validate_preferences(&split_finer_than_a_line).is_err());
     }
 }

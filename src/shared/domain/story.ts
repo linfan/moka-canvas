@@ -388,9 +388,59 @@ export function mergeChaptersAt(
   return table.slice(0, length);
 }
 
+/** The quotes and brackets a name may be wrapped in, which are not its name. */
+const AROUND_A_NAME = "「」『』“‘”’\"'《》【】[]（）()";
+
+/** A name as it is compared: the airs around it are not part of it. */
+function bareName(name: string): string {
+  const plain = name.trim().toLowerCase().replace(/\s+/g, "");
+  let first = 0;
+  let last = plain.length;
+  while (first < last && AROUND_A_NAME.includes(plain[first] ?? "")) first += 1;
+  while (last > first && AROUND_A_NAME.includes(plain[last - 1] ?? ""))
+    last -= 1;
+  return plain.slice(first, last);
+}
+
 /** The name two elements are the same by: kind, and the name without its airs. */
-function elementKey(kind: StoryElementKind, name: string): string {
-  return `${kind}:${name.trim().toLowerCase()}`;
+export function elementKey(kind: StoryElementKind, name: string): string {
+  return `${kind}:${bareName(name)}`;
+}
+
+/** The chapters a place was noticed in, in telling order and without repeats. */
+function chapterIdsOf(ids: string[], chapters: StoryChapter[]): string[] {
+  const order = new Map(chapters.map((chapter, at) => [chapter.id, at]));
+  return [...new Set(ids)].sort(
+    (one, other) =>
+      (order.get(one) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(other) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+/**
+ * One copy of an element written over another from the same answer.
+ *
+ * A reading that names the same thing twice named it once, and how it is said
+ * the second time is not a second thing: the description with more in it
+ * stands, since a description is what the thing is drawn from, and the chapters
+ * are added up.
+ */
+export function mergeElementDrafts(
+  one: StoryElementDraft,
+  other: StoryElementDraft,
+): StoryElementDraft {
+  const fuller =
+    other.description.length > one.description.length ? other : one;
+  const chapterIndexes = [
+    ...new Set([
+      ...(one.chapterIndexes ?? []),
+      ...(other.chapterIndexes ?? []),
+    ]),
+  ].sort((left, right) => left - right);
+  return {
+    ...fuller,
+    ...(chapterIndexes.length > 0 ? { chapterIndexes } : {}),
+  };
 }
 
 /**
@@ -406,8 +456,14 @@ function elementKey(kind: StoryElementKind, name: string): string {
  *
  * A reading that only saw some of the chapters is a `partial` one: what it did
  * not name stays where it was, since a character who stood in the part read
- * first is not gone for being absent from the part read second. A reading of
- * the whole telling is the cast the story now has, and everything else goes.
+ * first is not gone for being absent from the part read second — and the
+ * chapters it did notice are added to the ones already on file rather than
+ * standing in their place, since a part that read chapters 21 onwards cannot
+ * unsay what the part before it found in chapters 1 to 20. A reading of the
+ * whole telling is the cast the story now has, and everything else goes.
+ *
+ * The cast is built by name, so no name stands in it twice however many times
+ * an answer — or the parts of a long telling — says it.
  */
 export function mergeElements(
   existing: StoryElement[],
@@ -415,32 +471,41 @@ export function mergeElements(
   chapters: StoryChapter[] = [],
   options: { partial?: boolean } = {},
 ): StoryElement[] {
+  const partial = options.partial === true;
   const known = new Map(
     existing.map((element) => [
       elementKey(element.kind, element.name),
       element,
     ]),
   );
-  const merged = identified.map((draft) => {
-    const held = known.get(elementKey(draft.kind, draft.name));
-    const chapterIds = (draft.chapterIndexes ?? [])
+  const cast = new Map<string, StoryElement>();
+  for (const draft of identified) {
+    const key = elementKey(draft.kind, draft.name);
+    const noticed = (draft.chapterIndexes ?? [])
       .map((index) => chapters[index]?.id)
       .filter((id): id is string => id !== undefined);
-    if (!held)
-      return createElement(
-        draft.kind,
-        draft.name,
-        draft.description,
-        chapterIds,
+    const held = cast.get(key) ?? known.get(key);
+    if (held === undefined) {
+      cast.set(
+        key,
+        createElement(draft.kind, draft.name, draft.description, noticed),
       );
-    return {
+      continue;
+    }
+    const chapterIds = partial
+      ? chapterIdsOf([...held.chapterIds, ...noticed], chapters)
+      : noticed.length > 0
+        ? noticed
+        : held.chapterIds;
+    cast.set(key, {
       ...held,
       name: draft.name,
       description: draft.description,
-      chapterIds: chapterIds.length > 0 ? chapterIds : held.chapterIds,
-    };
-  });
-  if (options.partial !== true) return merged;
+      chapterIds,
+    });
+  }
+  const merged = [...cast.values()];
+  if (!partial) return merged;
   const named = new Set(
     identified.map((draft) => elementKey(draft.kind, draft.name)),
   );
@@ -876,5 +941,41 @@ export function chunkWaves<T>(items: T[], per: number): T[][] {
   for (let at = 0; at < items.length; at += width) {
     waves.push(items.slice(at, at + width));
   }
+  return waves;
+}
+
+/** What a chapter costs the ask that carries it: its title and its synopsis. */
+function chapterWords(chapter: StoryChapter): number {
+  return Array.from(`${chapter.title}${chapter.synopsis}`).length;
+}
+
+/**
+ * The chapters of a telling packed into the asks it is read in.
+ *
+ * A batch is sized by what it carries rather than by how many chapters it
+ * names: chapter counts say nothing about length, and how much of a telling one
+ * ask may hold depends on the model answering it. The chapters are packed in
+ * telling order, and a chapter that weighs more than an ask may carry is an ask
+ * of its own rather than left out.
+ */
+export function chapterWaves(
+  chapters: StoryChapter[],
+  budget: number,
+): StoryChapter[][] {
+  const limit = Math.max(1, Math.floor(budget));
+  const waves: StoryChapter[][] = [];
+  let held: StoryChapter[] = [];
+  let weight = 0;
+  for (const chapter of chapters) {
+    const words = chapterWords(chapter);
+    if (held.length > 0 && weight + words > limit) {
+      waves.push(held);
+      held = [];
+      weight = 0;
+    }
+    held.push(chapter);
+    weight += words;
+  }
+  if (held.length > 0) waves.push(held);
   return waves;
 }

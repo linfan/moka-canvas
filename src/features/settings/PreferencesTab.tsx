@@ -5,6 +5,7 @@ import type {
   GenerationPreferences,
   ImagePreferences,
   PreferencesPatch,
+  StoryPreferences,
   VideoPreferences,
 } from "../../api";
 import {
@@ -12,6 +13,8 @@ import {
   MAX_IMAGES_PER_RUN,
   MAX_VIDEO_SECONDS,
   MIN_AUDIO_SPEED,
+  STORY_CHARS_MAX,
+  STORY_CHARS_MIN,
 } from "../../shared/domain";
 import { useModelStore } from "./modelStore";
 import {
@@ -40,6 +43,7 @@ function clone(preferences: GenerationPreferences): GenerationPreferences {
     image: { ...preferences.image },
     video: { ...preferences.video },
     audio: { ...preferences.audio },
+    story: { ...preferences.story },
   };
 }
 
@@ -77,6 +81,7 @@ function GenerationDefaults() {
   if (differs(draft.image, stored.image)) patch.image = draft.image;
   if (differs(draft.video, stored.video)) patch.video = draft.video;
   if (differs(draft.audio, stored.audio)) patch.audio = draft.audio;
+  if (differs(draft.story, stored.story)) patch.story = draft.story;
   const changed = Object.keys(patch).length > 0;
 
   const edit = (next: Partial<GenerationPreferences>) =>
@@ -92,6 +97,10 @@ function GenerationDefaults() {
   const editAudio = (next: Partial<AudioPreferences>) =>
     setDraft(
       (state) => state && { ...state, audio: { ...state.audio, ...next } },
+    );
+  const editStory = (next: Partial<StoryPreferences>) =>
+    setDraft(
+      (state) => state && { ...state, story: { ...state.story, ...next } },
     );
 
   return (
@@ -326,6 +335,55 @@ function GenerationDefaults() {
             value={draft.audio.instructions}
           />
         </label>
+      </section>
+
+      <section
+        aria-label={t("settings:generation.storyDefaults")}
+        className="settings-section"
+      >
+        <h3 className="settings-heading">{t("settings:generation.story")}</h3>
+        <div className="settings-columns">
+          <label className="dialog-field">
+            <span>{t("settings:generation.splitChars")}</span>
+            <input
+              max={STORY_CHARS_MAX}
+              min={STORY_CHARS_MIN}
+              onChange={(event) =>
+                editStory({
+                  splitChars: toNumber(
+                    event.target.value,
+                    draft.story.splitChars,
+                  ),
+                })
+              }
+              step={500}
+              type="number"
+              value={draft.story.splitChars}
+            />
+          </label>
+          <label className="dialog-field">
+            <span>{t("settings:generation.readChars")}</span>
+            <input
+              max={STORY_CHARS_MAX}
+              min={STORY_CHARS_MIN}
+              onChange={(event) =>
+                editStory({
+                  readChars: toNumber(
+                    event.target.value,
+                    draft.story.readChars,
+                  ),
+                })
+              }
+              step={500}
+              type="number"
+              value={draft.story.readChars}
+            />
+          </label>
+        </div>
+        <p className="settings-hint">
+          {t("settings:generation.splitCharsTip")}
+        </p>
+        <p className="settings-hint">{t("settings:generation.readCharsTip")}</p>
       </section>
 
       <div className="dialog-actions">

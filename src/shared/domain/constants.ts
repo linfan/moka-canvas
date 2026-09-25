@@ -337,6 +337,22 @@ export const MAX_TOTAL_DURATION_MS = 8 * 60 * 60 * 1000;
 /** How many places one job may be asked for at once; the room splits the rest. */
 export const MAX_ITEMS_PER_STORY_JOB = 40;
 /**
+ * How much of a telling one ask may carry, in characters, when the reader has
+ * not said. A manuscript is cut into the parts a chapter is written from, and
+ * the chapters are read for their cast a part at a time; both boundaries are
+ * the reader's to move, since how much a model can hold is a property of the
+ * deployment rather than of the telling.
+ */
+export const STORY_SPLIT_CHARS_DEFAULT = 12_000;
+export const STORY_READ_CHARS_DEFAULT = 8_000;
+/**
+ * What either boundary may be set to. The ceiling leaves room for the
+ * instructions that travel with the telling's own words, since the whole
+ * prompt is what a batch is measured against.
+ */
+export const STORY_CHARS_MIN = 1_000;
+export const STORY_CHARS_MAX = 16_000;
+/**
  * The words each of the story room's enums is said in, the way
  * `CAPABILITY_LABELS` says a capability: the table is the label's address, and
  * the catalogue holds the sentence.

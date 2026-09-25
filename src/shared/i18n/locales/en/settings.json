@@ -135,6 +135,12 @@
     "pitch": "Pitch",
     "voiceInstructions": "Voice instructions",
     "voiceInstructionsTip": "Spoken as directions to the voice",
+    "storyDefaults": "Story room defaults",
+    "story": "Story room",
+    "splitChars": "Manuscript part length",
+    "splitCharsTip": "The most of a manuscript one chapter is written from, in characters; a longer part is cut at the nearest sentence end.",
+    "readChars": "Characters per reading",
+    "readCharsTip": "The most of the chapters one element reading carries, in characters; a longer telling is read a part at a time.",
     "save": "Save preferences"
   },
   "pictureTools": {

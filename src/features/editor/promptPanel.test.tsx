@@ -83,6 +83,7 @@ function models(models: ModelsView["models"]): ModelsView {
         rate: 1,
         pitch: 1,
       },
+      story: { splitChars: 12_000, readChars: 8_000 },
     },
     secretStorage: "unset",
   };

@@ -135,6 +135,12 @@
     "pitch": "音调",
     "voiceInstructions": "音色指令",
     "voiceInstructionsTip": "作为对音色的指示朗读",
+    "storyDefaults": "剧情房间默认值",
+    "story": "剧情房间",
+    "splitChars": "原文每段字数上限",
+    "splitCharsTip": "一章最多从多少字的原文写成；超出上限的部分会在最近的断句处截断。",
+    "readChars": "每次识别字数上限",
+    "readCharsTip": "一次元素识别最多携带多少字的章节内容；更长的故事会分批读取。",
     "save": "保存偏好设置"
   },
   "pictureTools": {

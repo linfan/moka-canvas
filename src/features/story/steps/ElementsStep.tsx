@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   STORY_ELEMENT_KINDS,
   STORY_NAME_MAX,
-  chunkWaves,
+  chapterWaves,
   currentTake,
   targetKey,
   type StoryDocument,
@@ -20,7 +20,12 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { ElementCard } from "../panels/ElementCard";
 import { readElementsAnswer } from "../jobs/apply";
-import { jobKey, planElementArt, planElements } from "../jobs/plan";
+import {
+  jobKey,
+  planElementArt,
+  planElements,
+  storyReadChars,
+} from "../jobs/plan";
 import {
   jobProgress,
   useRunningJob,
@@ -28,9 +33,6 @@ import {
   useStoryJobStore,
   useStoryRun,
 } from "../stores/storyJobStore";
-
-/** How many chapters one reading is asked about, when one ask will not do. */
-const CHAPTERS_PER_ASK = 20;
 
 /** The kinds of element, in the order the room shows them. */
 const KINDS: StoryElementKind[] = ["character", "scene", "prop"];
@@ -61,6 +63,8 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   const [pages, setPages] = useState(1);
   const [waves, setWaves] = useState<string[][]>([]);
   const [totalWaves, setTotalWaves] = useState(0);
+  // A batch is being handed over, whether for the first part or a later one.
+  const sending = useStoryJobStore((state) => state.starting);
   const starting = useRef(false);
 
   const groups = KINDS.map((each) => ({
@@ -113,9 +117,12 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
 
   // The parts of a long telling are read one after another, the next one
   // beginning when the one before it is over rather than when the reader
-  // presses again.
+  // presses again — and not while a part is still being handed over, since two
+  // batches out for one story are both written into the same cast and the last
+  // one home is the only one left standing.
   useEffect(() => {
-    if (starting.current || running !== null || waves.length === 0) return;
+    if (starting.current || sending || running !== null || waves.length === 0)
+      return;
     const next = waves[0];
     if (next === undefined) return;
     const part = totalWaves - waves.length + 1;
@@ -137,26 +144,32 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
       .finally(() => {
         starting.current = false;
       });
-  }, [running, waves, totalWaves, story]);
+  }, [running, waves, totalWaves, story, sending]);
 
   /** Reads the telling, whole or a part at a time. */
   const begin = async () => {
     setAsking(false);
-    const chapters = story.chapters.map((chapter) => chapter.id);
-    const cut = chunkWaves(chapters, CHAPTERS_PER_ASK);
+    const cut = chapterWaves(story.chapters, storyReadChars()).map((wave) =>
+      wave.map((chapter) => chapter.id),
+    );
     setTotalWaves(Math.max(1, cut.length));
     setWaves(cut.slice(1));
     const first = cut[0] ?? [];
-    await run(
-      story.id,
-      "elements",
-      planElements(
-        story,
-        cut.length <= 1
-          ? {}
-          : { chapterIds: first, part: 1, total: cut.length },
-      ),
-    );
+    const record = await useStoryJobStore
+      .getState()
+      .start(
+        story.id,
+        "elements",
+        planElements(
+          story,
+          cut.length <= 1
+            ? {}
+            : { chapterIds: first, part: 1, total: cut.length },
+        ),
+      );
+    // A first part that never went out leaves nothing for the rest to be read
+    // beside, so the parts that were still to come are dropped with it.
+    if (record === null) setWaves([]);
   };
 
   return (

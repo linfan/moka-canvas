@@ -167,14 +167,15 @@ describe("story prompts", () => {
   it("lists the chapters an answer is read for elements, one person per character", () => {
     const prompt = storyElementsPrompt({
       chapters: [
-        { title: "第一章 站台", synopsis: "他在站台上等列车。" },
-        { title: "第二章 车厢", synopsis: "车厢比站台更暗。" },
+        { number: 1, title: "第一章 站台", synopsis: "他在站台上等列车。" },
+        { number: 2, title: "第二章 车厢", synopsis: "车厢比站台更暗。" },
       ],
       genre: "对白剧情",
       style: "现代都市风",
     });
     expect(prompt).toContain("1. 第一章 站台 — 他在站台上等列车。");
     expect(prompt).toContain("2. 第二章 车厢 — 车厢比站台更暗。");
+    expect(prompt).toContain("by the numbers the list above gives them");
     // A couple or a crowd read as one character cannot be drawn: the
     // turn-around is four views of one person, and the cast sheet is one face.
     expect(prompt).toContain("a character is one person");
@@ -191,7 +192,9 @@ describe("story prompts", () => {
 
   it("keeps a scene to one place, and its change to its description", () => {
     const prompt = storyElementsPrompt({
-      chapters: [{ title: "第一章 站台", synopsis: "他在站台上等列车。" }],
+      chapters: [
+        { number: 1, title: "第一章 站台", synopsis: "他在站台上等列车。" },
+      ],
       genre: "对白剧情",
       style: "现代都市风",
     });
@@ -206,7 +209,9 @@ describe("story prompts", () => {
 
   it("asks for props a shot must show, not light or weather", () => {
     const prompt = storyElementsPrompt({
-      chapters: [{ title: "第一章 站台", synopsis: "他在站台上等列车。" }],
+      chapters: [
+        { number: 1, title: "第一章 站台", synopsis: "他在站台上等列车。" },
+      ],
       genre: "对白剧情",
       style: "现代都市风",
     });

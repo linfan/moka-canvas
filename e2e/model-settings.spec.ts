@@ -139,6 +139,39 @@ test("the settings dialog keeps one box across its tabs", async ({ page }) => {
   expect(overflow).toBe(true);
 });
 
+/**
+ * The story room's own boundaries are stored with the rest of the preferences.
+ *
+ * How much of a telling one ask may carry is the reader's to set, since it is
+ * the model answering that decides it, and it has to outlive the page: the room
+ * reads it whenever it plans a batch. The values are put back afterwards, since
+ * the suite shares one metadata store.
+ */
+test("the story room's boundaries are kept", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const openPreferences = async () => {
+    await dialog.getByRole("tab", { name: "Preferences" }).click();
+  };
+
+  await openPreferences();
+  await dialog.getByLabel("Manuscript part length").fill("9000");
+  await dialog.getByLabel("Characters per reading").fill("4000");
+  await dialog.getByRole("button", { name: "Save preferences" }).click();
+
+  // What was written survives the page being thrown away.
+  await page.reload();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await openPreferences();
+  await expect(dialog.getByLabel("Manuscript part length")).toHaveValue("9000");
+  await expect(dialog.getByLabel("Characters per reading")).toHaveValue("4000");
+
+  await dialog.getByLabel("Manuscript part length").fill("12000");
+  await dialog.getByLabel("Characters per reading").fill("8000");
+  await dialog.getByRole("button", { name: "Save preferences" }).click();
+});
+
 test("a category offers only the protocols that serve it", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings" }).click();

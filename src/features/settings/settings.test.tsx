@@ -172,6 +172,7 @@ function fixture(): ModelsView {
         rate: 1,
         pitch: 1,
       },
+      story: { splitChars: 12_000, readChars: 8_000 },
     },
     secretStorage: "file",
     secretStorageOptions: ["file", "keyring"],
@@ -787,6 +788,26 @@ describe("model settings", () => {
     const [write] = writesTo("/api/v1/models/preferences");
     expect(write.body).toEqual({
       image: { size: "1:1", quality: "auto", background: "", count: 3 },
+      expectedRevision: 1,
+    });
+  });
+
+  it("sends the story room's boundaries when they move", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Preferences" }));
+
+    fireEvent.change(await screen.findByLabelText("Manuscript part length"), {
+      target: { value: "6000" },
+    });
+    const save = screen.getByRole("button", { name: "Save preferences" });
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect((save as HTMLButtonElement).disabled).toBe(true),
+    );
+
+    const [write] = writesTo("/api/v1/models/preferences");
+    expect(write.body).toEqual({
+      story: { splitChars: 6_000, readChars: 8_000 },
       expectedRevision: 1,
     });
   });

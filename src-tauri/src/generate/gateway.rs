@@ -628,6 +628,10 @@ mod tests {
                 rate: 1.1,
                 pitch: 1.0,
             },
+            story: crate::metadata::StoryPreferences {
+                split_chars: 6_000,
+                read_chars: 3_000,
+            },
         }
     }
 

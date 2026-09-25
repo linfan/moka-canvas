@@ -1264,6 +1264,9 @@ pub async fn patch_preferences(
     if let Some(audio) = patch.audio {
         preferences.audio = audio;
     }
+    if let Some(story) = patch.story {
+        preferences.story = story;
+    }
     state
         .models
         .set_preferences(&preferences, patch.expected_revision)

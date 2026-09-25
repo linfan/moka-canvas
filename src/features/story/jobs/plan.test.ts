@@ -181,8 +181,10 @@ describe("planning the words", () => {
     // comes home to the part that asked for it.
     expect(items[0].id).toBe("elements:2");
     expect(items[0].prompt).toContain("This is part 2 of 3 of the telling");
-    // Only the chapters this part is for are listed, counted from one.
-    expect(items[0].prompt).toContain("1. 第二章 车厢 — 车厢比站台更暗。");
+    // Only the chapters this part is for are listed, and under the numbers the
+    // telling gives them: that number is how the answer says where each thing
+    // was noticed, and it is read against the whole table rather than the part.
+    expect(items[0].prompt).toContain("2. 第二章 车厢 — 车厢比站台更暗。");
     expect(items[0].prompt).not.toContain("第一章 站台");
   });
 
@@ -404,6 +406,7 @@ describe("planning the clips", () => {
             rate: 1,
             pitch: 1,
           },
+          story: { splitChars: 12_000, readChars: 8_000 },
         },
       },
     });

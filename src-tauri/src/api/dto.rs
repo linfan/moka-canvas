@@ -2,7 +2,8 @@ use crate::config::LimitsConfig;
 use crate::domain::{Capability, DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
 use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, InputRole, Usage};
 use crate::metadata::{
-    AudioPreferences, ImagePreferences, ModelDraft, SecretStorage, VideoPreferences,
+    AudioPreferences, ImagePreferences, ModelDraft, SecretStorage, StoryPreferences,
+    VideoPreferences,
 };
 use crate::story::{StoryJobItem, StoryJobKind, StoryTarget};
 use base64::Engine;
@@ -382,6 +383,8 @@ pub struct PreferencesPatch {
     pub video: Option<VideoPreferences>,
     #[serde(default)]
     pub audio: Option<AudioPreferences>,
+    #[serde(default)]
+    pub story: Option<StoryPreferences>,
     #[serde(default)]
     pub expected_revision: Option<u64>,
 }

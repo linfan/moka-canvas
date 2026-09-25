@@ -353,6 +353,23 @@ async fn a_partial_preference_edit_keeps_the_rest() {
     assert_eq!(view["preferences"]["image"]["count"], 4);
     assert_eq!(view["preferences"]["systemPrompt"], "Keep it short");
     assert_eq!(view["preferences"]["video"]["seconds"], 6);
+    // The story room's own group arrives with the document's defaults and moves
+    // whole, the way every other group does.
+    assert_eq!(view["preferences"]["story"]["splitChars"], 12_000);
+    assert_eq!(view["preferences"]["story"]["readChars"], 8_000);
+
+    let (_, view) = send(
+        &harness.app,
+        json_request(
+            "PATCH",
+            "/api/v1/models/preferences",
+            json!({ "story": { "splitChars": 4_000, "readChars": 2_000 } }),
+        ),
+    )
+    .await;
+    assert_eq!(view["preferences"]["story"]["splitChars"], 4_000);
+    assert_eq!(view["preferences"]["story"]["readChars"], 2_000);
+    assert_eq!(view["preferences"]["image"]["size"], "16:9");
 }
 
 #[tokio::test]
@@ -374,8 +391,29 @@ async fn a_preference_outside_its_bounds_is_refused() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(problem["code"], "VALIDATION_FAILED");
 
+    // A telling cut finer than a scene is not a telling, and one carrying more
+    // than the instructions leave room for would not survive the job's own
+    // ceiling on what a piece may ask.
+    for story in [
+        json!({ "splitChars": 900, "readChars": 8_000 }),
+        json!({ "splitChars": 12_000, "readChars": 20_000 }),
+    ] {
+        let (status, problem) = send(
+            &harness.app,
+            json_request(
+                "PATCH",
+                "/api/v1/models/preferences",
+                json!({ "story": story }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(problem["code"], "VALIDATION_FAILED");
+    }
+
     let (_, view) = send(&harness.app, plain_request("GET", "/api/v1/models")).await;
     assert_eq!(view["preferences"]["image"]["count"], 1);
+    assert_eq!(view["preferences"]["story"]["splitChars"], 12_000);
 }
 
 #[tokio::test]

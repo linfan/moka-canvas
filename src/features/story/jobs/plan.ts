@@ -19,7 +19,11 @@ import type {
   StoryJobItemDraft,
   StoryTarget,
 } from "../../../api/story";
-import { MAX_VIDEO_SECONDS } from "../../../shared/domain/constants";
+import {
+  MAX_VIDEO_SECONDS,
+  STORY_READ_CHARS_DEFAULT,
+  STORY_SPLIT_CHARS_DEFAULT,
+} from "../../../shared/domain/constants";
 import {
   STORY_CAMERA_ANGLES,
   STORY_CAMERA_MOVES,
@@ -159,6 +163,26 @@ function videoCeiling(): number {
 }
 
 /**
+ * How much of a telling one ask may carry, as the story settings say.
+ *
+ * Read where a batch is planned, the way the clip ceiling is: a telling cut to
+ * yesterday's boundary is a telling already being read.
+ */
+export function storySplitChars(): number {
+  const chars = useModelStore.getState().view?.preferences.story.splitChars;
+  return typeof chars === "number" && chars > 0
+    ? chars
+    : STORY_SPLIT_CHARS_DEFAULT;
+}
+
+export function storyReadChars(): number {
+  const chars = useModelStore.getState().view?.preferences.story.readChars;
+  return typeof chars === "number" && chars > 0
+    ? chars
+    : STORY_READ_CHARS_DEFAULT;
+}
+
+/**
  * A clip's parameters: how long it runs, in what shape, and the machine's own
  * answers about sound and a watermark.
  *
@@ -258,17 +282,23 @@ export function planOutline(
  * carry. A part is numbered the way a manuscript's parts are, and what it
  * names is read into the cast beside what earlier parts found rather than in
  * place of it.
+ *
+ * The chapters are listed under the telling's own numbers even where a part
+ * holds a few of them, because those numbers are how the answer says where each
+ * thing was noticed and how the reading files them: a part-local count would be
+ * read against the whole table and land on the wrong chapters.
  */
 export function planElements(
   story: StoryDocument,
   options: { chapterIds?: string[]; part?: number; total?: number } = {},
 ): StoryJobItemDraft[] {
-  const asked =
-    options.chapterIds === undefined
-      ? story.chapters
-      : story.chapters.filter((chapter) =>
-          options.chapterIds?.includes(chapter.id),
-        );
+  const asked = story.chapters
+    .map((chapter, at) => ({ number: at + 1, chapter }))
+    .filter(
+      ({ chapter }) =>
+        options.chapterIds === undefined ||
+        options.chapterIds.includes(chapter.id),
+    );
   return [
     {
       id: options.part === undefined ? "elements" : `elements:${options.part}`,
@@ -276,7 +306,8 @@ export function planElements(
       capability: "text",
       system: storySystemPrompt(),
       prompt: storyElementsPrompt({
-        chapters: asked.map((chapter) => ({
+        chapters: asked.map(({ number, chapter }) => ({
+          number,
           title: chapter.title,
           synopsis: chapter.synopsis,
         })),

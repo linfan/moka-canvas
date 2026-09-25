@@ -28,6 +28,7 @@ import {
   actPlannedMs,
   actsRegenerationCost,
   chapterRegenerationCost,
+  chapterWaves,
   chunkWaves,
   currentTake,
   elementOf,
@@ -457,6 +458,41 @@ describe("mergeElements", () => {
     expect(again[0].id).toBe(hero.id);
     expect(again[0].description).toBe("换了衣服。");
     expect(again[0].main.takes).toHaveLength(1);
+  });
+
+  it("adds the chapters a later part noticed to the ones already on file", () => {
+    const chapters = [createChapter("一"), createChapter("二")];
+    const heard = { ...hero, chapterIds: [chapters[0].id] };
+    const merged = mergeElements(
+      [heard],
+      [
+        {
+          kind: "character",
+          name: "林",
+          description: "换了衣服。",
+          chapterIndexes: [1],
+        },
+      ],
+      chapters,
+      { partial: true },
+    );
+    // A part that read the second chapter cannot unsay what the part before it
+    // found in the first: what it noticed is added, in telling order.
+    expect(merged).toHaveLength(1);
+    expect(merged[0].chapterIds).toEqual([chapters[0].id, chapters[1].id]);
+  });
+
+  it("keeps one name from standing in the cast twice", () => {
+    const merged = mergeElements(
+      [],
+      [
+        { kind: "character", name: "林", description: "短。" },
+        { kind: "character", name: "林", description: "更长的一段描述。" },
+      ],
+      [],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].chapterIds).toEqual([]);
   });
 
   it("resolves the chapters a draft was noticed in, and drops a number that names none", () => {
@@ -1522,6 +1558,29 @@ describe("chunkWaves", () => {
     expect(chunkWaves([], 5)).toEqual([]);
     // A width nobody could take pieces in is one piece an ask.
     expect(chunkWaves([1, 2], 0)).toEqual([[1], [2]]);
+  });
+});
+
+describe("chapterWaves", () => {
+  it("packs the chapters into the asks one reading is made of", () => {
+    // How many chapters a reading may hold says nothing about how long they
+    // are: a chapter weighs its title and its synopsis together.
+    const chapters = [
+      createChapter("一", "字".repeat(60)),
+      createChapter("二", "字".repeat(60)),
+      createChapter("三", "字".repeat(60)),
+    ];
+    expect(chapterWaves(chapters, 130).map((wave) => wave.length)).toEqual([
+      2, 1,
+    ]);
+    expect(chapterWaves(chapters, 1_000)).toHaveLength(1);
+    expect(chapterWaves([], 1_000)).toEqual([]);
+  });
+
+  it("gives a chapter heavier than an ask an ask of its own", () => {
+    const long = createChapter("一", "字".repeat(500));
+    const short = createChapter("二", "短。");
+    expect(chapterWaves([long, short], 100)).toEqual([[long], [short]]);
   });
 });
 

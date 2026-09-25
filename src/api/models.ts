@@ -71,6 +71,15 @@ export interface AudioPreferences {
   pitch: number;
 }
 
+/**
+ * What the story room cuts a telling to, in characters: the manuscript one
+ * chapter is written from, and the chapters one reading is asked about.
+ */
+export interface StoryPreferences {
+  splitChars: number;
+  readChars: number;
+}
+
 /** Global generation defaults; a node's own parameters override these. */
 export interface GenerationPreferences {
   systemPrompt: string;
@@ -78,6 +87,7 @@ export interface GenerationPreferences {
   image: ImagePreferences;
   video: VideoPreferences;
   audio: AudioPreferences;
+  story: StoryPreferences;
 }
 
 /**
@@ -141,6 +151,7 @@ export interface PreferencesPatch {
   image?: ImagePreferences;
   video?: VideoPreferences;
   audio?: AudioPreferences;
+  story?: StoryPreferences;
   expectedRevision?: number | null;
 }
 

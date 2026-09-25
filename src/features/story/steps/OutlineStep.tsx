@@ -24,7 +24,7 @@ import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { applyFixedOutline, readOutlineAnswer } from "../jobs/apply";
-import { planOutline } from "../jobs/plan";
+import { planOutline, storySplitChars } from "../jobs/plan";
 import { readTextAsset } from "../readText";
 import {
   jobProgress,
@@ -38,9 +38,6 @@ import { useStoryStore } from "../stores/storyStore";
 import { ResplitDialog } from "../components/ResplitDialog";
 import { useField } from "../panels/useField";
 import { useElapsed } from "./useElapsed";
-
-/** How much of a manuscript one chapter is written from. */
-const SOURCE_CHUNK_MAX = 12_000;
 
 /** How long a written ask runs before the reader is told it may be a while. */
 const STORY_SLOW_MS = 90_000;
@@ -95,6 +92,8 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
   const [waves, setWaves] = useState<StoryJobItemDraft[][]>([]);
   const [totalWaves, setTotalWaves] = useState(0);
   const [asking, setAsking] = useState(false);
+  // A batch is being handed over, whether for the first part or a later one.
+  const startingBatch = useStoryJobStore((state) => state.starting);
   const starting = useRef(false);
 
   const wanted = clampChapters(chapters);
@@ -142,9 +141,16 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
   }, [mode, sourceId, headings]);
 
   // A telling longer than one batch is taken in waves, the next one beginning
-  // when the one before it is over rather than when the reader presses again.
+  // when the one before it is over rather than when the reader presses again —
+  // and not while a batch is still being handed over.
   useEffect(() => {
-    if (starting.current || running !== null || waves.length === 0) return;
+    if (
+      starting.current ||
+      startingBatch ||
+      running !== null ||
+      waves.length === 0
+    )
+      return;
     const next = waves[0];
     if (next === undefined) return;
     starting.current = true;
@@ -157,7 +163,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
       .finally(() => {
         starting.current = false;
       });
-  }, [running, waves, story.id]);
+  }, [running, waves, story.id, startingBatch]);
 
   const begin = async (count: number) => {
     setAsking(false);
@@ -177,7 +183,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
     if (text === null) return;
     const chunks = splitSource(text, {
       targetChapters: count,
-      maxChars: SOURCE_CHUNK_MAX,
+      maxChars: storySplitChars(),
     });
     const items = planOutline(story, {
       mode: "split",

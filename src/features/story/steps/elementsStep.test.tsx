@@ -195,9 +195,21 @@ function slotOf(name: string, view: "main" | "turnaround") {
 
 /** The cast an ask is answered with, in the shape a model answers in. */
 function castAnswer(
-  characters: Array<{ name: string; description: string; chapters?: number[] }>,
-  scenes: Array<{ name: string; description: string }> = [],
-  props: Array<{ name: string; description: string }> = [],
+  characters: Array<{
+    name: string;
+    description: string;
+    chapters?: number[];
+  }>,
+  scenes: Array<{
+    name: string;
+    description: string;
+    chapters?: number[];
+  }> = [],
+  props: Array<{
+    name: string;
+    description: string;
+    chapters?: number[];
+  }> = [],
 ): string {
   return JSON.stringify({ characters, scenes, props });
 }
@@ -207,6 +219,7 @@ beforeEach(() => {
   held = [];
   answers = {};
   pictures = {};
+  useModelStore.setState({ view: null });
   serving();
   localStorage.clear();
   useProjectStore.getState().close();
@@ -333,6 +346,125 @@ describe("finding the cast in the chapters", () => {
   });
 });
 
+describe("a telling read in parts", () => {
+  /**
+   * A deployment whose story room is set to carry little at a time.
+   *
+   * How much of a telling one reading may hold is the reader's, since it is the
+   * model answering that decides it: what a test sets here is what the room
+   * reads when it plans the parts.
+   */
+  function readingInParts(readChars: number): void {
+    useModelStore.setState({
+      view: {
+        version: 1,
+        revision: 1,
+        models: [],
+        defaults: {
+          text: null,
+          image: null,
+          audio: null,
+          music: null,
+          video: null,
+          asr: null,
+        },
+        preferences: {
+          systemPrompt: "",
+          reasoningEffort: "auto",
+          image: { size: "1:1", quality: "auto", background: "", count: 1 },
+          video: {
+            seconds: 6,
+            resolution: "720",
+            generateAudio: true,
+            watermark: false,
+            mode: "auto",
+            ratio: "",
+          },
+          audio: {
+            voice: "",
+            format: "mp3",
+            speed: 1,
+            instructions: "",
+            sampleRate: 22050,
+            volume: 50,
+            rate: 1,
+            pitch: 1,
+          },
+          story: { splitChars: 12_000, readChars },
+        },
+        secretStorage: "unset",
+      },
+    });
+  }
+
+  it("reads the telling a part at a time, and adds what each part found", async () => {
+    // Both chapters together weigh more than one ask may carry, so each is
+    // read on its own.
+    readingInParts(30);
+    openAtElements(buildStoryMokaFile());
+    fireEvent.click(screen.getByTestId("story-elements-recognise"));
+    fireEvent.click(screen.getByTestId("recognise-elements-confirm"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+    expect(starts[0]?.items[0]?.id).toBe("elements:1");
+    expect(starts[0]?.items[0]?.prompt).toContain("1. 第一章 站台");
+    expect(starts[0]?.items[0]?.prompt).not.toContain("第二章 车厢");
+    expect(screen.getByTestId("story-elements-wave").textContent).toBe(
+      "Batch 1 of 2",
+    );
+    // The second part waits for the first to come home rather than being
+    // started over the top of it: two batches out at once are both written into
+    // the same cast, and the last one home is the only one left standing.
+    answers["elements:1"] = castAnswer([
+      { name: "林", description: "灰呢大衣，说话很慢。", chapters: [1] },
+    ]);
+    await comesBack();
+
+    await waitFor(() => {
+      expect(starts).toHaveLength(2);
+    });
+    // The second part is the telling's own second chapter, under the number
+    // the telling gives it, so what it finds is filed against the right one.
+    expect(starts[1]?.items[0]?.id).toBe("elements:2");
+    expect(starts[1]?.items[0]?.prompt).toContain("2. 第二章 车厢");
+    expect(screen.getByTestId("story-elements-wave").textContent).toBe(
+      "Batch 2 of 2",
+    );
+    answers["elements:2"] = castAnswer(
+      [{ name: "林", description: "四十岁上下，穿深色大衣。", chapters: [2] }],
+      [{ name: "末班车车厢", description: "空车厢。", chapters: [2] }],
+    );
+    await comesBack();
+
+    // What the second part found was added to the cast rather than standing in
+    // its place: the character both parts saw is one element, holding the
+    // chapters both of them read it in.
+    await waitFor(() => {
+      expect(element("林")?.description).toBe("四十岁上下，穿深色大衣。");
+    });
+    expect(story().elements.filter((each) => each.name === "林")).toHaveLength(
+      1,
+    );
+    expect(element("林")?.chapterIds).toEqual([
+      ids.chapterFirst,
+      ids.chapterSecond,
+    ]);
+    expect(element("末班车车厢")?.chapterIds).toEqual([
+      ids.chapterFirst,
+      ids.chapterSecond,
+    ]);
+    // What neither part named stays: a part read its own chapters and nothing
+    // else, and a part never seeing the keeper of the tale is not the telling
+    // saying they are gone.
+    expect(
+      story()
+        .elements.map((each) => each.name)
+        .sort(),
+    ).toEqual(["林", "末班车车厢", "周", "旧车票"].sort());
+  });
+});
+
 describe("the model a reading is asked of", () => {
   /** The two storytellers a deployment that keeps a spare looks like. */
   const storyteller = (id: string, displayName: string) => ({
@@ -385,6 +517,7 @@ describe("the model a reading is asked of", () => {
             rate: 1,
             pitch: 1,
           },
+          story: { splitChars: 12_000, readChars: 8_000 },
         },
         secretStorage: "unset",
       },

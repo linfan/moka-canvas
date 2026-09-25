@@ -212,6 +212,44 @@ describe("the elements", () => {
     }
   });
 
+  it("reads one name said twice as one element, and says so", () => {
+    // A long telling is read a part at a time, and a reading that names the
+    // same thing twice has named one thing: filed twice it would be two
+    // characters who are one person.
+    const read = parseElements({
+      characters: [
+        { name: "林", description: "四十岁上下。", chapters: [1] },
+        {
+          name: "林",
+          description: "四十岁上下，穿深色大衣。",
+          chapters: [2],
+        },
+      ],
+    });
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(read.value).toHaveLength(1);
+      // The description with more in it stands, since that is what a picture
+      // is drawn from, and the chapters add up.
+      expect(read.value[0].description).toBe("四十岁上下，穿深色大衣。");
+      expect(read.value[0].chapterIndexes).toEqual([0, 1]);
+      expect(read.warnings.join()).toContain("was named twice");
+    }
+  });
+
+  it("hears a name through the airs around it", () => {
+    const read = parseElements({
+      characters: [
+        { name: "林", description: "四十岁上下。" },
+        { name: "「林 」", description: "老了十岁。" },
+      ],
+    });
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(read.value).toHaveLength(1);
+    }
+  });
+
   it("says what it could not read rather than passing it over", () => {
     // Half an answer read as a whole one is how a telling ends up with its
     // cast and nothing to draw behind them: what no group is read from is

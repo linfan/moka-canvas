@@ -331,6 +331,28 @@ impl Default for AudioPreferences {
     }
 }
 
+/// What the story room cuts a telling to, in characters.
+///
+/// A long telling reaches a model a piece at a time, and how much one piece may
+/// carry is a property of the deployment the room is talking to rather than of
+/// any one telling: a manuscript is cut into the parts a chapter is written
+/// from, and the chapters are read for their cast a part at a time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StoryPreferences {
+    pub split_chars: u32,
+    pub read_chars: u32,
+}
+
+impl Default for StoryPreferences {
+    fn default() -> Self {
+        Self {
+            split_chars: 12_000,
+            read_chars: 8_000,
+        }
+    }
+}
+
 /// Global generation defaults. A node's own parameters override these.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -340,6 +362,11 @@ pub struct Preferences {
     pub image: ImagePreferences,
     pub video: VideoPreferences,
     pub audio: AudioPreferences,
+    /// Without a field-level default an existing models document would fail to
+    /// parse, and the whole of it — configurations, keys, defaults — would be
+    /// reset rather than read.
+    #[serde(default)]
+    pub story: StoryPreferences,
 }
 
 impl Default for Preferences {
@@ -350,6 +377,7 @@ impl Default for Preferences {
             image: ImagePreferences::default(),
             video: VideoPreferences::default(),
             audio: AudioPreferences::default(),
+            story: StoryPreferences::default(),
         }
     }
 }
@@ -610,6 +638,26 @@ mod tests {
         // model, so one is never chosen for it here.
         assert_eq!(preferences.audio.voice, "");
         assert_eq!(preferences.reasoning_effort, "auto");
+        assert_eq!(preferences.story.split_chars, 12_000);
+        assert_eq!(preferences.story.read_chars, 8_000);
+    }
+
+    #[test]
+    fn a_models_document_written_before_the_story_room_keeps_its_preferences() {
+        // The story group arrived after the first documents did. A field with
+        // no default would fail the whole document and reset every model
+        // configuration along with it.
+        let stored: Preferences = serde_json::from_str(
+            r#"{"systemPrompt":"be brief","reasoningEffort":"low",
+                "image":{"size":"1:1","quality":"auto","background":"","count":1},
+                "video":{"seconds":6,"resolution":"720","generateAudio":true,
+                         "watermark":false,"mode":"auto","ratio":""},
+                "audio":{"voice":"","format":"mp3","speed":1.0,"instructions":"",
+                         "sampleRate":22050,"volume":50,"rate":1.0,"pitch":1.0}}"#,
+        )
+        .expect("a document without the story group must parse");
+        assert_eq!(stored.system_prompt, "be brief");
+        assert_eq!(stored.story, StoryPreferences::default());
     }
 
     #[test]

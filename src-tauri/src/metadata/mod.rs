@@ -31,7 +31,8 @@ pub use types::{
     AudioPreferences, Defaults, DocumentInfo, ImagePreferences, MetadataInfo, MetadataStoreKind,
     ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot, Preferences, PromptItem, PromptPage,
     PromptQuery, PromptSource, Protocol, RecentProject, SecretInfo, SecretStorage,
-    VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
+    StoryPreferences, VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT,
+    MAX_SEARCH_PAGE_SIZE,
 };
 
 use crate::config::{MetadataConfig, RuntimeMode};
