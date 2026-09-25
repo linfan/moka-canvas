@@ -5372,6 +5372,10 @@ body.is-dragging-split {
 }
 
 .story-tab.is-active {
+  /* Said again at this weight because the pressed-button rule fills what it
+     matches: nothing here is a pressed button, and the fill would be a
+     near-white pill under near-white words. */
+  background: none;
   border-bottom-color: var(--primary);
   color: var(--ink);
 }
