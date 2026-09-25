@@ -15,6 +15,8 @@
  */
 import { Environment } from "nunjucks";
 
+import { formatDuration } from "../domain/story";
+import type { StoryAspect, StoryElementKind } from "../domain";
 import ask from "./assistant/ask.tmpl?raw";
 import answerSystem from "./assistant/answer-system.tmpl?raw";
 import contextBlock from "./assistant/context-block.tmpl?raw";
@@ -23,6 +25,17 @@ import historyLine from "./assistant/history-line.tmpl?raw";
 import rewriteSystem from "./assistant/rewrite-system.tmpl?raw";
 import describeFraming from "./editor/describe-framing.tmpl?raw";
 import describeDefault from "./editor/describe-default.tmpl?raw";
+import storySystem from "./story/system.tmpl?raw";
+import storyFacts from "./story/facts.tmpl?raw";
+import storyOutline from "./story/outline.tmpl?raw";
+import storySplit from "./story/split.tmpl?raw";
+import storyElements from "./story/elements.tmpl?raw";
+import storyStoryboard from "./story/storyboard.tmpl?raw";
+import storyElementMain from "./story/element-main.tmpl?raw";
+import storyElementTurnaround from "./story/element-turnaround.tmpl?raw";
+import storyKeyframe from "./story/keyframe.tmpl?raw";
+import storyActVideo from "./story/act-video.tmpl?raw";
+import storyKeyframeVideo from "./story/keyframe-video.tmpl?raw";
 
 /**
  * The engine, configured once.
@@ -46,7 +59,7 @@ const engine = new Environment(null, { autoescape: false });
  * a fault in the build and is not papered over here; the tests beside this file
  * read every one of them.
  */
-function render(source: string, values: Record<string, unknown>): string {
+function render(source: string, values: object): string {
   // A file that ends with a line break is what an editor writes and what a reader
   // expects to see. A newline at the end of a prompt is neither.
   return engine.renderString(source.replace(/\n$/, ""), values);
@@ -126,4 +139,204 @@ export function contextBlockPrompt(title: string, content: string): string {
  */
 export function askPrompt(parts: readonly string[]): string {
   return render(ask, { parts: parts.filter((part) => part !== "") });
+}
+
+// -----------------------------------------------------------------------------
+// The story room
+// -----------------------------------------------------------------------------
+
+/**
+ * The standing instruction a story's written answers are asked under.
+ *
+ * Sent as the `system` half of the request rather than folded into the prompt,
+ * because it says how every answer of this kind is written: a shape, and
+ * nothing that is not in it.
+ */
+export function storySystemPrompt(): string {
+  return render(storySystem, {});
+}
+
+/**
+ * The two things every picture of a story is drawn with.
+ *
+ * The frame, since a picture that does not say what shape it is gets whatever
+ * the provider feels like, and the look, since a cast drawn in five different
+ * styles is five different films.
+ */
+export interface StoryLook {
+  aspect: StoryAspect;
+  style: string;
+}
+
+/** What a written step is told about the telling it is writing. */
+export interface StoryFacts extends StoryLook {
+  genre: string;
+  totalDurationMs: number;
+}
+
+/**
+ * The standing facts of the telling, as the text prompts open with them.
+ *
+ * Composed by the constructors rather than included by the templates: a
+ * template that had to know another template's name would be a file to change
+ * whenever this block does, and the block is one thing in one place.
+ */
+export function storyFactsPrompt(facts: StoryFacts): string {
+  return render(storyFacts, {
+    aspect: facts.aspect,
+    genre: facts.genre,
+    style: facts.style,
+    total: formatDuration(facts.totalDurationMs),
+  });
+}
+
+/** The premise written into chapters, which is the outline step's ask. */
+export function storyOutlinePrompt(
+  input: StoryFacts & { idea: string; chapters: number },
+): string {
+  return [storyFactsPrompt(input), render(storyOutline, input)].join("\n\n");
+}
+
+/**
+ * One part of a manuscript written into one chapter.
+ *
+ * The index and the total are carried so the model knows where in the whole it
+ * is standing: a part read as the first reads differently from the last.
+ */
+export function storySplitPrompt(input: {
+  text: string;
+  index: number;
+  total: number;
+  genre: string;
+  style: string;
+}): string {
+  return render(storySplit, input);
+}
+
+/** What the telling is made of: its characters, places and things. */
+export function storyElementsPrompt(input: {
+  chapters: Array<{ title: string; synopsis: string }>;
+  genre: string;
+  style: string;
+}): string {
+  return render(storyElements, input);
+}
+
+/**
+ * One episode boarded as acts and shots.
+ *
+ * The elements arrive as the story holds them — names and descriptions, in the
+ * telling's own words — because the board has to be written in names the cast
+ * can be matched back to, and a name the model invented would match nothing.
+ */
+export function storyStoryboardPrompt(
+  input: StoryFacts & {
+    number: number;
+    chapter: { title: string; synopsis: string };
+    targetDurationMs: number;
+    elements: Array<{
+      kind: StoryElementKind;
+      name: string;
+      description: string;
+    }>;
+    shotSizes: readonly string[];
+    cameraMoves: readonly string[];
+    angles: readonly string[];
+  },
+): string {
+  return [
+    storyFactsPrompt(input),
+    render(storyStoryboard, {
+      ...input,
+      elements: storyElementsList(input.elements),
+      seconds: Math.round(input.targetDurationMs / 1000),
+    }),
+  ].join("\n\n");
+}
+
+function storyElementsList(
+  elements: Array<{
+    kind: StoryElementKind;
+    name: string;
+    description: string;
+  }>,
+): string {
+  return elements
+    .map(
+      (element) =>
+        `- ${element.name} (${element.kind}) — ${element.description}`,
+    )
+    .join("\n");
+}
+
+/** A character, a place or a thing, drawn on its own. */
+export function storyElementMainPrompt(
+  input: StoryLook & {
+    kind: StoryElementKind;
+    name: string;
+    description: string;
+  },
+): string {
+  return render(storyElementMain, input);
+}
+
+/** A character's four views, on one picture, which is how they stay the same person. */
+export function storyElementTurnaroundPrompt(
+  input: StoryLook & { name: string; description: string },
+): string {
+  return render(storyElementTurnaround, input);
+}
+
+/**
+ * One frame of a board, drawn with the cast that stands in it.
+ *
+ * The cast is written into the prompt in the order its pictures travel, so the
+ * numbered references the model reads are the numbered references it is given.
+ */
+export function storyKeyframePrompt(
+  input: StoryLook & {
+    chapter: { title: string };
+    act: { summary: string };
+    keyframe: {
+      content: string;
+      shotSize: string;
+      cameraMove: string;
+      angle: string;
+    };
+    cast: Array<{ name: string; description: string }>;
+  },
+): string {
+  return render(storyKeyframe, {
+    ...input,
+    summary: input.act.summary,
+    content: input.keyframe.content,
+    shotSize: input.keyframe.shotSize,
+    cameraMove: input.keyframe.cameraMove,
+    angle: input.keyframe.angle,
+  });
+}
+
+/** One act filmed whole, moving between the frames that were drawn for it. */
+export function storyActVideoPrompt(
+  input: StoryLook & {
+    title: string;
+    summary: string;
+    first: string;
+    last: string;
+    middle: string;
+    seconds: number;
+  },
+): string {
+  return render(storyActVideo, input);
+}
+
+/** One shot filmed, starting from the frame that was drawn for it. */
+export function storyKeyframeVideoPrompt(
+  input: StoryLook & {
+    title: string;
+    content: string;
+    seconds: number;
+  },
+): string {
+  return render(storyKeyframeVideo, input);
 }

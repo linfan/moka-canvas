@@ -1,0 +1,39 @@
+Chapter {{ number }} of the telling: {{ chapter.title }}
+{{ chapter.synopsis }}
+
+Board this chapter as acts, and each act as the shots it is made of. An act is one stretch of the story in one place at one time; a shot is what the camera sees before it cuts.
+For each act give its cast, the place it happens in, the things in it, and what it sounds like — music, effects, ambience, or none where there is none.
+For each shot give what is seen, how long it is held in milliseconds, and any lines spoken with who says them and how they say it. The whole chapter runs about {{ seconds }} seconds, so hold each shot for as long as it earns and keep the act's shots together inside it.
+
+What is on file, by the names the cast and the sound must be written with:
+
+{{ elements }}
+
+Choose the framing from these lists and write the key exactly as it is listed:
+
+- shotSize: {% for size in shotSizes %}{{ size }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+- cameraMove: {% for move in cameraMoves %}{{ move }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+- angle: {% for angle in angles %}{{ angle }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+Answer with a single fenced json block and nothing else:
+
+```json
+{
+  "acts": [
+    {
+      "title": "…", "summary": "…",
+      "characters": ["…"], "scene": "…", "props": ["…"],
+      "sound": { "music": "…", "sfx": "…", "ambience": "…" },
+      "keyframes": [
+        {
+          "shotSize": "medium", "cameraMove": "static", "angle": "eyeLevel",
+          "content": "…", "durationMs": 3000,
+          "dialogue": [ { "speaker": "…", "text": "…", "tone": "…" } ]
+        }
+      ]
+    }
+  ]
+}
+```

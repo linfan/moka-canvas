@@ -1,0 +1,17 @@
+The telling, chapter by chapter:
+
+{% for chapter in chapters %}{{ loop.index }}. {{ chapter.title }} — {{ chapter.synopsis }}
+{% endfor %}
+List what this telling is made of, so that it can be drawn: the characters it follows, the places it happens in, and the things that matter to it.
+Describe each one as a picture would have to know it: for a person, age, build, hair, clothes and manner; for a place, its size, its light and the state it is in; for a thing, its shape, its material and its wear.
+Say which chapters each one appears in, counted from 1 in the list above. Keep the names as they are written in the telling, and do not invent any that are not there.
+
+Answer with a single fenced json block and nothing else:
+
+```json
+{
+  "characters": [ { "name": "…", "description": "…", "chapters": [1] } ],
+  "scenes": [ { "name": "…", "description": "…", "chapters": [1] } ],
+  "props": [ { "name": "…", "description": "…", "chapters": [1] } ]
+}
+```

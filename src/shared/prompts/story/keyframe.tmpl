@@ -1,0 +1,9 @@
+One frame of a film, from "{{ chapter.title }}" — {{ summary }}
+
+This shot: {{ content }}
+It is a {{ shotSize }} shot, shot {{ cameraMove }}, seen from {{ angle }}.
+
+{% if cast.length > 0 %}Draw the people, the place and the things exactly as the reference pictures show them, and keep to them: the same faces, the same hair, the same clothes, the same place. The reference pictures, in the order they are given:
+
+{% for reference in cast %}{{ loop.index }}. {{ reference.name }} — {{ reference.description }}
+{% endfor %}{% endif %}A single {{ aspect }} frame in the film's own look: {{ style }}. No text, no lettering, no watermark, no frame around the picture.

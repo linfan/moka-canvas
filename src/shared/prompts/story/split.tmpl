@@ -1,0 +1,13 @@
+Part {{ index }} of {{ total }} of a manuscript, which is the telling's own text:
+
+---
+{{ text }}
+---
+
+Write this part as one chapter of the telling: a title, and a synopsis of what happens in it — a paragraph, not a retelling. Do not copy the manuscript's sentences; say what the chapter tells. The tone it is told in is {{ genre }}, {{ style }}.
+
+Answer with a single fenced json block and nothing else:
+
+```json
+{ "title": "…", "synopsis": "…" }
+```
