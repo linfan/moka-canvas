@@ -3,7 +3,14 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "../stores/appStore";
 
 /** Which page the menu is standing on, and marks as current. */
-export type HomeMenuPage = "canvas" | "clip";
+export type HomeMenuPage = "canvas" | "clip" | "story";
+
+/** Where each row of the menu leads. */
+const PHASE: Record<HomeMenuPage, "editing" | "clip" | "story"> = {
+  canvas: "editing",
+  story: "story",
+  clip: "clip",
+};
 
 /**
  * The mark on the button: a cup with steam over it.
@@ -72,6 +79,27 @@ function CanvasIcon() {
       <rect height="7" rx="1.5" width="7" x="3" y="4" />
       <rect height="7" rx="1.5" width="7" x="14" y="13" />
       <path d="M10 7.5h4a3 3 0 0 1 3 3V13" />
+    </svg>
+  );
+}
+
+/** A book with ruled lines in it: the telling a project is made of. */
+function StoryIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M4 5.5A2 2 0 0 1 6 3.5h12a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2Z" />
+      <path d="M4 17.5h15" />
+      <path d="M8 3.5v14M12 3.5v14" />
     </svg>
   );
 }
@@ -147,10 +175,10 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
   const go = (page: HomeMenuPage) => {
     setOpen(false);
     if (page === current) return;
-    // The project stays open across the two working pages: stepping over to
-    // the cutting room and back is not a close, and the board is standing
-    // exactly as it was left.
-    useAppStore.getState().setPhase(page === "clip" ? "clip" : "editing");
+    // The project stays open across the working pages: stepping between the
+    // board, the story room, and the cutting room is not a close, and each is
+    // standing exactly as it was left.
+    useAppStore.getState().setPhase(PHASE[page]);
   };
 
   return (
@@ -205,6 +233,18 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
               >
                 <CanvasIcon />
                 <span>{t("app:homeMenu.canvas")}</span>
+              </button>
+              <button
+                aria-current={current === "story" ? "page" : undefined}
+                className={`home-menu-item${
+                  current === "story" ? " is-current" : ""
+                }`}
+                onClick={() => go("story")}
+                role="menuitem"
+                type="button"
+              >
+                <StoryIcon />
+                <span>{t("app:homeMenu.story")}</span>
               </button>
               <button
                 aria-current={current === "clip" ? "page" : undefined}

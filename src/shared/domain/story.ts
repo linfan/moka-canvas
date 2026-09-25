@@ -548,3 +548,89 @@ export function keyframeAt(
     (keyframe) => keyframe.id === target.keyframeId,
   );
 }
+
+// -----------------------------------------------------------------------------
+// What a reader is shown
+// -----------------------------------------------------------------------------
+
+/**
+ * The step a story is standing on: the first one that is not settled, which is
+ * the one whose work is wanted next.
+ *
+ * A story every step of which is settled reads as standing on its last step,
+ * since that is where the finished film is.
+ */
+export function storyCurrentStep(
+  progress: Record<StoryStep, StoryStepProgress>,
+): StoryStepProgress {
+  for (const step of STORY_STEPS) {
+    const held = progress[step];
+    if (held.state !== "confirmed") return held;
+  }
+  return progress[STORY_STEPS[STORY_STEPS.length - 1]];
+}
+
+/**
+ * Whether a step can be walked to yet.
+ *
+ * Each step is offered only once the one before it has been settled: a board
+ * is written from the outline that was agreed to, and a drawing is made of a
+ * character who was described. The first step is always reachable, since a
+ * premise can always be re-written.
+ */
+export function stepReachable(
+  progress: Record<StoryStep, StoryStepProgress>,
+  step: StoryStep,
+): boolean {
+  const index = STORY_STEPS.indexOf(step);
+  if (index <= 0) return true;
+  const before = progress[STORY_STEPS[index - 1]];
+  return before.state === "confirmed";
+}
+
+/** A running time a reader can read: `mm:ss`, or `h:mm:ss` past an hour. */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const seconds = total % 60;
+  const minutes = Math.floor(total / 60) % 60;
+  const hours = Math.floor(total / 3600);
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/**
+ * What deleting a story would stop referring to, counted for the question that
+ * is asked before it.
+ *
+ * Nothing is deleted by it: the drawings and the clips stay in the shelf, and
+ * the timeline it assembled stays in the cutting room. What the count says is
+ * how much of the telling stops pointing at them.
+ */
+export function storyDeleteCost(story: StoryDocument): {
+  chapters: number;
+  acts: number;
+  pictures: number;
+  videos: number;
+} {
+  let acts = 0;
+  let pictures = story.elements.reduce(
+    (sum, element) =>
+      sum + element.main.takes.length + (element.turnaround?.takes.length ?? 0),
+    0,
+  );
+  let videos = 0;
+  for (const chapter of story.chapters) {
+    for (const act of chapter.acts) {
+      acts += 1;
+      videos += act.video.takes.length;
+      for (const keyframe of act.keyframes) {
+        pictures += keyframe.art.takes.length;
+        videos += keyframe.video.takes.length;
+      }
+    }
+  }
+  if (story.edit.film) videos += 1;
+  return { chapters: story.chapters.length, acts, pictures, videos };
+}

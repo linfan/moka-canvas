@@ -336,6 +336,68 @@ export const MIN_TOTAL_DURATION_MS = 30_000;
 export const MAX_TOTAL_DURATION_MS = 8 * 60 * 60 * 1000;
 /** How many places one job may be asked for at once; the room splits the rest. */
 export const MAX_ITEMS_PER_STORY_JOB = 40;
+/**
+ * The words each of the story room's enums is said in, the way
+ * `CAPABILITY_LABELS` says a capability: the table is the label's address, and
+ * the catalogue holds the sentence.
+ */
+export const SHOT_SIZE_LABELS: Record<string, string> = {
+  extremeClose: "domain:shotSize.extremeClose",
+  close: "domain:shotSize.close",
+  mediumClose: "domain:shotSize.mediumClose",
+  medium: "domain:shotSize.medium",
+  mediumFull: "domain:shotSize.mediumFull",
+  full: "domain:shotSize.full",
+  wide: "domain:shotSize.wide",
+  extremeWide: "domain:shotSize.extremeWide",
+};
+
+export const CAMERA_MOVE_LABELS: Record<string, string> = {
+  static: "domain:cameraMove.static",
+  handheld: "domain:cameraMove.handheld",
+  pushIn: "domain:cameraMove.pushIn",
+  pullOut: "domain:cameraMove.pullOut",
+  panLeft: "domain:cameraMove.panLeft",
+  panRight: "domain:cameraMove.panRight",
+  tiltUp: "domain:cameraMove.tiltUp",
+  tiltDown: "domain:cameraMove.tiltDown",
+  trackLeft: "domain:cameraMove.trackLeft",
+  trackRight: "domain:cameraMove.trackRight",
+  arc: "domain:cameraMove.arc",
+  craneUp: "domain:cameraMove.craneUp",
+  zoomIn: "domain:cameraMove.zoomIn",
+  zoomOut: "domain:cameraMove.zoomOut",
+};
+
+export const CAMERA_ANGLE_LABELS: Record<string, string> = {
+  eyeLevel: "domain:cameraAngle.eyeLevel",
+  high: "domain:cameraAngle.high",
+  low: "domain:cameraAngle.low",
+  overhead: "domain:cameraAngle.overhead",
+  dutch: "domain:cameraAngle.dutch",
+  overTheShoulder: "domain:cameraAngle.overTheShoulder",
+  pointOfView: "domain:cameraAngle.pointOfView",
+};
+
+export const ELEMENT_KIND_LABELS: Record<string, string> = {
+  character: "domain:elementKind.character",
+  scene: "domain:elementKind.scene",
+  prop: "domain:elementKind.prop",
+};
+
+/**
+ * A frame is written with the ratio itself, which cannot be a key of its own:
+ * dots and a colon are the catalogue's own punctuation, so each one is filed
+ * under a name instead.
+ */
+export const ASPECT_LABELS: Record<string, string> = {
+  "16:9": "domain:aspect.wide169",
+  "9:16": "domain:aspect.tall916",
+  "1:1": "domain:aspect.square",
+  "4:3": "domain:aspect.classic43",
+  "21:9": "domain:aspect.scope219",
+};
+
 /** How many lines one shot may be spoken with. */
 export const MAX_DIALOGUE_LINES_PER_KEYFRAME = 12;
 export const MAX_DIALOGUE_LINE_LENGTH = 500;

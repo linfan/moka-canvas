@@ -1,5 +1,86 @@
 {
   "defaults": {
     "name": "故事 {{n}}"
+  },
+  "page": {
+    "emptyTitle": "还没有故事",
+    "emptyHint": "故事在这里被讲出来：一段创意、它分成的一集集，以及最后成片。",
+    "newStory": "新建故事",
+    "stepComing": "这一步还在建设中。",
+    "historyBoundary": "故事房",
+    "saveConflict": "项目已在别处被修改；刷新后再离开。",
+    "saveFailed": "项目未能保存；先留在这里。"
+  },
+  "topBar": {
+    "exportFilm": "导出成片…"
+  },
+  "side": {
+    "label": "故事列表",
+    "title": "故事",
+    "new": "新建故事",
+    "empty": "还没有故事。",
+    "rename": "重命名「{{name}}」",
+    "renameHint": "双击改名",
+    "delete": "删除「{{name}}」",
+    "deleteHint": "删除这个故事",
+    "needsName": "故事需要一个名字。",
+    "nameTooLong": "名字最多 {{max}} 个字符。",
+    "limit": "一个项目最多讲 {{max}} 个故事。"
+  },
+  "list": {
+    "neverEdited": "从未修改",
+    "updatedAgo": "{{when}}更新"
+  },
+  "dialog": {
+    "newTitle": "新建故事",
+    "defaultName": "故事 {{n}}",
+    "name": "名字",
+    "create": "创建",
+    "cancel": "取消"
+  },
+  "remove": {
+    "title": "删除「{{name}}」？",
+    "body": "{{chapters}} 章 · {{acts}} 幕 · {{pictures}} 张图 · {{videos}} 段视频将不再被这个故事引用。",
+    "keeps": "素材库里的文件会留下；装配出来的时间线也会留下，可以在剪辑室继续用。",
+    "confirm": "删除",
+    "cancel": "取消"
+  },
+  "head": {
+    "editBrief": "编辑设定",
+    "genreUnset": "待设定影片风格",
+    "styleUnset": "待设定视觉风格",
+    "duration": "总时长",
+    "aspect": "画幅",
+    "granularity": "视频粒度"
+  },
+  "steps": {
+    "label": "五个步骤",
+    "locked": "要先完成{{step}}。"
+  },
+  "step": {
+    "idea": "创意",
+    "outline": "大纲",
+    "elements": "剧情元素",
+    "storyboard": "分镜脚本",
+    "edit": "剪辑"
+  },
+  "stepHint": {
+    "idea": "说清这个故事讲什么，以及它有多长。",
+    "outline": "把创意拆成它要讲的一集集。",
+    "elements": "找出故事需要的角色、场景与物品，并把它们画出来。",
+    "storyboard": "写下每一集的幕与关键帧，然后出图、出片。",
+    "edit": "把各幕按顺序铺到时间线上，渲染出成片。"
+  },
+  "state": {
+    "empty": "尚未开始",
+    "working": "进行中",
+    "ready": "待确认",
+    "confirmed": "已确认",
+    "failed": "有失败"
+  },
+  "history": {
+    "create": "新建故事",
+    "rename": "重命名故事",
+    "delete": "删除故事"
   }
 }

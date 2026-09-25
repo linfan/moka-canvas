@@ -107,10 +107,10 @@
     "keyframe": "One clip per shot"
   },
   "aspect": {
-    "16:9": "16:9 widescreen",
-    "9:16": "9:16 vertical",
-    "1:1": "1:1 square",
-    "4:3": "4:3 classic",
-    "21:9": "21:9 cinema"
+    "wide169": "16:9 widescreen",
+    "tall916": "9:16 vertical",
+    "square": "1:1 square",
+    "classic43": "4:3 classic",
+    "scope219": "21:9 cinema"
   }
 }

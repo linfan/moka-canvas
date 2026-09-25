@@ -22,7 +22,7 @@ export function useCanUndo(): boolean {
 
 interface PageTopBarProps {
   /** The page the bar stands on, which the menu marks as current. */
-  current: "canvas" | "clip";
+  current: "canvas" | "clip" | "story";
   /** What going home costs; the page decides whether that is guarded. */
   onHome: () => void;
   /** The middle of the bar: what the page is made of. */

@@ -4932,3 +4932,342 @@ body.is-dragging-split {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------------------------
+   The story room: a telling walked one step at a time.
+   --------------------------------------------------------------------------- */
+
+.story-page {
+  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.story-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  z-index: 0;
+}
+
+.story-side {
+  background: var(--surface);
+  border-right: 1px solid var(--stroke);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 12px 12px;
+  width: var(--panel-left-width, 280px);
+}
+
+.story-side-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding-right: 10px;
+}
+
+.story-side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.story-new {
+  background: none;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  height: 24px;
+  line-height: 1;
+  width: 24px;
+}
+
+.story-new:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
+.story-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.story-row {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 12px 1fr;
+  padding: 8px 8px 8px 10px;
+  position: relative;
+}
+
+.story-row:hover {
+  border-color: var(--stroke);
+}
+
+.story-row.is-active {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+}
+
+.story-dot {
+  align-self: start;
+  background: transparent;
+  border: 1.5px solid var(--muted);
+  border-radius: 999px;
+  display: inline-block;
+  height: 9px;
+  margin-top: 5px;
+  width: 9px;
+}
+
+.story-dot.is-working {
+  background: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.story-dot.is-ready {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.story-dot.is-confirmed {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.story-dot.is-failed {
+  background: var(--coral);
+  border-color: var(--coral);
+}
+
+.story-main {
+  background: none;
+  border: 0;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.story-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-row-meta,
+.story-row-when {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.story-row-when {
+  font-variant-numeric: tabular-nums;
+}
+
+.story-row-error {
+  color: var(--coral);
+  font-size: 11px;
+  grid-column: 2;
+}
+
+.story-row-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+
+.story-row:hover .story-row-actions,
+.story-row:focus-within .story-row-actions {
+  opacity: 1;
+}
+
+.story-row-actions button {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.story-row-actions button:hover {
+  color: var(--ink);
+}
+
+.story-rename {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+  padding: 4px 6px;
+  width: 100%;
+}
+
+.story-rename[aria-invalid="true"] {
+  border-color: var(--coral);
+}
+
+.story-stage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.story-flow {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.story-head {
+  align-items: baseline;
+  border-bottom: 1px solid var(--stroke);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 20px 12px;
+}
+
+.story-head-name {
+  margin: 0;
+}
+
+.story-head-edit {
+  background: none;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+.story-head-edit:hover {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
+.story-head-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.story-chip {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 10px;
+}
+
+.story-chip.is-missing {
+  border-style: dashed;
+  color: var(--coral);
+  cursor: pointer;
+}
+
+.story-flow-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.story-steps {
+  border-right: 1px solid var(--stroke);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  width: 208px;
+}
+
+.story-step {
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 22px 1fr auto;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.story-step.is-active {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+}
+
+.story-step:disabled {
+  opacity: 0.45;
+}
+
+.story-step-index {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.story-step-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.story-step.is-confirmed .story-step-index {
+  color: var(--success);
+}
+
+.story-step.is-working .story-step-index {
+  color: var(--yellow);
+}
+
+.story-step-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  outline: none;
+}
+
+.story-step-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  padding: 20px;
+}
+
+.story-step-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The column folds away with the window, as the other rooms' columns do; the
+   rule stands here rather than with theirs because a later rule of equal
+   weight is the one that wins, and this section is the last in the file. */
+@media (max-width: 900px) {
+  .story-side {
+    display: none;
+  }
+}

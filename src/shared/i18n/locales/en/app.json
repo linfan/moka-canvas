@@ -70,9 +70,10 @@
   },
   "homeMenu": {
     "button": "Home menu",
-    "hint": "Home, canvas, and clip",
+    "hint": "Home, canvas, story, and clip",
     "home": "Home",
     "canvas": "Canvas",
-    "clip": "Clip"
+    "clip": "Clip",
+    "story": "Story"
   }
 }

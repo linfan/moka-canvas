@@ -115,6 +115,39 @@ export async function openClipRoom(page: Page) {
 }
 
 /**
+ * Step into the story room from whichever working page is open.
+ *
+ * The project stays open across the step, exactly as it does on the way to the
+ * cutting room: the coffee button is the way between the pages, and the Story
+ * row is where the reader arrives.
+ */
+export async function openStoryRoom(page: Page) {
+  await page.getByRole("button", { name: "Home menu" }).click();
+  await page.getByRole("menuitem", { name: "Story" }).click();
+  await expect(page.getByTestId("story-page")).toBeVisible({ timeout: 10_000 });
+}
+
+/** Begin a story under a name, from the door that stands open. */
+export async function newStory(page: Page, name: string) {
+  // Two doors do the same thing: the empty room's own button, and the + over
+  // the column once the project tells a story already.
+  const empty = page.getByTestId("story-empty-new");
+  if ((await empty.count()) > 0) {
+    await empty.click();
+  } else {
+    await page.getByTestId("story-new").click();
+  }
+  const dialog = page.getByRole("dialog", { name: "New story" });
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
+  await dialog.getByLabel("Name").fill(name);
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(dialog).toBeHidden({ timeout: 10_000 });
+  await expect(
+    page.locator(".story-row-name").filter({ hasText: name }),
+  ).toBeVisible({ timeout: 10_000 });
+}
+
+/**
  * Add a timeline through the dialog, whichever door stands open: the first-run
  * empty state's own button, or the + at the end of the strip once there is one.
  */
@@ -133,6 +166,17 @@ export async function newTimeline(page: Page, name: string) {
   await expect(
     page.getByRole("tablist", { name: "Timelines" }).getByRole("tab", { name }),
   ).toBeVisible({ timeout: 10_000 });
+}
+
+/** The story names as the server has them written down, in document order. */
+export async function persistedStoryNames(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/v1/projects/current");
+    const body = (await response.json()) as {
+      moka?: { stories?: { name?: string }[] };
+    };
+    return (body.moka?.stories ?? []).map((story) => story.name ?? "");
+  });
 }
 
 /** The timeline names as the server has them written down, in document order. */
