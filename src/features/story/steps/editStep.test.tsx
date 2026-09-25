@@ -301,6 +301,13 @@ describe("the film of a telling", () => {
     const button = screen.getByTestId("story-film-export") as HTMLButtonElement;
     await waitFor(() => expect(button.disabled).toBe(true));
     expect(button.getAttribute("title")).toContain("ffmpeg");
+    // Said in words on the card as well: a reason that only a hover reveals
+    // is a reason most readers never read.
+    await waitFor(() =>
+      expect(screen.getByTestId("story-film-capability").textContent).toContain(
+        "no ffmpeg",
+      ),
+    );
   });
 
   it("plays the film on the step and opens its timeline in the cutting room", async () => {

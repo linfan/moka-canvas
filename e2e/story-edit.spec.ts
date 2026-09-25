@@ -146,6 +146,18 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     expect(timeline.clips[0]?.durationMs).toBe(1_000);
     expect(timeline.clips[1]?.startMs).toBe(0);
 
+    // The e2e harness points MOKA_FFMPEG at a path that is never there, so
+    // this is every machine at once: the film card reads once what the
+    // machine can do and refuses the render with that reason rather than
+    // failing when pressed. A real render belongs to whatever ffmpeg a host
+    // has, and is not asserted here.
+    await expect(page.getByTestId("story-film-capability")).toContainText(
+      "ffmpeg was not found",
+    );
+    const render = page.getByTestId("story-film-export");
+    await expect(render).toBeDisabled();
+    await expect(render).toHaveAttribute("title", /ffmpeg was not found/);
+
     // And the cutting room opens on that same timeline.
     await page.getByTestId("story-film-open").click();
     await expect(page.getByTestId("clip-page")).toBeVisible({

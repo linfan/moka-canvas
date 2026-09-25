@@ -59,10 +59,7 @@
         "headerImage": "installer/header.bmp",
         "sidebarImage": "installer/welcome.bmp",
         "uninstallerHeaderImage": "installer/uninstall-header.bmp",
-        "languages": [
-          "English",
-          "SimpChinese"
-        ],
+        "languages": ["English", "SimpChinese"],
         "displayLanguageSelector": true
       }
     }

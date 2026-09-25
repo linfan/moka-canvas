@@ -237,6 +237,26 @@ One export runs at a time (`409 CONFLICT` for a second ask). Each render writes 
 
 Reference numbers to set expectations (1080p30, two layers, one crossfade, burn-in subtitles, `libx264 -preset medium -crf 18`): roughly 2–4× realtime on a current desktop, about 5–15 MB per minute of output. A machine with `h264_videotoolbox` or `h264_nvenc` is asked for those by name and renders at a fixed 12 Mbit/s instead of a quality target.
 
+## The story room
+
+The story room asks configured models for premises, chapters, elements, boards, and shots, and every ask is a batch: `POST /api/v1/projects/current/story/jobs` carries the kind and the pieces, `GET /api/v1/projects/current/story/jobs?storyId=` lists the project's batches, `GET /api/v1/projects/current/story/jobs/{id}` reads one, and `POST /api/v1/projects/current/story/jobs/{id}/cancel` calls one off (a batch that already ended answers how it ended). Results are filed into the project document by the client, one command per batch, so the document is the only thing that holds a story.
+
+Batches are bounded twice over, and a deployment that expects several readers at once raises both:
+
+| Key                             | Default | What it bounds                                                                                                                                                                                                                                                            |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `story.maxStoriesPerProject`    | 20      | How many stories one project may tell. The client enforces the same number, so a room that offers the button is never refused by a server that would not have taken it. The ceiling is also written into the document schema, so raising this key alone does not lift it. |
+| `story.maxItemsPerJob`          | 40      | How many pieces one batch may carry. The client splits larger asks into waves and says which wave is out.                                                                                                                                                                 |
+| `story.maxParallelItems`        | 2       | How many generations from _any_ batch are in flight at once. A batch of twenty waits its turn here rather than opening twenty calls.                                                                                                                                      |
+| `story.maxActiveJobsPerProject` | 1       | How many batches one project may be running at once; a second ask is refused with `409 STORY_JOB_BUSY`.                                                                                                                                                                   |
+| `story.keepRecords`             | 100     | How many ended batch records the project keeps, besides the ones still running; older ones are pruned when the list is read.                                                                                                                                              |
+
+Timeouts and retries are not story settings: a piece is a generation like any other and is carried with the ones under `generate:`, including which executors are enabled (a deployment with only `deterministic` runs no story jobs at all).
+
+Each batch is one file under `<project>/history/story-jobs/`, written by the process that drives it and pruned as above. A batch found still running when a project is opened is failed as interrupted and named to the client, which offers it as a retry — nothing is left waiting on a process that is gone.
+
+The story room needs the same three capabilities as the rest of the product: **text** for premises, chapters, elements, boards, and shot lists; **image** for element art and key frames; **video** for the acts a telling is filmed in. A story can be taken all the way to the board with text and image alone; the fifth step assembles only what has been filmed, and a machine without ffmpeg says so in the same words the cutting room does (see [Video export](#video-export)).
+
 ## Probes
 
 | Endpoint          | Status     | Purpose                                                                                                                                                                                                                    |

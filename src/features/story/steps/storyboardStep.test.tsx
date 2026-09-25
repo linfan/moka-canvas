@@ -16,7 +16,11 @@ import type {
   StoryJobRecord,
 } from "../../../api/story";
 import type { MokaFile } from "../../../shared/domain";
-import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
+import {
+  buildLongStory,
+  buildStoryMokaFile,
+  storyIds,
+} from "../../../shared/domain/fixtures";
 import { clampSeconds } from "../jobs/plan";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { StoryPage } from "../StoryPage";
@@ -511,5 +515,33 @@ describe("writing an episode's board", () => {
     fireEvent.click(screen.getByTestId("story-kf-remove-1"));
     await waitFor(() => expect(acts()[0]?.keyframes).toHaveLength(2));
     expect(acts()[0]?.keyframes[0]?.id).toBe(ids.frameFirst);
+  });
+});
+
+describe("a telling at every ceiling", () => {
+  it("draws the episode it stands on and no other", () => {
+    const moka = buildLongStory();
+    const standing = moka.stories![0].chapters[0]!;
+    openAtBoard(moka);
+
+    // Every episode is a button in the strip; the board under it is the one
+    // the room stands on. The other fifty-nine cost a button each, not a
+    // table each, which is what makes sixty episodes openable at all.
+    expect(screen.getAllByTestId(/^story-board-chapter-\d+$/)).toHaveLength(
+      moka.stories![0].chapters.length,
+    );
+    expect(screen.getAllByTestId(/^story-act-\d+$/)).toHaveLength(
+      standing.acts.length,
+    );
+    expect(screen.queryByTestId("story-act-30")).toBeNull();
+
+    // A budget per shot rather than one flat number: the board is a row of
+    // cells with its slots and its words, and how many rows an episode holds
+    // is the telling's business. Measured at about fifty-five nodes a shot.
+    const shots = standing.acts.reduce(
+      (sum, act) => sum + act.keyframes.length,
+      0,
+    );
+    expect(document.querySelectorAll("body *").length).toBeLessThan(shots * 80);
   });
 });

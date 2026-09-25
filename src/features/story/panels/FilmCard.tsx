@@ -190,6 +190,14 @@ export function FilmCard({
     <section className="story-film-card" data-testid="story-film">
       <h3>{t("story:edit.film")}</h3>
 
+      {/* What this machine can do, in words rather than in a button's title:
+          a reader whose host cannot render should read why without hovering. */}
+      {capabilities !== null && !capabilities.available && (
+        <p className="story-hint" data-testid="story-film-capability">
+          {capabilities.reason ?? t("story:edit.noFfmpeg")}
+        </p>
+      )}
+
       {film === undefined ? (
         <p className="story-hint" data-testid="story-film-none">
           {t("story:edit.noFilm")}

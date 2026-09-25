@@ -19,6 +19,7 @@ import type { MokaFile } from "../../../shared/domain";
 import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
 import { actCast } from "../../../shared/domain/story";
 import { undo } from "../../editor/commands/execute";
+import { SHELF_PAGE } from "../../editor/panels/shelfFilter";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
@@ -541,5 +542,34 @@ describe("an element the reader types in", () => {
     expect(added?.description).toBe("长椅上空无一人。");
     expect(added?.main.takes).toEqual([]);
     expect(screen.queryByTestId("add-element")).toBeNull();
+  });
+});
+
+describe("a cast too long to show at once", () => {
+  it("shows a shelf's worth of cards and offers the rest", () => {
+    const moka = buildStoryMokaFile();
+    const story = moka.stories![0];
+    story.elements = Array.from({ length: SHELF_PAGE + 5 }, (_, at) => ({
+      id: `extra-${at}`,
+      kind: "prop" as const,
+      name: `道具 ${at + 1}`,
+      description: "一件东西。",
+      descriptionConfirmed: true,
+      chapterIds: [],
+      main: { takes: [], confirmed: false },
+    }));
+    openAtElements(moka);
+
+    expect(screen.getAllByTestId(/^story-element-prop-/)).toHaveLength(
+      SHELF_PAGE,
+    );
+    const paging = screen.getByTestId("story-elements-shown");
+    expect(paging.textContent).toBe(`${SHELF_PAGE} of ${SHELF_PAGE + 5} shown`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 5 more" }));
+    expect(screen.getAllByTestId(/^story-element-prop-/)).toHaveLength(
+      SHELF_PAGE + 5,
+    );
+    expect(screen.queryByTestId("story-elements-shown")).toBeNull();
   });
 });

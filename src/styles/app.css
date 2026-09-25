@@ -5784,6 +5784,14 @@ body.is-dragging-split {
   padding: 0;
 }
 
+.story-paging {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+}
+
 .story-element {
   background: var(--surface);
   border: 1px solid var(--stroke);

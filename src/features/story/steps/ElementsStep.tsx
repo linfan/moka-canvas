@@ -15,6 +15,7 @@ import { MAX_ELEMENTS_PER_STORY } from "../../../shared/domain/constants";
 import type { DocumentCommand } from "../../../shared/domain/types";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
+import { SHELF_PAGE } from "../../editor/panels/shelfFilter";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ElementCard } from "../panels/ElementCard";
 import { jobKey, planElementArt, planElements } from "../jobs/plan";
@@ -55,6 +56,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   const [kind, setKind] = useState<StoryElementKind | "all">("all");
   const [asking, setAsking] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [pages, setPages] = useState(1);
   const [waves, setWaves] = useState<string[][]>([]);
   const [totalWaves, setTotalWaves] = useState(0);
   const starting = useRef(false);
@@ -67,6 +69,15 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
     kind === "all"
       ? story.elements
       : story.elements.filter((element) => element.kind === kind);
+  // A telling may hold two hundred of these, and every card is a form: the
+  // list is shown a shelf's worth at a time, as the asset shelf is.
+  const visible = shown.slice(0, pages * SHELF_PAGE);
+
+  /** Another kind of thing is another list, and it starts at its top. */
+  const chooseKind = (next: StoryElementKind | "all") => {
+    setKind(next);
+    setPages(1);
+  };
   const undrawn = story.elements.filter(
     (element) => currentTake(element.main) === undefined,
   );
@@ -143,7 +154,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
               aria-selected={kind === "all"}
               className={`story-choice${kind === "all" ? " is-on" : ""}`}
               data-testid="story-elements-group-all"
-              onClick={() => setKind("all")}
+              onClick={() => chooseKind("all")}
               role="tab"
               type="button"
             >
@@ -155,7 +166,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
                 className={`story-choice${kind === group.kind ? " is-on" : ""}`}
                 data-testid={`story-elements-group-${group.kind}`}
                 key={group.kind}
-                onClick={() => setKind(group.kind)}
+                onClick={() => chooseKind(group.kind)}
                 role="tab"
                 type="button"
               >
@@ -303,17 +314,37 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
             </div>
           </div>
         ) : (
-          <ul className="story-elements">
-            {shown.map((element) => (
-              <ElementCard
-                busy={busyAt(jobs, element)}
-                element={element}
-                key={element.id}
-                running={running !== null}
-                story={story}
-              />
-            ))}
-          </ul>
+          <>
+            <ul className="story-elements">
+              {visible.map((element) => (
+                <ElementCard
+                  busy={busyAt(jobs, element)}
+                  element={element}
+                  key={element.id}
+                  running={running !== null}
+                  story={story}
+                />
+              ))}
+            </ul>
+            {shown.length > visible.length && (
+              <div className="story-paging">
+                <span data-testid="story-elements-shown">
+                  {t("story:elements.shown", {
+                    shown: visible.length,
+                    total: shown.length,
+                  })}
+                </span>
+                <button
+                  onClick={() => setPages((current) => current + 1)}
+                  type="button"
+                >
+                  {t("story:elements.showMore", {
+                    count: Math.min(SHELF_PAGE, shown.length - visible.length),
+                  })}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
