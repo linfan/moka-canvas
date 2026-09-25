@@ -178,8 +178,57 @@ describe("the elements", () => {
     }
   });
 
+  it("reads the near-miss names a model gives the three groups", () => {
+    // The ask describes the groups as places and things while its shape names
+    // them scenes and props, and a model may answer in either's words: a
+    // synonym is not a wrong answer, and dropping it silently would be.
+    const read = parseElements({
+      characters: [{ name: "林", description: "四十岁上下。" }],
+      places: [{ name: "末班车车厢", description: "灯管忽明忽暗。" }],
+      things: [{ name: "旧车票", description: "边角磨圆。" }],
+    });
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(read.value.map((held) => held.kind)).toEqual([
+        "character",
+        "scene",
+        "prop",
+      ]);
+      expect(read.warnings).toEqual([]);
+    }
+  });
+
+  it("keeps the group the ask asked for when an answer names it twice", () => {
+    const read = parseElements({
+      scenes: [{ name: "车厢", description: "灯管忽明忽暗。" }],
+      places: [{ name: "站台", description: "雨里没有灯。" }],
+    });
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(read.value.map((held) => held.name)).toEqual(["车厢"]);
+      // The other name is one the reading knows and did not need, rather than
+      // something it could not read.
+      expect(read.warnings).toEqual([]);
+    }
+  });
+
+  it("says what it could not read rather than passing it over", () => {
+    // Half an answer read as a whole one is how a telling ends up with its
+    // cast and nothing to draw behind them: what no group is read from is
+    // named out loud.
+    const read = parseElements({
+      characters: [{ name: "林", description: "四十岁上下。" }],
+      moods: [{ name: "湿冷", description: "雨水的气味。" }],
+    });
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(read.value).toHaveLength(1);
+      expect(read.warnings.join()).toContain("moods");
+    }
+  });
+
   it("refuses an answer that names none of the three", () => {
-    expect(parseElements({ people: [] }).ok).toBe(false);
+    expect(parseElements({ moods: [] }).ok).toBe(false);
     expect(parseElements("林").ok).toBe(false);
   });
 });

@@ -235,6 +235,28 @@ function chaptersIn(item: StoryJobItem): StoryChapterDraft[] | undefined {
   return readOutlineAnswer(item.text ?? "").drafts;
 }
 
+/** What one elements answer said, as the reading of it came out. */
+export interface ElementsReading {
+  drafts?: StoryElementDraft[];
+  warnings: string[];
+  /** Why it could not be read, when it could not. */
+  error?: string;
+}
+
+/**
+ * What the element reading of one answer came out as.
+ *
+ * Read here rather than in the step so that what the batch writes into the
+ * story and what the step shows a reader about it come from the one reading.
+ */
+export function readElementsAnswer(text: string): ElementsReading {
+  const read = parseStoryJson(text);
+  if (!read.ok) return { warnings: [], error: read.error };
+  const parsed = parseElements(read.value);
+  if (!parsed.ok) return { warnings: [], error: parsed.error };
+  return { drafts: parsed.value, warnings: parsed.warnings };
+}
+
 /** What a board's answer said, as the reading of it came out. */
 export interface BoardReading {
   drafts?: ActDraft[];
@@ -500,16 +522,26 @@ function commandsFor(
 
   switch (item.target.kind) {
     case "elements": {
-      const read = parseStoryJson(item.text ?? "");
-      const parsed = read.ok ? parseElements(read.value) : undefined;
-      if (parsed === undefined || !parsed.ok) {
+      const read = readElementsAnswer(item.text ?? "");
+      if (read.drafts === undefined) {
         report.notes.push(
           i18n.t("story:jobs.unreadableAnswer", { at: item.id }),
         );
         return [];
       }
+      // Said where the answer is read in and not only beside the element list:
+      // a group of the answer nothing was read from is exactly the loss a
+      // reader cannot see in the document.
+      if (read.warnings.length > 0) {
+        report.notes.push(
+          i18n.t("story:jobs.answerNotes", {
+            at: item.id,
+            notes: read.warnings.join(" "),
+          }),
+        );
+      }
       report.applied += 1;
-      return applyParsedElements(story, parsed.value, {
+      return applyParsedElements(story, read.drafts, {
         partial: PART_ELEMENTS.test(item.id),
       });
     }

@@ -131,7 +131,8 @@
     "busy": "{{done}}/{{total}}…",
     "targetGone": "{{label}} 已经不在这个故事里了。",
     "storyGone": "这批作业要讲的故事已经不在了。",
-    "unreadableAnswer": "{{at}} 的回答读不出来；原话已留给你手动修正。"
+    "unreadableAnswer": "{{at}} 的回答读不出来；原话已留给你手动修正。",
+    "answerNotes": "{{at}} 的回答有几处没有读进来：{{notes}}"
   },
   "idea": {
     "lead": "说说这个故事讲的是什么、要讲多久。后面每一步都从这里写起。",

@@ -257,6 +257,35 @@ describe("finding the cast in the chapters", () => {
     expect(starts[0]?.items[0]?.capability).toBe("text");
   });
 
+  it("says what of an answer it could not read, beside the list", async () => {
+    openAtElements(buildStoryMokaFile());
+    fireEvent.click(screen.getByTestId("story-elements-recognise"));
+    fireEvent.click(screen.getByTestId("recognise-elements-confirm"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+    // A model answering in the words the ask describes the groups with rather
+    // than the ones its shape names: the near-miss groups are read all the
+    // same, and the group nothing was read from is said out loud.
+    answers.elements = JSON.stringify({
+      characters: [{ name: "林", description: "灰呢大衣。", chapters: [1] }],
+      places: [{ name: "站外雨棚", description: "雨水顺着铁架走。" }],
+      moods: [{ name: "湿冷", description: "雨水的气味。" }],
+    });
+    await comesBack();
+
+    await waitFor(() => {
+      expect(story().elements.map((each) => each.name)).toEqual([
+        "林",
+        "站外雨棚",
+      ]);
+    });
+    expect(card("站外雨棚", "scene")).toBeTruthy();
+    expect(screen.getByTestId("story-elements-warnings").textContent).toContain(
+      "moods",
+    );
+  });
+
   it("says on the button that asked while the reading is under way", async () => {
     openAtElements(buildStoryMokaFile());
     fireEvent.click(screen.getByTestId("story-elements-recognise"));

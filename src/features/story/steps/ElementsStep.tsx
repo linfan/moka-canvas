@@ -19,6 +19,7 @@ import { SHELF_PAGE } from "../../editor/panels/shelfFilter";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { ElementCard } from "../panels/ElementCard";
+import { readElementsAnswer } from "../jobs/apply";
 import { jobKey, planElementArt, planElements } from "../jobs/plan";
 import {
   jobProgress,
@@ -94,6 +95,21 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   // chapter's worth of words takes a while, and the button that asked for it
   // is where a reader looks to see that it is still going.
   const recognising = running?.kind === "elements";
+  // What the newest reading had to say about what it could not read. Shown
+  // rather than only logged, because a group of an answer that was not read is
+  // a loss the document shows as simply not being there.
+  const answerJob = jobs.find(
+    (job) =>
+      job.kind === "elements" &&
+      job.items.some((item) => item.text !== undefined),
+  );
+  const warnings = (answerJob?.items ?? [])
+    .filter((item) => item.text !== undefined)
+    .flatMap((item) =>
+      readElementsAnswer(item.text ?? "").warnings.map(
+        (warning) => `${item.id}: ${warning}`,
+      ),
+    );
 
   // The parts of a long telling are read one after another, the next one
   // beginning when the one before it is over rather than when the reader
@@ -149,6 +165,20 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
         <h2>{t("story:step.elements")}</h2>
         <p className="story-step-lead">{t("story:elements.lead")}</p>
         <StoryModelPicks places={["text", "image"]} />
+
+        {warnings.length > 0 && (
+          <div
+            className="story-warnings"
+            data-testid="story-elements-warnings"
+            role="status"
+          >
+            <ul>
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="story-elements-bar">
           <div

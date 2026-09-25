@@ -183,11 +183,49 @@ describe("writing a batch's answers into the story", () => {
     );
 
     expect(report.applied).toBe(1);
+    expect(report.notes).toEqual([]);
     const hero = story().elements.find((each) => each.id === ids.hero);
     expect(hero?.description).toBe("四十岁上下，灰呢大衣。");
     expect(hero?.main.takes.map((take) => take.assetId)).toEqual([
       ids.heroMain,
     ]);
+  });
+
+  it("reads a group the model named its own way, and says what it could not", () => {
+    // The ask describes the groups as places and things while its shape names
+    // them scenes and props, so an answer may come back under either's words.
+    const report = applyJobResults(
+      record("elements", [
+        item({
+          id: "elements",
+          target: { kind: "elements" },
+          capability: "text",
+          text: JSON.stringify({
+            characters: [
+              {
+                name: "林",
+                description: "四十岁上下，深色大衣。",
+                chapters: [1],
+              },
+            ],
+            places: [
+              { name: "荒站台", description: "雨里没有灯。", chapters: [1] },
+            ],
+            things: [{ name: "宫灯", description: "纸罩上落着灰。" }],
+            moods: [{ name: "湿冷", description: "雨水的气味。" }],
+          }),
+        }),
+      ]),
+    );
+
+    const byName = new Map(
+      story().elements.map((each) => [each.name, each.kind]),
+    );
+    expect(byName.get("荒站台")).toBe("scene");
+    expect(byName.get("宫灯")).toBe("prop");
+    // What no group was read from is said at the moment the answer is read in:
+    // it is the one loss the document cannot show by being wrong.
+    expect(report.notes.join()).toContain("moods");
   });
 
   it("writes a board onto the episode its piece was for", () => {

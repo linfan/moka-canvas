@@ -194,11 +194,41 @@ const GROUPS: Record<StoryElementKind, string> = {
 };
 
 /**
+ * The other names an answer gives the three groups.
+ *
+ * A model that answered `places` and `things` has not answered wrongly — it
+ * used the words the ask described them with — and a reading that kept only
+ * what it recognized would lose two thirds of it without a word. The shape's
+ * own names win where both are there: what was asked for is what was meant.
+ */
+const ALSO_NAMED: Record<StoryElementKind, string[]> = {
+  character: ["people"],
+  scene: ["places", "locations"],
+  prop: ["things", "items", "objects"],
+};
+
+/** The list an answer gave for one kind, under whichever of its names. */
+function namedGroup(
+  value: Record<string, unknown>,
+  kind: StoryElementKind,
+): { name: string; entries: unknown[] } | undefined {
+  for (const name of [GROUPS[kind], ...ALSO_NAMED[kind]]) {
+    const entries = value[name];
+    if (Array.isArray(entries)) return { name, entries };
+  }
+  return undefined;
+}
+
+/**
  * The characters, places and things an answer names.
  *
- * An answer that is one flat list is read as characters and things alike, since
- * a model that answers with a list has stopped saying which is which and the
- * caller can still tell them apart by what it finds in the story.
+ * An answer that is one flat list is read as characters, since a model that
+ * answers with a list has stopped saying which is which and the caller can
+ * still tell them apart by what it finds in the story.
+ *
+ * A group under a name none of the three is known by is not read, and is not
+ * passed over in silence either: half an answer read as a whole one is how a
+ * telling ends up with its cast and nothing to draw behind them.
  */
 export function parseElements(
   value: unknown,
@@ -243,13 +273,31 @@ export function parseElements(
       take(entry, "character", `element ${index + 1}`),
     );
   } else if (isObject(value)) {
-    const present = KINDS.filter((kind) => Array.isArray(value[GROUPS[kind]]));
-    if (present.length === 0)
+    const groups = new Map<
+      StoryElementKind,
+      { name: string; entries: unknown[] }
+    >();
+    for (const kind of KINDS) {
+      const group = namedGroup(value, kind);
+      if (group !== undefined) groups.set(kind, group);
+    }
+    if (groups.size === 0)
       return fail("the answer named no characters, scenes or props");
-    for (const kind of present) {
-      const entries = value[GROUPS[kind]] as unknown[];
-      entries.forEach((entry, index) =>
+    for (const [kind, group] of groups) {
+      group.entries.forEach((entry, index) =>
         take(entry, kind, `the ${GROUPS[kind]}' number ${index + 1}`),
+      );
+    }
+    const known = new Set([
+      ...Object.values(GROUPS),
+      ...Object.values(ALSO_NAMED).flat(),
+    ]);
+    const unread = Object.keys(value).filter(
+      (key) => !known.has(key) && Array.isArray(value[key]),
+    );
+    if (unread.length > 0) {
+      warnings.push(
+        `the answer listed ${unread.join(", ")} besides the three groups, and nothing was read from ${unread.length === 1 ? "it" : "them"}`,
       );
     }
   } else {
