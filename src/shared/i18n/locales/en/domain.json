@@ -54,5 +54,63 @@
     "openaiResponses": "OpenAI-compatible · Responses",
     "openaiSpeech": "OpenAI-compatible · Speech API",
     "openaiVideos": "OpenAI-compatible · Videos API"
+  },
+  "shotSize": {
+    "extremeClose": "Extreme close-up",
+    "close": "Close-up",
+    "mediumClose": "Medium close-up",
+    "medium": "Medium shot",
+    "mediumFull": "Medium full shot",
+    "full": "Full shot",
+    "wide": "Wide shot",
+    "extremeWide": "Extreme wide shot"
+  },
+  "cameraMove": {
+    "static": "Static",
+    "handheld": "Handheld",
+    "pushIn": "Push in",
+    "pullOut": "Pull out",
+    "panLeft": "Pan left",
+    "panRight": "Pan right",
+    "tiltUp": "Tilt up",
+    "tiltDown": "Tilt down",
+    "trackLeft": "Track left",
+    "trackRight": "Track right",
+    "arc": "Arc",
+    "craneUp": "Crane up",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out"
+  },
+  "cameraAngle": {
+    "eyeLevel": "Eye level",
+    "high": "High angle",
+    "low": "Low angle",
+    "overhead": "Overhead",
+    "dutch": "Dutch angle",
+    "overTheShoulder": "Over the shoulder",
+    "pointOfView": "Point of view"
+  },
+  "elementKind": {
+    "character": "Character",
+    "scene": "Scene",
+    "prop": "Prop"
+  },
+  "storyStep": {
+    "idea": "Idea",
+    "outline": "Outline",
+    "elements": "Elements",
+    "storyboard": "Storyboard",
+    "edit": "Edit"
+  },
+  "granularity": {
+    "act": "One clip per act",
+    "keyframe": "One clip per shot"
+  },
+  "aspect": {
+    "16:9": "16:9 widescreen",
+    "9:16": "9:16 vertical",
+    "1:1": "1:1 square",
+    "4:3": "4:3 classic",
+    "21:9": "21:9 cinema"
   }
 }

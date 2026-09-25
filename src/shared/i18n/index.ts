@@ -10,6 +10,7 @@ import enEditor from "./locales/en/editor.json" with { type: "json" };
 import enErrors from "./locales/en/errors.json" with { type: "json" };
 import enProblems from "./locales/en/problems.json" with { type: "json" };
 import enSettings from "./locales/en/settings.json" with { type: "json" };
+import enStory from "./locales/en/story.json" with { type: "json" };
 import zhApp from "./locales/zh/app.json" with { type: "json" };
 import zhAssistant from "./locales/zh/assistant.json" with { type: "json" };
 import zhClip from "./locales/zh/clip.json" with { type: "json" };
@@ -19,6 +20,7 @@ import zhEditor from "./locales/zh/editor.json" with { type: "json" };
 import zhErrors from "./locales/zh/errors.json" with { type: "json" };
 import zhProblems from "./locales/zh/problems.json" with { type: "json" };
 import zhSettings from "./locales/zh/settings.json" with { type: "json" };
+import zhStory from "./locales/zh/story.json" with { type: "json" };
 
 /**
  * Which language the interface is drawn in. "system" follows the machine's
@@ -104,6 +106,7 @@ const resources = {
     errors: enErrors,
     problems: enProblems,
     settings: enSettings,
+    story: enStory,
   },
   zh: {
     app: zhApp,
@@ -115,6 +118,7 @@ const resources = {
     errors: zhErrors,
     problems: zhProblems,
     settings: zhSettings,
+    story: zhStory,
   },
 };
 

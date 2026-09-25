@@ -101,6 +101,15 @@ export interface AssetProvenance {
    * conversations travel with a full backup and not with a package of the work.
    */
   assistantSessionId?: SessionId;
+  /**
+   * The story job whose item drew this, and the story it was drawn for.
+   *
+   * The pair is what a reader follows backwards from a picture to the step
+   * that asked for it: a job records the words it was asked with, and the
+   * story names the place in the document the answer was filed under.
+   */
+  storyJobId?: string;
+  storyId?: string;
   inputAssetIds?: AssetId[];
   parameterSnapshot?: Record<string, unknown>;
   createdAt: IsoTimestamp;
@@ -527,7 +536,331 @@ export interface MokaFile {
    * rather than failing on it.
    */
   timelines?: TimelineDocument[];
+  /**
+   * The stories this project has told, in the order the story room's list
+   * reads them.
+   *
+   * Left off rather than left empty on a document that tells none: a project
+   * that has never opened the story room says so by carrying nothing here,
+   * and an older build reading a newer document skips the field it does not
+   * know rather than failing on it.
+   */
+  stories?: StoryDocument[];
   canvas: CanvasDocument[];
+}
+
+// -----------------------------------------------------------------------------
+// The story room: a premise told, chapter by chapter, into a finished film.
+//
+// The five steps are one document: the brief the whole of it rests on, the
+// chapters a reader confirmed, the elements every picture is drawn from, the
+// boards that name each shot, and the timeline the whole was assembled into.
+// A step's own working state — which job is running, which item failed — is
+// not here: this is what was decided, not what is being tried.
+// -----------------------------------------------------------------------------
+
+/** What a reader settled on before a word was written. */
+export interface StoryBrief {
+  /** The premise, as typed, or lifted out of an uploaded manuscript. */
+  idea: string;
+  /** The uploaded manuscript's place in the shelf, when one was uploaded. */
+  sourceAssetId?: AssetId;
+  /** The uploaded file's name, only ever shown to say where the words came from. */
+  sourceName?: string;
+  /** Whether the manuscript has been divided into chapters already. */
+  sourceSplit?: boolean;
+  /** How long the whole telling is meant to run, in milliseconds. */
+  totalDurationMs: number;
+  /** The frame the finished film is cut to. */
+  aspect: StoryAspect;
+  /** The genre, in the reader's own words. */
+  genre: string;
+  /** The look, in the reader's own words; every picture prompt carries it. */
+  style: string;
+}
+
+export const STORY_ASPECTS = ["16:9", "9:16", "1:1", "4:3", "21:9"] as const;
+export type StoryAspect = (typeof STORY_ASPECTS)[number];
+
+export const STORY_ELEMENT_KINDS = ["character", "scene", "prop"] as const;
+export type StoryElementKind = (typeof STORY_ELEMENT_KINDS)[number];
+
+/**
+ * Every take a place in the story has been given, and whether one was settled
+ * on.
+ *
+ * A place is redrawn rather than overwritten: the earlier takes stay, the
+ * newest is the one in use, and a reader who liked the third better than the
+ * fourth can say so by keeping it. Confirmation is the reader's word, not the
+ * machine's — a picture that exists is not a picture that was agreed to.
+ */
+export interface StorySlot {
+  takes: StoryTake[];
+  confirmed: boolean;
+}
+
+/** One drawing of one place: an asset, and where the ask for it is written down. */
+export interface StoryTake {
+  assetId: AssetId;
+  /** The job item that drew it, so a redraw can tell its own work from a reader's. */
+  jobId?: string;
+  itemId?: string;
+  /** What the ask said, in a line, for a reader deciding which take to keep. */
+  note?: string;
+  createdAt: IsoTimestamp;
+}
+
+export const STORY_SHOT_SIZES = [
+  "extremeClose",
+  "close",
+  "mediumClose",
+  "medium",
+  "mediumFull",
+  "full",
+  "wide",
+  "extremeWide",
+] as const;
+export type StoryShotSize = (typeof STORY_SHOT_SIZES)[number];
+
+export const STORY_CAMERA_MOVES = [
+  "static",
+  "handheld",
+  "pushIn",
+  "pullOut",
+  "panLeft",
+  "panRight",
+  "tiltUp",
+  "tiltDown",
+  "trackLeft",
+  "trackRight",
+  "arc",
+  "craneUp",
+  "zoomIn",
+  "zoomOut",
+] as const;
+export type StoryCameraMove = (typeof STORY_CAMERA_MOVES)[number];
+
+export const STORY_CAMERA_ANGLES = [
+  "eyeLevel",
+  "high",
+  "low",
+  "overhead",
+  "dutch",
+  "overTheShoulder",
+  "pointOfView",
+] as const;
+export type StoryCameraAngle = (typeof STORY_CAMERA_ANGLES)[number];
+
+/**
+ * A line of dialogue.
+ *
+ * The speaker's name is kept beside the reference, so a line still reads after
+ * its character has been taken out of the story.
+ */
+export interface StoryDialogueLine {
+  characterId?: string;
+  speaker: string;
+  text: string;
+  /** How the line is delivered; the voicing pass reads it. */
+  tone?: string;
+}
+
+/** One row of a board: a single shot held for a while. */
+export interface StoryKeyframe {
+  id: string;
+  title: string;
+  shotSize: StoryShotSize;
+  cameraMove: StoryCameraMove;
+  angle: StoryCameraAngle;
+  /** What this shot shows. */
+  content: string;
+  dialogue: StoryDialogueLine[];
+  durationMs: number;
+  /** The frame drawn for this shot. */
+  art: StorySlot;
+  /** This shot's own clip, when the story is boarded a shot at a time. */
+  video: StorySlot;
+}
+
+/** What an act sounds like. */
+export interface StoryActSound {
+  music: string;
+  sfx: string;
+  ambience?: string;
+}
+
+/**
+ * An act: one stretch of story, and the unit a clip is made of.
+ *
+ * The three flags are the reader's three answers, in the order they can be
+ * given: the board is right, the frames are right, the clip is right. Each
+ * step's work is offered only after the answer before it.
+ */
+export interface StoryAct {
+  id: string;
+  title: string;
+  summary: string;
+  /** The characters in this act, by the element ids step three settled on. */
+  characterIds: string[];
+  sceneId?: string;
+  propIds: string[];
+  sound: StoryActSound;
+  keyframes: StoryKeyframe[];
+  keysConfirmed: boolean;
+  imagesConfirmed: boolean;
+  /** The act's whole clip, when the story is boarded an act at a time. */
+  video: StorySlot;
+  videoConfirmed: boolean;
+}
+
+/** A chapter — one episode of the telling. */
+export interface StoryChapter {
+  id: string;
+  title: string;
+  synopsis: string;
+  synopsisConfirmed: boolean;
+  /** What this episode is meant to run for; the brief's total shares out evenly. */
+  targetDurationMs: number;
+  /** The board for this episode, made in step four. */
+  acts: StoryAct[];
+}
+
+/** Something the story is made of: a character, a place, a thing. */
+export interface StoryElement {
+  id: string;
+  kind: StoryElementKind;
+  name: string;
+  description: string;
+  descriptionConfirmed: boolean;
+  /** The chapters this was noticed in; empty when the outline did not say. */
+  chapterIds: string[];
+  main: StorySlot;
+  /** The full-length turn-around view, which only a character is drawn with. */
+  turnaround?: StorySlot;
+}
+
+export const STORY_SHOT_GRANULARITIES = ["act", "keyframe"] as const;
+export type StoryShotGranularity = (typeof STORY_SHOT_GRANULARITIES)[number];
+
+/** What step five assembled the story into. */
+export interface StoryEdit {
+  /** The timeline the acts were laid down on. */
+  timelineId?: TimelineId;
+  /**
+   * Which clips this story's assembly put on that timeline.
+   *
+   * Kept so a re-assembly overwrites its own work and nothing else: clips a
+   * reader moved there by hand, or a different story laid down, are not this
+   * story's to take away.
+   */
+  clipByAct?: Array<{ actId: string; keyframeId?: string; clipId: ClipId }>;
+  /** The finished film, once it has been rendered and filed. */
+  film?: StoryTake;
+}
+
+export interface StoryDocument {
+  id: string;
+  name: string;
+  schemaVersion: number;
+  brief: StoryBrief;
+  chapters: StoryChapter[];
+  elements: StoryElement[];
+  /** Whether a clip is made of a whole act or of each of its shots. */
+  shotGranularity: StoryShotGranularity;
+  edit: StoryEdit;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+/**
+ * A place in a story that holds a slot, as a command names it.
+ *
+ * The same vocabulary the job targets are written in, one level down: a job
+ * asks for a drawing at a place, a command files the answer there.
+ */
+export type StorySlotTarget =
+  | { kind: "element"; elementId: string; view: "main" | "turnaround" }
+  | {
+      kind: "keyframe";
+      chapterId: string;
+      actId: string;
+      keyframeId: string;
+    }
+  | { kind: "actVideo"; chapterId: string; actId: string }
+  | {
+      kind: "keyframeVideo";
+      chapterId: string;
+      actId: string;
+      keyframeId: string;
+    };
+
+/** The fields a caller may move on an element, for `updateStoryElement`. */
+export interface StoryElementPatch {
+  name?: string;
+  kind?: StoryElementKind;
+  description?: string;
+  descriptionConfirmed?: boolean;
+}
+
+/**
+ * The fields a caller may move on an act, for `updateStoryAct`.
+ *
+ * A field left off is not touched; `sceneId: null` is how a scene is taken
+ * away, since JSON cannot spell "this key goes away" any other way. Every
+ * patch that arrives through the document pipeline is JSON, so the merge rule
+ * and the undo rule are one rule: what a patch carries moves, what a patch
+ * carries as null goes.
+ */
+export interface StoryActPatch {
+  title?: string;
+  summary?: string;
+  characterIds?: string[];
+  sceneId?: string | null;
+  propIds?: string[];
+  sound?: StoryActSound;
+  keysConfirmed?: boolean;
+  imagesConfirmed?: boolean;
+  videoConfirmed?: boolean;
+}
+
+/** The fields a caller may move on a shot, for `updateStoryKeyframe`. */
+export interface StoryKeyframePatch {
+  title?: string;
+  shotSize?: StoryShotSize;
+  cameraMove?: StoryCameraMove;
+  angle?: StoryCameraAngle;
+  content?: string;
+  dialogue?: StoryDialogueLine[];
+  durationMs?: number;
+}
+
+/**
+ * The fields a caller may move on the brief, for `updateStoryBrief`.
+ *
+ * The three fields that may be absent take a null the same way an act's scene
+ * does: a manuscript a reader took away is not a manuscript that was never
+ * there, and the undo of adding one has to be able to say so.
+ */
+export interface StoryBriefPatch {
+  idea?: string;
+  sourceAssetId?: AssetId | null;
+  sourceName?: string | null;
+  sourceSplit?: boolean | null;
+  totalDurationMs?: number;
+  aspect?: StoryAspect;
+  genre?: string;
+  style?: string;
+}
+
+/** The fields a caller may move on the assembly, for `setStoryEdit`. */
+export interface StoryEditPatch {
+  timelineId?: TimelineId | null;
+  clipByAct?: Array<{
+    actId: string;
+    keyframeId?: string;
+    clipId: ClipId;
+  }> | null;
+  film?: StoryTake | null;
 }
 
 export interface NodePatch {
@@ -773,7 +1106,105 @@ export type DocumentCommand =
       type: "removeTransitions";
       timelineId: TimelineId;
       transitionIds: TransitionId[];
-    };
+    }
+  // -------------------------------------------------------------------------
+  // The story room. Everything here names the story it works on and nothing
+  // else: a story is a document of its own, and the steps that fill it in do
+  // not reach into the canvases or the cutting room.
+  // -------------------------------------------------------------------------
+  /** A story arrives whole — its brief, and whatever the steps have settled. */
+  | { type: "addStory"; story: StoryDocument; index?: number }
+  /**
+   * Takes a story out of the project.
+   *
+   * What it assembled is left standing: the timeline it wrote stays in the
+   * cutting room with its clips, because a film a reader can still watch is
+   * not this command's to throw away. What goes is the record of the story
+   * having made it.
+   */
+  | { type: "removeStory"; storyId: string }
+  | { type: "renameStory"; storyId: string; name: string }
+  /**
+   * A change to what the whole telling rests on. Only the fields the patch
+   * carries move, and nothing already made is remade: a longer running time
+   * changes what the next generation is asked for, not the boards that
+   * already exist.
+   */
+  | { type: "updateStoryBrief"; storyId: string; patch: StoryBriefPatch }
+  /** Only the granularity moves; clips already made are kept as they are. */
+  | {
+      type: "updateStoryGranularity";
+      storyId: string;
+      shotGranularity: StoryShotGranularity;
+    }
+  /**
+   * The outline, whole.
+   *
+   * A chapter arriving with an id the story already knows keeps its board and
+   * everything that was settled on it, and only its words are replaced; a
+   * chapter that is not in the new list takes its board with it. The caller
+   * is expected to have said as much before asking, since what is dropped
+   * here is not read back.
+   */
+  | { type: "setStoryChapters"; storyId: string; chapters: StoryChapter[] }
+  /**
+   * The cast, whole.
+   *
+   * An element arriving with a known id keeps its drawings and the reader's
+   * answers about them; one that is not in the new list is taken out of the
+   * story, though the pictures it was drawn in stay in the shelf.
+   */
+  | { type: "setStoryElements"; storyId: string; elements: StoryElement[] }
+  | {
+      type: "updateStoryElement";
+      storyId: string;
+      elementId: string;
+      patch: StoryElementPatch;
+    }
+  /**
+   * One episode's board, whole.
+   *
+   * An act arriving with a known id keeps its frames, its clip, and the
+   * reader's answers; one that leaves the list is dropped with them.
+   */
+  | {
+      type: "setStoryActs";
+      storyId: string;
+      chapterId: string;
+      acts: StoryAct[];
+    }
+  /** Only the fields the patch carries move; a sound is replaced as one thing. */
+  | {
+      type: "updateStoryAct";
+      storyId: string;
+      chapterId: string;
+      actId: string;
+      patch: StoryActPatch;
+    }
+  | {
+      type: "updateStoryKeyframe";
+      storyId: string;
+      chapterId: string;
+      actId: string;
+      keyframeId: string;
+      patch: StoryKeyframePatch;
+    }
+  /**
+   * One place's takes, whole.
+   *
+   * Whole rather than one take added at a time, because keeping an older take
+   * and dropping the newest is as ordinary as the reverse: what a reader
+   * settled on is the order and the content of this list, and the undo of a
+   * redraw puts the list back as it was.
+   */
+  | {
+      type: "setStorySlot";
+      storyId: string;
+      target: StorySlotTarget;
+      slot: StorySlot;
+    }
+  /** What the story was assembled into, whole. */
+  | { type: "setStoryEdit"; storyId: string; patch: StoryEditPatch };
 
 export interface SelfCheckIssue {
   assetId: AssetId;

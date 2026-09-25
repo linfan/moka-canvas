@@ -3,6 +3,7 @@ import type {
   DataType,
   NodeKind,
   PortDefinition,
+  StoryAspect,
 } from "./types";
 
 export const MOKA_MAGIC = [0x4d, 0x4f, 0x4b, 0x41] as const;
@@ -312,6 +313,41 @@ export const MAX_VIDEO_SECONDS = 600;
 export const MIN_AUDIO_SPEED = 0.25;
 export const MAX_AUDIO_SPEED = 4;
 
+// -----------------------------------------------------------------------------
+// The story room
+// -----------------------------------------------------------------------------
+
+export const STORY_SCHEMA_VERSION = 1;
+export const MAX_STORIES_PER_PROJECT = 20;
+export const STORY_NAME_MAX = 60;
+/** The premise's own ceiling, of the same size as a node's prompt. */
+export const STORY_IDEA_MAX = 20_000;
+/** How much manuscript a story will hold, measured in characters. */
+export const STORY_SOURCE_TEXT_MAX = 2_000_000;
+export const MAX_CHAPTERS_PER_STORY = 60;
+export const MAX_ELEMENTS_PER_STORY = 200;
+/** How many drawings one place keeps before the oldest is let go. */
+export const MAX_TAKES_PER_SLOT = 12;
+export const MAX_ACTS_PER_CHAPTER = 30;
+export const MAX_KEYFRAMES_PER_ACT = 12;
+export const MIN_KEYFRAME_MS = 400;
+export const MAX_KEYFRAME_MS = 60_000;
+export const MIN_TOTAL_DURATION_MS = 30_000;
+export const MAX_TOTAL_DURATION_MS = 8 * 60 * 60 * 1000;
+/** How many places one job may be asked for at once; the room splits the rest. */
+export const MAX_ITEMS_PER_STORY_JOB = 40;
+/** How many lines one shot may be spoken with. */
+export const MAX_DIALOGUE_LINES_PER_KEYFRAME = 12;
+export const MAX_DIALOGUE_LINE_LENGTH = 500;
+/** The running time a story starts from: two minutes, one short telling. */
+export const DEFAULT_STORY_DURATION_MS = 120_000;
+/** The frame a story starts from, which most screens are watched on. */
+export const DEFAULT_STORY_ASPECT: StoryAspect = "16:9";
+/** How long a shot is held when the board does not say. */
+export const DEFAULT_KEYFRAME_MS = 3_000;
+/** About how long one episode runs, which is how a total is cut into them. */
+export const DEFAULT_CHAPTER_MS = 60_000;
+
 export function port(
   id: string,
   direction: "input" | "output",
@@ -548,6 +584,21 @@ export const PROBLEM_CODES = [
   "GENERATION_OUTPUT_TOO_LARGE",
   "TASK_NOT_FOUND",
   "TASK_EXPIRED",
+  "STORY_NOT_FOUND",
+  "STORY_LIMIT_REACHED",
+  "STORY_NAME_INVALID",
+  "STORY_SCHEMA_NEWER",
+  "STORY_ID_EXISTS",
+  "STORY_CHAPTER_LIMIT",
+  "STORY_ELEMENT_LIMIT",
+  "STORY_ACT_LIMIT",
+  "STORY_KEYFRAME_LIMIT",
+  "STORY_SLOT_FULL",
+  "STORY_TARGET_INVALID",
+  "STORY_JOB_NOT_FOUND",
+  "STORY_JOB_NOT_CANCELLABLE",
+  "STORY_JOB_BUSY",
+  "STORY_JOB_ITEM_LIMIT",
   "NOT_FOUND",
   "CONFLICT",
   "PAYLOAD_TOO_LARGE",

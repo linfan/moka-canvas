@@ -871,6 +871,7 @@ mod tests {
             },
             folders: None,
             timelines: None,
+            stories: None,
             canvas: vec![canvas],
         }
     }

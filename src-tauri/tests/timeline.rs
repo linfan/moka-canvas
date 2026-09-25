@@ -119,6 +119,7 @@ fn golden_document() -> MokaFile {
         resources: ResourceRegistry::default(),
         folders: None,
         timelines: None,
+        stories: None,
         canvas: vec![CanvasDocument::empty("canvas-1".into(), "Canvas 1".into())],
     }
 }

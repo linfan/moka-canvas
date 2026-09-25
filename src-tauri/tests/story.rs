@@ -1,0 +1,1117 @@
+//! The Rust half of the story command matrix, mirrored from
+//! `src/shared/domain/story.test.ts`: the same cases, the same fixture shape,
+//! the same codes.
+//!
+//! Two languages read and write one document, so the cases here are the ones
+//! the TypeScript suite pins: if the two ever disagree about what a command
+//! does, one of these suites says so.
+
+use moka_canvas::domain::commands::apply_commands;
+use moka_canvas::domain::story::{
+    self, StoryAct, StoryActSound, StoryBrief, StoryChapter, StoryDialogueLine, StoryDocument,
+    StoryEdit, StoryEditClip, StoryEditPatch, StoryElement, StoryElementKind, StoryElementPatch,
+    StoryElementView, StoryKeyframe, StoryKeyframePatch, StoryShotGranularity, StoryShotSize,
+    StorySlot, StorySlotTarget, StoryTake, MAX_ACTS_PER_CHAPTER, MAX_CHAPTERS_PER_STORY,
+    MAX_ELEMENTS_PER_STORY, MAX_KEYFRAMES_PER_ACT, MAX_TAKES_PER_SLOT, STORY_NAME_MAX,
+};
+use moka_canvas::domain::validate::validate_moka_file;
+use moka_canvas::domain::{
+    CanvasDocument, DocumentCommand, MokaFile, ProjectMetadata, ResourceEntry, ResourceRegistry,
+    TimelineDocument, TimelineSettings, MOKA_FILE_VERSION,
+};
+use moka_canvas::project::codec::{decode_moka_file, encode_moka_file};
+
+const NOW: &str = "2026-01-01T00:00:00.000Z";
+
+const STORY: &str = "story-1";
+const CHAPTER_FIRST: &str = "chapter-first";
+const CHAPTER_SECOND: &str = "chapter-second";
+const ACT: &str = "act-1";
+const FRAME_FIRST: &str = "frame-1";
+const FRAME_SECOND: &str = "frame-2";
+const HERO: &str = "element-hero";
+const PARTNER: &str = "element-partner";
+const SCENE: &str = "element-scene";
+const PROP: &str = "element-prop";
+const SOURCE: &str = "asset-story-source";
+const HERO_MAIN: &str = "asset-hero-main";
+const HERO_SHEET: &str = "asset-hero-sheet";
+const FRAME_ART: &str = "asset-frame-art";
+const ACT_VIDEO: &str = "asset-act-video";
+const TIMELINE: &str = "timeline-1";
+
+fn apply(moka: &MokaFile, commands: Vec<DocumentCommand>) -> (MokaFile, Vec<DocumentCommand>) {
+    apply_commands(moka, &commands).expect("the commands apply")
+}
+
+fn code_of(moka: &MokaFile, command: DocumentCommand) -> &'static str {
+    match apply_commands(moka, &[command]) {
+        Ok(_) => "NO_ERROR",
+        Err(error) => error.code,
+    }
+}
+
+/// The round trip every command must survive: apply, undo with the inverse,
+/// and the document is the one the step started from.
+fn round_trip(moka: &MokaFile, commands: Vec<DocumentCommand>) -> MokaFile {
+    let (next, inverse) = apply(moka, commands);
+    let (undone, _) = apply(&next, inverse);
+    assert_eq!(undone, *moka, "the inverse must put the document back");
+    next
+}
+
+fn story_of(moka: &MokaFile) -> &StoryDocument {
+    &moka.stories.as_ref().expect("the fixture tells a story")[0]
+}
+
+fn take(asset_id: &str) -> StoryTake {
+    StoryTake {
+        asset_id: asset_id.into(),
+        job_id: None,
+        item_id: None,
+        note: None,
+        created_at: NOW.into(),
+    }
+}
+
+fn empty_slot() -> StorySlot {
+    StorySlot {
+        takes: Vec::new(),
+        confirmed: false,
+    }
+}
+
+fn resource(id: &str, name: &str, path: &str, mime: &str, bytes: i64) -> ResourceEntry {
+    ResourceEntry {
+        id: id.into(),
+        name: name.into(),
+        path: path.into(),
+        mime: Some(mime.into()),
+        bytes: Some(bytes),
+        sha256: None,
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        probe: None,
+        provenance: None,
+        tags: None,
+        note: None,
+        favorite: None,
+        origin: None,
+        keyword: None,
+    }
+}
+
+fn timeline() -> TimelineDocument {
+    TimelineDocument {
+        id: TIMELINE.into(),
+        name: "Timeline 1".into(),
+        schema_version: 1,
+        settings: TimelineSettings {
+            fps: 30,
+            width: 1920,
+            height: 1080,
+            background: "#000000".into(),
+        },
+        tracks: Vec::new(),
+        clips: Vec::new(),
+        transitions: Vec::new(),
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+    }
+}
+
+fn frame(index: usize) -> StoryKeyframe {
+    StoryKeyframe {
+        id: format!("frame-{index}"),
+        title: format!("#{}", index + 1),
+        shot_size: StoryShotSize::Medium,
+        camera_move: story::StoryCameraMove::Static,
+        angle: story::StoryCameraAngle::EyeLevel,
+        content: "画面".into(),
+        dialogue: Vec::new(),
+        duration_ms: 1_000,
+        art: empty_slot(),
+        video: empty_slot(),
+    }
+}
+
+fn act(id: &str) -> StoryAct {
+    StoryAct {
+        id: id.into(),
+        title: "第 1 幕".into(),
+        summary: "内容".into(),
+        character_ids: Vec::new(),
+        scene_id: None,
+        prop_ids: Vec::new(),
+        sound: StoryActSound {
+            music: String::new(),
+            sfx: String::new(),
+            ambience: None,
+        },
+        keyframes: Vec::new(),
+        keys_confirmed: false,
+        images_confirmed: false,
+        video: empty_slot(),
+        video_confirmed: false,
+    }
+}
+
+fn element(id: &str, kind: StoryElementKind) -> StoryElement {
+    StoryElement {
+        id: id.into(),
+        kind,
+        name: id.into(),
+        description: String::new(),
+        description_confirmed: false,
+        chapter_ids: Vec::new(),
+        main: empty_slot(),
+        turnaround: if kind == StoryElementKind::Character {
+            Some(empty_slot())
+        } else {
+            None
+        },
+    }
+}
+
+/// The project the TypeScript fixture builds, shape for shape: one telling
+/// walked as far as the fourth step, an assembly that names a real timeline,
+/// and a shelf holding every drawing it points at.
+fn story_document() -> MokaFile {
+    let mut moka = MokaFile {
+        version: MOKA_FILE_VERSION.to_string(),
+        metadata: ProjectMetadata {
+            id: "project-1".into(),
+            name: "Fixture".into(),
+            description: None,
+            cover_path: None,
+            revision: 1,
+            created_at: NOW.into(),
+            updated_at: NOW.into(),
+        },
+        resources: ResourceRegistry::default(),
+        folders: None,
+        timelines: Some(vec![timeline()]),
+        stories: None,
+        canvas: vec![CanvasDocument::empty("canvas-1".into(), "Canvas 1".into())],
+    };
+    for id in [HERO_MAIN, HERO_SHEET, FRAME_ART] {
+        moka.resources.images.push(resource(
+            id,
+            &format!("{id}.png"),
+            &format!("assets/images/{id}.png"),
+            "image/png",
+            120_000,
+        ));
+    }
+    moka.resources.videos.push(resource(
+        ACT_VIDEO,
+        "act-video.mp4",
+        "assets/videos/act-video.mp4",
+        "video/mp4",
+        240_000,
+    ));
+    moka.resources.texts.push(resource(
+        SOURCE,
+        "novel.txt",
+        "assets/texts/novel.txt",
+        "text/plain",
+        40_000,
+    ));
+
+    let first = StoryKeyframe {
+        id: FRAME_FIRST.into(),
+        title: "#1".into(),
+        shot_size: StoryShotSize::Wide,
+        camera_move: story::StoryCameraMove::PushIn,
+        angle: story::StoryCameraAngle::EyeLevel,
+        content: "雨中的站台，一个人立在灯下。".into(),
+        dialogue: vec![StoryDialogueLine {
+            character_id: Some(HERO.into()),
+            speaker: "林".into(),
+            text: "车已经停运了。".into(),
+            tone: Some("平静".into()),
+        }],
+        duration_ms: 2_000,
+        art: StorySlot {
+            takes: vec![StoryTake {
+                asset_id: FRAME_ART.into(),
+                job_id: Some("job-1".into()),
+                item_id: Some(format!("keyframe:{CHAPTER_FIRST}:{ACT}:{FRAME_FIRST}")),
+                note: Some("按关键帧生成".into()),
+                created_at: NOW.into(),
+            }],
+            confirmed: true,
+        },
+        video: empty_slot(),
+    };
+    let second = StoryKeyframe {
+        id: FRAME_SECOND.into(),
+        title: "#2".into(),
+        content: "另一人转过身来。".into(),
+        shot_size: StoryShotSize::Close,
+        camera_move: story::StoryCameraMove::Static,
+        angle: story::StoryCameraAngle::OverTheShoulder,
+        dialogue: Vec::new(),
+        duration_ms: 3_000,
+        art: empty_slot(),
+        video: empty_slot(),
+    };
+
+    moka.stories = Some(vec![StoryDocument {
+        id: STORY.into(),
+        name: "雨夜列车".into(),
+        schema_version: 1,
+        brief: StoryBrief {
+            idea: "末班列车上，两个陌生人交换了各自要说的话。".into(),
+            source_asset_id: Some(SOURCE.into()),
+            source_name: Some("novel.txt".into()),
+            source_split: Some(true),
+            total_duration_ms: 120_000,
+            aspect: story::StoryAspect::Widescreen,
+            genre: "对白剧情".into(),
+            style: "现代都市风".into(),
+        },
+        chapters: vec![
+            StoryChapter {
+                id: CHAPTER_FIRST.into(),
+                title: "第一章 站台".into(),
+                synopsis: "他在站台上等一班已经停运的列车。".into(),
+                synopsis_confirmed: true,
+                target_duration_ms: 60_000,
+                acts: vec![StoryAct {
+                    id: ACT.into(),
+                    title: "第 1 幕 空站台".into(),
+                    summary: "站台上的灯一盏一盏亮起来。".into(),
+                    character_ids: vec![HERO.into(), PARTNER.into()],
+                    scene_id: Some(SCENE.into()),
+                    prop_ids: vec![PROP.into()],
+                    sound: StoryActSound {
+                        music: "低音提琴，缓慢".into(),
+                        sfx: "雨声".into(),
+                        ambience: Some("空站台".into()),
+                    },
+                    keyframes: vec![first, second],
+                    keys_confirmed: true,
+                    images_confirmed: false,
+                    video: StorySlot {
+                        takes: vec![StoryTake {
+                            asset_id: ACT_VIDEO.into(),
+                            job_id: Some("job-2".into()),
+                            item_id: Some(format!("actVideo:{CHAPTER_FIRST}:{ACT}")),
+                            note: Some("按幕生成，5.0s".into()),
+                            created_at: NOW.into(),
+                        }],
+                        confirmed: true,
+                    },
+                    video_confirmed: true,
+                }],
+            },
+            StoryChapter {
+                id: CHAPTER_SECOND.into(),
+                title: "第二章 车厢".into(),
+                synopsis: "车厢比站台更暗。".into(),
+                synopsis_confirmed: true,
+                target_duration_ms: 60_000,
+                acts: Vec::new(),
+            },
+        ],
+        elements: vec![
+            StoryElement {
+                id: HERO.into(),
+                kind: StoryElementKind::Character,
+                name: "林".into(),
+                description: "四十岁上下，深色大衣，说话很慢。".into(),
+                description_confirmed: true,
+                chapter_ids: vec![CHAPTER_FIRST.into()],
+                main: StorySlot {
+                    takes: vec![take(HERO_MAIN)],
+                    confirmed: true,
+                },
+                turnaround: Some(StorySlot {
+                    takes: vec![take(HERO_SHEET)],
+                    confirmed: true,
+                }),
+            },
+            element(PARTNER, StoryElementKind::Character),
+            element(SCENE, StoryElementKind::Scene),
+            element(PROP, StoryElementKind::Prop),
+        ],
+        shot_granularity: StoryShotGranularity::Act,
+        edit: StoryEdit {
+            timeline_id: Some(TIMELINE.into()),
+            clip_by_act: Some(vec![StoryEditClip {
+                act_id: ACT.into(),
+                keyframe_id: None,
+                clip_id: "clip-video".into(),
+            }]),
+            film: None,
+        },
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+    }]);
+    moka
+}
+
+// -----------------------------------------------------------------------------
+// The commands
+// -----------------------------------------------------------------------------
+
+#[test]
+fn adds_a_story_at_the_place_it_asks_for() {
+    let mut moka = story_document();
+    moka.stories = None;
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::AddStory {
+            story: create_story("雨夜列车"),
+            index: Some(0),
+        }],
+    );
+    assert_eq!(next.stories.as_ref().unwrap()[0].name, "雨夜列车");
+}
+
+#[test]
+fn refuses_a_story_past_the_limit_a_nameless_one_and_a_duplicate_id() {
+    let mut full = story_document();
+    full.stories = Some(
+        (0..20)
+            .map(|n| create_story(&format!("故事 {n}")))
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        code_of(
+            &full,
+            DocumentCommand::AddStory {
+                story: create_story("多出来的"),
+                index: None,
+            }
+        ),
+        "STORY_LIMIT_REACHED"
+    );
+
+    let moka = story_document();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::AddStory {
+                story: create_story(""),
+                index: None,
+            }
+        ),
+        "STORY_NAME_INVALID"
+    );
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::AddStory {
+                story: create_story(&"x".repeat(STORY_NAME_MAX + 1)),
+                index: None,
+            }
+        ),
+        "STORY_NAME_INVALID"
+    );
+    let mut twin = create_story("同名");
+    twin.id = STORY.into();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::AddStory {
+                story: twin,
+                index: None,
+            }
+        ),
+        "STORY_ID_EXISTS"
+    );
+}
+
+#[test]
+fn takes_a_story_out_whole_and_leaves_the_timeline_standing() {
+    let moka = story_document();
+    let (next, inverse) = apply(
+        &moka,
+        vec![DocumentCommand::RemoveStory {
+            story_id: STORY.into(),
+        }],
+    );
+    assert!(next.stories.is_none());
+    // The timeline the story assembled stays where a reader can still watch it.
+    assert_eq!(next.timelines.as_ref().unwrap().len(), 1);
+    let (undone, _) = apply(&next, inverse);
+    assert_eq!(undone, moka);
+}
+
+#[test]
+fn renames_a_story() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::RenameStory {
+            story_id: STORY.into(),
+            name: "站台与车厢".into(),
+        }],
+    );
+    assert_eq!(story_of(&next).name, "站台与车厢");
+}
+
+#[test]
+fn moves_only_the_fields_a_brief_patch_names() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryBrief {
+            story_id: STORY.into(),
+            patch: story::StoryBriefPatch {
+                total_duration_ms: Some(300_000),
+                genre: Some("悬疑".into()),
+                ..Default::default()
+            },
+        }],
+    );
+    let brief = &story_of(&next).brief;
+    assert_eq!(brief.total_duration_ms, 300_000);
+    assert_eq!(brief.genre, "悬疑");
+    assert_eq!(brief.style, "现代都市风");
+    assert_eq!(brief.idea, story_of(&moka).brief.idea);
+}
+
+#[test]
+fn refuses_a_running_time_nobody_offered() {
+    let moka = story_document();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::UpdateStoryBrief {
+                story_id: STORY.into(),
+                patch: story::StoryBriefPatch {
+                    total_duration_ms: Some(1),
+                    ..Default::default()
+                },
+            }
+        ),
+        "VALIDATION_FAILED"
+    );
+}
+
+#[test]
+fn changes_the_granularity_and_keeps_the_clips_already_made() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryGranularity {
+            story_id: STORY.into(),
+            shot_granularity: StoryShotGranularity::Keyframe,
+        }],
+    );
+    let story = story_of(&next);
+    assert_eq!(story.shot_granularity, StoryShotGranularity::Keyframe);
+    assert_eq!(story.chapters[0].acts[0].video.takes.len(), 1);
+}
+
+#[test]
+fn keeps_a_chapters_board_when_the_chapter_keeps_its_id() {
+    let moka = story_document();
+    let rewritten = vec![
+        StoryChapter {
+            id: CHAPTER_FIRST.into(),
+            title: "第一章 站台".into(),
+            synopsis: "重写的梗概".into(),
+            synopsis_confirmed: false,
+            target_duration_ms: 60_000,
+            acts: Vec::new(),
+        },
+        StoryChapter {
+            id: "chapter-third".into(),
+            title: "第三章 终点".into(),
+            synopsis: "".into(),
+            synopsis_confirmed: false,
+            target_duration_ms: 60_000,
+            acts: Vec::new(),
+        },
+    ];
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::SetStoryChapters {
+            story_id: STORY.into(),
+            chapters: rewritten,
+        }],
+    );
+    let chapters = &story_of(&next).chapters;
+    assert_eq!(chapters.len(), 2);
+    // The board shot from the first chapter is still on it.
+    assert_eq!(chapters[0].acts.len(), 1);
+    assert_eq!(chapters[1].acts.len(), 0);
+}
+
+#[test]
+fn refuses_more_chapters_than_a_story_holds() {
+    let moka = story_document();
+    let chapters: Vec<StoryChapter> = (0..MAX_CHAPTERS_PER_STORY + 1)
+        .map(|n| StoryChapter {
+            id: format!("chapter-{n}"),
+            title: format!("第 {n} 章"),
+            synopsis: String::new(),
+            synopsis_confirmed: false,
+            target_duration_ms: 60_000,
+            acts: Vec::new(),
+        })
+        .collect();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStoryChapters {
+                story_id: STORY.into(),
+                chapters,
+            }
+        ),
+        "STORY_CHAPTER_LIMIT"
+    );
+}
+
+#[test]
+fn keeps_an_elements_drawings_and_answers_when_it_keeps_its_id() {
+    let moka = story_document();
+    let before = story_of(&moka)
+        .elements
+        .iter()
+        .find(|element| element.id == HERO)
+        .unwrap()
+        .clone();
+    let mut rewritten = before.clone();
+    rewritten.description = "重写的描述".into();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::SetStoryElements {
+            story_id: STORY.into(),
+            elements: vec![rewritten],
+        }],
+    );
+    let hero = &story_of(&next).elements[0];
+    assert_eq!(hero.description, "重写的描述");
+    assert!(hero.description_confirmed);
+    assert_eq!(hero.main.takes.len(), 1);
+    assert_eq!(hero.turnaround.as_ref().unwrap().takes.len(), 1);
+}
+
+#[test]
+fn refuses_more_elements_than_a_story_holds() {
+    let moka = story_document();
+    let elements: Vec<StoryElement> = (0..MAX_ELEMENTS_PER_STORY + 1)
+        .map(|n| element(&format!("element-{n}"), StoryElementKind::Prop))
+        .collect();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStoryElements {
+                story_id: STORY.into(),
+                elements,
+            }
+        ),
+        "STORY_ELEMENT_LIMIT"
+    );
+}
+
+#[test]
+fn moves_only_the_fields_an_element_patch_names() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryElement {
+            story_id: STORY.into(),
+            element_id: HERO.into(),
+            patch: StoryElementPatch {
+                description_confirmed: Some(false),
+                ..Default::default()
+            },
+        }],
+    );
+    let hero = story_of(&next)
+        .elements
+        .iter()
+        .find(|element| element.id == HERO)
+        .unwrap();
+    assert!(!hero.description_confirmed);
+    assert_eq!(hero.description, "四十岁上下，深色大衣，说话很慢。");
+}
+
+#[test]
+fn keeps_an_acts_frames_clip_and_answers_when_it_keeps_its_id() {
+    let moka = story_document();
+    let held = story_of(&moka).chapters[0].acts[0].clone();
+    let mut rewritten = held.clone();
+    rewritten.title = "第 1 幕 站台的灯".into();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::SetStoryActs {
+            story_id: STORY.into(),
+            chapter_id: CHAPTER_FIRST.into(),
+            acts: vec![rewritten, act("act-second")],
+        }],
+    );
+    let acts = &story_of(&next).chapters[0].acts;
+    assert_eq!(acts.len(), 2);
+    assert_eq!(acts[0].title, "第 1 幕 站台的灯");
+    assert_eq!(acts[0].video.takes.len(), 1);
+    assert!(acts[0].video_confirmed);
+    assert_eq!(acts[0].keyframes[0].art.takes.len(), 1);
+    assert!(acts[1].video.takes.is_empty());
+}
+
+#[test]
+fn refuses_more_acts_than_an_episode_holds_and_more_shots_than_an_act_holds() {
+    let moka = story_document();
+    let acts: Vec<StoryAct> = (0..MAX_ACTS_PER_CHAPTER + 1)
+        .map(|n| act(&format!("act-{n}")))
+        .collect();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStoryActs {
+                story_id: STORY.into(),
+                chapter_id: CHAPTER_FIRST.into(),
+                acts,
+            }
+        ),
+        "STORY_ACT_LIMIT"
+    );
+
+    let mut crowded = act(ACT);
+    crowded.keyframes = (0..MAX_KEYFRAMES_PER_ACT + 1).map(frame).collect();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStoryActs {
+                story_id: STORY.into(),
+                chapter_id: CHAPTER_FIRST.into(),
+                acts: vec![crowded],
+            }
+        ),
+        "STORY_KEYFRAME_LIMIT"
+    );
+}
+
+#[test]
+fn keeps_a_reference_to_an_element_that_is_no_longer_there_once() {
+    let moka = story_document();
+    let mut rewritten = story_of(&moka).chapters[0].acts[0].clone();
+    rewritten.character_ids = vec![HERO.into(), "gone".into(), HERO.into()];
+    let next = apply(
+        &moka,
+        vec![DocumentCommand::SetStoryActs {
+            story_id: STORY.into(),
+            chapter_id: CHAPTER_FIRST.into(),
+            acts: vec![rewritten],
+        }],
+    )
+    .0;
+    assert_eq!(
+        story_of(&next).chapters[0].acts[0].character_ids,
+        vec![HERO.to_string(), "gone".to_string()]
+    );
+}
+
+#[test]
+fn moves_only_the_fields_an_act_patch_names_replacing_a_sound_whole() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryAct {
+            story_id: STORY.into(),
+            chapter_id: CHAPTER_FIRST.into(),
+            act_id: ACT.into(),
+            patch: story::StoryActPatch {
+                sound: Some(StoryActSound {
+                    music: "大提琴".into(),
+                    sfx: String::new(),
+                    ambience: None,
+                }),
+                images_confirmed: Some(true),
+                ..Default::default()
+            },
+        }],
+    );
+    let held = &story_of(&next).chapters[0].acts[0];
+    assert_eq!(held.sound.music, "大提琴");
+    assert!(held.images_confirmed);
+    assert_eq!(held.title, "第 1 幕 空站台");
+}
+
+#[test]
+fn takes_a_scene_away_when_the_patch_carries_a_null_for_it() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryAct {
+            story_id: STORY.into(),
+            chapter_id: CHAPTER_FIRST.into(),
+            act_id: ACT.into(),
+            patch: story::StoryActPatch {
+                scene_id: Some(None),
+                ..Default::default()
+            },
+        }],
+    );
+    assert_eq!(story_of(&next).chapters[0].acts[0].scene_id, None);
+}
+
+#[test]
+fn moves_only_the_fields_a_shot_patch_names_and_keeps_a_shot_to_its_length() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryKeyframe {
+            story_id: STORY.into(),
+            chapter_id: CHAPTER_FIRST.into(),
+            act_id: ACT.into(),
+            keyframe_id: FRAME_SECOND.into(),
+            patch: StoryKeyframePatch {
+                shot_size: Some(StoryShotSize::ExtremeWide),
+                duration_ms: Some(1_200),
+                dialogue: Some(vec![StoryDialogueLine {
+                    character_id: None,
+                    speaker: "周".into(),
+                    text: "车还会来。".into(),
+                    tone: None,
+                }]),
+                ..Default::default()
+            },
+        }],
+    );
+    let held = &story_of(&next).chapters[0].acts[0].keyframes[1];
+    assert_eq!(held.shot_size, StoryShotSize::ExtremeWide);
+    assert_eq!(held.duration_ms, 1_200);
+    assert_eq!(held.dialogue.len(), 1);
+    assert_eq!(held.content, "另一人转过身来。");
+
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::UpdateStoryKeyframe {
+                story_id: STORY.into(),
+                chapter_id: CHAPTER_FIRST.into(),
+                act_id: ACT.into(),
+                keyframe_id: FRAME_SECOND.into(),
+                patch: StoryKeyframePatch {
+                    duration_ms: Some(10),
+                    ..Default::default()
+                },
+            }
+        ),
+        "VALIDATION_FAILED"
+    );
+}
+
+#[test]
+fn files_a_drawing_at_the_place_a_target_names() {
+    let moka = story_document();
+    let slot = StorySlot {
+        takes: vec![take("asset-new")],
+        confirmed: true,
+    };
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::SetStorySlot {
+            story_id: STORY.into(),
+            target: StorySlotTarget::Keyframe {
+                chapter_id: CHAPTER_FIRST.into(),
+                act_id: ACT.into(),
+                keyframe_id: FRAME_SECOND.into(),
+            },
+            slot: slot.clone(),
+        }],
+    );
+    assert_eq!(story_of(&next).chapters[0].acts[0].keyframes[1].art, slot);
+}
+
+#[test]
+fn trims_a_slot_to_what_a_place_keeps_oldest_first_and_drops_two_of_one_drawing() {
+    let moka = story_document();
+    let mut takes: Vec<StoryTake> = (0..MAX_TAKES_PER_SLOT + 3)
+        .map(|n| take(&format!("asset-{n}")))
+        .collect();
+    takes.push(take("asset-0"));
+    let next = apply(
+        &moka,
+        vec![DocumentCommand::SetStorySlot {
+            story_id: STORY.into(),
+            target: StorySlotTarget::Element {
+                element_id: PROP.into(),
+                view: StoryElementView::Main,
+            },
+            slot: StorySlot {
+                takes,
+                confirmed: false,
+            },
+        }],
+    )
+    .0;
+    let prop = story_of(&next)
+        .elements
+        .iter()
+        .find(|element| element.id == PROP)
+        .unwrap();
+    assert_eq!(prop.main.takes.len(), MAX_TAKES_PER_SLOT);
+    assert_eq!(prop.main.takes[0].asset_id, "asset-3");
+}
+
+#[test]
+fn refuses_a_place_the_story_no_longer_holds() {
+    let moka = story_document();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStorySlot {
+                story_id: STORY.into(),
+                target: StorySlotTarget::Element {
+                    element_id: "gone".into(),
+                    view: StoryElementView::Main,
+                },
+                slot: empty_slot(),
+            }
+        ),
+        "STORY_TARGET_INVALID"
+    );
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStorySlot {
+                story_id: STORY.into(),
+                target: StorySlotTarget::Element {
+                    element_id: SCENE.into(),
+                    view: StoryElementView::Turnaround,
+                },
+                slot: empty_slot(),
+            }
+        ),
+        "STORY_TARGET_INVALID"
+    );
+}
+
+#[test]
+fn remembers_what_a_story_was_assembled_into_and_refuses_a_timeline_nobody_holds() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::SetStoryEdit {
+            story_id: STORY.into(),
+            patch: StoryEditPatch {
+                timeline_id: Some(Some(TIMELINE.into())),
+                clip_by_act: Some(Some(vec![StoryEditClip {
+                    act_id: ACT.into(),
+                    keyframe_id: None,
+                    clip_id: "clip-cut-a".into(),
+                }])),
+                film: Some(Some(take(ACT_VIDEO))),
+            },
+        }],
+    );
+    let edit = &story_of(&next).edit;
+    assert_eq!(edit.timeline_id.as_deref(), Some(TIMELINE));
+    assert_eq!(edit.clip_by_act.as_ref().unwrap()[0].clip_id, "clip-cut-a");
+    assert_eq!(edit.film.as_ref().unwrap().asset_id, ACT_VIDEO);
+
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStoryEdit {
+                story_id: STORY.into(),
+                patch: StoryEditPatch {
+                    timeline_id: Some(Some("timeline-gone".into())),
+                    ..Default::default()
+                },
+            }
+        ),
+        "TIMELINE_NOT_FOUND"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Guardrails
+// -----------------------------------------------------------------------------
+
+#[test]
+fn passes_the_fixture_and_reports_what_a_hand_written_file_gets_wrong() {
+    let moka = story_document();
+    assert_eq!(validate_moka_file(&moka), Vec::new());
+
+    let mut nameless = moka.clone();
+    nameless.stories.as_mut().unwrap()[0].name = String::new();
+    assert!(validate_moka_file(&nameless)
+        .iter()
+        .any(|issue| issue.code == "STORY_NAME_INVALID"));
+
+    let mut from_the_future = moka.clone();
+    from_the_future.stories.as_mut().unwrap()[0].schema_version = 9;
+    assert!(validate_moka_file(&from_the_future)
+        .iter()
+        .any(|issue| issue.code == "STORY_SCHEMA_NEWER"));
+
+    let mut orphaned = moka.clone();
+    orphaned.stories.as_mut().unwrap()[0].edit.timeline_id = Some("timeline-gone".into());
+    assert!(validate_moka_file(&orphaned)
+        .iter()
+        .any(|issue| issue.code == "STORY_TARGET_INVALID"));
+
+    let mut doubled = moka.clone();
+    let story = doubled.stories.as_ref().unwrap()[0].clone();
+    doubled.stories.as_mut().unwrap().push(story);
+    assert!(validate_moka_file(&doubled)
+        .iter()
+        .any(|issue| issue.code == "STORY_ID_EXISTS"));
+}
+
+#[test]
+fn reports_a_slot_that_carries_more_takes_than_it_may() {
+    let mut moka = story_document();
+    let takes: Vec<StoryTake> = (0..MAX_TAKES_PER_SLOT + 1)
+        .map(|n| take(&format!("asset-{n}")))
+        .collect();
+    moka.stories.as_mut().unwrap()[0].elements[0].main = StorySlot {
+        takes,
+        confirmed: false,
+    };
+    assert!(validate_moka_file(&moka)
+        .iter()
+        .any(|issue| issue.code == "STORY_SLOT_FULL"));
+}
+
+#[test]
+fn counts_every_drawing_the_manuscript_and_the_film_as_in_use() {
+    let mut moka = story_document();
+    moka.stories.as_mut().unwrap()[0].edit.film = Some(take(ACT_VIDEO));
+    let refs = moka.asset_references();
+    for asset_id in [SOURCE, HERO_MAIN, HERO_SHEET, FRAME_ART, ACT_VIDEO] {
+        assert!(
+            refs.contains_key(asset_id),
+            "{asset_id} is pointed at by the story"
+        );
+    }
+}
+
+// -----------------------------------------------------------------------------
+// What a document carries
+// -----------------------------------------------------------------------------
+
+#[test]
+fn a_story_survives_the_codec_as_the_document_it_went_in_as() {
+    let moka = story_document();
+    let bytes = encode_moka_file(&moka, None).unwrap();
+    let read = decode_moka_file(&bytes).unwrap();
+    assert_eq!(read, moka);
+    assert_eq!(read.stories.as_ref().unwrap()[0].brief.style, "现代都市风");
+}
+
+#[test]
+fn a_document_that_tells_no_story_carries_none() {
+    let mut moka = story_document();
+    moka.stories = None;
+    let bytes = encode_moka_file(&moka, None).unwrap();
+    let read = decode_moka_file(&bytes).unwrap();
+    assert!(read.stories.is_none());
+}
+
+#[test]
+fn reads_a_word_it_does_not_know_as_the_plainest_thing_it_could_be() {
+    // A board written by another build: the words are ones this one has no
+    // meaning for, and the telling is still read.
+    let raw = r##"{
+        "id": "story-1",
+        "name": "雨夜列车",
+        "schemaVersion": 1,
+        "brief": {
+            "idea": "一句话",
+            "totalDurationMs": 120000,
+            "aspect": "5:4",
+            "genre": "",
+            "style": ""
+        },
+        "chapters": [{
+            "id": "chapter-1",
+            "title": "一",
+            "synopsis": "",
+            "synopsisConfirmed": false,
+            "targetDurationMs": 60000,
+            "acts": [{
+                "id": "act-1",
+                "title": "第 1 幕",
+                "summary": "",
+                "characterIds": [],
+                "propIds": [],
+                "sound": { "music": "", "sfx": "" },
+                "keyframes": [{
+                    "id": "frame-1",
+                    "title": "#1",
+                    "shotSize": "gigantic",
+                    "cameraMove": "swooping",
+                    "angle": "sideways",
+                    "content": "",
+                    "dialogue": [],
+                    "durationMs": 1000,
+                    "art": { "takes": [], "confirmed": false },
+                    "video": { "takes": [], "confirmed": false }
+                }],
+                "keysConfirmed": false,
+                "imagesConfirmed": false,
+                "video": { "takes": [], "confirmed": false },
+                "videoConfirmed": false
+            }]
+        }],
+        "elements": [{
+            "id": "element-1",
+            "kind": "souvenir",
+            "name": "票",
+            "description": "",
+            "descriptionConfirmed": false,
+            "chapterIds": [],
+            "main": { "takes": [], "confirmed": false }
+        }],
+        "shotGranularity": "everyShot",
+        "edit": {},
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z"
+    }"##;
+    let story: StoryDocument = serde_json::from_str(raw).expect("the telling is read");
+    assert_eq!(story.shot_granularity, StoryShotGranularity::Act);
+    assert_eq!(story.brief.aspect, story::StoryAspect::Widescreen);
+    assert_eq!(story.elements[0].kind, StoryElementKind::Prop);
+    let frame = &story.chapters[0].acts[0].keyframes[0];
+    assert_eq!(frame.shot_size, StoryShotSize::Medium);
+    assert_eq!(frame.camera_move, story::StoryCameraMove::Static);
+    assert_eq!(frame.angle, story::StoryCameraAngle::EyeLevel);
+}
+
+#[test]
+fn refuses_a_story_written_by_a_newer_build_rather_than_reading_it_wrongly() {
+    let mut moka = story_document();
+    moka.stories.as_mut().unwrap()[0].schema_version = 9;
+    let bytes = encode_moka_file(&moka, None).unwrap();
+    assert_eq!(
+        decode_moka_file(&bytes).unwrap_err().code(),
+        "MOKA_VERSION_UNSUPPORTED"
+    );
+}
+
+/// A story with a premise and nothing made of it yet, the way the room makes
+/// one.
+fn create_story(name: &str) -> StoryDocument {
+    StoryDocument {
+        id: "story-new".into(),
+        name: name.into(),
+        schema_version: 1,
+        brief: StoryBrief {
+            idea: "一句话".into(),
+            source_asset_id: None,
+            source_name: None,
+            source_split: None,
+            total_duration_ms: 120_000,
+            aspect: story::StoryAspect::Widescreen,
+            genre: String::new(),
+            style: String::new(),
+        },
+        chapters: Vec::new(),
+        elements: Vec::new(),
+        shot_granularity: StoryShotGranularity::Act,
+        edit: StoryEdit::default(),
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+    }
+}

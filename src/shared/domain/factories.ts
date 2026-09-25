@@ -2,15 +2,20 @@ import { newId, nowIso } from "./ids";
 import { i18n } from "../i18n";
 import {
   CANVAS_SCHEMA_VERSION,
+  DEFAULT_CHAPTER_MS,
+  DEFAULT_IMAGE_CLIP_MS,
+  DEFAULT_KEYFRAME_MS,
   DEFAULT_NODE_HEIGHT,
   DEFAULT_NODE_WIDTH,
+  DEFAULT_STORY_ASPECT,
+  DEFAULT_STORY_DURATION_MS,
+  DEFAULT_TEXT_CLIP_MS,
   MIN_NODE_HEIGHT,
   MOKA_FILE_VERSION,
   NODE_PORTS,
   PROVIDER_EXECUTOR_KEY,
+  STORY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
-  DEFAULT_IMAGE_CLIP_MS,
-  DEFAULT_TEXT_CLIP_MS,
 } from "./constants";
 import type { Capability, TransitionKind } from "./constants";
 import type {
@@ -26,6 +31,17 @@ import type {
   Rect,
   ResourceEntry,
   ResourceRegistry,
+  StoryAct,
+  StoryBrief,
+  StoryCameraAngle,
+  StoryCameraMove,
+  StoryChapter,
+  StoryDocument,
+  StoryElement,
+  StoryElementKind,
+  StoryKeyframe,
+  StorySlot,
+  StoryShotSize,
   TextClipStyle,
   TimelineClip,
   TimelineDocument,
@@ -483,4 +499,145 @@ export function createNode(
     createdAt: now,
     updatedAt: now,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The story room
+// ---------------------------------------------------------------------------
+
+/** A place nothing has been drawn for yet. */
+export function emptyStorySlot(): StorySlot {
+  return { takes: [], confirmed: false };
+}
+
+export function createStoryBrief(patch: Partial<StoryBrief> = {}): StoryBrief {
+  return {
+    idea: patch.idea ?? "",
+    ...(patch.sourceAssetId !== undefined
+      ? { sourceAssetId: patch.sourceAssetId }
+      : {}),
+    ...(patch.sourceName !== undefined ? { sourceName: patch.sourceName } : {}),
+    ...(patch.sourceSplit !== undefined
+      ? { sourceSplit: patch.sourceSplit }
+      : {}),
+    totalDurationMs: patch.totalDurationMs ?? DEFAULT_STORY_DURATION_MS,
+    aspect: patch.aspect ?? DEFAULT_STORY_ASPECT,
+    genre: patch.genre ?? "",
+    style: patch.style ?? "",
+  };
+}
+
+/** A story with a premise and nothing made of it yet. */
+export function createStory(
+  name: string,
+  brief: Partial<StoryBrief> = {},
+): StoryDocument {
+  const now = nowIso();
+  return {
+    id: newId(),
+    name,
+    schemaVersion: STORY_SCHEMA_VERSION,
+    brief: createStoryBrief(brief),
+    chapters: [],
+    elements: [],
+    shotGranularity: "act",
+    edit: {},
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function nextStoryName(moka: MokaFile): string {
+  const used = new Set((moka.stories ?? []).map((story) => story.name));
+  const name = (n: number) => i18n.t("story:defaults.name", { n });
+  let n = (moka.stories ?? []).length + 1;
+  while (used.has(name(n))) n += 1;
+  return name(n);
+}
+
+/** An episode of a telling, with nothing said about it yet. */
+export function createChapter(title: string, synopsis = ""): StoryChapter {
+  return {
+    id: newId(),
+    title,
+    synopsis,
+    synopsisConfirmed: false,
+    targetDurationMs: 0,
+    acts: [],
+  };
+}
+
+/** Something the story is made of, with no drawing of it yet. */
+export function createElement(
+  kind: StoryElementKind,
+  name: string,
+  description = "",
+  chapterIds: string[] = [],
+): StoryElement {
+  return {
+    id: newId(),
+    kind,
+    name,
+    description,
+    descriptionConfirmed: false,
+    chapterIds,
+    main: emptyStorySlot(),
+    ...(kind === "character" ? { turnaround: emptyStorySlot() } : {}),
+  };
+}
+
+/** One stretch of story, with no board written for it yet. */
+export function createAct(title: string, summary = ""): StoryAct {
+  return {
+    id: newId(),
+    title,
+    summary,
+    characterIds: [],
+    propIds: [],
+    sound: { music: "", sfx: "" },
+    keyframes: [],
+    keysConfirmed: false,
+    imagesConfirmed: false,
+    video: emptyStorySlot(),
+    videoConfirmed: false,
+  };
+}
+
+/** One shot of a board, named by its place: the first is "#1". */
+export function createKeyframe(
+  index: number,
+  shotSize: StoryShotSize = "medium",
+  cameraMove: StoryCameraMove = "static",
+  angle: StoryCameraAngle = "eyeLevel",
+): StoryKeyframe {
+  return {
+    id: newId(),
+    title: `#${index + 1}`,
+    shotSize,
+    cameraMove,
+    angle,
+    content: "",
+    dialogue: [],
+    durationMs: DEFAULT_KEYFRAME_MS,
+    art: emptyStorySlot(),
+    video: emptyStorySlot(),
+  };
+}
+
+/**
+ * How many episodes a running time is cut into when nobody says otherwise:
+ * about a minute each, which is as long as one telling can hold a viewer
+ * before it wants a new one.
+ */
+export function defaultChapterCount(totalDurationMs: number): number {
+  return Math.max(1, Math.round(totalDurationMs / DEFAULT_CHAPTER_MS));
+}
+
+/** What each episode is asked to run for, the total shared out evenly. */
+export function chapterTargetMs(
+  totalDurationMs: number,
+  chapterCount: number,
+): number {
+  if (chapterCount <= 0) return totalDurationMs;
+  return Math.round(totalDurationMs / chapterCount);
 }

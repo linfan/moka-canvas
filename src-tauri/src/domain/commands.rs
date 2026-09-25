@@ -12,9 +12,9 @@ use super::validate::{
     MAX_TITLE_LENGTH, ZOOM_MAX, ZOOM_MIN,
 };
 use super::{
-    timeline, AssistantMessage, AssistantSession, CanvasDocument, CanvasFolder, DocumentCommand,
-    GroupMembership, MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue, SettingsPatch,
-    WorkflowNode,
+    story, timeline, AssistantMessage, AssistantSession, CanvasDocument, CanvasFolder,
+    DocumentCommand, GroupMembership, MessageId, MokaFile, NodeData, NodeId, NodeKind, PointValue,
+    SettingsPatch, WorkflowNode,
 };
 use thiserror::Error;
 
@@ -1304,6 +1304,22 @@ fn apply_one(
         // The cutting room's commands live in `timeline.rs`, which holds the
         // same rules the document validator reads so a command and a
         // validation cannot disagree.
+        // The story room's commands live in `story.rs`, which holds the same
+        // rules the document validator reads so a command and a validation
+        // cannot disagree, for the same reason the cutting room's do.
+        command @ (DocumentCommand::AddStory { .. }
+        | DocumentCommand::RemoveStory { .. }
+        | DocumentCommand::RenameStory { .. }
+        | DocumentCommand::UpdateStoryBrief { .. }
+        | DocumentCommand::UpdateStoryGranularity { .. }
+        | DocumentCommand::SetStoryChapters { .. }
+        | DocumentCommand::SetStoryElements { .. }
+        | DocumentCommand::UpdateStoryElement { .. }
+        | DocumentCommand::SetStoryActs { .. }
+        | DocumentCommand::UpdateStoryAct { .. }
+        | DocumentCommand::UpdateStoryKeyframe { .. }
+        | DocumentCommand::SetStorySlot { .. }
+        | DocumentCommand::SetStoryEdit { .. }) => story::apply_story_command(moka, command),
         command @ (DocumentCommand::AddTimeline { .. }
         | DocumentCommand::RemoveTimeline { .. }
         | DocumentCommand::RenameTimeline { .. }

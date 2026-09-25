@@ -524,6 +524,7 @@ impl ProjectStore for FsProjectStore {
             resources: ResourceRegistry::default(),
             folders: None,
             timelines: None,
+            stories: None,
             canvas: vec![CanvasDocument::empty(
                 new_id(),
                 first_canvas_name(input.first_canvas_name),

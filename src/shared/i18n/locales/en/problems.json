@@ -67,5 +67,20 @@
   "transitionNotFound": "Some transitions were not found",
   "transitionSeam": "A stored transition no longer holds its seam",
   "transport": "Cannot reach the local process: {{message}}",
-  "unsupportedMediaType": "That file type cannot be worked on"
+  "unsupportedMediaType": "That file type cannot be worked on",
+  "storyNotFound": "This story is no longer in the project",
+  "storyLimitReached": "This project holds as many stories as it can",
+  "storyNameInvalid": "A story's name must be a word or two, and not too long",
+  "storySchemaNewer": "This story was written by a newer build",
+  "storyIdExists": "A story with that id is already here",
+  "storyChapterLimit": "The story holds as many chapters as it can",
+  "storyElementLimit": "The story holds as many elements as it can",
+  "storyActLimit": "This episode holds as many acts as it can",
+  "storyKeyframeLimit": "This act holds as many shots as it can",
+  "storySlotFull": "This place keeps as many takes as it can",
+  "storyTargetInvalid": "What the story points at is no longer there",
+  "storyJobNotFound": "That story job has been forgotten",
+  "storyJobNotCancellable": "That story job has already ended",
+  "storyJobBusy": "A story job of this kind is already running",
+  "storyJobItemLimit": "One job asks for too many places at once"
 }

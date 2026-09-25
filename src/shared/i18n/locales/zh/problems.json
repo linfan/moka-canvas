@@ -67,5 +67,20 @@
   "transitionNotFound": "转场不存在",
   "transitionSeam": "已保存的转场与片段接缝不再吻合，请调整相邻片段",
   "transport": "无法连接本地服务：{{message}}",
-  "unsupportedMediaType": "不支持该文件类型"
+  "unsupportedMediaType": "不支持该文件类型",
+  "storyNotFound": "这个故事已不在项目里",
+  "storyLimitReached": "故事数量已达上限",
+  "storyNameInvalid": "故事名不能为空，也不能过长",
+  "storySchemaNewer": "这个故事由更新的版本写入",
+  "storyIdExists": "同样 id 的故事已存在",
+  "storyChapterLimit": "章节数量已达上限",
+  "storyElementLimit": "剧情元素数量已达上限",
+  "storyActLimit": "这一集幕数已达上限",
+  "storyKeyframeLimit": "这一幕关键帧已达上限",
+  "storySlotFull": "这一处保留的生成结果已达上限",
+  "storyTargetInvalid": "故事里的一处位置已不存在",
+  "storyJobNotFound": "该故事作业已被遗忘",
+  "storyJobNotCancellable": "该故事作业已经结束",
+  "storyJobBusy": "同类故事作业已在运行",
+  "storyJobItemLimit": "一个作业一次要求的处数过多"
 }

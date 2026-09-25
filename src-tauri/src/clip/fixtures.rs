@@ -181,6 +181,7 @@ pub fn moka(entries: Vec<ResourceEntry>, timelines: Vec<TimelineDocument>) -> Mo
         } else {
             Some(timelines)
         },
+        stories: None,
         canvas: Vec::new(),
     }
 }

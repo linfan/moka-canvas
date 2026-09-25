@@ -1,10 +1,15 @@
 pub mod commands;
 pub mod folders;
+pub mod story;
 pub mod timeline;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use story::{
+    StoryActPatch, StoryBriefPatch, StoryDocument, StoryEditPatch, StoryElementPatch,
+    StoryKeyframePatch, StoryShotGranularity, StorySlot, StorySlotTarget,
+};
 
 pub type ProjectId = String;
 pub type CanvasId = String;
@@ -990,6 +995,14 @@ pub struct MokaFile {
     /// project that has cut nothing says so by carrying nothing here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timelines: Option<Vec<TimelineDocument>>,
+    /// The stories this project has told, in the order the story room's list
+    /// reads them.
+    ///
+    /// Left off rather than left empty on a document that tells none, which is
+    /// every document written before the story room existed: a project that
+    /// has never told one says so by carrying nothing here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stories: Option<Vec<StoryDocument>>,
     pub canvas: Vec<CanvasDocument>,
 }
 
@@ -1034,6 +1047,15 @@ impl MokaFile {
         for timeline in self.timelines.iter().flatten() {
             for clip in &timeline.clips {
                 add(&clip.asset_id, &clip.id);
+            }
+        }
+        // A story's pictures are its own: the frames drawn for a shot, the
+        // clip made of an act, the manuscript a premise was lifted from, and
+        // the film the whole was rendered into are all in use, however little
+        // of a canvas or a timeline they appear on.
+        for story in self.stories.iter().flatten() {
+            for asset_id in story.asset_references() {
+                refs.entry(asset_id).or_default().push(story.id.clone());
             }
         }
         refs
@@ -1087,7 +1109,9 @@ pub struct TrackPatch {
 /// and a missing key as the same `None`. This reads any present key — null
 /// included — as `Some(...)`, so `Some(None)` is the null that clears the
 /// field while a missing key stays `None` and leaves it alone.
-fn deserialize_double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+pub(crate) fn deserialize_double_option<'de, D, T>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de>,
@@ -1409,6 +1433,102 @@ pub enum DocumentCommand {
     RemoveTransitions {
         timeline_id: TimelineId,
         transition_ids: Vec<TransitionId>,
+    },
+    // -------------------------------------------------------------------------
+    // The story room. Everything here names the story it works on and nothing
+    // else: a story is a document of its own, and the steps that fill it in do
+    // not reach into the canvases or the cutting room.
+    // -------------------------------------------------------------------------
+    /// A story arrives whole — its brief, and whatever the steps have settled.
+    #[serde(rename_all = "camelCase")]
+    AddStory {
+        story: StoryDocument,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+    },
+    /// Takes a story out of the project.
+    ///
+    /// What it assembled is left standing: the timeline it wrote stays in the
+    /// cutting room with its clips, because a film a reader can still watch is
+    /// not this command's to throw away. What goes is the record of the story
+    /// having made it.
+    #[serde(rename_all = "camelCase")]
+    RemoveStory { story_id: String },
+    #[serde(rename_all = "camelCase")]
+    RenameStory { story_id: String, name: String },
+    /// A change to what the whole telling rests on. Only the fields the patch
+    /// carries move, and nothing already made is remade.
+    #[serde(rename_all = "camelCase")]
+    UpdateStoryBrief {
+        story_id: String,
+        patch: StoryBriefPatch,
+    },
+    /// Only the granularity moves; clips already made are kept as they are.
+    #[serde(rename_all = "camelCase")]
+    UpdateStoryGranularity {
+        story_id: String,
+        shot_granularity: StoryShotGranularity,
+    },
+    /// The outline, whole.
+    ///
+    /// A chapter arriving with an id the story already knows keeps its board
+    /// and everything settled on it, and only its words are replaced.
+    #[serde(rename_all = "camelCase")]
+    SetStoryChapters {
+        story_id: String,
+        chapters: Vec<story::StoryChapter>,
+    },
+    /// The cast, whole: a known element keeps its drawings and the reader's
+    /// answers about them.
+    #[serde(rename_all = "camelCase")]
+    SetStoryElements {
+        story_id: String,
+        elements: Vec<story::StoryElement>,
+    },
+    #[serde(rename_all = "camelCase")]
+    UpdateStoryElement {
+        story_id: String,
+        element_id: String,
+        patch: StoryElementPatch,
+    },
+    /// One episode's board, whole: a known act keeps its frames and its clip.
+    #[serde(rename_all = "camelCase")]
+    SetStoryActs {
+        story_id: String,
+        chapter_id: String,
+        acts: Vec<story::StoryAct>,
+    },
+    /// Only the fields the patch carries move; a sound is replaced as one thing.
+    #[serde(rename_all = "camelCase")]
+    UpdateStoryAct {
+        story_id: String,
+        chapter_id: String,
+        act_id: String,
+        patch: StoryActPatch,
+    },
+    #[serde(rename_all = "camelCase")]
+    UpdateStoryKeyframe {
+        story_id: String,
+        chapter_id: String,
+        act_id: String,
+        keyframe_id: String,
+        patch: StoryKeyframePatch,
+    },
+    /// One place's takes, whole.
+    ///
+    /// Whole rather than one take added at a time, because keeping an older
+    /// take and dropping the newest is as ordinary as the reverse.
+    #[serde(rename_all = "camelCase")]
+    SetStorySlot {
+        story_id: String,
+        target: StorySlotTarget,
+        slot: StorySlot,
+    },
+    /// What the story was assembled into, whole.
+    #[serde(rename_all = "camelCase")]
+    SetStoryEdit {
+        story_id: String,
+        patch: StoryEditPatch,
     },
 }
 

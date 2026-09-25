@@ -4,6 +4,7 @@ import {
   MOKA_FILE_VERSION,
   MOKA_MAGIC,
   PROJECT_ASSET_CATEGORIES,
+  STORY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
   TRANSITION_KINDS,
 } from "./constants";
@@ -12,6 +13,14 @@ import type {
   ClipFilterPreset,
   TransitionKind,
 } from "./constants";
+import {
+  STORY_ASPECTS,
+  STORY_CAMERA_ANGLES,
+  STORY_CAMERA_MOVES,
+  STORY_ELEMENT_KINDS,
+  STORY_SHOT_GRANULARITIES,
+  STORY_SHOT_SIZES,
+} from "./types";
 import { reconcilePorts } from "./factories";
 import type {
   AssistantFailure,
@@ -30,6 +39,16 @@ import type {
   ProjectMetadata,
   ResourceEntry,
   ResultSlot,
+  StoryAct,
+  StoryBrief,
+  StoryChapter,
+  StoryDialogueLine,
+  StoryDocument,
+  StoryEdit,
+  StoryElement,
+  StoryKeyframe,
+  StorySlot,
+  StoryTake,
   TextClipStyle,
   TimelineClip,
   TimelineDocument,
@@ -363,6 +382,148 @@ function encodeTimeline(timeline: TimelineDocument): Record<string, unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The story room
+// ---------------------------------------------------------------------------
+
+function encodeStoryTake(take: StoryTake): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    assetId: take.assetId,
+    createdAt: take.createdAt,
+  };
+  if (take.jobId !== undefined) doc.jobId = take.jobId;
+  if (take.itemId !== undefined) doc.itemId = take.itemId;
+  if (take.note !== undefined) doc.note = take.note;
+  return doc;
+}
+
+function encodeStorySlot(slot: StorySlot): Record<string, unknown> {
+  return {
+    takes: slot.takes.map(encodeStoryTake),
+    confirmed: slot.confirmed,
+  };
+}
+
+function encodeStoryDialogue(line: StoryDialogueLine): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    speaker: line.speaker,
+    text: line.text,
+  };
+  if (line.characterId !== undefined) doc.characterId = line.characterId;
+  if (line.tone !== undefined) doc.tone = line.tone;
+  return doc;
+}
+
+function encodeStoryKeyframe(keyframe: StoryKeyframe): Record<string, unknown> {
+  return {
+    id: keyframe.id,
+    title: keyframe.title,
+    shotSize: keyframe.shotSize,
+    cameraMove: keyframe.cameraMove,
+    angle: keyframe.angle,
+    content: keyframe.content,
+    dialogue: keyframe.dialogue.map(encodeStoryDialogue),
+    durationMs: asLong(keyframe.durationMs),
+    art: encodeStorySlot(keyframe.art),
+    video: encodeStorySlot(keyframe.video),
+  };
+}
+
+function encodeStoryAct(act: StoryAct): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    id: act.id,
+    title: act.title,
+    summary: act.summary,
+    characterIds: [...act.characterIds],
+    propIds: [...act.propIds],
+    sound: {
+      music: act.sound.music,
+      sfx: act.sound.sfx,
+      ...(act.sound.ambience !== undefined
+        ? { ambience: act.sound.ambience }
+        : {}),
+    },
+    keyframes: act.keyframes.map(encodeStoryKeyframe),
+    keysConfirmed: act.keysConfirmed,
+    imagesConfirmed: act.imagesConfirmed,
+    video: encodeStorySlot(act.video),
+    videoConfirmed: act.videoConfirmed,
+  };
+  if (act.sceneId !== undefined) doc.sceneId = act.sceneId;
+  return doc;
+}
+
+function encodeStoryChapter(chapter: StoryChapter): Record<string, unknown> {
+  return {
+    id: chapter.id,
+    title: chapter.title,
+    synopsis: chapter.synopsis,
+    synopsisConfirmed: chapter.synopsisConfirmed,
+    targetDurationMs: asLong(chapter.targetDurationMs),
+    acts: chapter.acts.map(encodeStoryAct),
+  };
+}
+
+function encodeStoryElement(element: StoryElement): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    id: element.id,
+    kind: element.kind,
+    name: element.name,
+    description: element.description,
+    descriptionConfirmed: element.descriptionConfirmed,
+    chapterIds: [...element.chapterIds],
+    main: encodeStorySlot(element.main),
+  };
+  if (element.turnaround !== undefined)
+    doc.turnaround = encodeStorySlot(element.turnaround);
+  return doc;
+}
+
+function encodeStoryBrief(brief: StoryBrief): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    idea: brief.idea,
+    totalDurationMs: asLong(brief.totalDurationMs),
+    aspect: brief.aspect,
+    genre: brief.genre,
+    style: brief.style,
+  };
+  if (brief.sourceAssetId !== undefined)
+    doc.sourceAssetId = brief.sourceAssetId;
+  if (brief.sourceName !== undefined) doc.sourceName = brief.sourceName;
+  if (brief.sourceSplit !== undefined) doc.sourceSplit = brief.sourceSplit;
+  return doc;
+}
+
+function encodeStoryEdit(edit: StoryEdit): Record<string, unknown> {
+  const doc: Record<string, unknown> = {};
+  if (edit.timelineId !== undefined) doc.timelineId = edit.timelineId;
+  if (edit.clipByAct !== undefined)
+    doc.clipByAct = edit.clipByAct.map((entry) => ({
+      actId: entry.actId,
+      clipId: entry.clipId,
+      ...(entry.keyframeId !== undefined
+        ? { keyframeId: entry.keyframeId }
+        : {}),
+    }));
+  if (edit.film !== undefined) doc.film = encodeStoryTake(edit.film);
+  return doc;
+}
+
+function encodeStory(story: StoryDocument): Record<string, unknown> {
+  return {
+    id: story.id,
+    name: story.name,
+    schemaVersion: story.schemaVersion,
+    brief: encodeStoryBrief(story.brief),
+    chapters: story.chapters.map(encodeStoryChapter),
+    elements: story.elements.map(encodeStoryElement),
+    shotGranularity: story.shotGranularity,
+    edit: encodeStoryEdit(story.edit),
+    createdAt: story.createdAt,
+    updatedAt: story.updatedAt,
+  };
+}
+
 function encodeProbe(
   probe: ResourceEntry["probe"],
 ): Record<string, unknown> | undefined {
@@ -453,6 +614,7 @@ export function encodeMokaFile(moka: MokaFile, maxBytes?: number): Uint8Array {
   if (moka.folders !== undefined) doc.folders = moka.folders.map(encodeFolder);
   if (moka.timelines !== undefined)
     doc.timelines = moka.timelines.map(encodeTimeline);
+  if (moka.stories !== undefined) doc.stories = moka.stories.map(encodeStory);
   doc.canvas = moka.canvas.map(encodeCanvas);
   const bson = serialize(doc);
   const bytes = new Uint8Array(4 + bson.length);
@@ -1005,6 +1167,230 @@ function decodeTimelines(value: unknown): TimelineDocument[] | undefined {
   return asArray(value, "timelines").map(decodeTimeline);
 }
 
+/**
+ * One of the words an enum field holds, or the fallback when it holds another.
+ *
+ * A board is words a model wrote and a reader edited, and a word this build
+ * does not know is not a reason to refuse the whole project: the shot is read
+ * as the plainest thing it could be, which is what a reader looking at one
+ * odd row would have assumed anyway. Words whose meaning changes what is done
+ * with them — a track's kind, a transition — are refused instead.
+ */
+function fallbackOneOf<T extends string>(
+  values: readonly T[],
+  value: unknown,
+  fallback: T,
+): T {
+  return typeof value === "string" && values.includes(value as T)
+    ? (value as T)
+    : fallback;
+}
+
+function decodeStoryTake(value: unknown): StoryTake {
+  const doc = asRecord(value, "stories[].takes[]");
+  const take: StoryTake = {
+    assetId: asString(doc.assetId, "takes[].assetId"),
+    createdAt: asString(doc.createdAt, "takes[].createdAt"),
+  };
+  if (doc.jobId !== undefined) take.jobId = optionalString(doc.jobId);
+  if (doc.itemId !== undefined) take.itemId = optionalString(doc.itemId);
+  if (doc.note !== undefined) take.note = optionalString(doc.note);
+  return take;
+}
+
+function decodeStorySlot(value: unknown): StorySlot {
+  const doc = asRecord(value, "stories[].slots[]");
+  return {
+    takes: asArray(doc.takes, "slots[].takes").map(decodeStoryTake),
+    confirmed: Boolean(doc.confirmed),
+  };
+}
+
+function decodeStoryDialogue(value: unknown): StoryDialogueLine {
+  const doc = asRecord(value, "keyframes[].dialogue[]");
+  const line: StoryDialogueLine = {
+    speaker: asString(doc.speaker, "dialogue[].speaker"),
+    text: asString(doc.text, "dialogue[].text"),
+  };
+  if (doc.characterId !== undefined)
+    line.characterId = optionalString(doc.characterId);
+  if (doc.tone !== undefined) line.tone = optionalString(doc.tone);
+  return line;
+}
+
+function decodeStoryKeyframe(value: unknown): StoryKeyframe {
+  const doc = asRecord(value, "stories[].keyframes[]");
+  return {
+    id: asString(doc.id, "keyframes[].id"),
+    title: asString(doc.title, "keyframes[].title"),
+    shotSize: fallbackOneOf(STORY_SHOT_SIZES, doc.shotSize, "medium"),
+    cameraMove: fallbackOneOf(STORY_CAMERA_MOVES, doc.cameraMove, "static"),
+    angle: fallbackOneOf(STORY_CAMERA_ANGLES, doc.angle, "eyeLevel"),
+    content: asString(doc.content, "keyframes[].content"),
+    dialogue: asArray(doc.dialogue, "keyframes[].dialogue").map(
+      decodeStoryDialogue,
+    ),
+    durationMs: requireField(
+      decodeLongField(doc.durationMs),
+      "keyframes[].durationMs",
+    ),
+    art: decodeStorySlot(doc.art),
+    video: decodeStorySlot(doc.video),
+  };
+}
+
+function decodeStoryAct(value: unknown): StoryAct {
+  const doc = asRecord(value, "stories[].acts[]");
+  const sound = asRecord(doc.sound ?? {}, "acts[].sound");
+  const act: StoryAct = {
+    id: asString(doc.id, "acts[].id"),
+    title: asString(doc.title, "acts[].title"),
+    summary: asString(doc.summary, "acts[].summary"),
+    characterIds: asArray(doc.characterIds ?? [], "acts[].characterIds").map(
+      (id) => asString(id, "acts[].characterIds[]"),
+    ),
+    propIds: asArray(doc.propIds ?? [], "acts[].propIds").map((id) =>
+      asString(id, "acts[].propIds[]"),
+    ),
+    sound: {
+      music: optionalString(sound.music) ?? "",
+      sfx: optionalString(sound.sfx) ?? "",
+      ...(sound.ambience !== undefined
+        ? { ambience: optionalString(sound.ambience) }
+        : {}),
+    },
+    keyframes: asArray(doc.keyframes ?? [], "acts[].keyframes").map(
+      decodeStoryKeyframe,
+    ),
+    keysConfirmed: Boolean(doc.keysConfirmed),
+    imagesConfirmed: Boolean(doc.imagesConfirmed),
+    video: decodeStorySlot(doc.video),
+    videoConfirmed: Boolean(doc.videoConfirmed),
+  };
+  if (doc.sceneId !== undefined) act.sceneId = optionalString(doc.sceneId);
+  return act;
+}
+
+function decodeStoryChapter(value: unknown): StoryChapter {
+  const doc = asRecord(value, "stories[].chapters[]");
+  return {
+    id: asString(doc.id, "chapters[].id"),
+    title: asString(doc.title, "chapters[].title"),
+    synopsis: asString(doc.synopsis, "chapters[].synopsis"),
+    synopsisConfirmed: Boolean(doc.synopsisConfirmed),
+    targetDurationMs: requireField(
+      decodeLongField(doc.targetDurationMs),
+      "chapters[].targetDurationMs",
+    ),
+    acts: asArray(doc.acts ?? [], "chapters[].acts").map(decodeStoryAct),
+  };
+}
+
+function decodeStoryElement(value: unknown): StoryElement {
+  const doc = asRecord(value, "stories[].elements[]");
+  const element: StoryElement = {
+    id: asString(doc.id, "elements[].id"),
+    kind: fallbackOneOf(STORY_ELEMENT_KINDS, doc.kind, "prop"),
+    name: asString(doc.name, "elements[].name"),
+    description: asString(doc.description, "elements[].description"),
+    descriptionConfirmed: Boolean(doc.descriptionConfirmed),
+    chapterIds: asArray(doc.chapterIds ?? [], "elements[].chapterIds").map(
+      (id) => asString(id, "elements[].chapterIds[]"),
+    ),
+    main: decodeStorySlot(doc.main),
+  };
+  if (doc.turnaround !== undefined)
+    element.turnaround = decodeStorySlot(doc.turnaround);
+  return element;
+}
+
+function decodeStoryBrief(value: unknown): StoryBrief {
+  const doc = asRecord(value, "stories[].brief");
+  const brief: StoryBrief = {
+    idea: asString(doc.idea, "brief.idea"),
+    totalDurationMs: requireField(
+      decodeLongField(doc.totalDurationMs),
+      "brief.totalDurationMs",
+    ),
+    aspect: fallbackOneOf(STORY_ASPECTS, doc.aspect, "16:9"),
+    genre: asString(doc.genre, "brief.genre"),
+    style: asString(doc.style, "brief.style"),
+  };
+  if (doc.sourceAssetId !== undefined)
+    brief.sourceAssetId = optionalString(doc.sourceAssetId);
+  if (doc.sourceName !== undefined)
+    brief.sourceName = optionalString(doc.sourceName);
+  if (doc.sourceSplit !== undefined)
+    brief.sourceSplit = Boolean(doc.sourceSplit);
+  return brief;
+}
+
+function decodeStoryEdit(value: unknown): StoryEdit {
+  const doc = asRecord(value ?? {}, "stories[].edit");
+  const edit: StoryEdit = {};
+  if (doc.timelineId !== undefined)
+    edit.timelineId = optionalString(doc.timelineId);
+  if (doc.clipByAct !== undefined) {
+    edit.clipByAct = asArray(doc.clipByAct, "edit.clipByAct").map((entry) => {
+      const row = asRecord(entry, "edit.clipByAct[]");
+      const held: { actId: string; keyframeId?: string; clipId: string } = {
+        actId: asString(row.actId, "clipByAct[].actId"),
+        clipId: asString(row.clipId, "clipByAct[].clipId"),
+      };
+      if (row.keyframeId !== undefined)
+        held.keyframeId = optionalString(row.keyframeId);
+      return held;
+    });
+  }
+  if (doc.film !== undefined) edit.film = decodeStoryTake(doc.film);
+  return edit;
+}
+
+function decodeStory(value: unknown): StoryDocument {
+  const doc = asRecord(value, "stories[]");
+  const schemaVersion = Math.trunc(
+    requireField(unwrapNumber(doc.schemaVersion), "stories[].schemaVersion"),
+  );
+  if (schemaVersion > STORY_SCHEMA_VERSION) {
+    throw new MokaCodecError(
+      "MOKA_VERSION_UNSUPPORTED",
+      `Story schema version ${schemaVersion} is not supported (expected ${STORY_SCHEMA_VERSION} or earlier)`,
+    );
+  }
+  return {
+    id: asString(doc.id, "stories[].id"),
+    name: asString(doc.name, "stories[].name"),
+    schemaVersion,
+    brief: decodeStoryBrief(doc.brief),
+    chapters: asArray(doc.chapters ?? [], "stories[].chapters").map(
+      decodeStoryChapter,
+    ),
+    elements: asArray(doc.elements ?? [], "stories[].elements").map(
+      decodeStoryElement,
+    ),
+    shotGranularity: fallbackOneOf(
+      STORY_SHOT_GRANULARITIES,
+      doc.shotGranularity,
+      "act",
+    ),
+    edit: decodeStoryEdit(doc.edit),
+    createdAt: asString(doc.createdAt, "stories[].createdAt"),
+    updatedAt: asString(doc.updatedAt, "stories[].updatedAt"),
+  };
+}
+
+/**
+ * The stories a project has told, or undefined when it has told none.
+ *
+ * Undefined and not an empty list, for the reason the timelines give: a
+ * document written before the story room existed is read and written back as
+ * the bytes it arrived with.
+ */
+function decodeStories(value: unknown): StoryDocument[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return asArray(value, "stories").map(decodeStory);
+}
+
 export function decodeMokaFile(bytes: Uint8Array): MokaFile {
   if (bytes.length < 5) {
     throw new MokaCodecError(
@@ -1064,6 +1450,7 @@ export function decodeMokaFile(bytes: Uint8Array): MokaFile {
   const canvas = asArray(doc.canvas, "canvas").map(decodeCanvas);
   const folders = decodeFolders(doc.folders);
   const timelines = decodeTimelines(doc.timelines);
+  const stories = decodeStories(doc.stories);
 
   return {
     version: MOKA_FILE_VERSION,
@@ -1071,6 +1458,7 @@ export function decodeMokaFile(bytes: Uint8Array): MokaFile {
     resources,
     ...(folders !== undefined ? { folders } : {}),
     ...(timelines !== undefined ? { timelines } : {}),
+    ...(stories !== undefined ? { stories } : {}),
     canvas,
   };
 }

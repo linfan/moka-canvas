@@ -1,5 +1,11 @@
-import { CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION } from "./constants";
-import { derivePorts } from "./factories";
+import {
+  CANVAS_SCHEMA_VERSION,
+  MAX_ACTS_PER_CHAPTER,
+  MAX_CHAPTERS_PER_STORY,
+  MAX_KEYFRAMES_PER_ACT,
+  MOKA_FILE_VERSION,
+} from "./constants";
+import { createStory, derivePorts } from "./factories";
 import type {
   AssistantMessage,
   MokaFile,
@@ -984,5 +990,330 @@ export function buildCutMokaFile(): MokaFile {
       height: 1080,
     },
   });
+  return moka;
+}
+
+// ---------------------------------------------------------------------------
+// The story room
+// ---------------------------------------------------------------------------
+
+export function storyIds() {
+  return {
+    story: "story-1",
+    chapterFirst: "chapter-first",
+    chapterSecond: "chapter-second",
+    act: "act-1",
+    frameFirst: "frame-1",
+    frameSecond: "frame-2",
+    hero: "element-hero",
+    partner: "element-partner",
+    scene: "element-scene",
+    prop: "element-prop",
+    source: "asset-story-source",
+    heroMain: "asset-hero-main",
+    heroSheet: "asset-hero-sheet",
+    partnerMain: "asset-partner-main",
+    sceneMain: "asset-scene-main",
+    frameArt: "asset-frame-art",
+    actVideo: "asset-act-video",
+  };
+}
+
+/** An image entry, sized the way the story room's own drawings are. */
+function storyImage(id: string, name: string): ResourceEntry {
+  return {
+    id,
+    name,
+    path: `assets/images/${name}-00000000.png`,
+    mime: "image/png",
+    bytes: 120_000,
+    createdAt: T0,
+    updatedAt: T0,
+    probe: {
+      mime: "image/png",
+      bytes: 120_000,
+      sha256: "c".repeat(64),
+      width: 1920,
+      height: 1080,
+    },
+  };
+}
+
+function storyVideo(
+  id: string,
+  name: string,
+  durationMs: number,
+): ResourceEntry {
+  return {
+    id,
+    name,
+    path: `assets/videos/${name}-00000000.mp4`,
+    mime: "video/mp4",
+    bytes: 240_000,
+    createdAt: T0,
+    updatedAt: T0,
+    probe: {
+      mime: "video/mp4",
+      bytes: 240_000,
+      sha256: "d".repeat(64),
+      width: 1920,
+      height: 1080,
+      durationMs,
+      codecSummary: "avc1",
+    },
+  };
+}
+
+/**
+ * A project with one telling, walked as far as the fourth step.
+ *
+ * Every shape a story holds is here at least once: a premise lifted out of an
+ * uploaded manuscript, two episodes of which one is boarded, four elements of
+ * which only the hero is drawn twice, a shot with words in it, an act with a
+ * clip, and an assembly that names a real timeline. The tests that want a
+ * step taken further take it themselves, through the commands.
+ */
+export function buildStoryMokaFile(): MokaFile {
+  const ids = storyIds();
+  const moka = buildTimelineMokaFile();
+  moka.resources.images.push(
+    storyImage(ids.heroMain, "hero-main"),
+    storyImage(ids.heroSheet, "hero-sheet"),
+    storyImage(ids.partnerMain, "partner-main"),
+    storyImage(ids.sceneMain, "scene-main"),
+    storyImage(ids.frameArt, "frame-art"),
+  );
+  moka.resources.videos.push(storyVideo(ids.actVideo, "act-video", 5_000));
+  moka.resources.texts.push({
+    id: ids.source,
+    name: "novel.txt",
+    path: "assets/texts/novel-00000000.txt",
+    mime: "text/plain",
+    bytes: 40_000,
+    createdAt: T0,
+    updatedAt: T0,
+  });
+
+  moka.stories = [
+    {
+      id: ids.story,
+      name: "雨夜列车",
+      schemaVersion: 1,
+      brief: {
+        idea: "末班列车上，两个陌生人交换了各自要说的话。",
+        sourceAssetId: ids.source,
+        sourceName: "novel.txt",
+        sourceSplit: true,
+        totalDurationMs: 120_000,
+        aspect: "16:9",
+        genre: "对白剧情",
+        style: "现代都市风",
+      },
+      chapters: [
+        {
+          id: ids.chapterFirst,
+          title: "第一章 站台",
+          synopsis: "他在站台上等一班已经停运的列车。",
+          synopsisConfirmed: true,
+          targetDurationMs: 60_000,
+          acts: [
+            {
+              id: ids.act,
+              title: "第 1 幕 空站台",
+              summary: "站台上的灯一盏一盏亮起来。",
+              characterIds: [ids.hero, ids.partner],
+              sceneId: ids.scene,
+              propIds: [ids.prop],
+              sound: {
+                music: "低音提琴，缓慢",
+                sfx: "雨声",
+                ambience: "空站台",
+              },
+              keyframes: [
+                {
+                  id: ids.frameFirst,
+                  title: "#1",
+                  shotSize: "wide",
+                  cameraMove: "pushIn",
+                  angle: "eyeLevel",
+                  content: "雨中的站台，一个人立在灯下。",
+                  dialogue: [
+                    {
+                      characterId: ids.hero,
+                      speaker: "林",
+                      text: "车已经停运了。",
+                      tone: "平静",
+                    },
+                  ],
+                  durationMs: 2_000,
+                  art: {
+                    takes: [
+                      {
+                        assetId: ids.frameArt,
+                        jobId: "job-1",
+                        itemId: `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
+                        note: "按关键帧生成",
+                        createdAt: T0,
+                      },
+                    ],
+                    confirmed: true,
+                  },
+                  video: { takes: [], confirmed: false },
+                },
+                {
+                  id: ids.frameSecond,
+                  title: "#2",
+                  shotSize: "close",
+                  cameraMove: "static",
+                  angle: "overTheShoulder",
+                  content: "另一人转过身来。",
+                  dialogue: [],
+                  durationMs: 3_000,
+                  art: { takes: [], confirmed: false },
+                  video: { takes: [], confirmed: false },
+                },
+              ],
+              keysConfirmed: true,
+              imagesConfirmed: false,
+              video: {
+                takes: [
+                  {
+                    assetId: ids.actVideo,
+                    jobId: "job-2",
+                    itemId: `actVideo:${ids.chapterFirst}:${ids.act}`,
+                    note: "按幕生成，5.0s",
+                    createdAt: T0,
+                  },
+                ],
+                confirmed: true,
+              },
+              videoConfirmed: true,
+            },
+          ],
+        },
+        {
+          id: ids.chapterSecond,
+          title: "第二章 车厢",
+          synopsis: "车厢比站台更暗。",
+          synopsisConfirmed: true,
+          targetDurationMs: 60_000,
+          acts: [],
+        },
+      ],
+      elements: [
+        {
+          id: ids.hero,
+          kind: "character",
+          name: "林",
+          description: "四十岁上下，深色大衣，说话很慢。",
+          descriptionConfirmed: true,
+          chapterIds: [ids.chapterFirst],
+          main: {
+            takes: [{ assetId: ids.heroMain, createdAt: T0 }],
+            confirmed: true,
+          },
+          turnaround: {
+            takes: [{ assetId: ids.heroSheet, createdAt: T0 }],
+            confirmed: true,
+          },
+        },
+        {
+          id: ids.partner,
+          kind: "character",
+          name: "周",
+          description: "年轻，背着旧书包。",
+          descriptionConfirmed: true,
+          chapterIds: [ids.chapterFirst],
+          main: {
+            takes: [{ assetId: ids.partnerMain, createdAt: T0 }],
+            confirmed: true,
+          },
+          turnaround: { takes: [], confirmed: false },
+        },
+        {
+          id: ids.scene,
+          kind: "scene",
+          name: "末班车车厢",
+          description: "空车厢，灯管忽明忽暗。",
+          descriptionConfirmed: true,
+          chapterIds: [ids.chapterFirst],
+          main: {
+            takes: [{ assetId: ids.sceneMain, createdAt: T0 }],
+            confirmed: true,
+          },
+        },
+        {
+          id: ids.prop,
+          kind: "prop",
+          name: "旧车票",
+          description: "边角磨圆的硬纸车票。",
+          descriptionConfirmed: false,
+          chapterIds: [],
+          main: { takes: [], confirmed: false },
+        },
+      ],
+      shotGranularity: "act",
+      edit: {
+        timelineId: timelineIds().timeline,
+        clipByAct: [
+          {
+            actId: ids.act,
+            clipId: timelineIds().videoClip,
+          },
+        ],
+      },
+      createdAt: T0,
+      updatedAt: T1,
+    },
+  ];
+  return moka;
+}
+
+/** A project holding one story that has been given a name and nothing else. */
+export function buildEmptyStory(name = "新的故事"): MokaFile {
+  const moka = buildGoldenMokaFile();
+  moka.stories = [createStory(name)];
+  return moka;
+}
+
+/**
+ * A telling at every ceiling at once: sixty episodes, thirty acts each, and
+ * twelve shots in every act. Built on demand, since it is twenty-one thousand
+ * shots and no test wants two of them.
+ */
+export function buildLongStory(): MokaFile {
+  const moka = buildEmptyStory("很长的一篇");
+  const story = moka.stories![0];
+  story.chapters = Array.from({ length: MAX_CHAPTERS_PER_STORY }, (_, c) => ({
+    id: `chapter-${c}`,
+    title: `第 ${c + 1} 章`,
+    synopsis: "梗概",
+    synopsisConfirmed: true,
+    targetDurationMs: 60_000,
+    acts: Array.from({ length: MAX_ACTS_PER_CHAPTER }, (_, a) => ({
+      id: `act-${c}-${a}`,
+      title: `第 ${a + 1} 幕`,
+      summary: "内容",
+      characterIds: [],
+      propIds: [],
+      sound: { music: "", sfx: "" },
+      keyframes: Array.from({ length: MAX_KEYFRAMES_PER_ACT }, (_, k) => ({
+        id: `frame-${c}-${a}-${k}`,
+        title: `#${k + 1}`,
+        shotSize: "medium" as const,
+        cameraMove: "static" as const,
+        angle: "eyeLevel" as const,
+        content: "画面",
+        dialogue: [],
+        durationMs: 1_000,
+        art: { takes: [], confirmed: false },
+        video: { takes: [], confirmed: false },
+      })),
+      keysConfirmed: false,
+      imagesConfirmed: false,
+      video: { takes: [], confirmed: false },
+      videoConfirmed: false,
+    })),
+  }));
   return moka;
 }

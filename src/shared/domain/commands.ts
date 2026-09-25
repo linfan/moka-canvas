@@ -1,23 +1,38 @@
 import {
   BACKGROUND_MODES,
   CANVAS_SCHEMA_VERSION,
+  MAX_ACTS_PER_CHAPTER,
   MAX_ASSISTANT_MESSAGE_LENGTH,
   MAX_ASSISTANT_MESSAGES_PER_SESSION,
   MAX_ASSISTANT_SESSIONS_PER_CANVAS,
   MAX_ASSISTANT_TITLE_LENGTH,
   MAX_CANVAS_NAME_LENGTH,
   MAX_CANVASES_PER_PROJECT,
+  MAX_CHAPTERS_PER_STORY,
   MAX_CLIPS_PER_COMMAND,
   MAX_CLIPS_PER_TIMELINE,
+  MAX_DIALOGUE_LINES_PER_KEYFRAME,
+  MAX_DIALOGUE_LINE_LENGTH,
   MAX_EDGES_PER_CANVAS,
+  MAX_ELEMENTS_PER_STORY,
   MAX_FOLDER_DEPTH,
   MAX_FOLDER_NAME_LENGTH,
   MAX_FOLDERS_PER_PROJECT,
+  MAX_KEYFRAMES_PER_ACT,
+  MAX_KEYFRAME_MS,
   MAX_NODES_PER_CANVAS,
+  MAX_STORIES_PER_PROJECT,
+  MAX_TAKES_PER_SLOT,
   MAX_TIMELINES_PER_PROJECT,
   MAX_TITLE_LENGTH,
+  MAX_TOTAL_DURATION_MS,
   MAX_TRACKS_PER_TIMELINE,
   MAX_TRANSITIONS_PER_TIMELINE,
+  MIN_KEYFRAME_MS,
+  MIN_TOTAL_DURATION_MS,
+  STORY_IDEA_MAX,
+  STORY_NAME_MAX,
+  STORY_SCHEMA_VERSION,
   TIMELINE_FPS_CHOICES,
   TIMELINE_HEIGHT_MAX,
   TIMELINE_HEIGHT_MIN,
@@ -28,6 +43,11 @@ import {
   ZOOM_MAX,
   ZOOM_MIN,
 } from "./constants";
+import {
+  STORY_ASPECTS,
+  STORY_ELEMENT_KINDS,
+  STORY_SHOT_GRANULARITIES,
+} from "./types";
 import type {
   AssistantSession,
   CanvasDocument,
@@ -37,6 +57,13 @@ import type {
   FolderId,
   MokaFile,
   NodeId,
+  StoryAct,
+  StoryChapter,
+  StoryDocument,
+  StoryElement,
+  StoryKeyframe,
+  StorySlot,
+  StorySlotTarget,
   TimelineClip,
   TimelineDocument,
   TimelineId,
@@ -1896,7 +1923,776 @@ function applyOne(
         ],
       };
     }
+
+    // -----------------------------------------------------------------------
+    // The story room
+    // -----------------------------------------------------------------------
+
+    case "addStory": {
+      const stories = moka.stories ?? [];
+      if (stories.length + 1 > MAX_STORIES_PER_PROJECT)
+        throw new CommandError(
+          "STORY_LIMIT_REACHED",
+          i18n.t("errors:command.storyLimitReached"),
+        );
+      if (stories.some((held) => held.id === command.story.id))
+        throw new CommandError(
+          "STORY_ID_EXISTS",
+          i18n.t("errors:command.storyIdExists"),
+        );
+      checkStory(command.story);
+      const index = Math.min(
+        Math.max(command.index ?? stories.length, 0),
+        stories.length,
+      );
+      const list = [...stories];
+      list.splice(index, 0, command.story);
+      return {
+        next: withStories(moka, list),
+        inverse: [{ type: "removeStory", storyId: command.story.id }],
+      };
+    }
+
+    case "removeStory": {
+      const stories = moka.stories ?? [];
+      const index = stories.findIndex((held) => held.id === command.storyId);
+      if (index < 0)
+        throw new CommandError(
+          "STORY_NOT_FOUND",
+          i18n.t("errors:command.storyNotFound"),
+        );
+      const removed = stories[index];
+      return {
+        next: withStories(
+          moka,
+          stories.filter((held) => held.id !== command.storyId),
+        ),
+        // Put back whole, at the place it was read: a story is a document in
+        // its own right, so everything settled in it comes back with it.
+        inverse: [{ type: "addStory", story: removed, index }],
+      };
+    }
+
+    case "renameStory": {
+      const story = storyOf(moka, command.storyId);
+      checkStoryName(command.name);
+      const previous = story.name;
+      return {
+        next: replaceStory(moka, { ...story, name: command.name }),
+        inverse: [
+          { type: "renameStory", storyId: command.storyId, name: previous },
+        ],
+      };
+    }
+
+    case "updateStoryBrief": {
+      const story = storyOf(moka, command.storyId);
+      const brief = { ...story.brief };
+      const previous: typeof command.patch = {};
+      // A key that is present moves, and a key carrying null goes: the two
+      // rules are one rule, which is what makes the inverse of a patch exact.
+      for (const key of Object.keys(
+        command.patch,
+      ) as (keyof typeof command.patch)[]) {
+        const value = command.patch[key];
+        (previous as Record<string, unknown>)[key] = story.brief[key] ?? null;
+        if (value === null || value === undefined)
+          delete (brief as Record<string, unknown>)[key];
+        else (brief as Record<string, unknown>)[key] = value;
+      }
+      checkStoryBrief(brief);
+      return {
+        next: replaceStory(moka, { ...story, brief }),
+        inverse: [
+          {
+            type: "updateStoryBrief",
+            storyId: command.storyId,
+            patch: previous,
+          },
+        ],
+      };
+    }
+
+    case "updateStoryGranularity": {
+      const story = storyOf(moka, command.storyId);
+      if (!STORY_SHOT_GRANULARITIES.includes(command.shotGranularity))
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.storyGranularityUnknown"),
+        );
+      const previous = story.shotGranularity;
+      return {
+        next: replaceStory(moka, {
+          ...story,
+          shotGranularity: command.shotGranularity,
+        }),
+        inverse: [
+          {
+            type: "updateStoryGranularity",
+            storyId: command.storyId,
+            shotGranularity: previous,
+          },
+        ],
+      };
+    }
+
+    case "setStoryChapters": {
+      const story = storyOf(moka, command.storyId);
+      if (command.chapters.length > MAX_CHAPTERS_PER_STORY)
+        throw new CommandError(
+          "STORY_CHAPTER_LIMIT",
+          i18n.t("errors:command.storyChapterLimit"),
+        );
+      const held = new Map(
+        story.chapters.map((chapter) => [chapter.id, chapter]),
+      );
+      // A chapter that stands where it stood keeps its board: re-writing an
+      // outline is not a reason to throw away what was shot from it.
+      const chapters = command.chapters.map((chapter) => {
+        const before = held.get(chapter.id);
+        return { ...chapter, acts: before ? before.acts : [] };
+      });
+      const next: StoryDocument = { ...story, chapters };
+      checkStory(next);
+      return {
+        next: replaceStory(moka, next),
+        inverse: [
+          {
+            type: "setStoryChapters",
+            storyId: command.storyId,
+            chapters: story.chapters,
+          },
+        ],
+      };
+    }
+
+    case "setStoryElements": {
+      const story = storyOf(moka, command.storyId);
+      if (command.elements.length > MAX_ELEMENTS_PER_STORY)
+        throw new CommandError(
+          "STORY_ELEMENT_LIMIT",
+          i18n.t("errors:command.storyElementLimit"),
+        );
+      const held = new Map(
+        story.elements.map((element) => [element.id, element]),
+      );
+      // The drawings and the reader's answers to them stay with the element
+      // they were made for; what a new reading brings is its words.
+      const elements: StoryElement[] = command.elements.map((element) => {
+        const before = held.get(element.id);
+        if (!before) return element;
+        return {
+          ...element,
+          descriptionConfirmed: before.descriptionConfirmed,
+          main: before.main,
+          ...(before.turnaround !== undefined
+            ? { turnaround: before.turnaround }
+            : {}),
+        };
+      });
+      const next: StoryDocument = { ...story, elements };
+      checkStory(next);
+      return {
+        next: replaceStory(moka, next),
+        inverse: [
+          {
+            type: "setStoryElements",
+            storyId: command.storyId,
+            elements: story.elements,
+          },
+        ],
+      };
+    }
+
+    case "updateStoryElement": {
+      const story = storyOf(moka, command.storyId);
+      const element = story.elements.find(
+        (held) => held.id === command.elementId,
+      );
+      if (!element)
+        throw new CommandError(
+          "STORY_TARGET_INVALID",
+          i18n.t("errors:command.storyElementNotFound"),
+        );
+      if (command.patch.name !== undefined) {
+        const name = command.patch.name.trim();
+        if (name.length === 0 || name.length > STORY_NAME_MAX)
+          throw new CommandError(
+            "STORY_NAME_INVALID",
+            i18n.t("errors:command.storyNameEmpty"),
+          );
+      }
+      if (command.patch.kind !== undefined) {
+        if (!STORY_ELEMENT_KINDS.includes(command.patch.kind))
+          throw new CommandError(
+            "VALIDATION_FAILED",
+            i18n.t("errors:command.storyElementKindUnknown"),
+          );
+      }
+      if (command.patch.description !== undefined) {
+        if (command.patch.description.length > STORY_IDEA_MAX)
+          throw new CommandError(
+            "VALIDATION_FAILED",
+            i18n.t("errors:command.storyDescriptionTooLong"),
+          );
+      }
+      const previous: typeof command.patch = {};
+      for (const key of Object.keys(
+        command.patch,
+      ) as (keyof typeof command.patch)[]) {
+        (previous as Record<string, unknown>)[key] = element[key];
+      }
+      const next: StoryDocument = {
+        ...story,
+        elements: story.elements.map((held) =>
+          held.id === command.elementId ? { ...held, ...command.patch } : held,
+        ),
+      };
+      return {
+        next: replaceStory(moka, next),
+        inverse: [
+          {
+            type: "updateStoryElement",
+            storyId: command.storyId,
+            elementId: command.elementId,
+            patch: previous,
+          },
+        ],
+      };
+    }
+
+    case "setStoryActs": {
+      const story = storyOf(moka, command.storyId);
+      const chapter = chapterOf(story, command.chapterId);
+      if (command.acts.length > MAX_ACTS_PER_CHAPTER)
+        throw new CommandError(
+          "STORY_ACT_LIMIT",
+          i18n.t("errors:command.storyActLimit"),
+        );
+      const heldActs = new Map(chapter.acts.map((act) => [act.id, act]));
+      // A reference to an element that is no longer in the story is kept as
+      // it was written: the room draws it greyed out and says so, which is
+      // more use than a board that quietly lost the character it names.
+      const acts: StoryAct[] = command.acts.map((act) => {
+        if (act.keyframes.length > MAX_KEYFRAMES_PER_ACT)
+          throw new CommandError(
+            "STORY_KEYFRAME_LIMIT",
+            i18n.t("errors:command.storyKeyframeLimit"),
+          );
+        const cleaned: StoryAct = {
+          ...act,
+          characterIds: [...new Set(act.characterIds)],
+          propIds: [...new Set(act.propIds)],
+        };
+        const before = heldActs.get(act.id);
+        if (!before) return cleaned;
+        const heldFrames = new Map(
+          before.keyframes.map((keyframe) => [keyframe.id, keyframe]),
+        );
+        return {
+          ...cleaned,
+          keysConfirmed: before.keysConfirmed,
+          imagesConfirmed: before.imagesConfirmed,
+          video: before.video,
+          videoConfirmed: before.videoConfirmed,
+          keyframes: cleaned.keyframes.map((keyframe) => {
+            const frame = heldFrames.get(keyframe.id);
+            if (!frame) return keyframe;
+            return { ...keyframe, art: frame.art, video: frame.video };
+          }),
+        };
+      });
+      const chapters = story.chapters.map((held) =>
+        held.id === command.chapterId ? { ...held, acts } : held,
+      );
+      return {
+        next: replaceStory(moka, { ...story, chapters }),
+        inverse: [
+          {
+            type: "setStoryActs",
+            storyId: command.storyId,
+            chapterId: command.chapterId,
+            acts: chapter.acts,
+          },
+        ],
+      };
+    }
+
+    case "updateStoryAct": {
+      const story = storyOf(moka, command.storyId);
+      const chapter = chapterOf(story, command.chapterId);
+      const act = actOf(chapter, command.actId);
+      if (command.patch.sound !== undefined) checkActSound(command.patch.sound);
+      const previous: typeof command.patch = {};
+      for (const key of Object.keys(
+        command.patch,
+      ) as (keyof typeof command.patch)[]) {
+        (previous as Record<string, unknown>)[key] = act[key] ?? null;
+      }
+      const chapters = story.chapters.map((held) =>
+        held.id === command.chapterId
+          ? {
+              ...held,
+              acts: held.acts.map((heldAct) => {
+                if (heldAct.id !== command.actId) return heldAct;
+                // Field by field rather than a spread, because one of these
+                // fields may be taken away rather than set: an act keeps a
+                // scene only while the patch still names one.
+                const next: StoryAct = { ...heldAct };
+                if (command.patch.title !== undefined)
+                  next.title = command.patch.title;
+                if (command.patch.summary !== undefined)
+                  next.summary = command.patch.summary;
+                if (command.patch.characterIds !== undefined)
+                  next.characterIds = command.patch.characterIds;
+                if (command.patch.sceneId === null) delete next.sceneId;
+                else if (command.patch.sceneId !== undefined)
+                  next.sceneId = command.patch.sceneId;
+                if (command.patch.propIds !== undefined)
+                  next.propIds = command.patch.propIds;
+                if (command.patch.sound !== undefined)
+                  next.sound = command.patch.sound;
+                if (command.patch.keysConfirmed !== undefined)
+                  next.keysConfirmed = command.patch.keysConfirmed;
+                if (command.patch.imagesConfirmed !== undefined)
+                  next.imagesConfirmed = command.patch.imagesConfirmed;
+                if (command.patch.videoConfirmed !== undefined)
+                  next.videoConfirmed = command.patch.videoConfirmed;
+                return next;
+              }),
+            }
+          : held,
+      );
+      return {
+        next: replaceStory(moka, { ...story, chapters }),
+        inverse: [
+          {
+            type: "updateStoryAct",
+            storyId: command.storyId,
+            chapterId: command.chapterId,
+            actId: command.actId,
+            patch: previous,
+          },
+        ],
+      };
+    }
+
+    case "updateStoryKeyframe": {
+      const story = storyOf(moka, command.storyId);
+      const chapter = chapterOf(story, command.chapterId);
+      const act = actOf(chapter, command.actId);
+      const keyframe = keyframeOf(act, command.keyframeId);
+      if (command.patch.durationMs !== undefined) {
+        if (!isKeyframeMs(command.patch.durationMs))
+          throw new CommandError(
+            "VALIDATION_FAILED",
+            i18n.t("errors:command.storyShotDurationOutOfRange"),
+          );
+      }
+      if (command.patch.dialogue !== undefined)
+        checkDialogue(command.patch.dialogue);
+      const previous: typeof command.patch = {};
+      for (const key of Object.keys(
+        command.patch,
+      ) as (keyof typeof command.patch)[]) {
+        (previous as Record<string, unknown>)[key] = keyframe[key];
+      }
+      const chapters = story.chapters.map((held) =>
+        held.id === command.chapterId
+          ? {
+              ...held,
+              acts: held.acts.map((heldAct) =>
+                heldAct.id === command.actId
+                  ? {
+                      ...heldAct,
+                      keyframes: heldAct.keyframes.map((heldFrame) =>
+                        heldFrame.id === command.keyframeId
+                          ? { ...heldFrame, ...command.patch }
+                          : heldFrame,
+                      ),
+                    }
+                  : heldAct,
+              ),
+            }
+          : held,
+      );
+      return {
+        next: replaceStory(moka, { ...story, chapters }),
+        inverse: [
+          {
+            type: "updateStoryKeyframe",
+            storyId: command.storyId,
+            chapterId: command.chapterId,
+            actId: command.actId,
+            keyframeId: command.keyframeId,
+            patch: previous,
+          },
+        ],
+      };
+    }
+
+    case "setStorySlot": {
+      const story = storyOf(moka, command.storyId);
+      const previous = slotOf(story, command.target);
+      const slot = checkStorySlot(command.slot);
+      return {
+        next: replaceStory(moka, withSlot(story, command.target, slot)),
+        inverse: [
+          {
+            type: "setStorySlot",
+            storyId: command.storyId,
+            target: command.target,
+            slot: previous,
+          },
+        ],
+      };
+    }
+
+    case "setStoryEdit": {
+      const story = storyOf(moka, command.storyId);
+      // Only a named timeline is checked: a null is an assembly being taken
+      // away, which names nothing and so points at nothing that must exist.
+      if (
+        typeof command.patch.timelineId === "string" &&
+        !(moka.timelines ?? []).some(
+          (timeline) => timeline.id === command.patch.timelineId,
+        )
+      )
+        throw new CommandError(
+          "TIMELINE_NOT_FOUND",
+          i18n.t("errors:command.timelineNotFound"),
+        );
+      const previous: typeof command.patch = {};
+      const edit = { ...story.edit };
+      for (const key of Object.keys(
+        command.patch,
+      ) as (keyof typeof command.patch)[]) {
+        const value = command.patch[key];
+        (previous as Record<string, unknown>)[key] = story.edit[key] ?? null;
+        if (value === null || value === undefined)
+          delete (edit as Record<string, unknown>)[key];
+        else (edit as Record<string, unknown>)[key] = value;
+      }
+      const next: StoryDocument = { ...story, edit };
+      return {
+        next: replaceStory(moka, next),
+        inverse: [
+          { type: "setStoryEdit", storyId: command.storyId, patch: previous },
+        ],
+      };
+    }
   }
+}
+
+// ---------------------------------------------------------------------------
+// The story room. What a story is, and what a step may settle, lives in
+// story.ts — the same functions the room and the job client read, so a
+// command and the interface cannot disagree about what an outline is.
+// ---------------------------------------------------------------------------
+
+/**
+ * The stories a project carries, or carrying the field not at all when it has
+ * none — the same honest reading the timelines give an unused cutting room.
+ */
+function withStories(moka: MokaFile, stories: StoryDocument[]): MokaFile {
+  return { ...moka, stories: stories.length > 0 ? stories : undefined };
+}
+
+function storyOf(moka: MokaFile, storyId: string): StoryDocument {
+  const story = (moka.stories ?? []).find((held) => held.id === storyId);
+  if (!story)
+    throw new CommandError(
+      "STORY_NOT_FOUND",
+      i18n.t("errors:command.storyNotFound"),
+    );
+  return story;
+}
+
+/**
+ * Puts a changed story back as it was handed over.
+ *
+ * The story's own `updatedAt` is the caller's to move, the way a timeline's
+ * is: what a command does is put the fields it was given where they belong,
+ * and one date that changed on every undo as well as every edit would say
+ * less than the edits do.
+ */
+function replaceStory(moka: MokaFile, story: StoryDocument): MokaFile {
+  return withStories(
+    moka,
+    (moka.stories ?? []).map((held) => (held.id === story.id ? story : held)),
+  );
+}
+
+function checkStoryName(name: string) {
+  if (name.length === 0)
+    throw new CommandError(
+      "STORY_NAME_INVALID",
+      i18n.t("errors:command.storyNameEmpty"),
+    );
+  if (name.length > STORY_NAME_MAX)
+    throw new CommandError(
+      "STORY_NAME_INVALID",
+      i18n.t("errors:command.storyNameTooLong"),
+    );
+}
+
+function chapterOf(story: StoryDocument, chapterId: string): StoryChapter {
+  const chapter = story.chapters.find((held) => held.id === chapterId);
+  if (!chapter)
+    throw new CommandError(
+      "STORY_TARGET_INVALID",
+      i18n.t("errors:command.storyChapterNotFound"),
+    );
+  return chapter;
+}
+
+function actOf(chapter: StoryChapter, actId: string): StoryAct {
+  const act = chapter.acts.find((held) => held.id === actId);
+  if (!act)
+    throw new CommandError(
+      "STORY_TARGET_INVALID",
+      i18n.t("errors:command.storyActNotFound"),
+    );
+  return act;
+}
+
+function keyframeOf(act: StoryAct, keyframeId: string): StoryKeyframe {
+  const keyframe = act.keyframes.find((held) => held.id === keyframeId);
+  if (!keyframe)
+    throw new CommandError(
+      "STORY_TARGET_INVALID",
+      i18n.t("errors:command.storyKeyframeNotFound"),
+    );
+  return keyframe;
+}
+
+/** The slot a target names, or a refusal when the story no longer holds it. */
+function slotOf(story: StoryDocument, target: StorySlotTarget): StorySlot {
+  switch (target.kind) {
+    case "element": {
+      const element = story.elements.find(
+        (held) => held.id === target.elementId,
+      );
+      if (!element)
+        throw new CommandError(
+          "STORY_TARGET_INVALID",
+          i18n.t("errors:command.storyElementNotFound"),
+        );
+      if (target.view === "main") return element.main;
+      if (!element.turnaround)
+        throw new CommandError(
+          "STORY_TARGET_INVALID",
+          i18n.t("errors:command.storyElementNotFound"),
+        );
+      return element.turnaround;
+    }
+    case "keyframe":
+      return keyframeOf(
+        actOf(chapterOf(story, target.chapterId), target.actId),
+        target.keyframeId,
+      ).art;
+    case "keyframeVideo":
+      return keyframeOf(
+        actOf(chapterOf(story, target.chapterId), target.actId),
+        target.keyframeId,
+      ).video;
+    case "actVideo":
+      return actOf(chapterOf(story, target.chapterId), target.actId).video;
+  }
+}
+
+/** Puts a slot back where it came from, leaving the rest of the story alone. */
+function withSlot(
+  story: StoryDocument,
+  target: StorySlotTarget,
+  slot: StorySlot,
+): StoryDocument {
+  const write = (chapters: StoryChapter[]): StoryDocument => ({
+    ...story,
+    chapters,
+  });
+  switch (target.kind) {
+    case "element":
+      return {
+        ...story,
+        elements: story.elements.map((element) => {
+          if (element.id !== target.elementId) return element;
+          return target.view === "main"
+            ? { ...element, main: slot }
+            : { ...element, turnaround: slot };
+        }),
+      };
+    case "keyframe":
+      return write(
+        story.chapters.map((chapter) => {
+          if (chapter.id !== target.chapterId) return chapter;
+          return {
+            ...chapter,
+            acts: chapter.acts.map((act) => {
+              if (act.id !== target.actId) return act;
+              return {
+                ...act,
+                keyframes: act.keyframes.map((keyframe) =>
+                  keyframe.id === target.keyframeId
+                    ? { ...keyframe, art: slot }
+                    : keyframe,
+                ),
+              };
+            }),
+          };
+        }),
+      );
+    case "keyframeVideo":
+      return write(
+        story.chapters.map((chapter) => {
+          if (chapter.id !== target.chapterId) return chapter;
+          return {
+            ...chapter,
+            acts: chapter.acts.map((act) => {
+              if (act.id !== target.actId) return act;
+              return {
+                ...act,
+                keyframes: act.keyframes.map((keyframe) =>
+                  keyframe.id === target.keyframeId
+                    ? { ...keyframe, video: slot }
+                    : keyframe,
+                ),
+              };
+            }),
+          };
+        }),
+      );
+    case "actVideo":
+      return write(
+        story.chapters.map((chapter) => {
+          if (chapter.id !== target.chapterId) return chapter;
+          return {
+            ...chapter,
+            acts: chapter.acts.map((act) =>
+              act.id === target.actId ? { ...act, video: slot } : act,
+            ),
+          };
+        }),
+      );
+  }
+}
+
+/**
+ * A slot a caller may file: the takes trimmed to what one place keeps, with
+ * the oldest let go first, and no drawing kept twice.
+ */
+function checkStorySlot(slot: StorySlot): StorySlot {
+  const seen = new Set<string>();
+  const takes = slot.takes.filter((take) => {
+    if (seen.has(take.assetId)) return false;
+    seen.add(take.assetId);
+    return true;
+  });
+  return {
+    takes:
+      takes.length > MAX_TAKES_PER_SLOT
+        ? takes.slice(takes.length - MAX_TAKES_PER_SLOT)
+        : takes,
+    confirmed: slot.confirmed,
+  };
+}
+
+function isKeyframeMs(value: number): boolean {
+  return (
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= MIN_KEYFRAME_MS &&
+    value <= MAX_KEYFRAME_MS
+  );
+}
+
+/** A sound is written whole: the two parts it is made of, and an optional air. */
+function checkActSound(sound: StoryAct["sound"]) {
+  if (typeof sound.music !== "string" || typeof sound.sfx !== "string")
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storySoundInvalid"),
+    );
+  if (sound.ambience !== undefined && typeof sound.ambience !== "string")
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storySoundInvalid"),
+    );
+}
+
+/** What may be said in one shot: a few lines, each of them with words in it. */
+function checkDialogue(lines: StoryKeyframe["dialogue"]) {
+  if (lines.length > MAX_DIALOGUE_LINES_PER_KEYFRAME)
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyDialogueTooLong"),
+    );
+  for (const line of lines) {
+    if (line.text.trim().length === 0)
+      throw new CommandError(
+        "VALIDATION_FAILED",
+        i18n.t("errors:command.storyDialogueEmpty"),
+      );
+    if (
+      line.text.length > MAX_DIALOGUE_LINE_LENGTH ||
+      line.speaker.length === 0
+    )
+      throw new CommandError(
+        "VALIDATION_FAILED",
+        i18n.t("errors:command.storyDialogueTooLong"),
+      );
+  }
+}
+
+/** A story's own guardrails, read before anything of it is written down. */
+function checkStory(story: StoryDocument) {
+  checkStoryName(story.name);
+  if (story.schemaVersion > STORY_SCHEMA_VERSION)
+    throw new CommandError(
+      "STORY_SCHEMA_NEWER",
+      i18n.t("errors:command.storySchemaNewer"),
+    );
+  if (story.chapters.length > MAX_CHAPTERS_PER_STORY)
+    throw new CommandError(
+      "STORY_CHAPTER_LIMIT",
+      i18n.t("errors:command.storyChapterLimit"),
+    );
+  if (story.elements.length > MAX_ELEMENTS_PER_STORY)
+    throw new CommandError(
+      "STORY_ELEMENT_LIMIT",
+      i18n.t("errors:command.storyElementLimit"),
+    );
+  for (const chapter of story.chapters) {
+    if (chapter.acts.length > MAX_ACTS_PER_CHAPTER)
+      throw new CommandError(
+        "STORY_ACT_LIMIT",
+        i18n.t("errors:command.storyActLimit"),
+      );
+    for (const act of chapter.acts) {
+      if (act.keyframes.length > MAX_KEYFRAMES_PER_ACT)
+        throw new CommandError(
+          "STORY_KEYFRAME_LIMIT",
+          i18n.t("errors:command.storyKeyframeLimit"),
+        );
+    }
+  }
+  checkStoryBrief(story.brief);
+}
+
+function checkStoryBrief(brief: StoryDocument["brief"]) {
+  if (
+    brief.totalDurationMs < MIN_TOTAL_DURATION_MS ||
+    brief.totalDurationMs > MAX_TOTAL_DURATION_MS
+  )
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyDurationOutOfRange"),
+    );
+  if (!STORY_ASPECTS.includes(brief.aspect))
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyAspectUnknown"),
+    );
 }
 
 export function applyCommands(

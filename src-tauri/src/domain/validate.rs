@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::folders::{folder_depth, folders_of, holds_itself};
 use super::{
-    generation_capability_for, timeline, CanvasDocument, Capability, Cardinality, DataType,
+    generation_capability_for, story, timeline, CanvasDocument, Capability, Cardinality, DataType,
     MokaFile, NodeId, NodeKind, PortDirection, ResourceEntry, ValidationIssue, WorkflowEdge,
     WorkflowNode, ASSET_CATEGORIES, ASSET_ORIGINS,
 };
@@ -917,6 +917,40 @@ pub fn validate_moka_file(moka: &MokaFile) -> Vec<ValidationIssue> {
 
     for timeline in moka.timelines.iter().flatten() {
         issues.extend(timeline::validate_timeline(timeline, moka));
+    }
+
+    let stories = moka.stories.iter().flatten().collect::<Vec<_>>();
+    if stories.len() > story::MAX_STORIES_PER_PROJECT {
+        issues.push(story::issue(
+            "STORY_LIMIT_REACHED",
+            "The project holds more stories than the limit".into(),
+        ));
+    }
+    let mut story_ids = HashSet::new();
+    for held in stories {
+        if !story_ids.insert(held.id.as_str()) {
+            issues.push(story::issue(
+                "STORY_ID_EXISTS",
+                format!("Duplicate story id {}", held.id),
+            ));
+        }
+        issues.extend(story::validate_story(held));
+        // What the story laid down in the cutting room has to still be there:
+        // a story pointing at a timeline nobody holds is one step five cannot
+        // open, which is worth saying before the reader gets there.
+        if let Some(timeline_id) = &held.edit.timeline_id {
+            let known = moka
+                .timelines
+                .iter()
+                .flatten()
+                .any(|timeline| &timeline.id == timeline_id);
+            if !known {
+                issues.push(story::issue(
+                    "STORY_TARGET_INVALID",
+                    format!("Story points at timeline {timeline_id}, which is not here"),
+                ));
+            }
+        }
     }
 
     // The references a document's two halves hold are read together: a timeline

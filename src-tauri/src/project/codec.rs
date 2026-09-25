@@ -1,3 +1,4 @@
+use crate::domain::story::STORY_SCHEMA_VERSION;
 use crate::domain::validate::resource_path_valid;
 use crate::domain::{reconcile_ports, MokaFile, CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION};
 use thiserror::Error;
@@ -87,6 +88,13 @@ pub fn decode_moka_file(bytes: &[u8]) -> Result<MokaFile, CodecError> {
         for node in canvas.nodes.iter_mut() {
             let stored = std::mem::take(&mut node.ports);
             node.ports = reconcile_ports(node.kind, &stored);
+        }
+    }
+    // A story written by a newer build is refused rather than read as though
+    // its words meant what this build's words mean, the way a timeline is.
+    for story in moka.stories.iter().flatten() {
+        if story.schema_version > STORY_SCHEMA_VERSION {
+            return Err(CodecError::SchemaUnsupported(story.schema_version));
         }
     }
     Ok(moka)

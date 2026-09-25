@@ -2,21 +2,34 @@ import {
   ASSET_ORIGINS,
   COORDINATE_LIMIT,
   GENERATION_PARAM_KEYS,
+  MAX_ACTS_PER_CHAPTER,
   MAX_ASSET_KEYWORD_LENGTH,
   MAX_ASSET_NOTE_LENGTH,
   MAX_ASSET_TAG_LENGTH,
   MAX_ASSET_TAGS,
   MAX_ASSISTANT_MESSAGES_PER_SESSION,
   MAX_ASSISTANT_SESSIONS_PER_CANVAS,
+  MAX_CHAPTERS_PER_STORY,
   MAX_EDGES_PER_CANVAS,
+  MAX_ELEMENTS_PER_STORY,
   MAX_FOLDER_DEPTH,
   MAX_FOLDER_NAME_LENGTH,
   MAX_FOLDERS_PER_PROJECT,
+  MAX_KEYFRAMES_PER_ACT,
+  MAX_KEYFRAME_MS,
   MAX_NODES_PER_CANVAS,
   MAX_PROMPT_LENGTH,
   MAX_RESULT_SLOTS,
+  MAX_STORIES_PER_PROJECT,
+  MAX_TAKES_PER_SLOT,
+  MAX_TOTAL_DURATION_MS,
+  MIN_KEYFRAME_MS,
+  MIN_TOTAL_DURATION_MS,
   PROJECT_ASSET_CATEGORIES,
+  STORY_NAME_MAX,
+  STORY_SCHEMA_VERSION,
 } from "./constants";
+import { STORY_ASPECTS } from "./types";
 import type {
   CanvasDocument,
   DataType,
@@ -29,6 +42,8 @@ import type {
   Rect,
   ResourceEntry,
   ResultSlot,
+  StoryDocument,
+  StorySlot,
   ValidationIssue,
   WorkflowEdge,
   WorkflowNode,
@@ -287,6 +302,29 @@ export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
   }
   for (const timeline of moka.timelines ?? []) {
     for (const clip of timeline.clips) add(clip.assetId, clip.id);
+  }
+  // A story's pictures are its own: the frames drawn for a shot, the clip
+  // made of an act, the manuscript a premise was lifted from, and the film
+  // the whole was rendered into are all in use, however little of a canvas
+  // or a timeline they appear on.
+  for (const story of moka.stories ?? []) {
+    add(story.brief.sourceAssetId, story.id);
+    add(story.edit.film?.assetId, story.id);
+    for (const element of story.elements) {
+      for (const take of element.main.takes) add(take.assetId, element.id);
+      for (const take of element.turnaround?.takes ?? [])
+        add(take.assetId, element.id);
+    }
+    for (const chapter of story.chapters) {
+      for (const act of chapter.acts) {
+        for (const take of act.video.takes) add(take.assetId, act.id);
+        for (const keyframe of act.keyframes) {
+          for (const take of keyframe.art.takes) add(take.assetId, keyframe.id);
+          for (const take of keyframe.video.takes)
+            add(take.assetId, keyframe.id);
+        }
+      }
+    }
   }
   return refs;
 }
@@ -802,6 +840,72 @@ function holdsItself(moka: MokaFile, folderId: string): boolean {
   return false;
 }
 
+/**
+ * A story's own guardrails: the limits its commands keep it within, read
+ * again over a document that may have been written by somebody else.
+ *
+ * The room reads a story it did not write — a package from another machine,
+ * a file a newer build saved — and a story that says an impossible thing is
+ * better reported than drawn.
+ */
+export function validateStory(story: StoryDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const at = (code: string, message: string) => {
+    issues.push({ code, message });
+  };
+
+  if (story.name.length === 0 || story.name.length > STORY_NAME_MAX)
+    at("STORY_NAME_INVALID", i18n.t("errors:validate.storyNameInvalid"));
+  if (story.schemaVersion > STORY_SCHEMA_VERSION)
+    at("STORY_SCHEMA_NEWER", i18n.t("errors:validate.storySchemaNewer"));
+  if (
+    story.brief.totalDurationMs < MIN_TOTAL_DURATION_MS ||
+    story.brief.totalDurationMs > MAX_TOTAL_DURATION_MS
+  )
+    at("VALIDATION_FAILED", i18n.t("errors:validate.storyDurationOutOfRange"));
+  if (!STORY_ASPECTS.includes(story.brief.aspect))
+    at("VALIDATION_FAILED", i18n.t("errors:validate.storyAspectUnknown"));
+  if (story.chapters.length > MAX_CHAPTERS_PER_STORY)
+    at("STORY_CHAPTER_LIMIT", i18n.t("errors:validate.storyChapterLimit"));
+  if (story.elements.length > MAX_ELEMENTS_PER_STORY)
+    at("STORY_ELEMENT_LIMIT", i18n.t("errors:validate.storyElementLimit"));
+
+  const slot = (held: StorySlot) => {
+    if (held.takes.length > MAX_TAKES_PER_SLOT)
+      at("STORY_SLOT_FULL", i18n.t("errors:validate.storySlotFull"));
+  };
+  for (const element of story.elements) {
+    slot(element.main);
+    if (element.turnaround) slot(element.turnaround);
+  }
+  for (const chapter of story.chapters) {
+    if (chapter.acts.length > MAX_ACTS_PER_CHAPTER)
+      at("STORY_ACT_LIMIT", i18n.t("errors:validate.storyActLimit"));
+    for (const act of chapter.acts) {
+      slot(act.video);
+      if (act.keyframes.length > MAX_KEYFRAMES_PER_ACT)
+        at(
+          "STORY_KEYFRAME_LIMIT",
+          i18n.t("errors:validate.storyKeyframeLimit"),
+        );
+      for (const keyframe of act.keyframes) {
+        slot(keyframe.art);
+        slot(keyframe.video);
+        if (
+          !Number.isInteger(keyframe.durationMs) ||
+          keyframe.durationMs < MIN_KEYFRAME_MS ||
+          keyframe.durationMs > MAX_KEYFRAME_MS
+        )
+          at(
+            "VALIDATION_FAILED",
+            i18n.t("errors:validate.storyShotDurationOutOfRange"),
+          );
+      }
+    }
+  }
+  return issues;
+}
+
 export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   issues.push(...folderIssues(moka));
@@ -844,6 +948,38 @@ export function validateMokaFile(moka: MokaFile): ValidationIssue[] {
 
   for (const timeline of moka.timelines ?? []) {
     issues.push(...validateTimeline(timeline, moka));
+  }
+
+  const stories = moka.stories ?? [];
+  if (stories.length > MAX_STORIES_PER_PROJECT)
+    issues.push({
+      code: "STORY_LIMIT_REACHED",
+      message: i18n.t("errors:validate.storyLimitReached"),
+    });
+  const storyIds = new Set<string>();
+  for (const story of stories) {
+    if (storyIds.has(story.id))
+      issues.push({
+        code: "STORY_ID_EXISTS",
+        message: i18n.t("errors:validate.duplicateStoryId", { id: story.id }),
+      });
+    storyIds.add(story.id);
+    issues.push(...validateStory(story));
+    // What the story laid down in the cutting room has to still be there:
+    // a story pointing at a timeline nobody holds is one step five cannot
+    // open, which is worth saying before the reader gets there.
+    if (
+      story.edit.timelineId !== undefined &&
+      !(moka.timelines ?? []).some(
+        (timeline) => timeline.id === story.edit.timelineId,
+      )
+    )
+      issues.push({
+        code: "STORY_TARGET_INVALID",
+        message: i18n.t("errors:validate.storyTimelineMissing", {
+          id: story.edit.timelineId,
+        }),
+      });
   }
 
   const refs = collectAssetReferences(moka);

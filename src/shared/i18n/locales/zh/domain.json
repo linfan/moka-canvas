@@ -54,5 +54,63 @@
     "openaiResponses": "OpenAI 兼容 · Responses",
     "openaiSpeech": "OpenAI 兼容 · Speech API",
     "openaiVideos": "OpenAI 兼容 · Videos API"
+  },
+  "shotSize": {
+    "extremeClose": "大特写",
+    "close": "特写",
+    "mediumClose": "中近景",
+    "medium": "中景",
+    "mediumFull": "中全景",
+    "full": "全景",
+    "wide": "远景",
+    "extremeWide": "大远景"
+  },
+  "cameraMove": {
+    "static": "固定",
+    "handheld": "手持",
+    "pushIn": "推近",
+    "pullOut": "拉远",
+    "panLeft": "左摇",
+    "panRight": "右摇",
+    "tiltUp": "上摇",
+    "tiltDown": "下摇",
+    "trackLeft": "左移",
+    "trackRight": "右移",
+    "arc": "环绕",
+    "craneUp": "升镜",
+    "zoomIn": "变焦推近",
+    "zoomOut": "变焦拉远"
+  },
+  "cameraAngle": {
+    "eyeLevel": "平视",
+    "high": "俯视",
+    "low": "仰视",
+    "overhead": "顶视",
+    "dutch": "倾斜",
+    "overTheShoulder": "过肩",
+    "pointOfView": "主观视角"
+  },
+  "elementKind": {
+    "character": "角色",
+    "scene": "场景",
+    "prop": "物品"
+  },
+  "storyStep": {
+    "idea": "创意",
+    "outline": "大纲",
+    "elements": "剧情元素",
+    "storyboard": "分镜脚本",
+    "edit": "剪辑"
+  },
+  "granularity": {
+    "act": "每幕一段",
+    "keyframe": "每格一段"
+  },
+  "aspect": {
+    "16:9": "16:9 宽屏",
+    "9:16": "9:16 竖屏",
+    "1:1": "1:1 方形",
+    "4:3": "4:3 经典",
+    "21:9": "21:9 宽银幕"
   }
 }

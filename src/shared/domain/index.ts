@@ -6,3 +6,4 @@ export * from "./commands";
 export * from "./codec";
 export * from "./factories";
 export * from "./folders";
+export * from "./story";

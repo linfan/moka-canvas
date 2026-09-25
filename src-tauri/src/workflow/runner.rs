@@ -1536,6 +1536,7 @@ mod tests {
             resources: ResourceRegistry::default(),
             folders: None,
             timelines: None,
+            stories: None,
             canvas: vec![canvas],
         }
     }
