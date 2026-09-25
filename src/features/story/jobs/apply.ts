@@ -29,7 +29,10 @@ import {
   type StoryElementDraft,
   type StoryGuess,
 } from "../../../shared/domain/story";
-import { chapterTargetMs } from "../../../shared/domain/factories";
+import {
+  chapterTargetMs,
+  emptyStorySlot,
+} from "../../../shared/domain/factories";
 import {
   parseChapter,
   parseElements,
@@ -122,6 +125,24 @@ function slotAt(
         ?.acts.find((held) => held.id === target.actId);
       return act?.video;
     }
+    // The two sound slots are absent on a telling that was never voiced, and
+    // an absent place answers as an empty one: the first take ever made for an
+    // act is written into a slot that was not there, which is what a reader
+    // pressing the button for the first time is asking for.
+    case "actVoice": {
+      const act = story.chapters
+        .find((chapter) => chapter.id === target.chapterId)
+        ?.acts.find((held) => held.id === target.actId);
+      if (act === undefined) return undefined;
+      return act.voice ?? emptyStorySlot();
+    }
+    case "actMusic": {
+      const act = story.chapters
+        .find((chapter) => chapter.id === target.chapterId)
+        ?.acts.find((held) => held.id === target.actId);
+      if (act === undefined) return undefined;
+      return act.music ?? emptyStorySlot();
+    }
     case "keyframeVideo": {
       const keyframe = story.chapters
         .find((chapter) => chapter.id === target.chapterId)
@@ -160,6 +181,18 @@ function slotTargetOf(item: StoryJobItem): StorySlotTarget | undefined {
         chapterId: item.target.chapterId,
         actId: item.target.actId,
         keyframeId: item.target.keyframeId,
+      };
+    case "voice":
+      return {
+        kind: "actVoice",
+        chapterId: item.target.chapterId,
+        actId: item.target.actId,
+      };
+    case "music":
+      return {
+        kind: "actMusic",
+        chapterId: item.target.chapterId,
+        actId: item.target.actId,
       };
     case "outline":
     case "elements":

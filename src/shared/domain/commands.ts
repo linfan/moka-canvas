@@ -98,6 +98,7 @@ import {
   trackAccepts,
   transitionsOfSeams,
 } from "./timeline";
+import { emptyStorySlot } from "./factories";
 import { findNode, validateBounds, validateEdgeCandidate } from "./validate";
 import { i18n } from "../i18n";
 
@@ -2506,6 +2507,18 @@ function slotOf(story: StoryDocument, target: StorySlotTarget): StorySlot {
       ).video;
     case "actVideo":
       return actOf(chapterOf(story, target.chapterId), target.actId).video;
+    // A slot that is not there has never been made: it is read as empty rather
+    // than refused, so a take can be written into it like any other.
+    case "actVoice":
+      return (
+        actOf(chapterOf(story, target.chapterId), target.actId).voice ??
+        emptyStorySlot()
+      );
+    case "actMusic":
+      return (
+        actOf(chapterOf(story, target.chapterId), target.actId).music ??
+        emptyStorySlot()
+      );
   }
 }
 
@@ -2582,7 +2595,52 @@ function withSlot(
           };
         }),
       );
+    case "actVoice":
+      return write(
+        story.chapters.map((chapter) => {
+          if (chapter.id !== target.chapterId) return chapter;
+          return {
+            ...chapter,
+            acts: chapter.acts.map((act) =>
+              act.id === target.actId ? withSoundSlot(act, "voice", slot) : act,
+            ),
+          };
+        }),
+      );
+    case "actMusic":
+      return write(
+        story.chapters.map((chapter) => {
+          if (chapter.id !== target.chapterId) return chapter;
+          return {
+            ...chapter,
+            acts: chapter.acts.map((act) =>
+              act.id === target.actId ? withSoundSlot(act, "music", slot) : act,
+            ),
+          };
+        }),
+      );
   }
+}
+
+/**
+ * One of an act's two sound slots, written where it belongs.
+ *
+ * An empty slot is written as no slot at all: the two would say different
+ * things about a place a reader has not asked about yet, and the undo of the
+ * first take ever made for an act has to put the document back the way it was
+ * — which is without the slot, not with an empty one.
+ */
+function withSoundSlot(
+  act: StoryAct,
+  field: "voice" | "music",
+  slot: StorySlot,
+): StoryAct {
+  if (slot.takes.length === 0 && !slot.confirmed) {
+    const kept: StoryAct = { ...act };
+    delete kept[field];
+    return kept;
+  }
+  return { ...act, [field]: slot };
 }
 
 /**

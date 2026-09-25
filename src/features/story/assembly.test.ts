@@ -338,3 +338,157 @@ describe("a telling on an episode everybody forgot", () => {
     expect(plan.units).toHaveLength(1);
   });
 });
+
+/** An audio file on the shelf, as a voice-over or a score. */
+function sound(id: string, durationMs: number): ResourceEntry {
+  return {
+    id,
+    name: `${id}.mp3`,
+    path: `assets/audio/${id}.mp3`,
+    mime: "audio/mpeg",
+    createdAt: T0,
+    updatedAt: T0,
+    probe: {
+      mime: "audio/mpeg",
+      bytes: 2048,
+      sha256: "1".repeat(64),
+      durationMs,
+    },
+  };
+}
+
+/** The same telling, with its first act voiced and scored. */
+function sounded(): MokaFile {
+  const moka = filmed({ secondAct: true });
+  moka.resources.voice = [sound("asset-act-voice", 4_000)];
+  moka.resources.music = [sound("asset-act-music", 9_000)];
+  const act = story(moka).chapters[0]!.acts[0]!;
+  act.voice = {
+    takes: [{ assetId: "asset-act-voice", createdAt: T0 }],
+    confirmed: true,
+  };
+  act.music = {
+    takes: [{ assetId: "asset-act-music", createdAt: T0 }],
+    confirmed: false,
+  };
+  return moka;
+}
+
+describe("a telling that has been voiced and scored", () => {
+  it("brings two rows of its own, and lays the sound where the act begins", () => {
+    const moka = sounded();
+    const held = story(moka);
+    const plan = planAssembly(held, moka);
+    const { commands, clipByAct } = assemblyCommands(held, moka, plan, {
+      withSubtitles: false,
+    });
+    const command = commands[0];
+    if (command?.type !== "addTimeline") throw new Error("a timeline is added");
+
+    const audio = command.timeline.tracks.filter(
+      (track) => track.kind === "audio",
+    );
+    expect(audio.map((track) => track.name)).toEqual([
+      i18n.t("story:edit.voiceTrack"),
+      i18n.t("story:edit.musicTrack"),
+    ]);
+
+    const voice = command.timeline.clips.find(
+      (clip) => clip.assetId === "asset-act-voice",
+    );
+    const music = command.timeline.clips.find(
+      (clip) => clip.assetId === "asset-act-music",
+    );
+    // Cued to the act, not to a shot: the line is the whole act's.
+    expect(voice?.startMs).toBe(0);
+    expect(voice?.trackId).toBe(audio[0]?.id);
+    expect(voice?.durationMs).toBe(4_000);
+    expect(music?.startMs).toBe(0);
+    expect(music?.trackId).toBe(audio[1]?.id);
+    // The second act has nothing said over it, so no second voice.
+    expect(
+      command.timeline.clips.filter((clip) => clip.kind === "audio"),
+    ).toHaveLength(2);
+    // And what the telling laid down is written down, so assembling again can
+    // take exactly these back.
+    expect(clipByAct.filter((entry) => entry.keyframeId === "")).toHaveLength(
+      2,
+    );
+  });
+
+  it("takes the sound it laid down back, and leaves a reader's own row alone", () => {
+    const moka = sounded();
+    const held = story(moka);
+    const plan = planAssembly(held, moka);
+    const first = assemblyCommands(held, moka, plan, { withSubtitles: false });
+    const added = first.commands[0];
+    if (added?.type !== "addTimeline") throw new Error("a timeline is added");
+    held.edit = { timelineId: added.timeline.id, clipByAct: first.clipByAct };
+    // A clip of the reader's own on the same timeline, and a row they added.
+    moka.timelines = [
+      ...(moka.timelines ?? []),
+      {
+        ...added.timeline,
+        tracks: [
+          ...added.timeline.tracks,
+          {
+            id: "track-mine",
+            kind: "audio",
+            name: "My own",
+            muted: false,
+            hidden: false,
+            locked: false,
+            createdAt: T0,
+          },
+        ],
+        clips: [
+          ...added.timeline.clips,
+          {
+            id: "clip-mine",
+            trackId: "track-mine",
+            kind: "audio",
+            label: "mine",
+            assetId: "asset-act-music",
+            startMs: 20_000,
+            durationMs: 1_000,
+            inPointMs: 0,
+            outPointMs: 1_000,
+            speed: 1,
+            volume: 1,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            muted: false,
+            opacity: 1,
+            createdAt: T0,
+            updatedAt: T0,
+          },
+        ],
+      },
+    ];
+    // The document is read as it stands, with the row the reader added on it.
+    const again = story(moka);
+    const second = assemblyCommands(again, moka, planAssembly(again, moka), {
+      withSubtitles: false,
+      timelineId: added.timeline.id,
+    });
+
+    const removed = second.commands.find(
+      (command) => command.type === "removeClips",
+    );
+    if (removed?.type !== "removeClips")
+      throw new Error("clips are taken back");
+    expect(removed.clipIds).not.toContain("clip-mine");
+    expect(removed.clipIds).toEqual(
+      expect.arrayContaining(
+        added.timeline.clips
+          .filter((clip) => clip.kind === "audio")
+          .map((clip) => clip.id),
+      ),
+    );
+    // The row the reader added is where the score goes the second time: it is
+    // an audio row, and this telling does not make new ones to spite it.
+    expect(second.commands.some((command) => command.type === "addTrack")).toBe(
+      false,
+    );
+  });
+});

@@ -153,6 +153,8 @@ fn act(id: &str) -> StoryAct {
         images_confirmed: false,
         video: empty_slot(),
         video_confirmed: false,
+        voice: None,
+        music: None,
     }
 }
 
@@ -304,6 +306,8 @@ fn story_document() -> MokaFile {
                         confirmed: true,
                     },
                     video_confirmed: true,
+                    voice: None,
+                    music: None,
                 }],
             },
             StoryChapter {
@@ -860,6 +864,56 @@ fn files_a_drawing_at_the_place_a_target_names() {
 }
 
 #[test]
+fn files_a_voice_and_a_score_where_an_act_keeps_them() {
+    let moka = story_document();
+    // Both places are absent on a telling nobody has voiced, and the first
+    // take ever made for an act is what makes one.
+    let act = &story_of(&moka).chapters[0].acts[0];
+    assert!(act.voice.is_none());
+    assert!(act.music.is_none());
+
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::SetStorySlot {
+            story_id: STORY.into(),
+            target: StorySlotTarget::ActVoice {
+                chapter_id: CHAPTER_FIRST.into(),
+                act_id: ACT.into(),
+            },
+            slot: StorySlot {
+                takes: vec![take("asset-act-voice")],
+                confirmed: false,
+            },
+        }],
+    );
+    let act = &story_of(&next).chapters[0].acts[0];
+    assert_eq!(
+        act.voice.as_ref().unwrap().takes[0].asset_id,
+        "asset-act-voice"
+    );
+    // The score is a place of its own, not the voice written twice.
+    assert!(act.music.is_none());
+
+    let scored = round_trip(
+        &moka,
+        vec![DocumentCommand::SetStorySlot {
+            story_id: STORY.into(),
+            target: StorySlotTarget::ActMusic {
+                chapter_id: CHAPTER_FIRST.into(),
+                act_id: ACT.into(),
+            },
+            slot: StorySlot {
+                takes: vec![take("asset-act-music")],
+                confirmed: true,
+            },
+        }],
+    );
+    let act = &story_of(&scored).chapters[0].acts[0];
+    assert!(act.music.as_ref().unwrap().confirmed);
+    assert!(act.voice.is_none());
+}
+
+#[test]
 fn trims_a_slot_to_what_a_place_keeps_oldest_first_and_drops_two_of_one_drawing() {
     let moka = story_document();
     let mut takes: Vec<StoryTake> = (0..MAX_TAKES_PER_SLOT + 3)
@@ -1015,8 +1069,24 @@ fn reports_a_slot_that_carries_more_takes_than_it_may() {
 fn counts_every_drawing_the_manuscript_and_the_film_as_in_use() {
     let mut moka = story_document();
     moka.stories.as_mut().unwrap()[0].edit.film = Some(take(ACT_VIDEO));
+    moka.stories.as_mut().unwrap()[0].chapters[0].acts[0].voice = Some(StorySlot {
+        takes: vec![take("asset-act-voice")],
+        confirmed: true,
+    });
+    moka.stories.as_mut().unwrap()[0].chapters[0].acts[0].music = Some(StorySlot {
+        takes: vec![take("asset-act-music")],
+        confirmed: false,
+    });
     let refs = moka.asset_references();
-    for asset_id in [SOURCE, HERO_MAIN, HERO_SHEET, FRAME_ART, ACT_VIDEO] {
+    for asset_id in [
+        SOURCE,
+        HERO_MAIN,
+        HERO_SHEET,
+        FRAME_ART,
+        ACT_VIDEO,
+        "asset-act-voice",
+        "asset-act-music",
+    ] {
         assert!(
             refs.contains_key(asset_id),
             "{asset_id} is pointed at by the story"
@@ -1027,6 +1097,33 @@ fn counts_every_drawing_the_manuscript_and_the_film_as_in_use() {
 // -----------------------------------------------------------------------------
 // What a document carries
 // -----------------------------------------------------------------------------
+
+#[test]
+fn a_voiced_act_survives_the_codec_with_its_sound_and_an_unvoiced_one_without() {
+    let mut moka = story_document();
+    // A telling nobody has voiced writes no slot at all: the file says "not
+    // asked for yet" rather than "asked for and empty".
+    let bytes = encode_moka_file(&moka, None).unwrap();
+    let read = decode_moka_file(&bytes).unwrap();
+    assert!(story_of(&read).chapters[0].acts[0].voice.is_none());
+
+    moka.stories.as_mut().unwrap()[0].chapters[0].acts[0].voice = Some(StorySlot {
+        takes: vec![take("asset-act-voice")],
+        confirmed: true,
+    });
+    moka.stories.as_mut().unwrap()[0].chapters[0].acts[0].music = Some(StorySlot {
+        takes: Vec::new(),
+        confirmed: false,
+    });
+    let bytes = encode_moka_file(&moka, None).unwrap();
+    let read = decode_moka_file(&bytes).unwrap();
+    let act = &story_of(&read).chapters[0].acts[0];
+    assert_eq!(
+        act.voice.as_ref().unwrap().takes[0].asset_id,
+        "asset-act-voice"
+    );
+    assert_eq!(act.music.as_ref().unwrap().takes.len(), 0);
+}
 
 #[test]
 fn a_story_survives_the_codec_as_the_document_it_went_in_as() {

@@ -215,7 +215,7 @@ pub struct StoryTake {
     pub created_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorySlot {
     pub takes: Vec<StoryTake>,
@@ -276,6 +276,13 @@ pub struct StoryAct {
     pub images_confirmed: bool,
     pub video: StorySlot,
     pub video_confirmed: bool,
+    /// The lines read aloud, and the music under them. Absent rather than
+    /// empty on a telling that was never voiced: the two say different things,
+    /// and only one of them is a reader who has not asked yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<StorySlot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music: Option<StorySlot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -365,6 +372,10 @@ pub enum StorySlotTarget {
         act_id: String,
         keyframe_id: String,
     },
+    #[serde(rename_all = "camelCase")]
+    ActVoice { chapter_id: String, act_id: String },
+    #[serde(rename_all = "camelCase")]
+    ActMusic { chapter_id: String, act_id: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -496,6 +507,12 @@ impl StoryDocument {
         for chapter in &self.chapters {
             for act in &chapter.acts {
                 slot(&act.video);
+                if let Some(voice) = &act.voice {
+                    slot(voice);
+                }
+                if let Some(music) = &act.music {
+                    slot(music);
+                }
                 for keyframe in &act.keyframes {
                     slot(&keyframe.art);
                     slot(&keyframe.video);
@@ -516,7 +533,12 @@ impl StoryDocument {
     }
 
     /// The slot a target names, with the mistake it would be read as.
-    fn slot(&self, target: &StorySlotTarget) -> Result<&StorySlot, CommandError> {
+    ///
+    /// Owned rather than borrowed: the two sound slots are absent on a telling
+    /// that was never voiced, and an absent slot answers as the empty one — a
+    /// take can be written into a place the reader has not asked about yet,
+    /// and the undo of that write has nothing to put back.
+    fn slot(&self, target: &StorySlotTarget) -> Result<StorySlot, CommandError> {
         match target {
             StorySlotTarget::Element { element_id, view } => {
                 let element = self
@@ -525,9 +547,9 @@ impl StoryDocument {
                     .find(|element| &element.id == element_id)
                     .ok_or_else(story_target_invalid)?;
                 match view {
-                    StoryElementView::Main => Ok(&element.main),
+                    StoryElementView::Main => Ok(element.main.clone()),
                     StoryElementView::Turnaround => {
-                        element.turnaround.as_ref().ok_or_else(story_target_invalid)
+                        element.turnaround.clone().ok_or_else(story_target_invalid)
                     }
                 }
             }
@@ -537,7 +559,7 @@ impl StoryDocument {
                 keyframe_id,
             } => self
                 .keyframe(chapter_id, act_id, keyframe_id)
-                .map(|keyframe| &keyframe.art)
+                .map(|keyframe| keyframe.art.clone())
                 .ok_or_else(story_target_invalid),
             StorySlotTarget::KeyframeVideo {
                 chapter_id,
@@ -545,11 +567,19 @@ impl StoryDocument {
                 keyframe_id,
             } => self
                 .keyframe(chapter_id, act_id, keyframe_id)
-                .map(|keyframe| &keyframe.video)
+                .map(|keyframe| keyframe.video.clone())
                 .ok_or_else(story_target_invalid),
             StorySlotTarget::ActVideo { chapter_id, act_id } => self
                 .act(chapter_id, act_id)
-                .map(|act| &act.video)
+                .map(|act| act.video.clone())
+                .ok_or_else(story_target_invalid),
+            StorySlotTarget::ActVoice { chapter_id, act_id } => self
+                .act(chapter_id, act_id)
+                .map(|act| act.voice.clone().unwrap_or_default())
+                .ok_or_else(story_target_invalid),
+            StorySlotTarget::ActMusic { chapter_id, act_id } => self
+                .act(chapter_id, act_id)
+                .map(|act| act.music.clone().unwrap_or_default())
                 .ok_or_else(story_target_invalid),
         }
     }
@@ -635,6 +665,30 @@ impl StoryDocument {
                     }
                 }
             }
+            StorySlotTarget::ActVoice { chapter_id, act_id } => {
+                for chapter in next.chapters.iter_mut() {
+                    if &chapter.id != chapter_id {
+                        continue;
+                    }
+                    for act in chapter.acts.iter_mut() {
+                        if &act.id == act_id {
+                            act.voice = kept_sound_slot(slot.clone());
+                        }
+                    }
+                }
+            }
+            StorySlotTarget::ActMusic { chapter_id, act_id } => {
+                for chapter in next.chapters.iter_mut() {
+                    if &chapter.id != chapter_id {
+                        continue;
+                    }
+                    for act in chapter.acts.iter_mut() {
+                        if &act.id == act_id {
+                            act.music = kept_sound_slot(slot.clone());
+                        }
+                    }
+                }
+            }
         }
         next
     }
@@ -642,6 +696,20 @@ impl StoryDocument {
 
 fn story_target_invalid() -> CommandError {
     CommandError::new("STORY_TARGET_INVALID", "The story does not hold that")
+}
+
+/// One of an act's two sound slots as the document keeps it.
+///
+/// An empty slot is kept as no slot at all: the two would say different things
+/// about a place a reader has not asked about yet, and the undo of the first
+/// take ever made for an act has to put the document back the way it was —
+/// which is without the slot, not with an empty one.
+fn kept_sound_slot(slot: StorySlot) -> Option<StorySlot> {
+    if slot.takes.is_empty() && !slot.confirmed {
+        None
+    } else {
+        Some(slot)
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -1441,7 +1509,7 @@ pub fn apply_story_command(
             slot,
         } => {
             let story = story_of(moka, story_id)?;
-            let previous = story.slot(target)?.clone();
+            let previous = story.slot(target)?;
             let next = story.with_slot(target, check_slot(slot.clone()));
             Ok((
                 replace_story(moka, next),

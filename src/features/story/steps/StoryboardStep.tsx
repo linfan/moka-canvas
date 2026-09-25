@@ -241,6 +241,13 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
             })}
           </span>
           <div className="story-step-actions">
+            {chapter.acts.some(
+              (act) => act.voice !== undefined || act.music !== undefined,
+            ) && (
+              <span className="story-hint" data-testid="story-board-sound">
+                {t("story:storyboard.soundReady")}
+              </span>
+            )}
             <button
               className="primary"
               data-testid="story-board-generate"
@@ -377,9 +384,11 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
                   guesses={marks.get(act.id) ?? []}
                   index={at}
                   key={act.id}
+                  musicBusy={busy.music}
                   running={running !== null}
                   story={story}
                   videoBusy={busy.video}
+                  voiceBusy={busy.voice}
                 />
               );
             })}
@@ -493,10 +502,16 @@ function busyIn(
   keys: Set<string>,
   chapterId: string,
   act: StoryAct,
-): { frames: Set<string>; video: boolean } {
+): { frames: Set<string>; video: boolean; voice: boolean; music: boolean } {
   const frames = new Set<string>();
   let video = keys.has(
     targetKey({ kind: "actVideo", chapterId, actId: act.id }),
+  );
+  const voice = keys.has(
+    targetKey({ kind: "actVoice", chapterId, actId: act.id }),
+  );
+  const music = keys.has(
+    targetKey({ kind: "actMusic", chapterId, actId: act.id }),
   );
   for (const keyframe of act.keyframes) {
     if (
@@ -524,5 +539,5 @@ function busyIn(
       video = true;
     }
   }
-  return { frames, video };
+  return { frames, video, voice, music };
 }

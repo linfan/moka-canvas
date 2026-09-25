@@ -6,6 +6,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import {
   PAINTER,
   PROVIDER_ADDRESS,
+  SPEAKER,
   STORYTELLER,
   VIDEOGRAPHER,
 } from "./mock-provider";
@@ -260,6 +261,8 @@ function endpoint(capability: Capability): string {
       return `${PROVIDER_ADDRESS}/images/generations`;
     case "video":
       return `${PROVIDER_ADDRESS}/videos`;
+    case "audio":
+      return `${PROVIDER_ADDRESS}/audio/speech`;
   }
 }
 
@@ -272,6 +275,8 @@ function protocolOf(capability: Capability): string {
       return "openaiImages";
     case "video":
       return "openaiVideos";
+    case "audio":
+      return "openaiSpeech";
   }
 }
 
@@ -341,16 +346,17 @@ export async function configureWordsAndPictures(): Promise<void> {
 }
 
 /**
- * Pictures, words and clips: everything a telling is made of, up to the point
- * where the shots are filmed.
+ * Pictures, words, clips and sound: everything a telling is made of, up to the
+ * point where the shots are filmed.
  */
 export async function configureTheWholeStudio(): Promise<void> {
   await configureModels([
     { id: PAINTER, capability: "image", alias: "Painter" },
     { id: STORYTELLER, capability: "text", alias: "Storyteller" },
     { id: VIDEOGRAPHER, capability: "video", alias: "Videographer" },
+    { id: SPEAKER, capability: "audio", alias: "Speaker" },
   ]);
 }
 
-/** Which of the four things a model is asked for. */
-type Capability = "text" | "image" | "video";
+/** Which of the things a model is asked for. */
+type Capability = "text" | "image" | "video" | "audio";

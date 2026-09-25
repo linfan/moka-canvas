@@ -72,6 +72,10 @@ pub enum StoryJobKind {
     ActVideo,
     /// One shot filmed.
     KeyframeVideo,
+    /// One act's lines read aloud, all in one voice.
+    Voice,
+    /// One act's music and sound, asked for as one piece.
+    Music,
 }
 
 impl StoryJobKind {
@@ -83,6 +87,7 @@ impl StoryJobKind {
             }
             StoryJobKind::ElementArt | StoryJobKind::KeyframeArt => Capability::Image,
             StoryJobKind::ActVideo | StoryJobKind::KeyframeVideo => Capability::Video,
+            StoryJobKind::Voice | StoryJobKind::Music => Capability::Audio,
         }
     }
 
@@ -243,6 +248,16 @@ pub enum StoryTarget {
         act_id: String,
         keyframe_id: String,
     },
+    #[serde(rename_all = "camelCase")]
+    Voice {
+        chapter_id: String,
+        act_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Music {
+        chapter_id: String,
+        act_id: String,
+    },
 }
 
 impl StoryTarget {
@@ -257,6 +272,8 @@ impl StoryTarget {
             StoryTarget::KeyframeArt { .. } => StoryJobKind::KeyframeArt,
             StoryTarget::ActVideo { .. } => StoryJobKind::ActVideo,
             StoryTarget::KeyframeVideo { .. } => StoryJobKind::KeyframeVideo,
+            StoryTarget::Voice { .. } => StoryJobKind::Voice,
+            StoryTarget::Music { .. } => StoryJobKind::Music,
         }
     }
 }

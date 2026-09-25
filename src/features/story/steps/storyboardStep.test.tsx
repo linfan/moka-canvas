@@ -21,6 +21,7 @@ import {
   buildStoryMokaFile,
   storyIds,
 } from "../../../shared/domain/fixtures";
+import { currentTake } from "../../../shared/domain/story";
 import { clampSeconds } from "../jobs/plan";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { StoryPage } from "../StoryPage";
@@ -245,6 +246,12 @@ function acts() {
   const open = useStoryStore.getState().openChapterId;
   const chapter = held.chapters.find((each) => each.id === open);
   return (chapter ?? held.chapters[0])?.acts ?? [];
+}
+
+/** The voice-over of the act under test, as the take it holds. */
+function voice(): string | undefined {
+  return currentTake(acts()[0]?.voice ?? { takes: [], confirmed: false })
+    ?.assetId;
 }
 
 function card(index: number): HTMLElement {
@@ -515,6 +522,70 @@ describe("writing an episode's board", () => {
     fireEvent.click(screen.getByTestId("story-kf-remove-1"));
     await waitFor(() => expect(acts()[0]?.keyframes).toHaveLength(2));
     expect(acts()[0]?.keyframes[0]?.id).toBe(ids.frameFirst);
+  });
+
+  it("reads an act's lines aloud as one ask, and shows the take that comes back", async () => {
+    openAtBoard(withOpenTable());
+    // The first act says one line; the room counts it out on the button.
+    const speak = screen.getByTestId("story-act-voice-go-0");
+    expect(speak.textContent).toContain("1");
+    fireEvent.click(speak);
+
+    await waitFor(() => expect(starts).toHaveLength(1));
+    expect(starts[0]!.kind).toBe("voice");
+    expect(starts[0]!.items[0]?.id).toBe(
+      `actVoice:${ids.chapterFirst}:${ids.act}`,
+    );
+    expect(starts[0]!.items[0]?.prompt).toContain("车已经停运了。");
+
+    await comesBack();
+    const taken = `asset-actVoice-${ids.chapterFirst}-${ids.act}`;
+    await waitFor(() => expect(voice()).toBe(taken));
+    // A take that came back is played where it lies, and can be replaced.
+    expect(
+      screen.getByTestId("story-act-voice-0").getAttribute("src"),
+    ).toContain(taken);
+    expect(screen.getByTestId("story-act-voice-again-0")).toBeDefined();
+  });
+
+  it("asks for the score once the board says what the act sounds like", async () => {
+    const moka = withOpenTable();
+    const act = moka.stories![0].chapters[0]!.acts[0]!;
+    act.sound = { music: "", sfx: "", ambience: "" };
+    openAtBoard(moka);
+    const score = screen.getByTestId("story-act-music-go-0");
+    expect((score as HTMLButtonElement).disabled).toBe(true);
+    expect(score.getAttribute("title")).toContain("sounds like");
+
+    fireEvent.change(screen.getByTestId("story-act-sound-music-0"), {
+      target: { value: "低音提琴" },
+    });
+    fireEvent.blur(screen.getByTestId("story-act-sound-music-0"));
+    await waitFor(() => expect(acts()[0]?.sound.music).toBe("低音提琴"));
+    await waitFor(() =>
+      expect(
+        (screen.getByTestId("story-act-music-go-0") as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+
+    fireEvent.click(screen.getByTestId("story-act-music-go-0"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    expect(starts[0]!.kind).toBe("music");
+    expect(starts[0]!.items[0]?.params?.music).toBe(true);
+  });
+
+  it("says when an episode has sound, since assembling carries it", async () => {
+    const moka = withOpenTable();
+    const act = moka.stories![0].chapters[0]!.acts[0]!;
+    act.voice = {
+      takes: [{ assetId: "asset-act-voice", createdAt: T0 }],
+      confirmed: true,
+    };
+    openAtBoard(moka);
+    expect(screen.getByTestId("story-board-sound").textContent).toContain(
+      "goes on the timeline",
+    );
   });
 });
 

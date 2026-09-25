@@ -89,12 +89,15 @@
       "elementArt": "归档一张元素图",
       "keyframeArt": "归档一张关键帧",
       "actVideo": "归档一幕的片段",
-      "keyframeVideo": "归档一格的片段"
+      "keyframeVideo": "归档一格的片段",
+      "voice": "归档一段配音",
+      "music": "归档一幕的音乐"
     },
     "brief": "写下创意",
     "source": "上传稿子",
     "chapters": "改写章节",
     "storyboard": "写分镜",
+    "sound": "选定这一幕的声音",
     "assemble": "装配成片"
   },
   "parse": {
@@ -277,6 +280,7 @@
     "lead": "一集一集地写：每一幕有哪些镜头、怎么拍，确认后逐格出图，再出片段。",
     "noChapters": "这个故事还没有章节，先去大纲里把它分成一集集。",
     "chapters": "集",
+    "soundReady": "这一集已经有声音：装配成片时会和片段一起落到时间线上。",
     "chipEmpty": "未分镜",
     "chipBoarded": "{{acts}} 幕",
     "chipFrames": "图 {{drawn}}/{{total}}",
@@ -374,6 +378,9 @@
     "summary": "{{name}} · 已出 {{count}} 段视频（共 {{seconds}} 秒），将按 集 → 幕 的顺序拼成一条时间线。",
     "summaryByShot": "{{name}} · 已出 {{count}} 段视频（共 {{seconds}} 秒），将按 集 → 幕 → 格 的顺序拼成一条时间线。",
     "timelineName": "{{name}} · 成片",
+    "voiceTrack": "配音",
+    "musicTrack": "音乐",
+    "soundNote": "配音与音乐会各自落在一条音轨上，铺在画面之下。",
     "withSubtitles": "把台词写成字幕轨",
     "noLines": "这个故事还没有台词。",
     "subtitlesNote": "字幕按计划时长落位；实际片段长短不同时，字幕仍跟着台词走。",
@@ -411,6 +418,17 @@
     "clipFrameLine": "第 {{chapter}} 集 · 幕 {{act}} · 第 {{shot}} 格",
     "notFilmed": "未生成",
     "line": "{{speaker}}：{{text}}",
-    "unconfirmedShort": "待确认"
+    "unconfirmedShort": "待确认",
+    "ownSoundNote": "片段本身也带声音，两处会同时响；到剪辑室里把其中一处的音量调低即可。"
+  },
+  "voice": {
+    "rowLabel": "声音",
+    "speak": "念出台词（{{count}} 句）",
+    "noLines": "这一幕还没有台词，没有可念的东西。",
+    "score": "生成音乐与音效",
+    "noSound": "先在分镜表里写下这一幕的声音。",
+    "take": "{{seconds}}",
+    "again": "换一段",
+    "instructions": "按{{genre}}的演法、{{style}}的调子念——平稳、不赶，也不要比台词本身更用力。"
   }
 }

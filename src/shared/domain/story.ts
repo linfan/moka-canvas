@@ -626,6 +626,10 @@ export function targetKey(target: StorySlotTarget): string {
       return `keyframe:${target.chapterId}:${target.actId}:${target.keyframeId}`;
     case "actVideo":
       return `actVideo:${target.chapterId}:${target.actId}`;
+    case "actVoice":
+      return `actVoice:${target.chapterId}:${target.actId}`;
+    case "actMusic":
+      return `actMusic:${target.chapterId}:${target.actId}`;
     case "keyframeVideo":
       return `keyframeVideo:${target.chapterId}:${target.actId}:${target.keyframeId}`;
   }

@@ -6,6 +6,7 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { useModelStore } from "../../settings/modelStore";
 import { saveEverything } from "../stores/storyJobStore";
 import {
   assemblyCommands,
@@ -48,6 +49,16 @@ export function EditStep({ story }: { story: StoryDocument }) {
     .flatMap((chapter) => chapter.acts)
     .flatMap((act) => act.keyframes)
     .some((keyframe) => keyframe.dialogue.length > 0);
+  // A telling that has been voiced or scored brings rows of its own with it,
+  // and a clip that carries its own sound is worth warning about before a
+  // reader hears two scores fighting in the cutting room.
+  const sounded = story.chapters.some((chapter) =>
+    chapter.acts.some(
+      (act) => act.voice !== undefined || act.music !== undefined,
+    ),
+  );
+  const videoSound =
+    useModelStore.getState().view?.preferences.video.generateAudio === true;
   const mine = new Set(
     (story.edit.clipByAct ?? []).map((entry) => entry.clipId),
   );
@@ -159,6 +170,13 @@ export function EditStep({ story }: { story: StoryDocument }) {
             {spoken ? t("story:edit.subtitlesNote") : t("story:edit.noLines")}{" "}
             {t("story:edit.againNote")}
           </p>
+
+          {sounded && (
+            <p className="story-hint" data-testid="story-assembly-sound">
+              {t("story:edit.soundNote")}
+              {videoSound ? ` ${t("story:edit.ownSoundNote")}` : ""}
+            </p>
+          )}
 
           {plan.warnings.length > 0 && (
             <div

@@ -711,6 +711,13 @@ export interface StoryAct {
   /** The act's whole clip, when the story is boarded an act at a time. */
   video: StorySlot;
   videoConfirmed: boolean;
+  /**
+   * The lines of this act read aloud, in one voice, and the music and sound
+   * under it. Optional because a telling made before either was asked for is
+   * still a telling: a slot that is not there has simply never been made.
+   */
+  voice?: StorySlot;
+  music?: StorySlot;
 }
 
 /** A chapter — one episode of the telling. */
@@ -792,7 +799,11 @@ export type StorySlotTarget =
       chapterId: string;
       actId: string;
       keyframeId: string;
-    };
+    }
+  /** The act's lines read aloud — one clip for the whole act, not one a shot. */
+  | { kind: "actVoice"; chapterId: string; actId: string }
+  /** The music and sound under an act, asked for as one piece. */
+  | { kind: "actMusic"; chapterId: string; actId: string };
 
 /** The fields a caller may move on an element, for `updateStoryElement`. */
 export interface StoryElementPatch {

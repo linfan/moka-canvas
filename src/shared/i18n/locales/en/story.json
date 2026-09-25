@@ -89,12 +89,15 @@
       "elementArt": "File a drawing",
       "keyframeArt": "File a frame",
       "actVideo": "File an act's clip",
-      "keyframeVideo": "File a shot's clip"
+      "keyframeVideo": "File a shot's clip",
+      "voice": "File a voice-over",
+      "music": "File an act's score"
     },
     "brief": "Write the premise",
     "source": "Upload a manuscript",
     "chapters": "Write the chapters",
     "storyboard": "Write the board",
+    "sound": "Choose the sound of an act",
     "assemble": "Assemble the film"
   },
   "parse": {
@@ -277,6 +280,7 @@
     "lead": "One episode at a time: which shots an act is made of and how each is filmed, drawn frame by frame once agreed to, then cut into clips.",
     "noChapters": "This telling has no chapters yet. Split it into episodes in the outline first.",
     "chapters": "Episodes",
+    "soundReady": "This episode has sound: it goes on the timeline with the clips when the film is assembled.",
     "chipEmpty": "not boarded",
     "chipBoarded": "{{acts}} acts",
     "chipFrames": "{{drawn}}/{{total}} frames",
@@ -374,6 +378,9 @@
     "summary": "{{name}} · {{count}} clips filmed ({{seconds}}s), laid end to end in episode and act order.",
     "summaryByShot": "{{name}} · {{count}} clips filmed ({{seconds}}s), laid end to end in episode, act and shot order.",
     "timelineName": "{{name}} · the film",
+    "voiceTrack": "Voice-over",
+    "musicTrack": "Music",
+    "soundNote": "The voice-over and the music go on rows of their own, under the pictures.",
     "withSubtitles": "Write the lines as a caption track",
     "noLines": "Nothing is said in this telling yet.",
     "subtitlesNote": "A caption sits where the shot was planned to run; a clip that came back a different length leaves the words where they are.",
@@ -411,6 +418,17 @@
     "clipFrameLine": "Episode {{chapter}} · Act {{act}} · Shot {{shot}}",
     "notFilmed": "not filmed",
     "line": "{{speaker}}: {{text}}",
-    "unconfirmedShort": "not agreed to"
+    "unconfirmedShort": "not agreed to",
+    "ownSoundNote": "The clips carry their own sound too, so two things may be heard at once; turn one of them down in the cutting room."
+  },
+  "voice": {
+    "rowLabel": "Sound",
+    "speak": "Read the lines aloud ({{count}})",
+    "noLines": "This act says nothing yet, so there is nothing to read out.",
+    "score": "Make the music and sound",
+    "noSound": "Write what this act sounds like on the board first.",
+    "take": "{{seconds}}",
+    "again": "Ask for another",
+    "instructions": "Read it as a {{genre}} told in a {{style}} register — steady and unhurried, and no more dramatic than the lines are."
   }
 }

@@ -5,17 +5,28 @@ import {
   actCast,
   actPlannedMs,
   currentTake,
+  findResource,
+  formatDuration,
   type StoryGuess,
 } from "../../../shared/domain";
 import type {
+  MokaFile,
   StoryAct,
   StoryActPatch,
   StoryActSound,
   StoryDocument,
 } from "../../../shared/domain/types";
+import { assetUrl } from "../../../api/assets";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
-import { clampSeconds, planActVideos, planKeyframeArt } from "../jobs/plan";
+import { useProjectStore } from "../../editor/stores/projectStore";
+import {
+  clampSeconds,
+  planActMusic,
+  planActVideos,
+  planActVoice,
+  planKeyframeArt,
+} from "../jobs/plan";
 import { useStoryRun } from "../stores/storyJobStore";
 import { KeyframeTable } from "./KeyframeTable";
 import { RefPicker } from "./RefPicker";
@@ -43,6 +54,8 @@ export function ActCard({
   running,
   busyKeyframes,
   videoBusy,
+  voiceBusy,
+  musicBusy,
 }: {
   story: StoryDocument;
   chapterId: string;
@@ -56,14 +69,20 @@ export function ActCard({
   busyKeyframes: Set<string>;
   /** Whether this act's own clip is being made just now. */
   videoBusy: boolean;
+  /** Whether this act's lines, or its score, are being made just now. */
+  voiceBusy: boolean;
+  musicBusy: boolean;
 }) {
   const { t } = useTranslation();
   const run = useStoryRun();
+  const moka = useProjectStore((state) => state.moka);
   const [playing, setPlaying] = useState(false);
   const [sound, setSound] = useState<StoryActSound>(act.sound);
   const perShot = story.shotGranularity === "keyframe";
   const locked = act.keysConfirmed;
   const clip = currentTake(act.video);
+  const voice = act.voice === undefined ? undefined : currentTake(act.voice);
+  const music = act.music === undefined ? undefined : currentTake(act.music);
 
   const plannedMs = actPlannedMs(act);
   const seconds = clampSeconds(plannedMs);
@@ -121,6 +140,38 @@ export function ActCard({
   const filmAct = () => {
     const items = planActVideos(story, chapterId, [act.id]);
     void run(story.id, "actVideo", items);
+  };
+
+  const spoken = act.keyframes
+    .flatMap((keyframe) => keyframe.dialogue)
+    .filter((line) => line.text.trim() !== "").length;
+  const hasSound =
+    act.sound.music.trim() !== "" ||
+    act.sound.sfx.trim() !== "" ||
+    (act.sound.ambience ?? "").trim() !== "";
+
+  const speakAct = () => {
+    const items = planActVoice(story, chapterId, act.id);
+    void run(story.id, "voice", items);
+  };
+
+  const scoreAct = () => {
+    const items = planActMusic(story, chapterId, act.id);
+    void run(story.id, "music", items);
+  };
+
+  /** Marks the take the reader is listening to as the one they settled on. */
+  const confirmSound = (kind: "actVoice" | "actMusic", confirmed: boolean) => {
+    const held = kind === "actVoice" ? act.voice : act.music;
+    if (held === undefined) return;
+    execute(i18n.t("story:history.sound"), [
+      {
+        type: "setStorySlot",
+        storyId: story.id,
+        target: { kind, chapterId, actId: act.id },
+        slot: { ...held, confirmed },
+      },
+    ]);
   };
 
   return (
@@ -397,6 +448,116 @@ export function ActCard({
         )}
       </div>
 
+      {/*
+        The sound of the act, under the pictures it belongs to: the lines read
+        aloud in one voice, and the music they are spoken over. Both slots are
+        optional, so the row says what a reader has not asked for yet and makes
+        it one press away.
+      */}
+      <div className="story-sound-row" data-testid={`story-act-sound-${index}`}>
+        <span className="story-field-label">{t("story:voice.rowLabel")}</span>
+        <span className="story-sound-slot">
+          {voice === undefined ? (
+            <button
+              data-testid={`story-act-voice-go-${index}`}
+              disabled={spoken === 0 || running || voiceBusy}
+              onClick={speakAct}
+              title={spoken === 0 ? t("story:voice.noLines") : undefined}
+              type="button"
+            >
+              {voiceBusy
+                ? t("story:panels.drawing")
+                : t("story:voice.speak", { count: spoken })}
+            </button>
+          ) : (
+            <>
+              <audio
+                controls
+                data-testid={`story-act-voice-${index}`}
+                preload="metadata"
+                src={assetUrl(voice.assetId)}
+              />
+              <span className="story-hint">
+                {t("story:voice.take", {
+                  seconds: secondsOf(moka, voice.assetId),
+                })}
+              </span>
+              <button
+                className="link"
+                data-testid={`story-act-voice-again-${index}`}
+                disabled={running || voiceBusy}
+                onClick={speakAct}
+                type="button"
+              >
+                {t("story:voice.again")}
+              </button>
+              <button
+                aria-pressed={act.voice?.confirmed ?? false}
+                className="link"
+                data-testid={`story-act-voice-confirm-${index}`}
+                onClick={() =>
+                  confirmSound("actVoice", !(act.voice?.confirmed ?? false))
+                }
+                type="button"
+              >
+                {act.voice?.confirmed
+                  ? t("story:panels.confirmed")
+                  : t("story:panels.confirm")}
+              </button>
+            </>
+          )}
+        </span>
+        <span className="story-sound-slot">
+          {music === undefined ? (
+            <button
+              data-testid={`story-act-music-go-${index}`}
+              disabled={!hasSound || running || musicBusy}
+              onClick={scoreAct}
+              title={hasSound ? undefined : t("story:voice.noSound")}
+              type="button"
+            >
+              {musicBusy ? t("story:panels.drawing") : t("story:voice.score")}
+            </button>
+          ) : (
+            <>
+              <audio
+                controls
+                data-testid={`story-act-music-${index}`}
+                preload="metadata"
+                src={assetUrl(music.assetId)}
+              />
+              <span className="story-hint">
+                {t("story:voice.take", {
+                  seconds: secondsOf(moka, music.assetId),
+                })}
+              </span>
+              <button
+                className="link"
+                data-testid={`story-act-music-again-${index}`}
+                disabled={running || musicBusy}
+                onClick={scoreAct}
+                type="button"
+              >
+                {t("story:voice.again")}
+              </button>
+              <button
+                aria-pressed={act.music?.confirmed ?? false}
+                className="link"
+                data-testid={`story-act-music-confirm-${index}`}
+                onClick={() =>
+                  confirmSound("actMusic", !(act.music?.confirmed ?? false))
+                }
+                type="button"
+              >
+                {act.music?.confirmed
+                  ? t("story:panels.confirmed")
+                  : t("story:panels.confirm")}
+              </button>
+            </>
+          )}
+        </span>
+      </div>
+
       {playing && clip !== undefined && (
         <StoryLightbox
           assetId={clip.assetId}
@@ -415,6 +576,13 @@ const SOUND_FIELDS: Array<{ key: keyof StoryActSound }> = [
   { key: "sfx" },
   { key: "ambience" },
 ];
+
+/** How long a sound file runs, as the shelf reads it back. */
+function secondsOf(moka: MokaFile | null, assetId: string): string {
+  const entry = moka === null ? undefined : findResource(moka, assetId);
+  const durationMs = entry?.probe?.durationMs;
+  return durationMs === undefined ? "—" : formatDuration(durationMs);
+}
 
 /** One act's field, as the reader leaves it. */
 function writeAct(

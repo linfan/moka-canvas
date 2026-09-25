@@ -42,6 +42,8 @@ const STEP_OF_KIND: Record<StoryJobKind, StoryStep> = {
   keyframeArt: "storyboard",
   actVideo: "storyboard",
   keyframeVideo: "storyboard",
+  voice: "storyboard",
+  music: "storyboard",
 };
 
 function isRunning(status: StoryJobRecord["status"]): boolean {

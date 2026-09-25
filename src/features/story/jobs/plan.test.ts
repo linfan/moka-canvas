@@ -8,7 +8,9 @@ import {
   imageSizeForAspect,
   itemsForTargets,
   jobKey,
+  planActMusic,
   planActVideos,
+  planActVoice,
   planElementArt,
   planElements,
   planKeyframeArt,
@@ -441,6 +443,108 @@ describe("asking again for what did not come back", () => {
     expect(items.map((item) => item.id)).toEqual([
       `actVideo:${ids.chapterFirst}:${ids.act}`,
       `keyframeVideo:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
+    ]);
+  });
+});
+
+describe("the sound of an act", () => {
+  it("reads an act's lines aloud as one ask, in the order the board tells them", () => {
+    const held = story();
+    const act = held.chapters[0].acts[0];
+    // A line in the second shot too, so the order it is read in is a claim
+    // the fixture can be wrong about.
+    const lined: StoryDocument = {
+      ...held,
+      chapters: held.chapters.map((chapter) => ({
+        ...chapter,
+        acts: chapter.acts.map((each) =>
+          each.id !== act.id
+            ? each
+            : {
+                ...each,
+                keyframes: each.keyframes.map((keyframe) =>
+                  keyframe.id !== ids.frameSecond
+                    ? keyframe
+                    : {
+                        ...keyframe,
+                        dialogue: [
+                          { speaker: "周", text: "下一班还来。", tone: "" },
+                        ],
+                      },
+                ),
+              },
+        ),
+      })),
+    };
+
+    const items = planActVoice(lined, ids.chapterFirst, ids.act);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(`actVoice:${ids.chapterFirst}:${ids.act}`);
+    expect(items[0].capability).toBe("audio");
+    expect(items[0].prompt).toContain("林：车已经停运了。（平静）");
+    expect(items[0].prompt).toContain("周：下一班还来。");
+    expect(items[0].prompt.indexOf("车已经停运了")).toBeLessThan(
+      items[0].prompt.indexOf("下一班还来"),
+    );
+  });
+
+  it("asks for nothing when an act says nothing", () => {
+    const held = story();
+    const silent: StoryDocument = {
+      ...held,
+      chapters: held.chapters.map((chapter) => ({
+        ...chapter,
+        acts: chapter.acts.map((act) => ({
+          ...act,
+          keyframes: act.keyframes.map((keyframe) => ({
+            ...keyframe,
+            dialogue: [],
+          })),
+        })),
+      })),
+    };
+    expect(planActVoice(silent, ids.chapterFirst, ids.act)).toEqual([]);
+  });
+
+  it("asks for the score with the board's own words and the music flag", () => {
+    const items = planActMusic(story(), ids.chapterFirst, ids.act);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(`actMusic:${ids.chapterFirst}:${ids.act}`);
+    expect(items[0].capability).toBe("audio");
+    expect(items[0].prompt).toContain("低音提琴，缓慢");
+    expect(items[0].prompt).toContain("雨声");
+    expect(items[0].prompt).toContain("空站台");
+    // The flag is what the server files the answer by: without it a score
+    // would land on the voice shelf.
+    expect(items[0]?.params?.music).toBe(true);
+  });
+
+  it("asks for nothing when the board says nothing about the sound", () => {
+    const held = story();
+    const act = held.chapters[0].acts[0];
+    const hushed: StoryDocument = {
+      ...held,
+      chapters: held.chapters.map((chapter) => ({
+        ...chapter,
+        acts: chapter.acts.map((each) =>
+          each.id !== act.id
+            ? each
+            : { ...each, sound: { music: "", sfx: "", ambience: "  " } },
+        ),
+      })),
+    };
+    expect(planActMusic(hushed, ids.chapterFirst, ids.act)).toEqual([]);
+  });
+
+  it("asks for both again when a retry names the act's sound", () => {
+    const held = story();
+    const items = itemsForTargets(held, [
+      { kind: "voice", chapterId: ids.chapterFirst, actId: ids.act },
+      { kind: "music", chapterId: ids.chapterFirst, actId: ids.act },
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      `actVoice:${ids.chapterFirst}:${ids.act}`,
+      `actMusic:${ids.chapterFirst}:${ids.act}`,
     ]);
   });
 });

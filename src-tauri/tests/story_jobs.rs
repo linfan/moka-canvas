@@ -34,6 +34,7 @@ const NOW: &str = "2026-01-01T00:00:00.000Z";
 const WRITER: &str = "scribe-1";
 const PAINTER: &str = "painter-1";
 const SHOOTER: &str = "shooter-1";
+const SPEAKER: &str = "speaker-1";
 
 const API_KEY: &str = "sk-test-1234567890abcd";
 
@@ -51,6 +52,30 @@ const TASK: &str = "0192b7d4-0000-7000-8000-000000000001";
 /// A finished shot: the header of an MP4 and nothing else, because what a filed
 /// asset is filed as is read off its bytes rather than trusted from an answer.
 const SHOT: &[u8] = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom";
+
+/// A second of sound, written as a real WAV so the probe can measure it. The
+/// shelf needs no duration to file a file, but a score that cannot be measured
+/// would not be the thing a story is assembled from either.
+fn speech(seconds: u32) -> Vec<u8> {
+    let sample_rate = 8_000u32;
+    let data_size = sample_rate * seconds;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_size).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&8u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_size.to_le_bytes());
+    bytes.resize(bytes.len() + data_size as usize, 128);
+    bytes
+}
 
 struct Harness {
     app: Router,
@@ -343,6 +368,14 @@ fn act_video_target(act: &str) -> Value {
     json!({ "kind": "actVideo", "chapterId": "chapter-1", "actId": act })
 }
 
+fn act_voice_target(act: &str) -> Value {
+    json!({ "kind": "voice", "chapterId": "chapter-1", "actId": act })
+}
+
+fn act_music_target(act: &str) -> Value {
+    json!({ "kind": "music", "chapterId": "chapter-1", "actId": act })
+}
+
 /// A story job record as a process that stopped in the middle of one left it:
 /// one act being filmed, with the handle the far end issued for it or without.
 fn abandoned_job(task_id: Option<&str>) -> Value {
@@ -460,11 +493,12 @@ impl Recorded {
     }
 }
 
-/// A provider that writes words, paints a picture and films a shot: everything
-/// one story step could ask for.
+/// A provider that writes words, paints a picture, films a shot and speaks a
+/// line: everything one story step could ask for.
 fn answering(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
     let writing = recorded.clone();
     let painting = recorded.clone();
+    let speaking = recorded.clone();
     let starting = recorded;
     let asking = starting.clone();
     Router::new()
@@ -488,6 +522,16 @@ fn answering(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
                         "created": 1_700_000_000u64,
                         "data": [{ "b64_json": encoded(&picture(8, 6)) }],
                     }))
+                }
+            }),
+        )
+        .route(
+            "/v1/audio/speech",
+            post(move |body: Bytes| {
+                let recorded = speaking.clone();
+                async move {
+                    recorded.note(&body);
+                    ([(header::CONTENT_TYPE, "audio/wav")], speech(1))
                 }
             }),
         )
@@ -632,6 +676,94 @@ async fn a_batch_of_drawings_is_answered_and_filed_under_the_batch_that_asked() 
         entry["name"]
     );
     assert_eq!(recorded.count(), 1, "one piece is one call");
+}
+
+#[tokio::test]
+async fn a_batch_of_sound_is_filed_as_voice_on_the_shelf_and_as_music_beside_it() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
+    harness
+        .configure(&provider, &[(SPEAKER, Capability::Audio)])
+        .await;
+    harness.project("Story Sound").await;
+
+    // A line of an act read aloud: audio like any other answer, filed under the
+    // one category a sniffer cannot settle on its own.
+    let spoken = harness
+        .start_ok(batch(
+            "voice",
+            vec![piece(
+                "voice:1",
+                act_voice_target("act-1"),
+                "audio",
+                "「我们到站了。」他轻声说。",
+            )],
+        ))
+        .await;
+    let spoken_id = spoken["id"].as_str().unwrap().to_string();
+    let settled = harness.settled(&spoken_id).await;
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    assert_eq!(settled["model"], SPEAKER);
+    let voice_id = settled["items"][0]["assetIds"][0]
+        .as_str()
+        .expect("the answer became a file")
+        .to_string();
+
+    let document = harness.document().await;
+    let voice = document["moka"]["resources"]["voice"]
+        .as_array()
+        .expect("the shelf keeps voices")
+        .iter()
+        .find(|entry| entry["id"] == json!(voice_id))
+        .expect("the line is filed as voice")
+        .clone();
+    assert!(
+        voice["name"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("act voice"),
+        "the file says what it is: {}",
+        voice["name"]
+    );
+    assert_eq!(voice["provenance"]["storyJobId"], json!(spoken_id));
+
+    // The music and sound under the act arrives under the same parameter a
+    // node's music does, which is what tells the two audio categories apart.
+    let mut scored = piece(
+        "music:1",
+        act_music_target("act-1"),
+        "audio",
+        "站台的风声，远处一列停运的列车。",
+    );
+    scored["params"] = json!({ "music": true });
+    let score = harness.start_ok(batch("music", vec![scored])).await;
+    let score_id = score["id"].as_str().unwrap().to_string();
+    let settled = harness.settled(&score_id).await;
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    let music_id = settled["items"][0]["assetIds"][0]
+        .as_str()
+        .expect("the answer became a file")
+        .to_string();
+
+    let document = harness.document().await;
+    let music = document["moka"]["resources"]["music"]
+        .as_array()
+        .expect("the shelf keeps music")
+        .iter()
+        .find(|entry| entry["id"] == json!(music_id))
+        .expect("the score is filed as music")
+        .clone();
+    assert!(
+        music["name"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("act music"),
+        "the file says what it is: {}",
+        music["name"]
+    );
+    assert_eq!(recorded.count(), 2, "two pieces are two calls");
 }
 
 #[tokio::test]

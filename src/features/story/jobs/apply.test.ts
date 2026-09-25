@@ -258,6 +258,50 @@ describe("writing a batch's answers into the story", () => {
     // Which take is the right one is the reader's word, not the batch's.
     expect(act.videoConfirmed).toBe(true);
   });
+
+  it("files a voice and a score in the two places an act keeps them", () => {
+    const report = applyJobResults(
+      record("voice", [
+        item({
+          id: `actVoice:${ids.chapterFirst}:${ids.act}`,
+          target: {
+            kind: "voice",
+            chapterId: ids.chapterFirst,
+            actId: ids.act,
+          },
+          capability: "audio",
+          assetIds: ["asset-new-voice"],
+        }),
+      ]),
+    );
+    applyJobResults(
+      record("music", [
+        item({
+          id: `actMusic:${ids.chapterFirst}:${ids.act}`,
+          target: {
+            kind: "music",
+            chapterId: ids.chapterFirst,
+            actId: ids.act,
+          },
+          capability: "audio",
+          assetIds: ["asset-new-music"],
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    const act = story().chapters[0].acts[0];
+    // Both slots were absent before the answers; an answer makes the place
+    // rather than being dropped for want of one.
+    expect(act.voice?.takes.map((take) => take.assetId)).toEqual([
+      "asset-new-voice",
+    ]);
+    expect(act.music?.takes.map((take) => take.assetId)).toEqual([
+      "asset-new-music",
+    ]);
+    // Nothing is confirmed on the reader's behalf.
+    expect(act.voice?.confirmed).toBe(false);
+  });
 });
 
 describe("what applying an answer twice does", () => {

@@ -125,6 +125,8 @@ fn target_label(target: &StoryTarget) -> String {
         StoryTarget::KeyframeArt { .. } => "keyframe art".to_string(),
         StoryTarget::ActVideo { .. } => "act video".to_string(),
         StoryTarget::KeyframeVideo { .. } => "keyframe video".to_string(),
+        StoryTarget::Voice { .. } => "act voice".to_string(),
+        StoryTarget::Music { .. } => "act music".to_string(),
     }
 }
 
@@ -138,6 +140,8 @@ fn kind_word(kind: StoryJobKind) -> &'static str {
         StoryJobKind::KeyframeArt => "keyframeArt",
         StoryJobKind::ActVideo => "actVideo",
         StoryJobKind::KeyframeVideo => "keyframeVideo",
+        StoryJobKind::Voice => "voice",
+        StoryJobKind::Music => "music",
     }
 }
 

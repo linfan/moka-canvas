@@ -6391,6 +6391,28 @@ body.is-dragging-split {
   padding: 5px 8px;
 }
 
+/* The voice-over and the score, under the row of sound descriptions. */
+.story-sound-row {
+  align-items: center;
+  border-top: 1px dashed var(--stroke);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.story-sound-slot {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.story-sound-slot audio {
+  height: 28px;
+  max-width: 220px;
+}
+
 .story-table-wrap {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);

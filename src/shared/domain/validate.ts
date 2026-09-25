@@ -318,6 +318,8 @@ export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
     for (const chapter of story.chapters) {
       for (const act of chapter.acts) {
         for (const take of act.video.takes) add(take.assetId, act.id);
+        for (const take of act.voice?.takes ?? []) add(take.assetId, act.id);
+        for (const take of act.music?.takes ?? []) add(take.assetId, act.id);
         for (const keyframe of act.keyframes) {
           for (const take of keyframe.art.takes) add(take.assetId, keyframe.id);
           for (const take of keyframe.video.takes)

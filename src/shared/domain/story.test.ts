@@ -573,6 +573,76 @@ describe("the name a place is known by", () => {
         keyframeId: "k",
       }),
     ).toBe("keyframeVideo:c:a:k");
+    expect(targetKey({ kind: "actVoice", chapterId: "c", actId: "a" })).toBe(
+      "actVoice:c:a",
+    );
+    expect(targetKey({ kind: "actMusic", chapterId: "c", actId: "a" })).toBe(
+      "actMusic:c:a",
+    );
+  });
+});
+
+describe("the sound of an act", () => {
+  it("writes a voice into a slot that was not there, and takes it back", () => {
+    const moka = buildStoryMokaFile();
+    const story = storyOfFile(moka);
+    expect(story.chapters[0].acts[0].voice).toBeUndefined();
+
+    const target = {
+      kind: "actVoice" as const,
+      chapterId: story.chapters[0].id,
+      actId: story.chapters[0].acts[0].id,
+    };
+    const next = expectRoundTrip(moka, {
+      type: "setStorySlot",
+      storyId: story.id,
+      target,
+      slot: { takes: [take("asset-act-voice")], confirmed: false },
+    });
+    expect(storyOfFile(next).chapters[0].acts[0].voice?.takes[0]?.assetId).toBe(
+      "asset-act-voice",
+    );
+
+    // And the score is a place of its own, not the same one written twice.
+    const scored = expectRoundTrip(moka, {
+      type: "setStorySlot",
+      storyId: story.id,
+      target: { ...target, kind: "actMusic" },
+      slot: { takes: [take("asset-act-music")], confirmed: true },
+    });
+    const act = storyOfFile(scored).chapters[0].acts[0];
+    expect(act.music?.confirmed).toBe(true);
+    expect(act.voice).toBeUndefined();
+  });
+
+  it("is what the document says: absent until it is made, and absent after", () => {
+    const moka = buildStoryMokaFile();
+    // A telling nobody has voiced writes no slot at all, so the file says
+    // "not asked for yet" rather than "asked for and empty".
+    const bare = decodeMokaFile(encodeMokaFile(moka));
+    expect(storyOfFile(bare).chapters[0].acts[0].voice).toBeUndefined();
+
+    const story = storyOfFile(moka);
+    story.chapters[0].acts[0].voice = {
+      takes: [take("asset-act-voice")],
+      confirmed: true,
+    };
+    story.chapters[0].acts[0].music = { takes: [], confirmed: false };
+    const read = decodeMokaFile(encodeMokaFile(moka));
+    expect(storyOfFile(read).chapters[0].acts[0].voice?.takes).toHaveLength(1);
+    expect(storyOfFile(read).chapters[0].acts[0].music?.takes).toEqual([]);
+  });
+
+  it("is kept by the document as something in use, so a package carries it", () => {
+    const moka = buildStoryMokaFile();
+    const story = storyOfFile(moka);
+    const act = story.chapters[0].acts[0];
+    act.voice = { takes: [take("asset-act-voice")], confirmed: true };
+    act.music = { takes: [take("asset-act-music")], confirmed: false };
+
+    const refs = collectAssetReferences(moka);
+    expect(refs.get("asset-act-voice")).toEqual([act.id]);
+    expect(refs.get("asset-act-music")).toEqual([act.id]);
   });
 });
 

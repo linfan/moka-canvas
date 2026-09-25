@@ -18,7 +18,9 @@ import {
   createClipFromAsset,
   createTextClip,
   createTimeline,
+  emptyStorySlot,
 } from "../../shared/domain/factories";
+import { newId, nowIso } from "../../shared/domain/ids";
 import { findResource } from "../../shared/domain/validate";
 import {
   actPlannedMs,
@@ -37,6 +39,7 @@ import type {
   StoryTake,
   TimelineClip,
   TimelineDocument,
+  TimelineTrack,
 } from "../../shared/domain/types";
 import { i18n } from "../../shared/i18n";
 
@@ -118,6 +121,94 @@ function shotsOf(story: StoryDocument, act: StoryAct): ShotSlot[] {
 /** How long a clip runs: what the material measures, or what it was planned for. */
 function lengthOf(resource: ResourceEntry, plannedMs: number): number {
   return resource.probe?.durationMs ?? plannedMs;
+}
+
+/**
+ * The sound of each act: the voice-over and the score, where they begin.
+ *
+ * Sound is cued to the act rather than to the shot: an act's lines were asked
+ * for as one piece, so it goes down at the act's own beginning and runs as long
+ * as it runs, whatever the shots under it are doing. An act whose first shot
+ * never made it has nowhere to put the voice — a voice over nothing would be a
+ * piece of the telling the film has not got to yet — so it is left out.
+ */
+function soundCues(
+  story: StoryDocument,
+  plan: AssemblyPlan,
+): Array<{
+  actId: string;
+  kind: "voice" | "music";
+  take: StoryTake;
+  startMs: number;
+}> {
+  const starts = new Map<string, number>();
+  for (const unit of plan.units) {
+    if (!starts.has(unit.actId)) starts.set(unit.actId, unit.startMs);
+  }
+  const cues: Array<{
+    actId: string;
+    kind: "voice" | "music";
+    take: StoryTake;
+    startMs: number;
+  }> = [];
+  for (const chapter of story.chapters) {
+    for (const act of chapter.acts) {
+      const startMs = starts.get(act.id);
+      if (startMs === undefined) continue;
+      for (const kind of ["voice", "music"] as const) {
+        const take = currentTake(
+          (kind === "voice" ? act.voice : act.music) ?? emptyStorySlot(),
+        );
+        if (take !== undefined)
+          cues.push({ actId: act.id, kind, take, startMs });
+      }
+    }
+  }
+  return cues;
+}
+
+/**
+ * Which row of the timeline each kind of sound goes on.
+ *
+ * A telling with both a voice-over and a score gets two rows, so a reader can
+ * weigh them apart afterwards: the first audio row carries the voice, the
+ * second carries the music, and a row that is not there yet is made rather
+ * than the sound being dropped for want of somewhere to put it.
+ */
+function soundRows(
+  story: StoryDocument,
+  tracks: TimelineDocument["tracks"],
+): {
+  rows: { voice?: string; music?: string };
+  added: TimelineTrack[];
+} {
+  const voiced = story.chapters.some((chapter) =>
+    chapter.acts.some((act) => act.voice !== undefined),
+  );
+  const scored = story.chapters.some((chapter) =>
+    chapter.acts.some((act) => act.music !== undefined),
+  );
+  const audio = tracks.filter((track) => track.kind === "audio");
+  const added: TimelineTrack[] = [];
+  const row = (name: string): TimelineTrack => {
+    const track: TimelineTrack = {
+      id: newId(),
+      kind: "audio",
+      name,
+      muted: false,
+      hidden: false,
+      locked: false,
+      createdAt: nowIso(),
+    };
+    added.push(track);
+    return track;
+  };
+  const rows: { voice?: string; music?: string } = {};
+  if (voiced)
+    rows.voice = (audio.shift() ?? row(i18n.t("story:edit.voiceTrack"))).id;
+  if (scored)
+    rows.music = (audio.shift() ?? row(i18n.t("story:edit.musicTrack"))).id;
+  return { rows, added };
 }
 
 /**
@@ -235,12 +326,23 @@ export function assemblyCommands(
         background: ASSEMBLY_BACKGROUND,
       },
     );
+    // A timeline this telling is making can have its rows named for what they
+    // carry; one a reader has worked on keeps whatever names it was given.
+    const sound = soundRows(story, timeline.tracks);
+    const tracks = [...timeline.tracks, ...sound.added].map((track) =>
+      track.id === sound.rows.voice
+        ? { ...track, name: i18n.t("story:edit.voiceTrack") }
+        : track,
+    );
     const { clips, clipByAct } = layDown(story, moka, plan, {
-      tracks: timeline.tracks,
+      tracks,
+      rows: sound.rows,
       withSubtitles: options.withSubtitles,
     });
     return {
-      commands: [{ type: "addTimeline", timeline: { ...timeline, clips } }],
+      commands: [
+        { type: "addTimeline", timeline: { ...timeline, tracks, clips } },
+      ],
       clipByAct,
     };
   }
@@ -263,8 +365,10 @@ export function assemblyCommands(
     };
   }
 
+  const sound = soundRows(story, target.tracks);
   const { clips, clipByAct } = layDown(story, moka, plan, {
-    tracks: target.tracks,
+    tracks: [...target.tracks, ...sound.added],
+    rows: sound.rows,
     withSubtitles: options.withSubtitles,
   });
 
@@ -280,6 +384,9 @@ export function assemblyCommands(
       timelineId: target.id,
       clipIds: mine,
     });
+  }
+  for (const track of sound.added) {
+    commands.push({ type: "addTrack", timelineId: target.id, track });
   }
   commands.push({ type: "addClips", timelineId: target.id, clips });
   const { width, height } = target.settings;
@@ -300,6 +407,7 @@ function layDown(
   plan: AssemblyPlan,
   options: {
     tracks: TimelineDocument["tracks"];
+    rows: { voice?: string; music?: string };
     withSubtitles: boolean;
   },
 ): {
@@ -325,6 +433,25 @@ function layDown(
     clipByAct.push({
       actId: unit.actId,
       ...(unit.keyframeId === undefined ? {} : { keyframeId: unit.keyframeId }),
+      clipId: clip.id,
+    });
+  }
+
+  // The voice and the score, cued to the act they belong to rather than to the
+  // shots under them: the whole act's lines were asked for as one piece.
+  for (const cue of soundCues(story, plan)) {
+    const trackId =
+      cue.kind === "voice" ? options.rows.voice : options.rows.music;
+    if (trackId === undefined) continue;
+    const resource = findResource(moka, cue.take.assetId);
+    if (resource === undefined) continue;
+    const clip = createClipFromAsset(resource, trackId, cue.startMs);
+    clips.push({ ...clip, kind: "audio" });
+    clipByAct.push({
+      actId: cue.actId,
+      // An empty id says this clip is a piece of the whole act rather than one
+      // shot of it, which is what a re-assembly has to take back too.
+      keyframeId: "",
       clipId: clip.id,
     });
   }

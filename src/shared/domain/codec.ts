@@ -450,6 +450,10 @@ function encodeStoryAct(act: StoryAct): Record<string, unknown> {
     videoConfirmed: act.videoConfirmed,
   };
   if (act.sceneId !== undefined) doc.sceneId = act.sceneId;
+  // A slot that was never made is left out rather than written back empty:
+  // the document says which of the two the reader has not asked for yet.
+  if (act.voice !== undefined) doc.voice = encodeStorySlot(act.voice);
+  if (act.music !== undefined) doc.music = encodeStorySlot(act.music);
   return doc;
 }
 
@@ -1273,6 +1277,8 @@ function decodeStoryAct(value: unknown): StoryAct {
     videoConfirmed: Boolean(doc.videoConfirmed),
   };
   if (doc.sceneId !== undefined) act.sceneId = optionalString(doc.sceneId);
+  if (doc.voice !== undefined) act.voice = decodeStorySlot(doc.voice);
+  if (doc.music !== undefined) act.music = decodeStorySlot(doc.music);
   return act;
 }
 

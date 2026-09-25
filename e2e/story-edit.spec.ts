@@ -14,9 +14,12 @@ import {
  * The fifth step: a telling's clips laid end to end as one timeline.
  *
  * The whole telling is taken there — premise, chapters, cast, board, one filmed
- * act — and then assembled: what the step is for is that the shots a reader has
- * agreed to one at a time come out as one cut, on a timeline of its own that
- * the cutting room can go on working on.
+ * act, and then the act's sound — and assembled: what the step is for is that
+ * the shots a reader has agreed to one at a time come out as one cut, on a
+ * timeline of its own that the cutting room can go on working on. The sound is
+ * the part of the step that may be skipped (a telling with no score is still a
+ * telling); it is walked here because a track nothing ever asks for is a track
+ * nobody has seen work.
  */
 
 /** The timeline the server has for the first story, as the document holds it. */
@@ -126,10 +129,24 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     });
     await firstAct.getByTestId("story-act-video-confirm-0").click();
 
+    // The sound of the act, asked for as two pieces of the whole act: the lines
+    // read aloud, and the music and sound under them.
+    await firstAct.getByTestId("story-act-voice-go-0").click();
+    await expect(firstAct.getByTestId("story-act-voice-0")).toBeVisible({
+      timeout: 60_000,
+    });
+    await firstAct.getByTestId("story-act-voice-confirm-0").click();
+    await firstAct.getByTestId("story-act-music-go-0").click();
+    await expect(firstAct.getByTestId("story-act-music-0")).toBeVisible({
+      timeout: 60_000,
+    });
+    await firstAct.getByTestId("story-act-music-confirm-0").click();
+
     // Step five: the filmed act is laid down as a timeline of the telling's own.
     await page.getByTestId("story-step-edit").click();
     await expect(page.getByTestId("story-step-edit-body")).toBeVisible();
     await expect(page.getByTestId("story-assembly-summary")).toContainText("1");
+    await expect(page.getByTestId("story-assembly-sound")).toBeVisible();
     await page.getByTestId("story-assemble").click();
 
     await expect
@@ -139,12 +156,21 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
       .toContain("Rain at Night");
     const timeline = await persistedTimeline(page);
     expect(timeline.isTheStories).toBe(true);
-    // The clip of the act, then the words said in it — laid down from zero,
-    // the length coming from the material the stand-in handed back.
-    expect(timeline.clips.map((clip) => clip.kind)).toEqual(["video", "text"]);
+    // The clip of the act, the voice and the score under it, then the words
+    // said in it — laid down from zero, the lengths coming from the material
+    // the stand-in handed back.
+    expect(timeline.clips.map((clip) => clip.kind)).toEqual([
+      "video",
+      "audio",
+      "audio",
+      "text",
+    ]);
     expect(timeline.clips[0]?.startMs).toBe(0);
     expect(timeline.clips[0]?.durationMs).toBe(1_000);
     expect(timeline.clips[1]?.startMs).toBe(0);
+    expect(timeline.clips[1]?.durationMs).toBe(1_000);
+    expect(timeline.clips[2]?.startMs).toBe(0);
+    expect(timeline.clips[3]?.startMs).toBe(0);
 
     // The e2e harness points MOKA_FFMPEG at a path that is never there, so
     // this is every machine at once: the film card reads once what the

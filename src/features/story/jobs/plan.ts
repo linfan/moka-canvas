@@ -39,10 +39,13 @@ import type { StoryElement } from "../../../shared/domain";
 import type {
   StoryAct,
   StoryAspect,
+  StoryDialogueLine,
   StoryDocument,
 } from "../../../shared/domain/types";
 import {
+  storyActMusicPrompt,
   storyActVideoPrompt,
+  storyActVoicePrompt,
   storyElementMainPrompt,
   storyElementTurnaroundPrompt,
   storyElementsPrompt,
@@ -54,6 +57,7 @@ import {
   type StoryFacts,
   type StoryLook,
 } from "../../../shared/prompts";
+import { i18n } from "../../../shared/i18n";
 import { useModelStore } from "../../settings/modelStore";
 
 /**
@@ -98,6 +102,18 @@ export function jobKey(target: StoryTarget): string {
         chapterId: target.chapterId,
         actId: target.actId,
         keyframeId: target.keyframeId,
+      });
+    case "voice":
+      return targetKey({
+        kind: "actVoice",
+        chapterId: target.chapterId,
+        actId: target.actId,
+      });
+    case "music":
+      return targetKey({
+        kind: "actMusic",
+        chapterId: target.chapterId,
+        actId: target.actId,
       });
   }
 }
@@ -539,6 +555,136 @@ export function planKeyframeVideos(
 }
 
 // -----------------------------------------------------------------------------
+// The sound of an act
+// -----------------------------------------------------------------------------
+
+/**
+ * An act's lines read aloud, as one piece in one voice.
+ *
+ * One ask for the whole act rather than one a line, because a voice that
+ * changed halfway through an act is not a voice: the lines of every shot are
+ * flattened in board order, and a line with no words in it is not read.
+ */
+export function planActVoice(
+  story: StoryDocument,
+  chapterId: string,
+  actId: string,
+): StoryJobItemDraft[] {
+  const act = actAt(story, chapterId, actId);
+  if (act === undefined) return [];
+  const lines = act.keyframes
+    .flatMap((keyframe) => keyframe.dialogue)
+    .map((line) => spokenLine(line))
+    .filter((line) => line !== "");
+  if (lines.length === 0) return [];
+  const target: StoryTarget = { kind: "voice", chapterId, actId };
+  return [
+    {
+      id: jobKey(target),
+      target,
+      capability: "audio",
+      prompt: storyActVoicePrompt({
+        ...lookOf(story),
+        genre: story.brief.genre,
+        title: act.title,
+        summary: act.summary,
+        lines,
+      }),
+      inputs: [],
+      params: voiceParams(story),
+    },
+  ];
+}
+
+/**
+ * An act's music and sound, as one piece under the whole act.
+ *
+ * The three descriptions the board holds are asked for together, since music
+ * that arrived as three files would be three things a reader has to mix; an
+ * act with nothing said about its sound has nothing to ask for.
+ */
+export function planActMusic(
+  story: StoryDocument,
+  chapterId: string,
+  actId: string,
+): StoryJobItemDraft[] {
+  const act = actAt(story, chapterId, actId);
+  if (act === undefined) return [];
+  const music = act.sound.music.trim();
+  const sfx = act.sound.sfx.trim();
+  const ambience = (act.sound.ambience ?? "").trim();
+  if (music === "" && sfx === "" && ambience === "") return [];
+  const seconds = clampSeconds(actPlannedMs(act), audioCeiling());
+  const target: StoryTarget = { kind: "music", chapterId, actId };
+  return [
+    {
+      id: jobKey(target),
+      target,
+      capability: "audio",
+      prompt: storyActMusicPrompt({
+        ...lookOf(story),
+        genre: story.brief.genre,
+        title: act.title,
+        summary: act.summary,
+        music,
+        sfx,
+        ambience,
+        seconds,
+      }),
+      inputs: [],
+      params: { music: true, ...audioParams() },
+    },
+  ];
+}
+
+/** One line of dialogue as it is read aloud, with the tone in brackets. */
+function spokenLine(line: StoryDialogueLine): string {
+  const words = line.text.trim();
+  if (words === "") return "";
+  const speaker = line.speaker.trim();
+  const said = speaker === "" ? words : `${speaker}：${words}`;
+  const tone = (line.tone ?? "").trim();
+  return tone === "" ? said : `${said}（${tone}）`;
+}
+
+/**
+ * What a read-aloud ask is carried with: the machine's own voice, and the
+ * acting direction the telling gives it.
+ *
+ * The direction rides in `instructions` because that is the parameter a
+ * speech model reads as how to say something; a protocol that has never heard
+ * of it drops it rather than failing, which is the gateway's standing rule.
+ */
+function voiceParams(story: StoryDocument): Record<string, unknown> {
+  return {
+    ...audioParams(),
+    instructions: i18n.t("story:voice.instructions", {
+      genre: story.brief.genre,
+      style: story.brief.style,
+    }),
+  };
+}
+
+/** The format and pace this machine's audio settings ask for. */
+function audioParams(): Record<string, unknown> {
+  const audio = useModelStore.getState().view?.preferences.audio;
+  return {
+    ...(audio?.voice ? { voice: audio.voice } : {}),
+    ...(audio?.format ? { format: audio.format } : {}),
+    ...(audio?.speed ? { speed: audio.speed } : {}),
+  };
+}
+
+/**
+ * The longest a piece of sound may be asked for. Sound has no ceiling of its
+ * own in the settings — a score is as long as the act it sits under — so this
+ * is the same one clips are filmed with rather than a second number.
+ */
+function audioCeiling(): number {
+  return videoCeiling();
+}
+
+// -----------------------------------------------------------------------------
 // Asking again for what did not come back
 // -----------------------------------------------------------------------------
 
@@ -578,6 +724,10 @@ export function itemsForTargets(
         return planKeyframeVideos(story, target.chapterId, target.actId, [
           target.keyframeId,
         ]);
+      case "voice":
+        return planActVoice(story, target.chapterId, target.actId);
+      case "music":
+        return planActMusic(story, target.chapterId, target.actId);
     }
   });
 }

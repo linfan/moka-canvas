@@ -23,6 +23,7 @@ export const PROVIDER_ADDRESS = `${PROVIDER_ORIGIN}/v1`;
 export const PAINTER = "painter";
 export const STORYTELLER = "storyteller";
 export const VIDEOGRAPHER = "videographer";
+export const SPEAKER = "speaker";
 
 /**
  * What the stand-in says, whole and in the pieces it arrives in.
@@ -71,6 +72,35 @@ const SHOT = readFileSync(
 ).toString("base64");
 /** The handle the one job the stand-in ever starts is polled by. */
 const SHOT_JOB = "video-job-1";
+
+/**
+ * One second of sound, written as a real WAV.
+ *
+ * A speech endpoint answers with the bytes themselves rather than with a job,
+ * so this is the whole of the stand-in's part in making a voice. It is a real
+ * WAV rather than bytes with the right header, because the shelf measures what
+ * it files — a take nobody can read the length of is not one that can be laid
+ * on a track.
+ */
+function wav(seconds: number): Buffer {
+  const sampleRate = 8_000;
+  const dataSize = sampleRate * seconds;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate, 28);
+  header.writeUInt16LE(1, 32);
+  header.writeUInt16LE(8, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, Buffer.alloc(dataSize, 128)]);
+}
 
 /** What the stand-in was asked for, holding nothing a credential could be in. */
 export interface ProviderCall {
@@ -405,6 +435,16 @@ export async function startMockProvider(): Promise<MockProvider> {
     }
     if (path === "/v1/videos") {
       return send(200, { id: SHOT_JOB, status: "queued" });
+    }
+    // A voice or a score: the answer is the sound itself, not an answer about
+    // where the sound is.
+    if (path === "/v1/audio/speech") {
+      const bytes = wav(1);
+      response.writeHead(200, {
+        "Content-Type": "audio/wav",
+        "Content-Length": String(bytes.length),
+      });
+      return response.end(bytes);
     }
     if (path === "/v1/chat/completions") {
       const json = jsonAnswer(prompt);

@@ -19,7 +19,9 @@ export type StoryJobKind =
   | "elementArt"
   | "keyframeArt"
   | "actVideo"
-  | "keyframeVideo";
+  | "keyframeVideo"
+  | "voice"
+  | "music";
 
 export type StoryArtView = "main" | "turnaround";
 
@@ -46,7 +48,11 @@ export type StoryTarget =
       chapterId: string;
       actId: string;
       keyframeId: string;
-    };
+    }
+  /** One act's lines read aloud, in a single voice for the whole act. */
+  | { kind: "voice"; chapterId: string; actId: string }
+  /** One act's music and sound, under the words and the pictures. */
+  | { kind: "music"; chapterId: string; actId: string };
 
 export interface StoryJobInput {
   role: InputRole;
