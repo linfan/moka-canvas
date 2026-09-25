@@ -377,11 +377,17 @@ function elementKey(kind: StoryElementKind, name: string): string {
  *
  * `chapters` resolves the draft's chapter numbers into the story's chapter
  * ids; a number naming no chapter is dropped rather than guessed at.
+ *
+ * A reading that only saw some of the chapters is a `partial` one: what it did
+ * not name stays where it was, since a character who stood in the part read
+ * first is not gone for being absent from the part read second. A reading of
+ * the whole telling is the cast the story now has, and everything else goes.
  */
 export function mergeElements(
   existing: StoryElement[],
   identified: StoryElementDraft[],
   chapters: StoryChapter[] = [],
+  options: { partial?: boolean } = {},
 ): StoryElement[] {
   const known = new Map(
     existing.map((element) => [
@@ -389,7 +395,7 @@ export function mergeElements(
       element,
     ]),
   );
-  return identified.map((draft) => {
+  const merged = identified.map((draft) => {
     const held = known.get(elementKey(draft.kind, draft.name));
     const chapterIds = (draft.chapterIndexes ?? [])
       .map((index) => chapters[index]?.id)
@@ -408,6 +414,14 @@ export function mergeElements(
       chapterIds: chapterIds.length > 0 ? chapterIds : held.chapterIds,
     };
   });
+  if (options.partial !== true) return merged;
+  const named = new Set(
+    identified.map((draft) => elementKey(draft.kind, draft.name)),
+  );
+  return [
+    ...merged,
+    ...existing.filter((held) => !named.has(elementKey(held.kind, held.name))),
+  ];
 }
 
 /**
@@ -512,6 +526,22 @@ export function withTake(
   return {
     ...slot,
     takes: takes.length > max ? takes.slice(takes.length - max) : takes,
+  };
+}
+
+/**
+ * The slot a place holds once a take is the one being kept.
+ *
+ * Keeping is the newest take of the list, which is how every other part of the
+ * room reads a place — so choosing one moves it to the end and leaves the rest
+ * in the order they were drawn in.
+ */
+export function slotWithCurrent(slot: StorySlot, assetId: string): StorySlot {
+  const chosen = slot.takes.find((held) => held.assetId === assetId);
+  if (chosen === undefined) return slot;
+  return {
+    ...slot,
+    takes: [...slot.takes.filter((held) => held.assetId !== assetId), chosen],
   };
 }
 

@@ -386,6 +386,8 @@ pub struct StoryElementPatch {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description_confirmed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chapter_ids: Option<Vec<String>>,
 }
 
 /// The fields a caller may move on an act, for `updateStoryAct`.
@@ -1139,6 +1141,17 @@ pub fn apply_story_command(
                     ));
                 }
             }
+            if let Some(chapter_ids) = &patch.chapter_ids {
+                if chapter_ids
+                    .iter()
+                    .any(|id| !story.chapters.iter().any(|chapter| &chapter.id == id))
+                {
+                    return Err(CommandError::new(
+                        "STORY_TARGET_INVALID",
+                        "Chapter not found in this story",
+                    ));
+                }
+            }
             let previous = StoryElementPatch {
                 name: patch.name.as_ref().map(|_| element.name.clone()),
                 kind: patch.kind.map(|_| element.kind),
@@ -1149,6 +1162,10 @@ pub fn apply_story_command(
                 description_confirmed: patch
                     .description_confirmed
                     .map(|_| element.description_confirmed),
+                chapter_ids: patch
+                    .chapter_ids
+                    .as_ref()
+                    .map(|_| element.chapter_ids.clone()),
             };
             let mut next = story.clone();
             for held in next.elements.iter_mut() {
@@ -1166,6 +1183,9 @@ pub fn apply_story_command(
                 }
                 if let Some(confirmed) = patch.description_confirmed {
                     held.description_confirmed = confirmed;
+                }
+                if let Some(chapter_ids) = &patch.chapter_ids {
+                    held.chapter_ids = chapter_ids.clone();
                 }
             }
             Ok((

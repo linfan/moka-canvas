@@ -800,6 +800,8 @@ export interface StoryElementPatch {
   kind?: StoryElementKind;
   description?: string;
   descriptionConfirmed?: boolean;
+  /** The chapters it was noticed in, whole; a chapter the story has not got is refused. */
+  chapterIds?: string[];
 }
 
 /**

@@ -35,6 +35,7 @@ import {
 } from "../stores/storyJobStore";
 import { useStoryStore } from "../stores/storyStore";
 import { ResplitDialog } from "../components/ResplitDialog";
+import { useField } from "../panels/useField";
 
 /** How much of a manuscript one chapter is written from. */
 const SOURCE_CHUNK_MAX = 12_000;
@@ -617,41 +618,6 @@ function stepDuration(chapter: StoryChapter, by: number): number {
 
 function clampDuration(ms: number): number {
   return Math.min(MAX_TOTAL_DURATION_MS, Math.max(MIN_TOTAL_DURATION_MS, ms));
-}
-
-/**
- * A field's words, which become the document's when the reader looks away.
- *
- * The same bargain the premise is written under: a paragraph typed into a
- * chapter is one step to undo, not one per letter, and words that were typed
- * and never written down are written when the card goes away rather than
- * silently lost.
- */
-function useField(
-  committed: string,
-  commit: (value: string) => void,
-): { value: string; set: (value: string) => void; commit: () => void } {
-  const [value, setValue] = useState(committed);
-  const held = useRef({ value, committed, commit });
-  held.current = { value, committed, commit };
-
-  useEffect(() => {
-    setValue(committed);
-  }, [committed]);
-
-  const write = () => {
-    const now = held.current;
-    if (now.value !== now.committed) now.commit(now.value);
-  };
-
-  useEffect(() => {
-    return () => {
-      const now = held.current;
-      if (now.value !== now.committed) now.commit(now.value);
-    };
-  }, []);
-
-  return { value, set: setValue, commit: write };
 }
 
 /** How long a batch has been out, ticking once a second while it is. */

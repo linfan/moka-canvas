@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { StoryDocument, StoryStep } from "../../../shared/domain";
+import { ElementsStep } from "./ElementsStep";
 import { IdeaStep } from "./IdeaStep";
 import { OutlineStep } from "./OutlineStep";
 
@@ -20,6 +21,7 @@ export function StoryStepBody({
 }) {
   if (step === "idea") return <IdeaStep story={story} />;
   if (step === "outline") return <OutlineStep story={story} />;
+  if (step === "elements") return <ElementsStep story={story} />;
   return <StepWaiting step={step} story={story} />;
 }
 

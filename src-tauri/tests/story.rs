@@ -634,6 +634,43 @@ fn moves_only_the_fields_an_element_patch_names() {
 }
 
 #[test]
+fn names_the_chapters_an_element_was_seen_in_and_refuses_a_chapter_it_has_not() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryElement {
+            story_id: STORY.into(),
+            element_id: HERO.into(),
+            patch: StoryElementPatch {
+                chapter_ids: Some(vec![CHAPTER_FIRST.into()]),
+                ..Default::default()
+            },
+        }],
+    );
+    let hero = story_of(&next)
+        .elements
+        .iter()
+        .find(|element| element.id == HERO)
+        .unwrap();
+    assert_eq!(hero.chapter_ids, vec![CHAPTER_FIRST.to_string()]);
+
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::UpdateStoryElement {
+                story_id: STORY.into(),
+                element_id: HERO.into(),
+                patch: StoryElementPatch {
+                    chapter_ids: Some(vec!["chapter-gone".into()]),
+                    ..Default::default()
+                },
+            }
+        ),
+        "STORY_TARGET_INVALID"
+    );
+}
+
+#[test]
 fn keeps_an_acts_frames_clip_and_answers_when_it_keeps_its_id() {
     let moka = story_document();
     let held = story_of(&moka).chapters[0].acts[0].clone();

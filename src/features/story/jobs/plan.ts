@@ -208,20 +208,40 @@ export function planOutline(
   ];
 }
 
-/** The characters, places and things the chapters are made of. */
-export function planElements(story: StoryDocument): StoryJobItemDraft[] {
+/**
+ * The characters, places and things the chapters are made of.
+ *
+ * One ask for the whole telling wherever it fits, and otherwise a part of the
+ * chapters at a time — a long telling's synopses are more than one prompt may
+ * carry. A part is numbered the way a manuscript's parts are, and what it
+ * names is read into the cast beside what earlier parts found rather than in
+ * place of it.
+ */
+export function planElements(
+  story: StoryDocument,
+  options: { chapterIds?: string[]; part?: number; total?: number } = {},
+): StoryJobItemDraft[] {
+  const asked =
+    options.chapterIds === undefined
+      ? story.chapters
+      : story.chapters.filter((chapter) =>
+          options.chapterIds?.includes(chapter.id),
+        );
   return [
     {
-      id: "elements",
+      id: options.part === undefined ? "elements" : `elements:${options.part}`,
       target: { kind: "elements" },
       capability: "text",
       prompt: storyElementsPrompt({
-        chapters: story.chapters.map((chapter) => ({
+        chapters: asked.map((chapter) => ({
           title: chapter.title,
           synopsis: chapter.synopsis,
         })),
         genre: story.brief.genre,
         style: story.brief.style,
+        ...(options.part === undefined
+          ? {}
+          : { part: options.part, total: options.total }),
       }),
     },
   ];

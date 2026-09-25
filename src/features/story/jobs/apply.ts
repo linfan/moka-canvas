@@ -204,6 +204,9 @@ function chaptersIn(item: StoryJobItem): StoryChapterDraft[] | undefined {
 /** The part of a manuscript an outline piece was asked for, when it was one. */
 const PART = /^outline:(\d+)$/;
 
+/** One part of a telling's chapters, when a reading was asked for one. */
+const PART_ELEMENTS = /^elements:\d+$/;
+
 /** The place in the table an outline piece's answer belongs. */
 function partAt(itemId: string): number {
   const part = PART.exec(itemId);
@@ -310,16 +313,25 @@ export function applyFixedOutline(
   return done === null ? i18n.t("story:page.saveConflict") : undefined;
 }
 
+/**
+ * The elements an answer found, written onto the story.
+ *
+ * A piece numbered `elements:N` read only a part of the chapters, so what it
+ * found is added to the cast rather than standing for it: a character read out
+ * of the first twenty chapters is not undone by a second ask that never saw
+ * them.
+ */
 export function applyParsedElements(
   story: StoryDocument,
   drafts: StoryElementDraft[],
+  options: { partial?: boolean } = {},
 ): DocumentCommand[] {
   if (drafts.length === 0) return [];
   return [
     {
       type: "setStoryElements",
       storyId: story.id,
-      elements: mergeElements(story.elements, drafts, story.chapters),
+      elements: mergeElements(story.elements, drafts, story.chapters, options),
     },
   ];
 }
@@ -380,7 +392,9 @@ function commandsFor(
         return [];
       }
       report.applied += 1;
-      return applyParsedElements(story, parsed.value);
+      return applyParsedElements(story, parsed.value, {
+        partial: PART_ELEMENTS.test(item.id),
+      });
     }
     case "storyboard": {
       const { chapterId } = item.target;

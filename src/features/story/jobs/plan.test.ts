@@ -148,6 +148,24 @@ describe("planning the words", () => {
       "1. 第一章 站台 — 他在站台上等一班已经停运的列车。",
     );
     expect(items[0].prompt).toContain("2. 第二章 车厢 — 车厢比站台更暗。");
+    // Reading the whole telling is one ask, and it is not numbered as a part.
+    expect(items[0].prompt).not.toContain("This is part");
+  });
+
+  it("reads a long telling a part at a time, and says which part it is", () => {
+    const items = planElements(story(), {
+      chapterIds: [ids.chapterSecond],
+      part: 2,
+      total: 3,
+    });
+
+    // The piece is numbered the way a manuscript's parts are, so the answer
+    // comes home to the part that asked for it.
+    expect(items[0].id).toBe("elements:2");
+    expect(items[0].prompt).toContain("This is part 2 of 3 of the telling");
+    // Only the chapters this part is for are listed, counted from one.
+    expect(items[0].prompt).toContain("1. 第二章 车厢 — 车厢比站台更暗。");
+    expect(items[0].prompt).not.toContain("第一章 站台");
   });
 
   it("asks for a board with the names the story holds", () => {

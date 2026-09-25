@@ -213,11 +213,19 @@ export function storySplitPrompt(input: {
   return render(storySplit, input);
 }
 
-/** What the telling is made of: its characters, places and things. */
+/**
+ * What the telling is made of: its characters, places and things.
+ *
+ * A telling whose chapters do not fit in one ask is read a part at a time, and
+ * a part is told which part it is: what it names is added to what earlier parts
+ * found rather than standing for the whole cast.
+ */
 export function storyElementsPrompt(input: {
   chapters: Array<{ title: string; synopsis: string }>;
   genre: string;
   style: string;
+  part?: number;
+  total?: number;
 }): string {
   return render(storyElements, input);
 }

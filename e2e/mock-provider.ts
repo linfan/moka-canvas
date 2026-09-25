@@ -90,6 +90,26 @@ function lastMessage(body: Record<string, unknown>): string {
   return typeof content === "string" ? content : "";
 }
 
+/**
+ * One field of a multipart body, read as text.
+ *
+ * An image ask that carries a picture — a character's turn-around is drawn
+ * from the main picture already on file — is sent as a multipart edit rather
+ * than as json, so the stand-in reads the prompt out of the part it travels in
+ * instead of the body. What it does with the part is answer with the picture,
+ * which is all any test asserts.
+ */
+function partOf(raw: string, name: string): string {
+  const at = raw.indexOf(`name="${name}"`);
+  if (at === -1) return "";
+  const after = raw.slice(at);
+  const start = after.indexOf("\r\n\r\n");
+  if (start === -1) return "";
+  const rest = after.slice(start + 4);
+  const end = rest.indexOf("\r\n--");
+  return (end === -1 ? rest : rest.slice(0, end)).trim();
+}
+
 /** Writes an answer as a server-sent stream, a piece at a time. */
 async function streamText(
   response: ServerResponse,
@@ -173,6 +193,37 @@ function jsonAnswer(prompt: string): string | undefined {
       synopsis: `What happens in part ${part[1]} of the manuscript.`,
     });
   }
+  // The cast of a telling, asked for by the chapters it stands in.
+  if (prompt.includes("List what this telling is made of")) {
+    return JSON.stringify({
+      characters: [
+        {
+          name: "Keeper",
+          description: "A woman in a grey coat, slow to speak.",
+          chapters: [1],
+        },
+        {
+          name: "Traveller",
+          description: "Young, carrying a worn satchel.",
+          chapters: [1, 2],
+        },
+      ],
+      scenes: [
+        {
+          name: "Last carriage",
+          description: "An empty carriage, lights flickering.",
+          chapters: [1],
+        },
+      ],
+      props: [
+        {
+          name: "Old ticket",
+          description: "A cardboard ticket, corners rounded.",
+          chapters: [2],
+        },
+      ],
+    });
+  }
   return undefined;
 }
 
@@ -219,19 +270,26 @@ export async function startMockProvider(): Promise<MockProvider> {
     if (request.method !== "POST") return missing();
 
     const raw = await bodyOf(request);
+    const multipart = String(request.headers["content-type"] ?? "").startsWith(
+      "multipart/form-data",
+    );
     let body: Record<string, unknown> = {};
-    try {
-      body =
-        raw.trim() === "" ? {} : (JSON.parse(raw) as Record<string, unknown>);
-    } catch {
-      return send(400, { error: { message: "the request was not JSON" } });
+    if (!multipart) {
+      try {
+        body =
+          raw.trim() === "" ? {} : (JSON.parse(raw) as Record<string, unknown>);
+      } catch {
+        return send(400, { error: { message: "the request was not JSON" } });
+      }
     }
-    const prompt = String(body.prompt ?? "") || lastMessage(body);
+    const prompt = multipart
+      ? partOf(raw, "prompt")
+      : String(body.prompt ?? "") || lastMessage(body);
     calls.push({
       path,
-      model: String(body.model ?? ""),
+      model: multipart ? "" : String(body.model ?? ""),
       prompt,
-      count: Number(body.n ?? 1),
+      count: multipart ? 1 : Number(body.n ?? 1),
       credentialed: Boolean(request.headers.authorization),
     });
 
@@ -250,13 +308,13 @@ export async function startMockProvider(): Promise<MockProvider> {
       });
     }
 
-    if (path === "/v1/images/generations") {
-      const count = Math.max(1, Number(body.n ?? 1));
+    if (path === "/v1/images/generations" || path === "/v1/images/edits") {
+      const count = multipart ? 1 : Math.max(1, Number(body.n ?? 1));
       return send(200, {
         created: 1700000000,
         data: Array.from({ length: count }, () => ({
           b64_json: PICTURE,
-          revised_prompt: String(body.prompt ?? ""),
+          revised_prompt: prompt,
         })),
       });
     }

@@ -437,6 +437,27 @@ describe("mergeElements", () => {
     expect(merged[0].turnaround).toBeUndefined();
   });
 
+  it("keeps what a part of the telling did not name, since it never saw it", () => {
+    const merged = mergeElements(
+      [hero],
+      [{ kind: "character", name: "周", description: "年轻。" }],
+      [],
+      { partial: true },
+    );
+    expect(merged.map((each) => each.name)).toEqual(["周", "林"]);
+    // The cast it did name is still matched and rewritten, drawings and all.
+    const again = mergeElements(
+      [hero],
+      [{ kind: "character", name: "林", description: "换了衣服。" }],
+      [],
+      { partial: true },
+    );
+    expect(again).toHaveLength(1);
+    expect(again[0].id).toBe(hero.id);
+    expect(again[0].description).toBe("换了衣服。");
+    expect(again[0].main.takes).toHaveLength(1);
+  });
+
   it("resolves the chapters a draft was noticed in, and drops a number that names none", () => {
     const chapters = [createChapter("一"), createChapter("二")];
     const merged = mergeElements(
@@ -814,6 +835,30 @@ describe("the elements commands", () => {
     )!;
     expect(hero.descriptionConfirmed).toBe(false);
     expect(hero.description).toBe("四十岁上下，深色大衣，说话很慢。");
+  });
+
+  it("names the chapters an element was seen in, and refuses one the story has not", () => {
+    const moka = buildStoryMokaFile();
+    const ids = storyIds();
+    const next = expectRoundTrip(moka, {
+      type: "updateStoryElement",
+      storyId: ids.story,
+      elementId: ids.hero,
+      patch: { chapterIds: [ids.chapterSecond] },
+    });
+    const hero = storyOfFile(next).elements.find((e) => e.id === ids.hero)!;
+    expect(hero.chapterIds).toEqual([ids.chapterSecond]);
+
+    expect(
+      codeOf(() =>
+        apply(moka, {
+          type: "updateStoryElement",
+          storyId: ids.story,
+          elementId: ids.hero,
+          patch: { chapterIds: ["chapter-gone"] },
+        }),
+      ),
+    ).toBe("STORY_TARGET_INVALID");
   });
 });
 

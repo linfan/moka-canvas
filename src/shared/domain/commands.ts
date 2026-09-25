@@ -2136,6 +2136,14 @@ function applyOne(
             i18n.t("errors:command.storyDescriptionTooLong"),
           );
       }
+      if (command.patch.chapterIds !== undefined) {
+        const known = new Set(story.chapters.map((chapter) => chapter.id));
+        if (command.patch.chapterIds.some((id) => !known.has(id)))
+          throw new CommandError(
+            "STORY_TARGET_INVALID",
+            i18n.t("errors:command.storyChapterNotFound"),
+          );
+      }
       const previous: typeof command.patch = {};
       for (const key of Object.keys(
         command.patch,

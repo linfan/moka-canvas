@@ -5754,6 +5754,415 @@ body.is-dragging-split {
   width: 100%;
 }
 
+/* ---------------------------------------------------------------------------
+   Step three: the elements, and the places their pictures live in
+   --------------------------------------------------------------------------- */
+
+.story-step-wide {
+  display: grid;
+  gap: 22px;
+  margin: 0 auto;
+  max-width: 1100px;
+  padding-bottom: 24px;
+  width: 100%;
+}
+
+.story-elements-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.story-elements {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.story-element {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.story-element.is-confirmed {
+  border-left-color: var(--success);
+}
+
+.story-element-pictures {
+  display: grid;
+  gap: 10px;
+}
+
+.story-element-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.story-element-kind {
+  background: var(--bg);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.story-element-name {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  flex: 1;
+  font-size: 14px;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+.story-element-name:hover {
+  border-color: var(--stroke);
+}
+
+.story-element-name:focus {
+  background: var(--bg);
+  border-color: var(--primary);
+  outline: none;
+}
+
+.story-element-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  flex: none;
+  font-size: 13px;
+  padding: 4px 6px;
+}
+
+.story-element-remove:hover {
+  color: var(--danger, #e5534b);
+}
+
+.story-element-chapters {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  position: relative;
+}
+
+.story-chapter-menu {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  max-height: 240px;
+  min-width: 200px;
+  overflow-y: auto;
+  padding: 6px;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 20;
+}
+
+.story-chapter-choice {
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.story-chapter-choice:hover {
+  background: var(--hover);
+}
+
+.story-chapter-choice.is-on {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.story-element-description {
+  background: var(--bg);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.story-element-description.is-locked {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.story-element-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.story-element-state {
+  color: var(--success);
+  font-size: 12px;
+}
+
+/* The picture places, which step four's frames live in as well. */
+
+.story-slot {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-slot-empty {
+  align-items: center;
+  background: var(--bg);
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  width: 100%;
+}
+
+.story-slot-empty.is-busy {
+  border-style: solid;
+}
+
+.story-slot-waiting {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.story-spin {
+  animation: story-spin 0.9s linear infinite;
+  border: 2px solid var(--stroke);
+  border-radius: 50%;
+  border-top-color: var(--primary);
+  display: inline-block;
+  height: 14px;
+  width: 14px;
+}
+
+@keyframes story-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.story-slot-drawn {
+  position: relative;
+}
+
+.story-slot-picture {
+  background: var(--bg);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  width: 100%;
+}
+
+.story-slot-picture img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.story-slot-stamp {
+  background: rgb(0 0 0 / 55%);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+
+.story-slot-stamp.is-on {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--bg);
+}
+
+.story-slot-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.story-slot-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The picks and the lightbox, which both stand over the step. */
+
+.story-lightbox {
+  align-items: center;
+  background: rgb(0 0 0 / 72%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 60;
+}
+
+.story-lightbox-body {
+  display: grid;
+  gap: 10px;
+  max-width: min(1100px, 92vw);
+}
+
+.story-lightbox-body img {
+  border-radius: var(--radius-sm);
+  display: block;
+  margin: 0 auto;
+  max-height: 82vh;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.story-lightbox-foot {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.story-picks {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 12px;
+  max-height: 86vh;
+  max-width: min(1000px, 92vw);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.story-picks h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.story-picks-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.story-pick {
+  background: var(--bg);
+  border: 2px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+}
+
+.story-pick.is-current {
+  border-color: var(--success);
+}
+
+.story-pick img {
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.story-pick-foot {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.story-pick-current {
+  color: var(--success);
+}
+
+/* The form a hand-typed element is added with, which stands over the step. */
+
+.story-add-element {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 45%);
+  display: grid;
+  gap: 8px;
+  left: 50%;
+  max-width: min(460px, 92vw);
+  padding: 18px;
+  position: fixed;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  z-index: 60;
+}
+
+.story-add-element h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.story-add-element input,
+.story-add-element textarea,
+.story-add-element select {
+  background: var(--bg);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.story-add-element textarea {
+  resize: vertical;
+}
+
 /* The column folds away with the window, as the other rooms' columns do; the
    rule stands here rather than with theirs because a later rule of equal
    weight is the one that wins, and this section is the last in the file. */
