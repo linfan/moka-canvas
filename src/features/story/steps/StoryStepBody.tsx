@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { StoryDocument, StoryStep } from "../../../shared/domain";
 import { IdeaStep } from "./IdeaStep";
+import { OutlineStep } from "./OutlineStep";
 
 /**
  * What is standing in the middle of the room: the step the reader picked.
@@ -18,6 +19,7 @@ export function StoryStepBody({
   story: StoryDocument;
 }) {
   if (step === "idea") return <IdeaStep story={story} />;
+  if (step === "outline") return <OutlineStep story={story} />;
   return <StepWaiting step={step} story={story} />;
 }
 

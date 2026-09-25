@@ -128,10 +128,15 @@ describe("planning the words", () => {
       ],
     });
 
+    // The number on the piece is the place in the telling its answer belongs,
+    // so the parts are in the order the manuscript was read in.
     expect(items.map((item) => item.id)).toEqual(["outline:1", "outline:2"]);
     expect(items[0].prompt).toContain("Part 1 of 2");
     expect(items[1].prompt).toContain("Part 2 of 2");
     expect(items[1].prompt).toContain("车厢比站台更暗。");
+    // A chapter is asked for under the name the manuscript gave it.
+    expect(items[0].prompt).toContain("第一章");
+    expect(items[1].prompt).toContain("第二章");
   });
 
   it("asks what the telling is made of, chapter by chapter", () => {

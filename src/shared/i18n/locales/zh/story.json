@@ -92,7 +92,14 @@
       "keyframeVideo": "归档一格的片段"
     },
     "brief": "写下创意",
-    "source": "上传稿子"
+    "source": "上传稿子",
+    "chapters": "改写章节"
+  },
+  "parse": {
+    "failed": "这个答案读不成一张章节表"
+  },
+  "common": {
+    "stillSaving": "更改仍在保存中——请稍后重试"
   },
   "jobs": {
     "done": "{{count}} 项结果已写进故事。",
@@ -121,7 +128,6 @@
     "badType": "这不是文本文件。请先转成 .txt。",
     "tooBig": "文件超过 8 MB。",
     "tooLong": "这部稿子比一个故事能装下的更长。",
-    "stillSaving": "更改仍在保存中——请稍后重试",
     "sourceUnnamed": "已上传的文件",
     "sourceChars": "{{count}} 字",
     "sourceBytes": "{{count}}，尚未读入",
@@ -145,5 +151,58 @@
     "afterOutline": "改动创意不会自动重拆章节——大纲那一步有「重新拆解」。",
     "needsIdea": "写一段创意，或上传一部稿子。",
     "next": "下一步：剧本大纲"
+  },
+  "outline": {
+    "lead": "把创意拆成它要讲的几集，或者把一部稿子按它自己的缝隙切开、逐段写成章节。你不点，什么都还没开始拍。",
+    "source": "章节从哪里来",
+    "modeExpand": "根据创意扩写",
+    "modeSplit": "按稿子分章",
+    "modeSplitLocked": "请先在上一上传一部稿子。",
+    "chapters": "章节数",
+    "fewer": "少一章",
+    "more": "多一章",
+    "chaptersHint": "每集约 {{minutes}} 分钟；成片 {{duration}}。",
+    "detected": "稿子里自己写了 {{count}} 个章节标题。",
+    "willAsk": "将以 {{count}} 章拆解",
+    "wave": "第 {{at}}/{{of}} 批",
+    "start": "开始拆解",
+    "resplit": "重新拆解",
+    "reading": "正在读稿子…",
+    "writing": "撰写中",
+    "slow": "模型这次有点慢，可以停下来。",
+    "cancel": "取消",
+    "confirmAll": "全部确认",
+    "confirm": "确认",
+    "unconfirm": "取消确认",
+    "confirmed": "已确认 ✓",
+    "unconfirmed": "未确认",
+    "title": "章节标题",
+    "synopsis": "这一章讲什么",
+    "synopsisHint": "{{used}} 字；一段 {{low}}–{{high}} 字就够。",
+    "duration": "目标时长",
+    "minutes": "分钟",
+    "shorter": "减半分钟",
+    "longer": "加半分钟",
+    "durationBoard": "这一集已有的分镜不会跟着重算时长。",
+    "acts": "{{count}} 幕",
+    "redo": "重新生成本章",
+    "partGone": "这一段稿子已经不在记录里了，请重新拆解一次。",
+    "showAnswer": "原始答案",
+    "hideAnswer": "收起原始答案",
+    "answerFrom": "由 {{model}} 作答。",
+    "part": "第 {{number}} 段",
+    "copy": "复制",
+    "fix": "手动修正",
+    "fixLabel": "手写 {{id}} 的答案",
+    "apply": "应用",
+    "moreWarnings": "还有 {{count}} 条",
+    "fewerWarnings": "收起",
+    "unreadable": "模型这次没有给出能读的章节表。可以再问一次，也可以手动修正答案。",
+    "again": "再问一次",
+    "resplitTitle": "要重新拆解这个故事吗？",
+    "resplitBody": "{{chapters}} 章的梗概会被覆盖，其中 {{acts}} 幕的分镜会一并丢弃。",
+    "resplitKeeps": "素材都留在素材架上，已经装配好的时间线也留在剪辑房里。",
+    "resplitConfirm": "重新拆解",
+    "resplitCancel": "取消"
   }
 }

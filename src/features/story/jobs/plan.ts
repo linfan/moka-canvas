@@ -181,7 +181,12 @@ export function planOutline(
       target: { kind: "outline" },
       capability: "text",
       prompt: storySplitPrompt({
-        text: chunk.text,
+        // The heading the manuscript itself wrote for this part travels with
+        // it: a chapter is asked for by the name it was written under.
+        text:
+          chunk.title === undefined
+            ? chunk.text
+            : `${chunk.title}\n${chunk.text}`,
         index: index + 1,
         total: chunks.length,
         genre: story.brief.genre,

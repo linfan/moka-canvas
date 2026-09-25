@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { splitSource } from "./storySource";
+import { sourceHeadings, splitSource } from "./storySource";
+
+describe("counting the chapters a manuscript writes", () => {
+  it("says how many headings it has, and none when they are too few to be one", () => {
+    expect(
+      sourceHeadings("第一章 站台\n他等着。\n第二章 车厢\n车厢很暗。"),
+    ).toBe(2);
+    expect(sourceHeadings("第1章\n第二章\nChapter 3\n3、第四段")).toBe(4);
+    // One heading is a line that happened to start with a number.
+    expect(sourceHeadings("第一章 站台\n他等着。")).toBe(0);
+    expect(sourceHeadings("他等着，没有章节标题。")).toBe(0);
+  });
+});
 
 describe("cutting a manuscript into parts", () => {
   it("cuts where the manuscript says 第…章", () => {

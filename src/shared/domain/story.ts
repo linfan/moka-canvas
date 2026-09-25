@@ -299,21 +299,67 @@ export interface ActDraft {
  * and a chapter is the same chapter when it stands where it stood. A matched
  * chapter keeps everything that was made for it and takes only the new words:
  * a board survives a re-write of the outline it was made from.
+ *
+ * The table that comes back is the answer's own length, so a telling that was
+ * re-split into fewer chapters drops the ones that were left out.
  */
 export function mergeChapters(
   existing: StoryChapter[],
   proposed: StoryChapterDraft[],
 ): StoryChapter[] {
-  return proposed.map((draft, index) => {
-    const held = existing[index];
-    if (!held) return createChapter(draft.title, draft.synopsis);
-    return {
-      ...held,
-      title: draft.title,
-      synopsis: draft.synopsis,
-      targetDurationMs: draft.targetDurationMs ?? held.targetDurationMs,
-    };
-  });
+  return mergeChaptersAt(
+    existing,
+    proposed.map((draft, at) => ({ at, draft })),
+    true,
+  );
+}
+
+/** One chapter's new words, at the place in the table they were asked for. */
+export interface ChapterWrite {
+  at: number;
+  draft: StoryChapterDraft;
+}
+
+/**
+ * The story's chapters with answers written into the places they belong.
+ *
+ * A manuscript asked for one part at a time is answered one chapter at a time,
+ * and each answer knows which part it is: writing them into the table in the
+ * order they happen to come home would put a chapter where the answer before
+ * it ended rather than where it was asked for. A place past the end of the
+ * table is a chapter the telling has not reached yet — a part that came home
+ * before the parts before it did — and is added there rather than left as a
+ * hole, since a telling with a gap in it is not a telling.
+ *
+ * `whole` says the answer is the table rather than a place in it — one ask for
+ * every chapter — and then the chapters it left out are dropped.
+ */
+export function mergeChaptersAt(
+  existing: StoryChapter[],
+  writes: ChapterWrite[],
+  whole = false,
+): StoryChapter[] {
+  const table = [...existing];
+  const sorted = [...writes].sort((one, other) => one.at - other.at);
+  for (const { at, draft } of sorted) {
+    const place = Math.min(at, table.length);
+    const held = table[place];
+    table[place] =
+      held === undefined
+        ? createChapter(draft.title, draft.synopsis)
+        : {
+            ...held,
+            title: draft.title,
+            synopsis: draft.synopsis,
+            targetDurationMs: draft.targetDurationMs ?? held.targetDurationMs,
+          };
+  }
+  if (!whole) return table;
+  const length = writes.reduce(
+    (deepest, write) => Math.max(deepest, write.at + 1),
+    0,
+  );
+  return table.slice(0, length);
 }
 
 /** The name two elements are the same by: kind, and the name without its airs. */
@@ -572,21 +618,39 @@ export function storyCurrentStep(
 }
 
 /**
- * Whether a step can be walked to yet.
+ * What the step before it has to have settled, read off that step's count.
  *
- * Each step is offered only once the one before it has been settled: a board
- * is written from the outline that was agreed to, and a drawing is made of a
- * character who was described. The first step is always reachable, since a
- * premise can always be re-written.
+ * Settled is not the same as the step's dot being confirmed: the outline's dot
+ * is confirmed only once every chapter also has a board, and boards are what
+ * step four is for — a door waiting on that would be one that never opens. So
+ * each step asks the one before it for the thing it actually needs, which is
+ * the count that step keeps.
  */
+const STEP_OPENS_AFTER: Record<
+  StoryStep,
+  (before: StoryStepProgress) => boolean
+> = {
+  /** The first step is always reachable: a premise can always be re-written. */
+  idea: () => true,
+  /** A premise to tell. */
+  outline: (idea) => idea.done > 0,
+  /** Chapters, every one of them agreed to. */
+  elements: (outline) => outline.total > 0 && outline.done === outline.total,
+  /** Elements, every one of them described and drawn. */
+  storyboard: (elements) =>
+    elements.total > 0 && elements.done === elements.total,
+  /** An act with a clip the reader has settled on. */
+  edit: (storyboard) => storyboard.done > 0,
+};
+
+/** Whether a step can be walked to yet. */
 export function stepReachable(
   progress: Record<StoryStep, StoryStepProgress>,
   step: StoryStep,
 ): boolean {
   const index = STORY_STEPS.indexOf(step);
   if (index <= 0) return true;
-  const before = progress[STORY_STEPS[index - 1]];
-  return before.state === "confirmed";
+  return STEP_OPENS_AFTER[step](progress[STORY_STEPS[index - 1]]);
 }
 
 /**
@@ -677,4 +741,46 @@ export function storyDeleteCost(story: StoryDocument): {
   }
   if (story.edit.film) videos += 1;
   return { chapters: story.chapters.length, acts, pictures, videos };
+}
+
+/**
+ * What splitting a story again would overwrite, counted for the question that
+ * is asked before it.
+ *
+ * A chapter keeps everything made for it as long as it stands where it stood,
+ * so what a re-split costs is the words it replaces — every chapter that has a
+ * synopsis — and the boards of the chapters the new telling has no room for.
+ * Counting the acts that would go is why the count is asked for before the
+ * split rather than after it.
+ */
+export function chapterRegenerationCost(
+  story: StoryDocument,
+  chapterCount: number = story.chapters.length,
+): { chapters: number; acts: number } {
+  const kept = Math.max(0, Math.min(chapterCount, story.chapters.length));
+  return {
+    chapters: story.chapters.filter((chapter) => chapter.synopsis.trim() !== "")
+      .length,
+    acts: story.chapters
+      .slice(kept)
+      .reduce((sum, chapter) => sum + chapter.acts.length, 0),
+  };
+}
+
+/**
+ * A list cut into the waves a story's jobs are taken in.
+ *
+ * A batch may hold no more pieces than the story job client's limit allows, and
+ * a telling may ask for more than that at once — sixty episodes of a
+ * manuscript, eight episodes of boards at a time. The pieces are the same
+ * pieces either way; what the waves decide is how many asks the telling is
+ * made of, and a list that fits in one wave comes back as one.
+ */
+export function chunkWaves<T>(items: T[], per: number): T[][] {
+  const width = Math.max(1, Math.floor(per));
+  const waves: T[][] = [];
+  for (let at = 0; at < items.length; at += width) {
+    waves.push(items.slice(at, at + width));
+  }
+  return waves;
 }

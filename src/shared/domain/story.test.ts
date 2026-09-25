@@ -20,11 +20,14 @@ import {
   createChapter,
   createKeyframe,
   createStory,
+  defaultChapterCount,
   emptyStorySlot,
   nextStoryName,
 } from "./factories";
 import {
   actPlannedMs,
+  chapterRegenerationCost,
+  chunkWaves,
   currentTake,
   elementOf,
   formatDuration,
@@ -32,7 +35,10 @@ import {
   keyframeCount,
   mergeActs,
   mergeChapters,
+  mergeChaptersAt,
   mergeElements,
+  stepReachable,
+  STORY_STEPS,
   storyProgress,
   targetKey,
   timelineSizeForAspect,
@@ -218,6 +224,80 @@ describe("storyProgress", () => {
     expect(storyProgress(story).edit.state).toBe("ready");
     story.edit = { timelineId: "timeline-1", film: take(ids.actVideo) };
     expect(storyProgress(story).edit.state).toBe("confirmed");
+  });
+});
+
+describe("which step a reader can walk to", () => {
+  const ids = storyIds();
+
+  it("lets step two open on a premise, and no sooner", () => {
+    const story = createStory("新的故事");
+    expect(stepReachable(storyProgress(story), "outline")).toBe(false);
+    story.brief.idea = "一个人等一班停运的车。";
+    expect(stepReachable(storyProgress(story), "outline")).toBe(true);
+  });
+
+  it("opens the elements on chapters that are all confirmed, boarded or not", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    story.chapters = [{ ...createChapter("一"), synopsisConfirmed: true }];
+    // One of two confirmed: the elements are not yet a door.
+    story.chapters.push(createChapter("二"));
+    expect(stepReachable(storyProgress(story), "elements")).toBe(false);
+
+    story.chapters = story.chapters.map((chapter) => ({
+      ...chapter,
+      synopsisConfirmed: true,
+    }));
+    // Confirmed all through, and not one board between them: the boards are
+    // what step four is for, and step three is where they are drawn from.
+    expect(storyProgress(story).outline.state).toBe("ready");
+    expect(stepReachable(storyProgress(story), "elements")).toBe(true);
+  });
+
+  it("opens the board on elements that are described and drawn, all of them", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    story.chapters = [{ ...createChapter("一"), synopsisConfirmed: true }];
+    story.elements = [
+      {
+        ...element(ids.hero, "character"),
+        descriptionConfirmed: true,
+        main: { takes: [take(ids.heroMain)], confirmed: true },
+        turnaround: { takes: [take(ids.heroSheet)], confirmed: true },
+      },
+      {
+        ...element(ids.prop, "prop"),
+        descriptionConfirmed: true,
+        main: { takes: [take(ids.sceneMain)], confirmed: false },
+      },
+    ];
+    expect(stepReachable(storyProgress(story), "storyboard")).toBe(false);
+
+    story.elements = story.elements.map((held) => ({
+      ...held,
+      main: { ...held.main, confirmed: true },
+    }));
+    expect(stepReachable(storyProgress(story), "storyboard")).toBe(true);
+  });
+
+  it("opens the cutting room on the first clip that is settled", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    const act = createActFor(ids.chapterFirst);
+    act.video = { takes: [take(ids.actVideo)], confirmed: true };
+    act.videoConfirmed = true;
+    story.chapters = [{ ...createChapter("一"), acts: [act] }];
+    expect(stepReachable(storyProgress(story), "edit")).toBe(true);
+
+    // A story with nothing filmed is not a cutting room yet.
+    act.videoConfirmed = false;
+    expect(stepReachable(storyProgress(story), "edit")).toBe(false);
+  });
+
+  it("always offers the first step, and keeps the other four in order", () => {
+    const bare = storyProgress(createStory("新的故事"));
+    expect(stepReachable(bare, "idea")).toBe(true);
+    for (const step of STORY_STEPS) {
+      expect(stepReachable(bare, step)).toBe(step === "idea");
+    }
   });
 });
 
@@ -1220,6 +1300,87 @@ describe("a story through the codec", () => {
     expect(() => decodeMokaFile(encodeMokaFile(ahead))).toThrowError(
       /schema version 9 is not supported/,
     );
+  });
+});
+
+describe("mergeChaptersAt", () => {
+  it("writes each answer into the place it was asked for", () => {
+    const existing: StoryChapter[] = [
+      { ...createChapter("一", "旧梗概"), acts: [createActFor("chapter-1")] },
+      createChapter("二", "第二章的梗概"),
+    ];
+    // A manuscript answers one part at a time: the second part rewrites the
+    // second chapter, and the fourth is the next chapter the telling has not
+    // been told yet.
+    const merged = mergeChaptersAt(existing, [
+      { at: 1, draft: { title: "二", synopsis: "新梗概" } },
+      { at: 3, draft: { title: "四", synopsis: "第四段" } },
+    ]);
+    expect(merged).toHaveLength(3);
+    expect(merged[1]?.id).toBe(existing[1]?.id);
+    expect(merged[1]?.synopsis).toBe("新梗概");
+    expect(merged[2]?.title).toBe("四");
+    // The place nobody answered for is left as it stood, board and all.
+    expect(merged[0]?.id).toBe(existing[0]?.id);
+    expect(merged[0]?.acts).toHaveLength(1);
+  });
+
+  it("drops the chapters a whole-table answer left out", () => {
+    const existing = [createChapter("一"), createChapter("二")];
+    const merged = mergeChaptersAt(
+      existing,
+      [{ at: 0, draft: { title: "只有一章", synopsis: "" } }],
+      true,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.title).toBe("只有一章");
+  });
+});
+
+describe("chapterRegenerationCost", () => {
+  it("counts the words a re-split writes over and the boards it leaves behind", () => {
+    const story = createStory("新的故事");
+    story.chapters = [
+      {
+        ...createChapter("一", "写过的梗概"),
+        acts: [createActFor("chapter-1")],
+      },
+      {
+        ...createChapter("二", "也写过的梗概"),
+        acts: [createActFor("chapter-2")],
+      },
+      createChapter("三", ""),
+    ];
+    expect(chapterRegenerationCost(story, 3)).toEqual({
+      chapters: 2,
+      acts: 0,
+    });
+    // A telling divided into fewer chapters than it has leaves the last
+    // chapter's board behind, which is what the question is asking about.
+    expect(chapterRegenerationCost(story, 1)).toEqual({
+      chapters: 2,
+      acts: 1,
+    });
+    expect(chapterRegenerationCost(story)).toEqual({ chapters: 2, acts: 0 });
+  });
+});
+
+describe("chunkWaves", () => {
+  it("cuts a list into the asks a telling is made of", () => {
+    expect(chunkWaves([1, 2, 3], 2)).toEqual([[1, 2], [3]]);
+    expect(chunkWaves([1, 2], 5)).toEqual([[1, 2]]);
+    expect(chunkWaves([], 5)).toEqual([]);
+    // A width nobody could take pieces in is one piece an ask.
+    expect(chunkWaves([1, 2], 0)).toEqual([[1], [2]]);
+  });
+});
+
+describe("defaultChapterCount", () => {
+  it("offers a chapter a minute, and never a telling of no chapters", () => {
+    expect(defaultChapterCount(600_000)).toBe(10);
+    expect(defaultChapterCount(180_000)).toBe(3);
+    expect(defaultChapterCount(20_000)).toBe(1);
+    expect(defaultChapterCount(0)).toBe(1);
   });
 });
 

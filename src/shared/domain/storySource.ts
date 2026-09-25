@@ -71,6 +71,20 @@ export function splitSource(
 }
 
 /**
+ * How many chapters a manuscript writes of its own, or none when it writes too
+ * few to be a structure rather than a line that happened to start with a
+ * number.
+ *
+ * Read before the manuscript is cut, so the number the telling is divided into
+ * can be the number it already has rather than the one the running time
+ * suggests.
+ */
+export function sourceHeadings(text: string): number {
+  const found = text.split("\n").filter((line) => HEADING.test(line)).length;
+  return found >= 2 ? found : 0;
+}
+
+/**
  * The manuscript cut at its own chapter headings, when it has any and they
  * agree with how many chapters were asked for.
  *

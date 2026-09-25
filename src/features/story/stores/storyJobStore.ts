@@ -56,6 +56,29 @@ function toast(
   useAppStore.getState().pushToast(kind, message, choice);
 }
 
+/**
+ * Saves everything the window is holding, and says whether it all went out.
+ *
+ * One flush takes the commands it was sent with, so anything written while it
+ * was on its way waits for the next one — and a batch asked for on the tail of
+ * a chapter written a moment ago is asked for against a document that does not
+ * have it yet. Which is what this is for: the server reads the document, so
+ * everything in the window has to be the server's before anything is asked of
+ * it.
+ */
+async function saveEverything(): Promise<boolean> {
+  for (let turn = 0; turn < 8; turn += 1) {
+    await useProjectStore.getState().flush();
+    const { pending, saveStatus } = useProjectStore.getState();
+    if (pending.length === 0) return true;
+    // Nothing is on its way any more, and something is still waiting: the save
+    // was refused or could not be made, and asking now would ask against a
+    // document the server does not hold.
+    if (saveStatus !== "saved") return false;
+  }
+  return useProjectStore.getState().pending.length === 0;
+}
+
 interface StoryJobState {
   /** The story these batches belong to, which is the one being looked at. */
   storyId: string | null;
@@ -217,6 +240,15 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
     async start(storyId, kind, items) {
       set({ starting: true, error: null });
       try {
+        // The server reads the document it holds when it is asked for a batch:
+        // a story that is still only in this window is a story it has never
+        // heard of, and a chapter written a moment ago is not there to be
+        // asked about. So what is still waiting to be saved goes first.
+        if (!(await saveEverything())) {
+          set({ starting: false });
+          toast("error", i18n.t("story:common.stillSaving"));
+          return null;
+        }
         const record = await storyApi.start(storyId, kind, items);
         // A batch started for the story the room is showing: the list it is
         // put at the head of is that story's, whichever one it was.
@@ -268,7 +300,10 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
  * it stands now.
  *
  * Not the same ask twice: a description edited since the batch went out belongs
- * to the new ask, and so does a reference that has been redrawn.
+ * to the new ask, and so does a reference that has been redrawn. A manuscript's
+ * part is the exception, and not really one: the part is the ask, and the file
+ * it was cut from is the same file — planning it again would cut the manuscript
+ * at edges the first ask did not use.
  */
 export async function retryFailed(
   story: StoryDocument,
@@ -276,12 +311,62 @@ export async function retryFailed(
 ): Promise<void> {
   const failed = job.items.filter((item) => item.status === "failed");
   if (failed.length === 0) return;
-  const items = itemsForTargets(
-    story,
-    failed.map((item) => item.target),
-  );
+  const items = failed.flatMap((item) => againFor(story, item));
   if (items.length === 0) return;
   await useStoryJobStore.getState().start(story.id, job.kind, items);
+}
+
+/** One failed piece, as it is asked for the second time. */
+function againFor(
+  story: StoryDocument,
+  item: StoryJobRecord["items"][number],
+): StoryJobItemDraft[] {
+  if (item.target.kind === "outline" && PART_ITEM.test(item.id)) {
+    return [
+      {
+        id: item.id,
+        target: item.target,
+        capability: item.capability,
+        prompt: item.prompt,
+      },
+    ];
+  }
+  return itemsForTargets(story, [item.target]);
+}
+
+/** An outline piece that answers for one part of a manuscript, not for all. */
+const PART_ITEM = /^outline:\d+$/;
+
+/**
+ * Asks again for one episode that was written from a manuscript's part.
+ *
+ * The part is not planned again for the same reason a failed one is not: the
+ * ask for a part is the part itself. What the record kept is sent again, so an
+ * episode the reader did not like comes back from the same words it came from
+ * the first time.
+ */
+export async function redoChapterPart(
+  story: StoryDocument,
+  chapterIndex: number,
+): Promise<void> {
+  const id = `outline:${chapterIndex + 1}`;
+  const recorded = useStoryJobStore
+    .getState()
+    .jobs.filter((job) => job.storyId === story.id && job.kind === "outline")
+    .flatMap((job) => job.items)
+    .find((item) => item.id === id);
+  if (recorded === undefined) {
+    toast("info", i18n.t("story:outline.partGone"));
+    return;
+  }
+  await useStoryJobStore.getState().start(story.id, "outline", [
+    {
+      id,
+      target: { kind: "outline" },
+      capability: recorded.capability,
+      prompt: recorded.prompt,
+    },
+  ]);
 }
 
 /** Makes one place again, from the story as it stands now. */

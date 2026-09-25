@@ -92,7 +92,14 @@
       "keyframeVideo": "File a shot's clip"
     },
     "brief": "Write the premise",
-    "source": "Upload a manuscript"
+    "source": "Upload a manuscript",
+    "chapters": "Write the chapters"
+  },
+  "parse": {
+    "failed": "That answer did not read as a chapter table"
+  },
+  "common": {
+    "stillSaving": "Changes are still saving — try again in a moment"
   },
   "jobs": {
     "done": "{{count}} answers were written into the story.",
@@ -121,7 +128,6 @@
     "badType": "That is not a text file. Turn it into a .txt first.",
     "tooBig": "That file is larger than 8 MB.",
     "tooLong": "That manuscript is longer than a story will hold.",
-    "stillSaving": "Changes are still saving — try again in a moment",
     "sourceUnnamed": "the uploaded file",
     "sourceChars": "{{count}} characters",
     "sourceBytes": "{{count}} not read yet",
@@ -145,5 +151,58 @@
     "afterOutline": "Changing the premise does not re-split the chapters by itself — the outline step has “split again”.",
     "needsIdea": "Write a premise, or upload a manuscript.",
     "next": "Next: the outline"
+  },
+  "outline": {
+    "lead": "Break the premise into the episodes it is told in, or have a manuscript divided at its own seams and written into them one part at a time. Nothing is filmed until you say so.",
+    "source": "Where the chapters come from",
+    "modeExpand": "From the premise",
+    "modeSplit": "From the manuscript",
+    "modeSplitLocked": "Upload a manuscript first, in the step before this one.",
+    "chapters": "Chapters",
+    "fewer": "One chapter fewer",
+    "more": "One chapter more",
+    "chaptersHint": "About {{minutes}} minutes an episode; the film runs {{duration}}.",
+    "detected": "The manuscript writes {{count}} chapters of its own.",
+    "willAsk": "Asks for {{count}} chapters",
+    "wave": "Batch {{at}} of {{of}}",
+    "start": "Split it up",
+    "resplit": "Split it again",
+    "reading": "Reading the manuscript…",
+    "writing": "Writing",
+    "slow": "The model is taking its time; you can stop it.",
+    "cancel": "Stop",
+    "confirmAll": "Confirm them all",
+    "confirm": "Confirm",
+    "unconfirm": "Unconfirm",
+    "confirmed": "confirmed ✓",
+    "unconfirmed": "not confirmed",
+    "title": "Episode title",
+    "synopsis": "What happens",
+    "synopsisHint": "{{used}} characters; a paragraph of {{low}}–{{high}} is enough.",
+    "duration": "Running time",
+    "minutes": "min",
+    "shorter": "Half a minute shorter",
+    "longer": "Half a minute longer",
+    "durationBoard": "A board already made for this episode keeps its own lengths.",
+    "acts": "{{count}} acts",
+    "redo": "Ask for this one again",
+    "partGone": "That part of the manuscript is no longer on file; split it again.",
+    "showAnswer": "The answer as it came",
+    "hideAnswer": "Hide the answer",
+    "answerFrom": "Answered by {{model}}.",
+    "part": "Part {{number}}",
+    "copy": "Copy",
+    "fix": "Fix it by hand",
+    "fixLabel": "The answer to {{id}}, by hand",
+    "apply": "Apply",
+    "moreWarnings": "and {{count}} more",
+    "fewerWarnings": "Show less",
+    "unreadable": "The model did not answer with a chapter table this could read. Ask again, or fix the answer by hand.",
+    "again": "Ask again",
+    "resplitTitle": "Split the story again?",
+    "resplitBody": "The words of {{chapters}} chapters are written over, and the boards of {{acts}} acts go with them.",
+    "resplitKeeps": "The drawings and the clips stay on the shelf, and the timeline it assembled stays in the cutting room.",
+    "resplitConfirm": "Split it again",
+    "resplitCancel": "Cancel"
   }
 }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
 
 import type { StoryJobRecord } from "../../../api/story";
 import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
@@ -8,6 +9,8 @@ import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import {
   jobProgress,
+  redoChapterPart,
+  retryFailed,
   stepFailure,
   targetRunning,
   useStoryJobStore,
@@ -18,6 +21,7 @@ const ids = storyIds();
 interface Call {
   url: string;
   method: string;
+  body?: string;
 }
 
 let calls: Call[] = [];
@@ -40,7 +44,11 @@ function serving(answers: Record<string, unknown>) {
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ url, method: init?.method ?? "GET" });
+      calls.push({
+        url,
+        method: init?.method ?? "GET",
+        ...(typeof init?.body === "string" ? { body: init.body } : {}),
+      });
       // The longest match wins: a cancel is not the list it hangs under.
       const key = Object.keys(routes)
         .filter((each) => url.startsWith(each))
@@ -130,6 +138,73 @@ afterEach(() => {
 });
 
 describe("starting a batch", () => {
+  it("saves what is waiting before it asks for anything", async () => {
+    serving({ "/api/v1/projects/current/story/jobs": job() });
+    // A change still in this window when the batch is asked for: the server
+    // answers from the document it holds, so it has to hold this first.
+    await act(async () => {
+      useProjectStore
+        .getState()
+        .applyLocal([
+          { type: "renameStory", storyId: ids.story, name: "夜车" },
+        ]);
+    });
+
+    const started = await useStoryJobStore
+      .getState()
+      .start(ids.story, "outline", []);
+
+    expect(started?.id).toBe("job-1");
+    expect(useProjectStore.getState().pending).toEqual([]);
+    const saved = calls.findIndex((call) =>
+      call.url.endsWith("/projects/current/commands"),
+    );
+    const asked = calls.findIndex(
+      (call) => call.method === "POST" && call.url.endsWith("/story/jobs"),
+    );
+    expect(saved).toBeGreaterThanOrEqual(0);
+    expect(saved).toBeLessThan(asked);
+  });
+
+  it("asks for nothing while the document it would be asked against is unsaved", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/projects/current/commands")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ code: "INTERNAL", message: "no" }), {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }),
+    );
+    await act(async () => {
+      useProjectStore
+        .getState()
+        .applyLocal([
+          { type: "renameStory", storyId: ids.story, name: "夜车" },
+        ]);
+    });
+
+    const started = await useStoryJobStore
+      .getState()
+      .start(ids.story, "outline", []);
+
+    expect(started).toBeNull();
+    expect(useAppStore.getState().toasts.at(-1)?.message).toContain(
+      "still saving",
+    );
+  });
+
   it("puts the record at the head of the list and starts asking about it", async () => {
     serving({ "/api/v1/projects/current/story/jobs": job() });
 
@@ -279,6 +354,111 @@ describe("cancelling a batch", () => {
     await useStoryJobStore.getState().cancel("job-1");
 
     expect(useStoryJobStore.getState().jobs[0].status).toBe("cancelled");
+  });
+});
+
+describe("asking again for what did not come back", () => {
+  /** The story the room is looking at, as a step reads it out of the document. */
+  function openStory() {
+    const held = useProjectStore
+      .getState()
+      .moka?.stories?.find((each) => each.id === ids.story);
+    if (held === undefined) throw new Error("the fixture story is open");
+    return held;
+  }
+
+  /** What was asked of the server last, as it was asked. */
+  function lastAsk(): { items: { id: string; prompt: string }[] } {
+    const sent = calls.filter((call) => call.method === "POST").at(-1);
+    if (sent?.body === undefined) throw new Error("nothing was started");
+    return JSON.parse(sent.body) as { items: { id: string; prompt: string }[] };
+  }
+
+  it("sends a manuscript's part again as the part it was, not as a new outline", async () => {
+    serving({ "/api/v1/projects/current/story/jobs": job() });
+    const held = job({
+      kind: "outline",
+      items: [
+        {
+          ...job().items[0],
+          id: "outline:2",
+          target: { kind: "outline" },
+          capability: "text",
+          prompt:
+            "Part 2 of 3 of a manuscript, which is the telling's own text:",
+          status: "failed",
+        },
+      ],
+    });
+
+    await retryFailed(openStory(), held);
+
+    const [again] = lastAsk().items;
+    expect(again?.id).toBe("outline:2");
+    expect(again?.prompt).toContain("Part 2 of 3");
+  });
+
+  it("plans an answer for every chapter again when the whole table was asked for", async () => {
+    serving({ "/api/v1/projects/current/story/jobs": job() });
+    const held = job({
+      kind: "outline",
+      items: [
+        {
+          ...job().items[0],
+          id: "outline",
+          target: { kind: "outline" },
+          capability: "text",
+          prompt: "an ask of an older shape",
+          status: "failed",
+        },
+      ],
+    });
+
+    await retryFailed(openStory(), held);
+
+    const [again] = lastAsk().items;
+    expect(again?.id).toBe("outline");
+    expect(again?.prompt).toContain("Write this telling as 2 chapters.");
+  });
+
+  it("asks again for one part of a manuscript from the record it was made for", async () => {
+    serving({
+      "/api/v1/projects/current/story/jobs": [
+        job({
+          kind: "outline",
+          items: [
+            {
+              ...job().items[0],
+              id: "outline:2",
+              target: { kind: "outline" },
+              capability: "text",
+              prompt:
+                "Part 2 of 3 of a manuscript, which is the telling's own text:",
+              status: "succeeded",
+            },
+          ],
+        }),
+      ],
+    });
+    await useStoryJobStore.getState().load(ids.story);
+
+    await redoChapterPart(openStory(), 1);
+
+    const [again] = lastAsk().items;
+    expect(again?.id).toBe("outline:2");
+    expect(again?.prompt).toContain("Part 2 of 3");
+  });
+
+  it("says so when the part it would ask for is no longer on file", async () => {
+    serving({ "/api/v1/projects/current/story/jobs": [] });
+    await useStoryJobStore.getState().load(ids.story);
+
+    await redoChapterPart(openStory(), 0);
+
+    expect(useAppStore.getState().toasts.at(-1)?.message).toContain(
+      "split it again",
+    );
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
   });
 });
 

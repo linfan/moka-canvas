@@ -5545,6 +5545,215 @@ body.is-dragging-split {
   padding-top: 4px;
 }
 
+/* ---------------------------------------------------------------------------
+   Step two: the outline
+   --------------------------------------------------------------------------- */
+
+.story-outline-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.story-outline-count {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.story-outline-chapters {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 5px 8px;
+  text-align: center;
+  width: 64px;
+}
+
+.story-outline-count .story-step-count {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 9px;
+}
+
+.story-outline-count .story-step-count:hover {
+  background: var(--hover);
+}
+
+.story-running {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.story-chapters {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.story-chapter {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.story-chapter.is-confirmed {
+  border-left-color: var(--success);
+}
+
+.story-chapter-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.story-chapter-index {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 18px;
+}
+
+.story-chapter-title {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 6px;
+}
+
+.story-chapter-title:hover,
+.story-chapter-title:focus {
+  background: var(--bg);
+  border-color: var(--stroke);
+  outline: none;
+}
+
+.story-chapter-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.story-chapter-state.is-on {
+  color: var(--success);
+}
+
+.story-chapter-acts {
+  background: none;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.story-chapter-acts:hover {
+  color: var(--text);
+}
+
+.story-chapter-synopsis {
+  background: var(--bg);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  min-height: 62px;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.story-chapter-foot {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.story-chapter-actions {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.story-answers {
+  display: grid;
+  gap: 10px;
+}
+
+.story-warnings {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-left: 3px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 12px;
+}
+
+.story-warnings ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.story-answer {
+  display: grid;
+  gap: 8px;
+}
+
+.story-answer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.story-choice.is-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.story-answer-error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.story-answer-fix {
+  display: grid;
+  gap: 8px;
+}
+
+.story-answer-fix textarea {
+  background: var(--bg);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
 /* The column folds away with the window, as the other rooms' columns do; the
    rule stands here rather than with theirs because a later rule of equal
    weight is the one that wins, and this section is the last in the file. */

@@ -91,14 +91,21 @@ function lastMessage(body: Record<string, unknown>): string {
 }
 
 /** Writes an answer as a server-sent stream, a piece at a time. */
-async function streamText(response: ServerResponse, answers: boolean) {
+async function streamText(
+  response: ServerResponse,
+  answers: boolean,
+  answer: { text: string; pieces: string[] } = {
+    text: SENTENCE,
+    pieces: PIECES,
+  },
+) {
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
   });
   const write = (frame: unknown) =>
     response.write(`data: ${JSON.stringify(frame)}\n\n`);
-  for (const piece of PIECES) {
+  for (const piece of answer.pieces) {
     write(
       answers
         ? { type: "response.output_text.delta", delta: piece }
@@ -113,7 +120,7 @@ async function streamText(response: ServerResponse, answers: boolean) {
       ? {
           type: "response.completed",
           response: {
-            output_text: SENTENCE,
+            output_text: answer.text,
             usage: { input_tokens: 4, output_tokens: 6 },
           },
         }
@@ -124,6 +131,49 @@ async function streamText(response: ServerResponse, answers: boolean) {
   );
   write("[DONE]");
   response.end();
+}
+
+/** A text cut into the pieces it arrives in, so an answer streams either way. */
+function inPieces(text: string): { text: string; pieces: string[] } {
+  const third = Math.ceil(text.length / 3);
+  return {
+    text,
+    pieces: [
+      text.slice(0, third),
+      text.slice(third, third * 2),
+      text.slice(third * 2),
+    ],
+  };
+}
+
+/**
+ * What an ask that wants json is answered with, or none when it wants words.
+ *
+ * The story room asks for the chapters of a telling as a table, with the count
+ * it wants in the ask, and for a manuscript's part as one chapter of one. A
+ * real model writes them; what the suite has to prove is that an answer in
+ * that shape arrives, is read, and lands in the story — so the stand-in
+ * answers in the shape the prompt asked for.
+ */
+function jsonAnswer(prompt: string): string | undefined {
+  const table = /as (\d+) chapters/.exec(prompt);
+  if (table !== null) {
+    const count = Math.max(1, Number(table[1]));
+    return JSON.stringify({
+      chapters: Array.from({ length: count }, (_, index) => ({
+        title: `Chapter ${index + 1}`,
+        synopsis: `What happens in chapter ${index + 1} of the telling.`,
+      })),
+    });
+  }
+  const part = /Part (\d+) of (\d+)/.exec(prompt);
+  if (part !== null) {
+    return JSON.stringify({
+      title: `Chapter ${part[1]}`,
+      synopsis: `What happens in part ${part[1]} of the manuscript.`,
+    });
+  }
+  return undefined;
 }
 
 /**
@@ -211,10 +261,31 @@ export async function startMockProvider(): Promise<MockProvider> {
       });
     }
     if (path === "/v1/chat/completions") {
-      return streamText(response, false);
+      const json = jsonAnswer(prompt);
+      if (body.stream !== true) {
+        return send(200, {
+          choices: [
+            {
+              message: { role: "assistant", content: json ?? SENTENCE },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 4, completion_tokens: 6 },
+        });
+      }
+      return streamText(
+        response,
+        false,
+        json === undefined ? undefined : inPieces(json),
+      );
     }
     if (path === "/v1/responses") {
-      return streamText(response, true);
+      const json = jsonAnswer(prompt);
+      return streamText(
+        response,
+        true,
+        json === undefined ? undefined : inPieces(json),
+      );
     }
     return missing();
   }

@@ -128,7 +128,7 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
       // would be refused for resting on a revision the upload has replaced.
       await useProjectStore.getState().flush();
       if (useProjectStore.getState().pending.length > 0) {
-        toast("error", t("story:idea.stillSaving"));
+        toast("error", t("story:common.stillSaving"));
         return;
       }
       const filed = await assetsApi.upload(file, { categoryHint: "texts" });

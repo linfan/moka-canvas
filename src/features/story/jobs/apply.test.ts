@@ -283,6 +283,34 @@ describe("what applying an answer twice does", () => {
     expect(report.applied).toBe(0);
     expect(useHistoryStore.getState().undoStack).toHaveLength(0);
   });
+
+  it("writes nothing for a telling whose chapters are already the story's", () => {
+    // The same answer, read into the story a second time: the record is kept
+    // and may be read again by a room opened tomorrow, so what it wrote the
+    // first time is what it must notice the second.
+    const held = record("outline", [
+      item({
+        id: "outline",
+        target: { kind: "outline" },
+        capability: "text",
+        text: JSON.stringify({
+          chapters: [
+            { title: "第一章 站台", synopsis: "他在站台上等到天亮。" },
+            { title: "第二章 车厢", synopsis: "车厢里没有别人。" },
+          ],
+        }),
+      }),
+    ]);
+    const first = applyJobResults(held);
+    const afterFirst = useHistoryStore.getState().undoStack.length;
+    expect(first.applied).toBe(1);
+
+    const again = applyJobResults(held);
+
+    expect(again.applied).toBe(0);
+    expect(again.skipped).toBe(1);
+    expect(useHistoryStore.getState().undoStack.length).toBe(afterFirst);
+  });
 });
 
 describe("what applying does not write", () => {
@@ -338,6 +366,74 @@ describe("what applying does not write", () => {
 
     expect(report.applied).toBe(0);
     expect(report.notes.join(" ")).toContain("outline");
+  });
+});
+
+describe("a manuscript written in parts", () => {
+  /** One part of a manuscript, answered with the one chapter it is. */
+  function part(number: number, title: string, synopsis: string): StoryJobItem {
+    return item({
+      id: `outline:${number}`,
+      target: { kind: "outline" },
+      capability: "text",
+      text: JSON.stringify({ title, synopsis }),
+    });
+  }
+
+  it("writes the parts as one table, in the order they were asked for", () => {
+    const report = applyJobResults(
+      record("outline", [
+        part(1, "第一章 站台", "他在站台上等车。"),
+        part(2, "第二章 车厢", "车厢里只有两个人。"),
+        part(3, "第三章 天亮", "天亮了。"),
+      ]),
+    );
+
+    expect(report.applied).toBe(3);
+    expect(story().chapters.map((chapter) => chapter.title)).toEqual([
+      "第一章 站台",
+      "第二章 车厢",
+      "第三章 天亮",
+    ]);
+    // One batch is one step back, however many parts it answered with.
+    const entry = useHistoryStore.getState().takeUndo();
+    expect(entry?.forwardCommands).toHaveLength(1);
+  });
+
+  it("leaves the places nobody answered for as they stood", () => {
+    const held = record("outline", [
+      part(2, "第二章 车厢", "车厢里只有两个人。"),
+      item({
+        id: "outline:3",
+        target: { kind: "outline" },
+        capability: "text",
+        status: "failed",
+      }),
+    ]);
+    const report = applyJobResults(held);
+
+    expect(report.applied).toBe(1);
+    expect(report.skipped).toBe(1);
+    // The second part landed in the second place, and the first chapter — the
+    // one the fixture already told — is still the first chapter.
+    expect(story().chapters[0].title).toBe("第一章 站台");
+    expect(story().chapters[1].title).toBe("第二章 车厢");
+  });
+
+  it("adds the chapters a telling has not reached yet rather than leaving holes", () => {
+    const report = applyJobResults(
+      record("outline", [
+        part(4, "第四章 雨", "雨一直下到天亮。"),
+        part(5, "第五章 天亮", "天亮了。"),
+      ]),
+    );
+
+    expect(report.applied).toBe(2);
+    const chapters = story().chapters;
+    expect(chapters).toHaveLength(4);
+    expect(chapters.every((chapter) => chapter.title !== "")).toBe(true);
+    expect(chapters[2].title).toBe("第四章 雨");
+    expect(chapters[3].title).toBe("第五章 天亮");
   });
 });
 
