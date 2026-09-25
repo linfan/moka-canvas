@@ -67,6 +67,18 @@ function activeRow(): string | null {
   return row?.textContent ?? null;
 }
 
+/** The names the strip across the bar stands under. */
+function tabNames(): string[] {
+  return [...document.querySelectorAll(".story-bar-tab > button")].map(
+    (tab) => tab.textContent ?? "",
+  );
+}
+
+function activeTab(): string | null {
+  const tab = document.querySelector(".story-bar-tab.is-active > button");
+  return tab?.textContent ?? null;
+}
+
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
@@ -230,6 +242,36 @@ describe("the five steps", () => {
     ) as HTMLButtonElement;
     expect(storyboard.disabled).toBe(true);
     expect(storyboard.title).toBe("Elements comes first.");
+  });
+});
+
+describe("the strip across the bar", () => {
+  it("shows the stories being told, and turns to the one that is clicked", () => {
+    const { moka, id } = withStory(buildStoryMokaFile(), "第二个故事");
+    openRoom(moka);
+    expect(tabNames()).toEqual(["雨夜列车", "第二个故事"]);
+    expect(activeTab()).toBe("雨夜列车");
+
+    fireEvent.click(screen.getByTestId("story-tab-第二个故事"));
+    expect(activeTab()).toBe("第二个故事");
+    expect(activeRow()).toBe("第二个故事");
+    expect(useStoryStore.getState().storyId).toBe(id);
+  });
+
+  it("asks for a new story from the strip once there is a story to stand beside", () => {
+    openRoom(buildGoldenMokaFile());
+    // Nothing to put a strip across until a story exists; the empty page owns
+    // the one thing there is to do.
+    expect(screen.queryByTestId("story-tab-add")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("story-empty-new"));
+    fireEvent.change(screen.getByTestId("story-name"), {
+      target: { value: "雨夜列车" },
+    });
+    fireEvent.click(screen.getByTestId("story-create"));
+
+    fireEvent.click(screen.getByTestId("story-tab-add"));
+    expect(screen.getByRole("dialog", { name: "New story" })).toBeTruthy();
   });
 });
 

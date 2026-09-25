@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { PageTopBar } from "../../editor/panels/PageTopBar";
 import { useStoryStore } from "../stores/storyStore";
+import { StoryTabs } from "./StoryTabs";
 
 interface StoryTopBarProps {
   /** Going home from the story room, which puts the project down first. */
@@ -8,12 +9,12 @@ interface StoryTopBarProps {
 }
 
 /**
- * The story room's bar: the shared one, and no tabs in the middle.
+ * The story room's bar: the shared one, with the stories where the boards of
+ * the canvas and the cuts of the cutting room stand.
  *
- * The column beside the room is already the list of stories, so a strip of
- * them across the bar would say the same thing twice in two places. What the
- * room is working on is named in the head of the stage instead, where the
- * settings it rests on are said beside it.
+ * Which story is open is said twice on this page and both times on purpose: the
+ * strip is the way across the room's width, and the column beside it is where a
+ * story is renamed, taken away and read for how far it has got.
  */
 export function StoryTopBar({ onHome }: StoryTopBarProps) {
   const { t } = useTranslation();
@@ -31,6 +32,7 @@ export function StoryTopBar({ onHome }: StoryTopBarProps) {
         </button>
       }
       onHome={onHome}
+      tabs={<StoryTabs />}
     />
   );
 }

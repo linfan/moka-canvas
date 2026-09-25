@@ -14,11 +14,11 @@ import {
 /**
  * The story room is a place of its own.
  *
- * It is reached from the corner menu, below the board and above the cutting
- * room, and it opens on the first-run question a project with no story asks.
- * A story is begun under a name and stood on at its first step; the steps that
- * have not been earned say what comes first. What the reader is looking at is
- * kept on the machine, and what the story holds is kept in the document.
+ * It is reached from the corner menu, above the board and the cutting room,
+ * and it opens on the first-run question a project with no story asks. A story
+ * is begun under a name and stood on at its first step; the steps that have not
+ * been earned say what comes first. What the reader is looking at is kept on
+ * the machine, and what the story holds is kept in the document.
  */
 
 async function emptyProject(page: Page, name: string): Promise<string> {
@@ -29,7 +29,7 @@ async function emptyProject(page: Page, name: string): Promise<string> {
   return home;
 }
 
-test("the corner menu leads to the story room, below the board", async ({
+test("the corner menu leads to the story room, above the board", async ({
   page,
 }) => {
   const home = await emptyProject(page, "Story Room");
@@ -45,7 +45,7 @@ test("the corner menu leads to the story room, below the board", async ({
   // marks the one being stood on.
   await page.getByRole("button", { name: "Home menu" }).click();
   const rows = page.getByTestId("home-menu").getByRole("menuitem");
-  await expect(rows).toHaveText(["Home", "Canvas", "Story", "Clip"]);
+  await expect(rows).toHaveText(["Home", "Story", "Canvas", "Clip"]);
   await expect(rows.filter({ hasText: "Story" })).toHaveAttribute(
     "aria-current",
     "page",
@@ -88,6 +88,12 @@ test("a story is begun under a name and stood on at its first step", async ({
     .poll(async () => persistedStoryNames(page))
     .toEqual(["Rain at Night"]);
 
+  // The story has a tab across the bar, the way every board and every cut has
+  // one in the rooms beside this.
+  await expect(page.locator(".story-bar-tab.is-active")).toHaveText(
+    "Rain at Night",
+  );
+
   // The machine remembers the story that was being told, across a reload.
   await page.reload();
   await openRecent(page, "Story Begun");
@@ -110,10 +116,37 @@ test("a story is renamed in place, and the rename can be undone", async ({
   await field.press("Enter");
   await expect(page.locator(".story-head-name")).toHaveText("Night Train");
   await expect(page.locator(".story-row-name")).toHaveText("Night Train");
+  await expect(page.locator(".story-bar-tab.is-active")).toHaveText(
+    "Night Train",
+  );
 
   // The rename is a step in the history like any other change to the work.
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.locator(".story-row-name")).toHaveText("Rain at Night");
+
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("a second story gets a tab, and the tab turns the room over", async ({
+  page,
+}) => {
+  const home = await emptyProject(page, "Story Tabs");
+  await openStoryRoom(page);
+  await newStory(page, "Rain at Night");
+  await newStory(page, "Snow at Dawn");
+
+  // A new story is stood on when it is begun, and both are on the strip.
+  await expect(page.locator(".story-head-name")).toHaveText("Snow at Dawn");
+  await expect(page.locator(".story-bar-tab")).toHaveCount(2);
+
+  await page.getByTestId("story-tab-Rain at Night").click();
+  await expect(page.locator(".story-head-name")).toHaveText("Rain at Night");
+  await expect(page.locator(".story-row.is-active .story-row-name")).toHaveText(
+    "Rain at Night",
+  );
+  await expect(page.locator(".story-bar-tab.is-active")).toHaveText(
+    "Rain at Night",
+  );
 
   rmSync(home, { recursive: true, force: true });
 });

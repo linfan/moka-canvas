@@ -223,18 +223,6 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
             </div>
             <div className="home-menu-group">
               <button
-                aria-current={current === "canvas" ? "page" : undefined}
-                className={`home-menu-item${
-                  current === "canvas" ? " is-current" : ""
-                }`}
-                onClick={() => go("canvas")}
-                role="menuitem"
-                type="button"
-              >
-                <CanvasIcon />
-                <span>{t("app:homeMenu.canvas")}</span>
-              </button>
-              <button
                 aria-current={current === "story" ? "page" : undefined}
                 className={`home-menu-item${
                   current === "story" ? " is-current" : ""
@@ -245,6 +233,18 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
               >
                 <StoryIcon />
                 <span>{t("app:homeMenu.story")}</span>
+              </button>
+              <button
+                aria-current={current === "canvas" ? "page" : undefined}
+                className={`home-menu-item${
+                  current === "canvas" ? " is-current" : ""
+                }`}
+                onClick={() => go("canvas")}
+                role="menuitem"
+                type="button"
+              >
+                <CanvasIcon />
+                <span>{t("app:homeMenu.canvas")}</span>
               </button>
               <button
                 aria-current={current === "clip" ? "page" : undefined}

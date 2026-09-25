@@ -4952,6 +4952,53 @@ body.is-dragging-split {
   z-index: 0;
 }
 
+/* The stories, in the middle of the bar: the same strip the boards and the
+   cuts stand in, and the same shape, so a reader crossing between the three
+   rooms finds the way across each one where they left it. */
+.story-bar-tabs {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.story-bar-tab {
+  display: inline-flex;
+  flex: none;
+}
+
+.story-bar-tab > button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.story-bar-tab.is-active > button {
+  background: var(--surface-raised);
+  border-color: var(--stroke);
+  color: var(--ink);
+}
+
+.story-bar-tab-add {
+  background: transparent;
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  flex: none;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.story-bar-tab-add:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
 .story-side {
   background: var(--surface);
   border-right: 1px solid var(--stroke);
@@ -5976,6 +6023,13 @@ body.is-dragging-split {
   display: inline-block;
   height: 14px;
   width: 14px;
+}
+
+/* The ring inside a button: the rows that wait for a batch are flex, and a
+   button is not, so the room the ring needs beside its word is given here. */
+button > .story-spin {
+  margin-right: 6px;
+  vertical-align: -2px;
 }
 
 @keyframes story-spin {

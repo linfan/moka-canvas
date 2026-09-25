@@ -14,6 +14,11 @@
   "topBar": {
     "exportFilm": "导出成片…"
   },
+  "tabs": {
+    "list": "正在讲的故事",
+    "add": "新建故事",
+    "addHint": "再讲一个故事"
+  },
   "side": {
     "label": "故事列表",
     "title": "故事",
@@ -237,6 +242,7 @@
     "group_prop": "物品（{{count}}）",
     "all": "全部（{{count}}）",
     "counts": "{{characters}} 个角色 · {{scenes}} 个场景 · {{props}} 个物品",
+    "reading": "正在识别…",
     "recognise": "从章节里识别",
     "recogniseAgain": "重新识别",
     "recogniseTitle": "重新识别一遍？",

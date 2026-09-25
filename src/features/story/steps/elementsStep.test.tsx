@@ -244,6 +244,33 @@ describe("finding the cast in the chapters", () => {
     expect(starts[0]?.items[0]?.capability).toBe("text");
   });
 
+  it("says on the button that asked while the reading is under way", async () => {
+    openAtElements(buildStoryMokaFile());
+    fireEvent.click(screen.getByTestId("story-elements-recognise"));
+    fireEvent.click(screen.getByTestId("recognise-elements-confirm"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+
+    // A chapter's worth of words takes a while, and the reader is told so
+    // where they pressed rather than only in the tally beneath the list.
+    const button = screen.getByTestId("story-elements-recognise");
+    expect(button.textContent).toContain("Reading the chapters…");
+    expect(button.querySelector(".story-spin")).toBeTruthy();
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    answers.elements = castAnswer(
+      [{ name: "林", description: "灰呢大衣，说话很慢。", chapters: [1] }],
+      [],
+    );
+    await comesBack();
+    await waitFor(() => {
+      const done = screen.getByTestId("story-elements-recognise");
+      expect(done.textContent).toContain("Read the chapters again");
+      expect(done.querySelector(".story-spin")).toBeNull();
+    });
+  });
+
   it("says what reading again costs before it reads again", async () => {
     openAtElements(buildStoryMokaFile());
 

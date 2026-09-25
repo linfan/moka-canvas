@@ -89,6 +89,10 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   );
   const everyDrawn = story.elements.length > 0 && undrawn.length === 0;
   const spoken = story.elements.some((element) => element.descriptionConfirmed);
+  // The reading itself, rather than one of the drawings that follow it: a
+  // chapter's worth of words takes a while, and the button that asked for it
+  // is where a reader looks to see that it is still going.
+  const recognising = running?.kind === "elements";
 
   // The parts of a long telling are read one after another, the next one
   // beginning when the one before it is over rather than when the reader
@@ -259,9 +263,12 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
               }
               type="button"
             >
-              {story.elements.length === 0
-                ? t("story:elements.recognise")
-                : t("story:elements.recogniseAgain")}
+              {recognising && <span className="story-spin" />}
+              {recognising
+                ? t("story:elements.reading")
+                : story.elements.length === 0
+                  ? t("story:elements.recognise")
+                  : t("story:elements.recogniseAgain")}
             </button>
           </div>
         </div>
@@ -309,7 +316,10 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
                 onClick={() => void begin()}
                 type="button"
               >
-                {t("story:elements.recognise")}
+                {recognising && <span className="story-spin" />}
+                {recognising
+                  ? t("story:elements.reading")
+                  : t("story:elements.recognise")}
               </button>
             </div>
           </div>

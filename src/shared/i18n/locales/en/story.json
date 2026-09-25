@@ -14,6 +14,11 @@
   "topBar": {
     "exportFilm": "Export the film…"
   },
+  "tabs": {
+    "list": "Stories being told",
+    "add": "New story",
+    "addHint": "Start another story"
+  },
   "side": {
     "label": "Stories",
     "title": "Stories",
@@ -237,6 +242,7 @@
     "group_prop": "Props ({{count}})",
     "all": "All ({{count}})",
     "counts": "{{characters}} characters · {{scenes}} places · {{props}} props",
+    "reading": "Reading the chapters…",
     "recognise": "Find them in the chapters",
     "recogniseAgain": "Read the chapters again",
     "recogniseTitle": "Read the chapters again?",

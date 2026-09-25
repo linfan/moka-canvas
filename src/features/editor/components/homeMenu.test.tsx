@@ -76,4 +76,13 @@ describe("the corner menu's guard", () => {
     expect(menu).toBeTruthy();
     cleanup();
   });
+
+  it("lists the three rooms with the story room first", () => {
+    openMenu();
+    const rooms = screen
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent)
+      .filter((name) => name !== "Home");
+    expect(rooms).toEqual(["Story", "Canvas", "Clip"]);
+  });
 });
