@@ -55,15 +55,24 @@ impl Problem {
 
 pub fn status_for_code(code: &str) -> StatusCode {
     match code {
-        "NOT_FOUND" | "PROJECT_NOT_FOUND" | "RUN_NOT_FOUND" | "ASSET_MISSING"
-        | "TASK_NOT_FOUND" | "EXPORT_NOT_FOUND" | "TIMELINE_NOT_FOUND" => StatusCode::NOT_FOUND,
+        "NOT_FOUND"
+        | "PROJECT_NOT_FOUND"
+        | "RUN_NOT_FOUND"
+        | "ASSET_MISSING"
+        | "TASK_NOT_FOUND"
+        | "EXPORT_NOT_FOUND"
+        | "TIMELINE_NOT_FOUND"
+        | "STORY_NOT_FOUND"
+        | "STORY_JOB_NOT_FOUND" => StatusCode::NOT_FOUND,
         "PROJECT_NOT_OPEN"
         | "REVISION_CONFLICT"
         | "METADATA_CONFLICT"
         | "ASSET_IN_USE"
         | "CONFLICT"
         | "RUN_NOT_CANCELLABLE"
-        | "RUN_NOT_RETRYABLE" => StatusCode::CONFLICT,
+        | "RUN_NOT_RETRYABLE"
+        | "STORY_JOB_NOT_CANCELLABLE"
+        | "STORY_JOB_BUSY" => StatusCode::CONFLICT,
         // The job existed and is gone for good; retrying the same handle
         // cannot bring it back, which is what separates this from a 404.
         "TASK_EXPIRED" => StatusCode::GONE,

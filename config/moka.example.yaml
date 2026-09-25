@@ -68,6 +68,22 @@ generate:
   # See docs/security.md.
   # debug:
   #   enabled: false
+story:
+  # The story room asks for its answers in batches — a chapter's worth of
+  # drawings, an episode filmed shot by shot — and these bound those batches.
+  # Timeouts and retries are the ones under generate: a story's generation is a
+  # generation like any other.
+  # How many stories one project may tell.
+  maxStoriesPerProject: 20
+  # How many pieces one batch may carry.
+  maxItemsPerJob: 40
+  # How many generations may be in flight at once, across every batch. A batch
+  # of twenty pieces waits its turn here rather than opening twenty calls.
+  maxParallelItems: 2
+  # How many batches one project may be running at once.
+  maxActiveJobsPerProject: 1
+  # How many ended records a project keeps, besides the ones still running.
+  keepRecords: 100
 clip:
   # Where the timeline exporter finds ffmpeg. Left out, the search goes to
   # MOKA_FFMPEG and then to the platform search path. A machine with no ffmpeg

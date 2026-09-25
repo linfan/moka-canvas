@@ -49,28 +49,70 @@ pub async fn ingest_generated(
     if pieces.is_empty() {
         return Ok(Vec::new());
     }
+    let spec = node.data.generation.as_ref();
+    let provenance = provenance(run, node, spec, inputs);
+    let incoming = pieces
+        .iter()
+        .enumerate()
+        .map(|(index, piece)| Incoming {
+            name: display_name(node, run, index, pieces.len()),
+            bytes: piece.bytes.to_vec(),
+            mime: piece.mime.to_string(),
+            category_hint: category_hint(piece.kind, spec),
+            provenance: provenance.clone(),
+        })
+        .collect();
+    file_incoming(store, incoming).await
+}
+
+/// One file, ready to be written into a project.
+///
+/// The half of an ingest that does not care where the bytes came from: a
+/// provider's answer and a story job's answer are the same file once their
+/// names, their kinds and their origin have been decided.
+pub struct Incoming {
+    pub name: String,
+    pub bytes: Vec<u8>,
+    pub mime: String,
+    /// What the shelf should file it under, where a sniffer cannot tell.
+    pub category_hint: Option<String>,
+    pub provenance: AssetProvenance,
+}
+
+/// Writes files into the project's registry, all of them or none.
+///
+/// Either every file is registered or none is: a half-ingested answer would sit
+/// in the resources panel as clutter nobody asked for, with nothing to point at
+/// it. A file that fails takes the ones already registered with it, and the
+/// ones still waiting in tmp are deleted — the rest the store collects the next
+/// time the project opens.
+pub async fn file_incoming(
+    store: &dyn ProjectStore,
+    incoming: Vec<Incoming>,
+) -> Result<Vec<ResourceEntry>, ProjectError> {
+    if incoming.is_empty() {
+        return Ok(Vec::new());
+    }
     let root = store
         .current()
         .await?
         .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?
         .root;
-    let spec = node.data.generation.as_ref();
-    let provenance = provenance(run, node, spec, inputs);
 
-    let mut staged = Vec::with_capacity(pieces.len());
-    for (index, piece) in pieces.iter().enumerate() {
+    let mut staged = Vec::with_capacity(incoming.len());
+    for file in incoming {
         let tmp_path = new_tmp_path(&root)?;
-        if let Err(error) = std::fs::write(&tmp_path, piece.bytes) {
+        if let Err(error) = std::fs::write(&tmp_path, &file.bytes) {
             let _ = std::fs::remove_file(&tmp_path);
             discard(&mut staged);
             return Err(error.into());
         }
         staged.push(StagedAsset {
-            name: display_name(node, run, index, pieces.len()),
+            name: file.name,
             tmp_path,
-            declared_mime: Some(piece.mime.to_string()),
-            category_hint: category_hint(piece.kind, spec),
-            provenance: Some(provenance.clone()),
+            declared_mime: Some(file.mime),
+            category_hint: file.category_hint,
+            provenance: Some(file.provenance),
         });
     }
 
@@ -120,8 +162,8 @@ fn pieces(result: &GenerateResult) -> Vec<Piece<'_>> {
 }
 
 /// Leaves nothing behind for an ingest that did not finish: files still waiting
-/// in tmp are deleted, and the store collects the rest the next time the project
-/// opens.
+/// in tmp are deleted, and the store collects the rest the next time the
+/// project opens.
 fn discard(staged: &mut Vec<StagedAsset>) {
     for asset in staged.drain(..) {
         let _ = std::fs::remove_file(asset.tmp_path);
@@ -170,6 +212,8 @@ fn provenance(
         canvas_id: Some(run.canvas_id.clone()),
         operation_node_id: Some(node.id.clone()),
         assistant_session_id: run.assistant_session_id.clone(),
+        story_job_id: None,
+        story_id: None,
         input_asset_ids: if consumed.is_empty() {
             None
         } else {

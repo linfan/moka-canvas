@@ -5,6 +5,7 @@ use crate::generate::{Gateway, ModelRepo};
 use crate::metadata::{self, MetadataStore};
 use crate::project::store::FsProjectStore;
 use crate::project::ProjectStore;
+use crate::story::StoryJobManager;
 use crate::workflow::executor::DeterministicExecutor;
 use crate::workflow::provider::ProviderExecutor;
 use crate::workflow::runner::RunManager;
@@ -26,6 +27,9 @@ pub struct ApiState {
     pub models: Arc<ModelRepo>,
     pub gateway: Arc<Gateway>,
     pub runs: Arc<RunManager>,
+    /// The story room's batches, which drive generations of their own rather
+    /// than steps of a graph.
+    pub story_jobs: Arc<StoryJobManager>,
     /// Where the timeline exporter finds ffmpeg, and what it can do. Resolved
     /// once per process; a machine without one is not a failure to start.
     clip_probe: Arc<CapabilityProbe>,
@@ -76,9 +80,10 @@ impl ApiState {
                 &clip_probe,
             )))),
         ));
+        let provider = Arc::new(ProviderExecutor::new(Arc::clone(&gateway)));
         let executors: Vec<Arc<dyn WorkflowExecutor>> = vec![
             Arc::new(DeterministicExecutor::new()),
-            Arc::new(ProviderExecutor::new(Arc::clone(&gateway))),
+            Arc::clone(&provider) as Arc<dyn WorkflowExecutor>,
         ];
         let runs = RunManager::new(
             Arc::clone(&store),
@@ -86,6 +91,7 @@ impl ApiState {
             config.active_executors(),
             config.generate.concurrent_runs(),
         );
+        let story_jobs = StoryJobManager::new(Arc::clone(&store), provider, config.story.clone());
         Self {
             mode,
             store,
@@ -94,6 +100,7 @@ impl ApiState {
             gateway,
             config,
             runs,
+            story_jobs,
             clip_probe,
             exports: Arc::new(ExportRegistry::new()),
             converter_root,
@@ -184,6 +191,20 @@ pub fn router() -> axum::Router<ApiState> {
         .route(
             "/api/v1/projects/current/runs/{id}/retry",
             post(routes::retry_run),
+        )
+        // The story room's batches, beside the runs: both ask a provider for
+        // work, and neither is the other's business.
+        .route(
+            "/api/v1/projects/current/story/jobs",
+            get(routes::list_story_jobs).post(routes::start_story_job),
+        )
+        .route(
+            "/api/v1/projects/current/story/jobs/{id}",
+            get(routes::get_story_job),
+        )
+        .route(
+            "/api/v1/projects/current/story/jobs/{id}/cancel",
+            post(routes::cancel_story_job),
         )
         // Beside the run routes rather than under /generate: it answers from the
         // open document, so it belongs where the rest of the document is read.

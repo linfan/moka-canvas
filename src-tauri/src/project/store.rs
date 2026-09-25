@@ -14,6 +14,7 @@ use crate::project::{
     AssetChange, AssetFile, AssetShelfEdit, ByteRange, CreateProject, FiledAsset, OpenProject,
     PackageReport, PackageScope, ProjectError, ProjectStore, SaveResult, StagedAsset,
 };
+use crate::story::{StoryJobRecord, StoryJobStatus};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -50,6 +51,7 @@ impl FsProjectStore {
         }
         std::fs::create_dir_all(root.join("output"))?;
         std::fs::create_dir_all(root.join("history").join("runs"))?;
+        std::fs::create_dir_all(root.join("history").join("story-jobs"))?;
         std::fs::create_dir_all(root.join("tmp"))?;
         Ok(())
     }
@@ -66,6 +68,15 @@ impl FsProjectStore {
                 }
             }
         }
+    }
+
+    /// The root of the open project, or the reason there is nothing to write to.
+    fn open_root(&self) -> Result<PathBuf, ProjectError> {
+        let guard = self.state.lock().expect("store poisoned");
+        guard
+            .as_ref()
+            .map(|state| state.root.clone())
+            .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))
     }
 
     fn runs_dir(root: &Path) -> PathBuf {
@@ -118,6 +129,125 @@ impl FsProjectStore {
         let bytes = serde_json::to_vec_pretty(run)
             .map_err(|error| ProjectError::domain("INTERNAL", error.to_string()))?;
         Self::write_json(&Self::runs_dir(root), &run.id, &bytes)
+    }
+
+    /// The records of story jobs, one file each, beside the runs.
+    ///
+    /// A job is a batch of generations rather than a run of a graph, and the
+    /// two are read by different rooms, so they are kept apart rather than
+    /// told apart by a field that everything reading runs would have to know
+    /// about.
+    fn story_jobs_dir(root: &Path) -> PathBuf {
+        root.join("history").join("story-jobs")
+    }
+
+    /// Job ids are uuids; anything else can never resolve to a record file.
+    fn story_job_path(root: &Path, id: &str) -> Result<PathBuf, ProjectError> {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(ProjectError::domain(
+                "STORY_JOB_NOT_FOUND",
+                "Story job not found",
+            ));
+        }
+        Ok(Self::story_jobs_dir(root).join(format!("{id}.json")))
+    }
+
+    fn write_story_job(root: &Path, job: &StoryJobRecord) -> Result<(), ProjectError> {
+        let bytes = serde_json::to_vec_pretty(job)
+            .map_err(|error| ProjectError::domain("INTERNAL", error.to_string()))?;
+        Self::write_json(&Self::story_jobs_dir(root), &job.id, &bytes)
+    }
+
+    /// Whether a story job left in progress can be picked up again rather than
+    /// failed.
+    ///
+    /// Only a batch waiting on a shot can be: the provider is still filming it
+    /// and the handle to ask again with is on the record. Anything else was in
+    /// the middle of something this process was doing, which stopped with it.
+    fn is_resumable_story_job(job: &StoryJobRecord) -> bool {
+        job.items.iter().any(|item| {
+            matches!(
+                item.status,
+                StoryJobStatus::Queued | StoryJobStatus::Running
+            ) && item.task_id.is_some()
+        })
+    }
+
+    /// Story jobs left running by a dead process are failed on open, unless one
+    /// is waiting on a shot that is still out there — that one is left as it is
+    /// and picked up again, because failing it would throw away an answer
+    /// already paid for.
+    fn sweep_interrupted_story_jobs(root: &Path) {
+        let dir = Self::story_jobs_dir(root);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(mut job) = serde_json::from_str::<StoryJobRecord>(&raw) else {
+                continue;
+            };
+            if job.status.is_terminal() {
+                continue;
+            }
+            if Self::is_resumable_story_job(&job) {
+                continue;
+            }
+            job.status = StoryJobStatus::Failed;
+            job.error = Some("The app stopped while this job was in progress".to_string());
+            for item in &mut job.items {
+                if matches!(
+                    item.status,
+                    StoryJobStatus::Queued | StoryJobStatus::Running
+                ) {
+                    item.status = StoryJobStatus::Failed;
+                    item.error = Some("Interrupted before completion".to_string());
+                    item.retryable = Some(true);
+                }
+            }
+            job.updated_at = now_iso();
+            let _ = Self::write_story_job(root, &job);
+        }
+    }
+
+    /// Keeps the records worth keeping: the recent ones, and every batch that
+    /// has not settled.
+    ///
+    /// A record that has ended is a note about work already applied, so the
+    /// old ones are clutter; one still in progress is what a client is
+    /// following and is never dropped, however old it looks.
+    fn prune_story_jobs(root: &Path, keep: usize) {
+        let dir = Self::story_jobs_dir(root);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        let mut jobs: Vec<(PathBuf, StoryJobRecord)> = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(job) = serde_json::from_str::<StoryJobRecord>(&raw) else {
+                continue;
+            };
+            jobs.push((path, job));
+        }
+        // Newest first, so everything past the ceiling is the oldest.
+        jobs.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
+        for (index, (path, job)) in jobs.iter().enumerate() {
+            if job.status.is_terminal() && index >= keep {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 
     /// The records of jobs a provider is still running, kept beside the runs
@@ -202,6 +332,22 @@ impl FsProjectStore {
             .into_iter()
             .filter(|run| matches!(run.status, RunStatus::Queued | RunStatus::Running))
             .map(|run| run.id)
+            .collect())
+    }
+
+    /// The story jobs a previous process left mid-flight, which is to say the
+    /// ones the sweep just declined to fail.
+    ///
+    /// Read after a project is open and only there, for the same reason runs
+    /// are: what is still in progress is waiting on a shot somebody else is
+    /// still filming.
+    pub async fn interrupted_story_jobs(&self) -> Result<Vec<String>, ProjectError> {
+        Ok(self
+            .list_story_jobs()
+            .await?
+            .into_iter()
+            .filter(|job| !job.status.is_terminal())
+            .map(|job| job.id)
             .collect())
     }
 
@@ -569,6 +715,7 @@ impl ProjectStore for FsProjectStore {
         let (moka, stamp) = self.load_from_disk(&root)?;
         Self::clean_tmp(&root);
         Self::sweep_interrupted_runs(&root);
+        Self::sweep_interrupted_story_jobs(&root);
         let report = Self::self_check(&root, &moka);
         let revision = moka.metadata.revision;
         {
@@ -946,6 +1093,8 @@ impl ProjectStore for FsProjectStore {
                 canvas_id: Some(canvas_id.to_string()),
                 operation_node_id: Some(node_id.to_string()),
                 assistant_session_id: None,
+                story_job_id: None,
+                story_id: None,
                 input_asset_ids: None,
                 parameter_snapshot: None,
                 created_at: now,
@@ -1172,6 +1321,55 @@ impl ProjectStore for FsProjectStore {
         // A record that cannot be read is a record that is not there: what it
         // named is gone either way, and saying so lets the caller answer once.
         Ok(serde_json::from_str(&raw).ok())
+    }
+
+    async fn list_story_jobs(&self) -> Result<Vec<StoryJobRecord>, ProjectError> {
+        let root = self.open_root()?;
+        Self::prune_story_jobs(&root, self.config.story.keep_records);
+        let dir = Self::story_jobs_dir(&root);
+        let mut jobs = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Ok(raw) = std::fs::read_to_string(&path) {
+                    if let Ok(job) = serde_json::from_str::<StoryJobRecord>(&raw) {
+                        jobs.push(job);
+                    }
+                }
+            }
+        }
+        jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(jobs)
+    }
+
+    async fn create_story_job(&self, job: StoryJobRecord) -> Result<StoryJobRecord, ProjectError> {
+        let root = self.open_root()?;
+        Self::write_story_job(&root, &job)?;
+        Ok(job)
+    }
+
+    async fn get_story_job(&self, id: &str) -> Result<StoryJobRecord, ProjectError> {
+        let root = self.open_root()?;
+        let path = Self::story_job_path(&root, id)?;
+        let raw = std::fs::read_to_string(&path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ProjectError::domain("STORY_JOB_NOT_FOUND", "Story job not found")
+            } else {
+                ProjectError::Io(error)
+            }
+        })?;
+        serde_json::from_str(&raw).map_err(|error| {
+            ProjectError::domain("INTERNAL", format!("Story job record is corrupt: {error}"))
+        })
+    }
+
+    async fn update_story_job(&self, job: StoryJobRecord) -> Result<StoryJobRecord, ProjectError> {
+        let root = self.open_root()?;
+        Self::write_story_job(&root, &job)?;
+        Ok(job)
     }
 }
 

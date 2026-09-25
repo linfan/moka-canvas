@@ -418,6 +418,38 @@ fn default_max_output_items() -> usize {
 fn default_video_max_polls() -> u32 {
     120
 }
+
+/// Budgets for the story room's batches, which are generations like any other
+/// and are bounded like any other. What is different is the shape of the ask:
+/// one job is dozens of pieces, so how wide a batch may run is its own number.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StoryConfig {
+    /// How many stories one project may tell. The same number as the client
+    /// enforces, so a room that offers the button is never refused by a server
+    /// that would not have taken it.
+    pub max_stories_per_project: usize,
+    /// How many pieces one batch may carry.
+    pub max_items_per_job: usize,
+    /// How many generations may be in flight at once, across every batch.
+    pub max_parallel_items: usize,
+    /// How many batches one project may be running at once.
+    pub max_active_jobs_per_project: usize,
+    /// How many ended records a project keeps, besides the ones still running.
+    pub keep_records: usize,
+}
+
+impl Default for StoryConfig {
+    fn default() -> Self {
+        Self {
+            max_stories_per_project: 20,
+            max_items_per_job: 40,
+            max_parallel_items: 2,
+            max_active_jobs_per_project: 1,
+            keep_records: 100,
+        }
+    }
+}
 fn default_clip_timeout_seconds() -> u64 {
     3_600
 }
@@ -434,6 +466,8 @@ pub struct AppConfig {
     pub workflow: WorkflowConfig,
     #[serde(default)]
     pub generate: GenerateConfig,
+    #[serde(default)]
+    pub story: StoryConfig,
     #[serde(default)]
     pub clip: ClipConfig,
     pub public: PublicConfig,
@@ -454,6 +488,7 @@ impl Default for AppConfig {
             metadata: MetadataConfig::default(),
             workflow: WorkflowConfig::default(),
             generate: GenerateConfig::default(),
+            story: StoryConfig::default(),
             clip: ClipConfig::default(),
             public: PublicConfig::default(),
             limits: LimitsConfig::default(),
@@ -666,6 +701,7 @@ pub fn parse_test_config(root: &Path) -> AppConfig {
         },
         workflow: WorkflowConfig::default(),
         generate: GenerateConfig::default(),
+        story: StoryConfig::default(),
         clip: ClipConfig::default(),
         public: PublicConfig {
             product_name: "Moka Canvas".into(),

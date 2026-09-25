@@ -15,6 +15,7 @@ use moka_canvas::project::{
     AssetChange, AssetFile, AssetShelfEdit, ByteRange, CreateProject, FiledAsset, OpenProject,
     PackageReport, PackageScope, ProjectError, ProjectStore, SaveResult, StagedAsset,
 };
+use moka_canvas::story::StoryJobRecord;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -411,6 +412,18 @@ impl ProjectStore for RefusesAfter {
     }
     async fn job(&self, id: &str) -> Result<Option<serde_json::Value>, ProjectError> {
         self.inner.job(id).await
+    }
+    async fn list_story_jobs(&self) -> Result<Vec<StoryJobRecord>, ProjectError> {
+        self.inner.list_story_jobs().await
+    }
+    async fn create_story_job(&self, job: StoryJobRecord) -> Result<StoryJobRecord, ProjectError> {
+        self.inner.create_story_job(job).await
+    }
+    async fn get_story_job(&self, id: &str) -> Result<StoryJobRecord, ProjectError> {
+        self.inner.get_story_job(id).await
+    }
+    async fn update_story_job(&self, job: StoryJobRecord) -> Result<StoryJobRecord, ProjectError> {
+        self.inner.update_story_job(job).await
     }
 }
 

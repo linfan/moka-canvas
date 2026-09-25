@@ -567,6 +567,8 @@ async fn stage_generated_project(root: &Path) -> StagedProject {
                 canvas_id: Some(canvas_id.clone()),
                 operation_node_id: Some("node-1".to_string()),
                 assistant_session_id: Some(ASKED_IN_SESSION.to_string()),
+                story_job_id: None,
+                story_id: None,
                 input_asset_ids: None,
                 parameter_snapshot: Some(json!({
                     "model": "a-model",

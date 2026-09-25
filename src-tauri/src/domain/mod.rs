@@ -91,6 +91,16 @@ pub struct AssetProvenance {
     /// conversations travel with a full backup and not with a package of the work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assistant_session_id: Option<SessionId>,
+    /// The story job whose item drew this, and the story it was drawn for.
+    ///
+    /// A story job is a batch of generations rather than a run of a graph, so
+    /// the reference a picture carries is the batch and the place in the
+    /// document it was filed under. Both are this machine's: they name work
+    /// that happened here and are not part of what a package carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub story_job_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub story_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_asset_ids: Option<Vec<AssetId>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

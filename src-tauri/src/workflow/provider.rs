@@ -14,7 +14,8 @@ use super::{
 };
 use crate::domain::{Capability, RunId, ValidationIssue};
 use crate::generate::{
-    Cancel, DeltaSink, Gateway, GenerateRequest, GenerateResult, ProviderError, TaskState,
+    AsyncTask, Cancel, DeltaSink, Gateway, GenerateRequest, GenerateResult, ProviderError,
+    TaskState,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -69,6 +70,85 @@ impl ProviderExecutor {
             gateway,
             in_flight: CancelRegistry::default(),
         }
+    }
+
+    /// One generation answered inside the call that asks for it.
+    ///
+    /// Borrowed by the story jobs, which drive batches of generations rather
+    /// than a graph: a batch has no nodes and no run to hang a cancel flag on,
+    /// so it brings its own flag and gets the same gateway call a step does.
+    /// Everything a step adds around it — the merged preferences, the retries,
+    /// the classification of a failure — is here rather than copied.
+    pub async fn answer_once(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ExecutionError> {
+        if asks_for_nothing(&request) {
+            return Err(ExecutionError {
+                code: "GENERATION_PROMPT_EMPTY",
+                message: "The prompt resolved to nothing and no reference came with it".to_string(),
+                retryable: false,
+                cancelled: false,
+            });
+        }
+        let result = answered(&self.gateway, &request, &DeltaSink::default(), cancel)
+            .await
+            .map_err(step_error)?;
+        cancel.check().map_err(step_error)?;
+        Ok(result)
+    }
+
+    /// Places a shot and hands the handle back without waiting for it.
+    ///
+    /// Split from the wait so a caller can write the handle down in between: a
+    /// job that was placed before a process stopped is collectable by the next
+    /// one only if something on disk says it exists.
+    pub async fn shoot(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<AsyncTask, ExecutionError> {
+        // Only a shot is a job. Everything else answers inside the call that
+        // asks, and a caller that named another capability has the wrong door.
+        if request.capability != Capability::Video {
+            return Err(ExecutionError {
+                code: "VALIDATION_FAILED",
+                message: "Only a shot is placed as a job".to_string(),
+                retryable: false,
+                cancelled: false,
+            });
+        }
+        if asks_for_nothing(&request) {
+            return Err(ExecutionError {
+                code: "GENERATION_PROMPT_EMPTY",
+                message: "The prompt resolved to nothing and no reference came with it".to_string(),
+                retryable: false,
+                cancelled: false,
+            });
+        }
+        self.gateway
+            .video(request, cancel)
+            .await
+            .map_err(step_error)
+    }
+
+    /// Waits out a job that was placed earlier, whoever placed it.
+    ///
+    /// The handle is the whole state: nothing else about the caller is needed
+    /// to ask after it again, which is what lets the wait outlive the process
+    /// that started it.
+    pub async fn collect(
+        &self,
+        task: &str,
+        cancel: &Cancel,
+        progress: &ProgressReporter,
+    ) -> Result<GenerateResult, ExecutionError> {
+        let result = waited(&self.gateway, task, cancel, progress)
+            .await
+            .map_err(step_error)?;
+        cancel.check().map_err(step_error)?;
+        Ok(result)
     }
 }
 

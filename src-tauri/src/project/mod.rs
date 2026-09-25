@@ -3,6 +3,7 @@ pub mod package;
 pub mod store;
 
 use crate::domain::{AssetProvenance, MokaFile, ResourceEntry, SelfCheckReport};
+use crate::story::StoryJobRecord;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -213,4 +214,13 @@ pub trait ProjectStore: Send + Sync {
     async fn drop_job(&self, id: &str) -> Result<(), ProjectError>;
     /// The record kept for one job, if there still is one.
     async fn job(&self, id: &str) -> Result<Option<serde_json::Value>, ProjectError>;
+    /// The story jobs this project has been asked for, newest first.
+    ///
+    /// Reading the list also sweeps the old records away: what a project keeps
+    /// is the recent batches and every batch that has not settled, and nothing
+    /// else reads the directory to notice the rest.
+    async fn list_story_jobs(&self) -> Result<Vec<StoryJobRecord>, ProjectError>;
+    async fn create_story_job(&self, job: StoryJobRecord) -> Result<StoryJobRecord, ProjectError>;
+    async fn get_story_job(&self, id: &str) -> Result<StoryJobRecord, ProjectError>;
+    async fn update_story_job(&self, job: StoryJobRecord) -> Result<StoryJobRecord, ProjectError>;
 }

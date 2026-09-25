@@ -4,6 +4,7 @@ use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, InputRole, Usage
 use crate::metadata::{
     AudioPreferences, ImagePreferences, ModelDraft, SecretStorage, VideoPreferences,
 };
+use crate::story::{StoryJobItem, StoryJobKind, StoryTarget};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,80 @@ pub struct ImportProjectRequest {
 pub struct ApplyCommandsRequest {
     pub expected_revision: i32,
     pub commands: Vec<DocumentCommand>,
+}
+
+/// One batch of story generations, as a room asks for it.
+///
+/// The pieces carry their own prompts and references because the story is the
+/// room's: which character a drawing is of, what a shot says — all of it is
+/// read out of the document by the client and sent up already resolved. What
+/// comes back is applied by the client the same way, by the ids it chose.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartStoryJobRequest {
+    pub story_id: String,
+    pub kind: StoryJobKind,
+    pub items: Vec<StoryJobItemDraft>,
+}
+
+/// Which batches a reader is asking for: one story's, or the project's.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryJobQuery {
+    #[serde(default)]
+    pub story_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryJobItemDraft {
+    pub id: String,
+    pub target: StoryTarget,
+    pub capability: Capability,
+    pub prompt: String,
+    #[serde(default)]
+    pub inputs: Vec<StoryJobInput>,
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+}
+
+/// A reference a piece carries, as the client says what it is for.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryJobInput {
+    pub role: InputRole,
+    pub asset_id: String,
+}
+
+impl StoryJobInput {
+    /// The same input as the generation layer reads it, with no window: a story
+    /// asks for a whole drawing or a whole clip, never for a stretch of one.
+    pub fn into_generate_input(self) -> crate::generate::GenerateInput {
+        crate::generate::GenerateInput {
+            role: self.role,
+            asset_id: self.asset_id,
+            window: None,
+        }
+    }
+}
+
+impl StoryJobItemDraft {
+    /// The piece the job manager works with.
+    pub fn into_item(self) -> StoryJobItem {
+        StoryJobItem::queued(
+            self.id,
+            self.target,
+            self.capability,
+            self.prompt,
+            self.inputs
+                .into_iter()
+                .map(StoryJobInput::into_generate_input)
+                .collect(),
+            self.params.unwrap_or(serde_json::Value::Null),
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]

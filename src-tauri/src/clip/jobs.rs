@@ -254,6 +254,8 @@ impl ArtifactSink for ProjectSink {
                     canvas_id: None,
                     operation_node_id: None,
                     assistant_session_id: None,
+                    story_job_id: None,
+                    story_id: None,
                     input_asset_ids: None,
                     // What this file is a render of, so a reader a month from
                     // now can tell it from anything else in the project.

@@ -1,0 +1,1110 @@
+//! Story jobs, end to end: a batch asked for, answered, filed, and followed.
+//!
+//! What is checked here is the join between the batch machine and everything
+//! under it — the gateway, the ingest, the project store, the routes. A
+//! provider stands in for the far end, so a batch of drawings is answered with
+//! real bytes that land in a real project's registry, a shot is placed and then
+//! looked at until it answers, and a batch left waiting on one is picked up
+//! again by the process that opens the project next.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use axum::body::{to_bytes, Body, Bytes};
+use axum::extract::Path as Route;
+use axum::http::{header, Request, StatusCode};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use base64::Engine;
+use moka_canvas::api::ApiState;
+use moka_canvas::config::{parse_test_config, RuntimeMode};
+use moka_canvas::domain::Capability;
+use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
+use moka_canvas::metadata::{Defaults, ModelDraft, Protocol};
+use serde_json::{json, Value};
+use tempfile::TempDir;
+use tower::ServiceExt;
+
+/// The story every test here tells, and the chapter of it a piece is aimed at.
+const STORY: &str = "story-1";
+const NOW: &str = "2026-01-01T00:00:00.000Z";
+
+/// The models a test configures, one per capability it asks of.
+const WRITER: &str = "scribe-1";
+const PAINTER: &str = "painter-1";
+const SHOOTER: &str = "shooter-1";
+
+const API_KEY: &str = "sk-test-1234567890abcd";
+
+/// What the writer says, which a text batch keeps whole.
+const SENTENCE: &str = "第一集：他在站台上等一班已经停运的列车。";
+
+/// The handle a provider's own endpoint issues for a shot, which the gateway
+/// keeps to itself and polls with.
+const JOB: &str = "job-at-the-provider";
+
+/// The handle this app tracks a placed shot by, which is what a record carries
+/// and what a process that comes next comes back by.
+const TASK: &str = "0192b7d4-0000-7000-8000-000000000001";
+
+/// A finished shot: the header of an MP4 and nothing else, because what a filed
+/// asset is filed as is read off its bytes rather than trusted from an answer.
+const SHOT: &[u8] = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom";
+
+struct Harness {
+    app: Router,
+    state: ApiState,
+    /// The directory the whole app is opened over, kept alive by the caller so
+    /// that one test can open a second app over the same one.
+    root: PathBuf,
+}
+
+/// Opens the app over a temporary directory that already holds a master key:
+/// a generation cannot be placed without a credential to send, and server mode
+/// would only make one on the first credential stored.
+fn harness_at(tmp: &TempDir) -> Harness {
+    let config = parse_test_config(tmp.path());
+    let metadata = config
+        .metadata
+        .dir
+        .clone()
+        .expect("the test configuration sets a metadata directory");
+    std::fs::create_dir_all(&metadata).expect("the metadata directory is created");
+    let encoded = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+    std::fs::write(metadata.join(MASTER_KEY_FILE), encoded).expect("the master key is written");
+    let state = ApiState::new(config, RuntimeMode::Web, &metadata).expect("the store opens");
+    let app = moka_canvas::server::router(state.clone());
+    Harness {
+        app,
+        state,
+        root: tmp.path().to_path_buf(),
+    }
+}
+
+impl Harness {
+    /// Points the app at throwaway models and makes them the defaults.
+    async fn configure(&self, base_url: &str, models: &[(&str, Capability)]) {
+        let mut defaults = Defaults::default();
+        for (id, capability) in models {
+            let (protocol, suffix) = match capability {
+                Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
+                Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
+                Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
+                Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
+                Capability::Asr => (Protocol::Custom, "/v1/transcription"),
+            };
+            self.state
+                .models
+                .upsert(ModelDraft {
+                    id: (*id).into(),
+                    category: *capability,
+                    protocol,
+                    url: format!("{base_url}{suffix}"),
+                    model: (*id).into(),
+                    display_name: (*id).into(),
+                    enabled: true,
+                    expected_revision: None,
+                })
+                .await
+                .expect("the model is stored");
+            self.state
+                .models
+                .set_key(id, Some(API_KEY))
+                .await
+                .expect("the credential is stored");
+            match capability {
+                Capability::Text => defaults.text = Some((*id).to_string()),
+                Capability::Image => defaults.image = Some((*id).to_string()),
+                Capability::Audio => defaults.audio = Some((*id).to_string()),
+                Capability::Video => defaults.video = Some((*id).to_string()),
+                Capability::Asr => defaults.asr = Some((*id).to_string()),
+            }
+        }
+        self.state
+            .models
+            .set_defaults(&defaults, None)
+            .await
+            .expect("the defaults are stored");
+    }
+
+    /// Creates the project a batch happens in, tells it one story, and answers
+    /// with the directory a restart would open.
+    async fn project(&self, name: &str) -> PathBuf {
+        let created = self
+            .send_json(
+                json_request(
+                    "POST",
+                    "/api/v1/projects",
+                    json!({
+                        "directory": self.root.join("projects").to_string_lossy(),
+                        "name": name,
+                    }),
+                ),
+                StatusCode::CREATED,
+            )
+            .await;
+        let root = PathBuf::from(created["root"].as_str().expect("a root is reported"));
+        let revision = document_revision(&self.document().await);
+        self.send_json(
+            json_request(
+                "POST",
+                "/api/v1/projects/current/commands",
+                json!({
+                    "expectedRevision": revision,
+                    "commands": [{ "type": "addStory", "story": story_document() }],
+                }),
+            ),
+            StatusCode::OK,
+        )
+        .await;
+        root
+    }
+
+    async fn document(&self) -> Value {
+        self.send_json(get_request("/api/v1/projects/current"), StatusCode::OK)
+            .await
+    }
+
+    /// Asks for a batch, and answers with whatever the server said.
+    async fn start(&self, request: Value) -> (StatusCode, Value) {
+        let response = self
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                "/api/v1/projects/current/story/jobs",
+                request,
+            ))
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, body_json(response).await)
+    }
+
+    async fn start_ok(&self, request: Value) -> Value {
+        let (status, body) = self.start(request).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        body
+    }
+
+    async fn job(&self, id: &str) -> Value {
+        self.send_json(
+            get_request(&format!("/api/v1/projects/current/story/jobs/{id}")),
+            StatusCode::OK,
+        )
+        .await
+    }
+
+    async fn jobs(&self) -> Value {
+        self.send_json(
+            get_request("/api/v1/projects/current/story/jobs"),
+            StatusCode::OK,
+        )
+        .await
+    }
+
+    async fn cancel(&self, id: &str) -> (StatusCode, Value) {
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/projects/current/story/jobs/{id}/cancel"))
+            .body(Body::empty())
+            .expect("a request is built");
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        (status, body_json(response).await)
+    }
+
+    /// Waits a batch out, which the provider here answers fast enough that a
+    /// few seconds without a terminal state is a batch that never settles.
+    async fn settled(&self, id: &str) -> Value {
+        for _ in 0..240 {
+            let job = self.job(id).await;
+            let status = job["status"].as_str().expect("a job has a status");
+            if status != "queued" && status != "running" {
+                return job;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        panic!("story job {id} did not reach a terminal state");
+    }
+
+    /// Waits until a piece's handle is on the record, which is the moment a
+    /// shot exists at the far end and nothing on this side has answered yet.
+    async fn until_placed(&self, id: &str) -> String {
+        for _ in 0..120 {
+            let job = self.job(id).await;
+            if let Some(task_id) = job["items"][0]["taskId"].as_str() {
+                return task_id.to_string();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        panic!("story job {id} never wrote the handle down");
+    }
+
+    /// Opens the project again, which is what a restart does before anything
+    /// else and the moment the batches a previous process left are picked up.
+    async fn reopen(&self) {
+        let listed = self
+            .send_json(get_request("/api/v1/recent-projects"), StatusCode::OK)
+            .await;
+        let path = listed[0]["path"]
+            .as_str()
+            .expect("the project that was made is the recent one")
+            .to_string();
+        self.send_json(
+            json_request("POST", "/api/v1/projects/open", json!({ "path": path })),
+            StatusCode::OK,
+        )
+        .await;
+    }
+
+    async fn send_json(&self, request: Request<Body>, expected: StatusCode) -> Value {
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), expected);
+        body_json(response).await
+    }
+}
+
+async fn body_json(response: axum::http::Response<Body>) -> Value {
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice(&bytes).expect("a response body is JSON")
+}
+
+fn json_request(method: &str, uri: &str, payload: Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap()
+}
+
+fn get_request(uri: &str) -> Request<Body> {
+    Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap()
+}
+
+fn document_revision(document: &Value) -> i64 {
+    document["moka"]["metadata"]["revision"]
+        .as_i64()
+        .expect("the document carries a revision")
+}
+
+fn story_document() -> Value {
+    json!({
+        "id": STORY,
+        "name": "雨夜列车",
+        "schemaVersion": 1,
+        "brief": {
+            "idea": "末班列车上，两个陌生人交换了各自要说的话。",
+            "totalDurationMs": 120000,
+            "aspect": "16:9",
+            "genre": "对白剧情",
+            "style": "现代都市风"
+        },
+        "chapters": [],
+        "elements": [],
+        "shotGranularity": "act",
+        "createdAt": NOW,
+        "updatedAt": NOW,
+    })
+}
+
+/// A batch of one kind, carrying the pieces given.
+fn batch(kind: &str, items: Vec<Value>) -> Value {
+    json!({ "storyId": STORY, "kind": kind, "items": items })
+}
+
+/// One piece, aimed at a slot of the kind its target names.
+fn piece(id: &str, target: Value, capability: &str, prompt: &str) -> Value {
+    json!({
+        "id": id,
+        "target": target,
+        "capability": capability,
+        "prompt": prompt,
+        "params": {},
+    })
+}
+
+fn keyframe_target(chapter: &str, act: &str, keyframe: &str) -> Value {
+    json!({
+        "kind": "keyframeArt",
+        "chapterId": chapter,
+        "actId": act,
+        "keyframeId": keyframe,
+    })
+}
+
+fn act_video_target(act: &str) -> Value {
+    json!({ "kind": "actVideo", "chapterId": "chapter-1", "actId": act })
+}
+
+/// A story job record as a process that stopped in the middle of one left it:
+/// one act being filmed, with the handle the far end issued for it or without.
+fn abandoned_job(task_id: Option<&str>) -> Value {
+    let mut item = json!({
+        "id": "act",
+        "target": act_video_target("act-1"),
+        "capability": "video",
+        "prompt": "站台上的灯一盏一盏亮起来",
+        "params": {},
+        "status": "running",
+    });
+    if let Some(task_id) = task_id {
+        item["taskId"] = json!(task_id);
+    }
+    json!({
+        "id": "job-abandoned",
+        "projectId": "whatever",
+        "storyId": STORY,
+        "kind": "actVideo",
+        "status": "running",
+        "model": SHOOTER,
+        "items": [item],
+        "createdAt": NOW,
+        "updatedAt": NOW,
+    })
+}
+
+/// Writes a record straight into the project's history, the way a process that
+/// stopped mid-flight would have left it behind.
+fn leave_record(root: &Path, job: Value) {
+    let dir = root.join("history").join("story-jobs");
+    std::fs::create_dir_all(&dir).unwrap();
+    let id = job["id"].as_str().unwrap();
+    std::fs::write(
+        dir.join(format!("{id}.json")),
+        serde_json::to_vec_pretty(&job).unwrap(),
+    )
+    .unwrap();
+}
+
+/// Writes the note a placed shot leaves beside the project, which is the only
+/// thing a process that comes next can find the job by.
+fn leave_job_note(root: &Path, task_id: &str) {
+    let dir = root.join("history").join("jobs");
+    std::fs::create_dir_all(&dir).unwrap();
+    let note = json!({
+        "id": task_id,
+        "reference": JOB,
+        "protocol": "openaiVideos",
+        "capability": "video",
+        "model": SHOOTER,
+        "createdAt": NOW,
+    });
+    std::fs::write(
+        dir.join(format!("{task_id}.json")),
+        serde_json::to_vec_pretty(&note).unwrap(),
+    )
+    .unwrap();
+}
+
+/// Starts a throwaway provider and returns the address a model would carry.
+async fn serve(routes: Router) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("an ephemeral port is available");
+    let address = listener.local_addr().expect("the socket has an address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, routes).await;
+    });
+    format!("http://{address}")
+}
+
+/// What a throwaway provider was asked, so a test can read the batch that
+/// reached the far end of the whole pipeline — and tell a shot placed from a
+/// shot merely looked at again.
+#[derive(Clone, Default)]
+struct Recorded {
+    asks: Arc<Mutex<Vec<Value>>>,
+    placed: Arc<Mutex<Vec<String>>>,
+    looks: Arc<Mutex<Vec<String>>>,
+}
+
+impl Recorded {
+    fn note(&self, body: &[u8]) {
+        if let Ok(asked) = serde_json::from_slice::<Value>(body) {
+            self.asks
+                .lock()
+                .expect("the notes are not poisoned")
+                .push(asked);
+        }
+    }
+
+    fn noted(&self, list: &Arc<Mutex<Vec<String>>>, value: &str) {
+        list.lock()
+            .expect("the notes are not poisoned")
+            .push(value.to_string());
+    }
+
+    fn count(&self) -> usize {
+        self.asks.lock().expect("the notes are not poisoned").len()
+    }
+
+    fn placed(&self) -> Vec<String> {
+        self.placed
+            .lock()
+            .expect("the notes are not poisoned")
+            .clone()
+    }
+
+    fn looks(&self) -> Vec<String> {
+        self.looks
+            .lock()
+            .expect("the notes are not poisoned")
+            .clone()
+    }
+}
+
+/// A provider that writes words, paints a picture and films a shot: everything
+/// one story step could ask for.
+fn answering(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
+    let writing = recorded.clone();
+    let painting = recorded.clone();
+    let starting = recorded;
+    let asking = starting.clone();
+    Router::new()
+        .route(
+            "/v1/responses",
+            post(move |body: Bytes| {
+                let recorded = writing.clone();
+                async move {
+                    recorded.note(&body);
+                    Json(json!({ "output_text": SENTENCE }))
+                }
+            }),
+        )
+        .route(
+            "/v1/images/generations",
+            post(move |body: Bytes| {
+                let recorded = painting.clone();
+                async move {
+                    recorded.note(&body);
+                    Json(json!({
+                        "created": 1_700_000_000u64,
+                        "data": [{ "b64_json": encoded(&picture(8, 6)) }],
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/v1/videos",
+            post(move |body: Bytes| {
+                let recorded = starting.clone();
+                async move {
+                    recorded.note(&body);
+                    recorded.noted(&recorded.placed, JOB);
+                    Json(json!({ "id": JOB, "status": "queued" }))
+                }
+            }),
+        )
+        .route(
+            "/v1/videos/{reference}",
+            get(move |Route(reference): Route<String>| {
+                let recorded = asking.clone();
+                let finished = Arc::clone(&finished);
+                async move {
+                    recorded.noted(&recorded.looks, &reference);
+                    let status = if finished.load(Ordering::SeqCst) {
+                        "succeeded"
+                    } else {
+                        "in_progress"
+                    };
+                    Json(json!({ "id": reference, "status": status }))
+                }
+            }),
+        )
+        .route(
+            "/v1/videos/{reference}/content",
+            get(|| async { ([(header::CONTENT_TYPE, "video/mp4")], SHOT.to_vec()) }),
+        )
+}
+
+/// A provider that paints the first picture, refuses the second, and paints
+/// everything after it: one refusal is one piece's bad luck.
+fn refusing_the_second_picture() -> Router {
+    Router::new().route(
+        "/v1/images/generations",
+        post(move |body: Bytes| async move {
+            let refused = serde_json::from_slice::<Value>(&body)
+                .ok()
+                .and_then(|asked| {
+                    asked["prompt"]
+                        .as_str()
+                        .map(|prompt| prompt.contains("第二格"))
+                })
+                .unwrap_or(false);
+            if refused {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": { "message": "that prompt cannot be drawn" } })),
+                );
+            }
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "created": 1_700_000_000u64,
+                    "data": [{ "b64_json": encoded(&picture(8, 6)) }],
+                })),
+            )
+        }),
+    )
+}
+
+fn encoded(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// A tiny PNG, sized so a test can tell one drawing from another.
+fn picture(width: u32, height: u32) -> Vec<u8> {
+    let mut png = image::RgbaImage::new(width, height);
+    for pixel in png.pixels_mut() {
+        *pixel = image::Rgba([30, 120, 200, 255]);
+    }
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(png)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    bytes
+}
+
+#[tokio::test]
+async fn a_batch_of_drawings_is_answered_and_filed_under_the_batch_that_asked() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
+    harness
+        .configure(&provider, &[(PAINTER, Capability::Image)])
+        .await;
+    harness.project("Story Drawings").await;
+
+    let job = harness
+        .start_ok(batch(
+            "keyframeArt",
+            vec![piece(
+                "kf:1",
+                keyframe_target("chapter-1", "act-1", "frame-1"),
+                "image",
+                "雨中的站台",
+            )],
+        ))
+        .await;
+    assert_eq!(job["status"], "queued");
+    let job_id = job["id"].as_str().expect("a job has an id").to_string();
+
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    assert_eq!(settled["model"], PAINTER);
+    let item = &settled["items"][0];
+    assert_eq!(item["status"], "succeeded");
+    let asset_id = item["assetIds"][0]
+        .as_str()
+        .expect("the answer became a file")
+        .to_string();
+    assert!(item["progress"].as_f64().unwrap_or_default() > 0.9);
+
+    // The file is in the project, and it says which batch drew it and which
+    // story it was drawn for.
+    let document = harness.document().await;
+    let entry = document["moka"]["resources"]["images"]
+        .as_array()
+        .expect("the shelf is a list")
+        .iter()
+        .find(|entry| entry["id"] == json!(asset_id))
+        .expect("the drawing is on the shelf")
+        .clone();
+    assert_eq!(entry["provenance"]["storyJobId"], json!(job_id));
+    assert_eq!(entry["provenance"]["storyId"], json!(STORY));
+    assert!(
+        entry["name"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("keyframe art"),
+        "the file says what it is: {}",
+        entry["name"]
+    );
+    assert_eq!(recorded.count(), 1, "one piece is one call");
+}
+
+#[tokio::test]
+async fn a_batch_of_words_keeps_what_the_provider_said() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded, Arc::new(AtomicBool::new(true)))).await;
+    harness
+        .configure(&provider, &[(WRITER, Capability::Text)])
+        .await;
+    harness.project("Story Words").await;
+
+    let outline = json!({ "kind": "outline" });
+    let job = harness
+        .start_ok(batch(
+            "outline",
+            vec![piece("outline", outline.clone(), "text", "把它拆成两集")],
+        ))
+        .await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "succeeded");
+    // Parsing the answer is the room's business: what is kept here is the whole
+    // of what the provider said.
+    assert_eq!(settled["items"][0]["text"], json!(SENTENCE));
+    assert!(
+        settled["items"][0]["assetIds"]
+            .as_array()
+            .map(|ids| ids.is_empty())
+            .unwrap_or(true),
+        "words are kept, not filed"
+    );
+}
+
+#[tokio::test]
+async fn a_shot_is_placed_written_down_and_then_waited_out() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let finished = Arc::new(AtomicBool::new(false));
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::clone(&finished))).await;
+    harness
+        .configure(&provider, &[(SHOOTER, Capability::Video)])
+        .await;
+    let project = harness.project("Story Shots").await;
+
+    let job = harness
+        .start_ok(batch(
+            "actVideo",
+            vec![piece(
+                "act",
+                act_video_target("act-1"),
+                "video",
+                "站台上的灯一盏一盏亮起来",
+            )],
+        ))
+        .await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+
+    // The handle reaches the record while the provider is still filming, which
+    // is the whole of what a restart comes back by.
+    let placed = harness.until_placed(&job_id).await;
+    assert_eq!(placed.len(), 36, "a handle of our own: {placed}");
+    assert!(
+        project
+            .join("history")
+            .join("jobs")
+            .join(format!("{placed}.json"))
+            .exists(),
+        "the handle is written down beside the project"
+    );
+
+    finished.store(true, Ordering::SeqCst);
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    let asset_id = settled["items"][0]["assetIds"][0].as_str().unwrap();
+    let document = harness.document().await;
+    assert!(
+        document["moka"]["resources"]["videos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == json!(asset_id)),
+        "the shot landed on the shelf"
+    );
+    assert_eq!(recorded.placed(), vec![JOB.to_string()], "placed once");
+}
+
+#[tokio::test]
+async fn a_batch_left_waiting_on_a_shot_is_picked_up_by_the_process_that_comes_next() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
+    harness
+        .configure(&provider, &[(SHOOTER, Capability::Video)])
+        .await;
+    let project = harness.project("Story Restart").await;
+
+    // A batch the process before this one placed and was waiting on when it
+    // stopped: the handle is on the record and the shot is out there.
+    leave_record(&project, abandoned_job(Some(TASK)));
+    leave_job_note(&project, TASK);
+
+    harness.reopen().await;
+
+    let mut settled = harness.job("job-abandoned").await;
+    for _ in 0..240 {
+        settled = harness.job("job-abandoned").await;
+        if settled["status"] == json!("succeeded") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    assert_eq!(settled["items"][0]["taskId"], json!(TASK));
+    assert!(
+        !settled["items"][0]["assetIds"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "the answer the provider was holding all along was collected"
+    );
+    assert!(
+        recorded.placed().is_empty(),
+        "the shot was waited out, not asked for a second time"
+    );
+    assert_eq!(
+        recorded.looks().len(),
+        1,
+        "and it was waited out by the handle the record carried"
+    );
+}
+
+#[tokio::test]
+async fn a_batch_is_cancelled_without_losing_the_pieces_that_answered() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let finished = Arc::new(AtomicBool::new(false));
+    let provider = serve(answering(Recorded::default(), Arc::clone(&finished))).await;
+    harness
+        .configure(&provider, &[(SHOOTER, Capability::Video)])
+        .await;
+    harness.project("Story Cancel").await;
+
+    let job = harness
+        .start_ok(batch(
+            "actVideo",
+            vec![
+                piece("act", act_video_target("act-1"), "video", "第一幕"),
+                piece("act:2", act_video_target("act-2"), "video", "第二幕"),
+                piece("act:3", act_video_target("act-3"), "video", "第三幕"),
+            ],
+        ))
+        .await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+    harness.until_placed(&job_id).await;
+
+    let (status, answered) = harness.cancel(&job_id).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(answered["cancelRequested"], json!(true));
+
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "cancelled", "{settled}");
+    // The pieces that were in flight are over; the one that was still waiting
+    // its turn is still queued, which is what a room reads to ask for the rest
+    // of the batch and not for the whole of it.
+    assert_eq!(settled["items"][0]["status"], "cancelled", "{settled}");
+    assert_eq!(settled["items"][2]["status"], "queued", "{settled}");
+}
+
+#[tokio::test]
+async fn one_piece_being_refused_does_not_take_the_others_with_it() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let provider = serve(refusing_the_second_picture()).await;
+    harness
+        .configure(&provider, &[(PAINTER, Capability::Image)])
+        .await;
+    harness.project("Story Refusal").await;
+
+    let job = harness
+        .start_ok(batch(
+            "keyframeArt",
+            vec![
+                piece(
+                    "kf:1",
+                    keyframe_target("chapter-1", "act-1", "frame-1"),
+                    "image",
+                    "第一格",
+                ),
+                piece(
+                    "kf:2",
+                    keyframe_target("chapter-1", "act-1", "frame-2"),
+                    "image",
+                    "第二格",
+                ),
+                piece(
+                    "kf:3",
+                    keyframe_target("chapter-1", "act-1", "frame-3"),
+                    "image",
+                    "第三格",
+                ),
+            ],
+        ))
+        .await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "failed");
+    assert_eq!(settled["error"], json!("1 of 3 items failed"));
+    assert_eq!(settled["items"][0]["status"], "succeeded", "{settled}");
+    assert_eq!(settled["items"][1]["status"], "failed", "{settled}");
+    assert_eq!(
+        settled["items"][1]["retryable"],
+        json!(false),
+        "a refusal is not worth asking again as it stands"
+    );
+    assert_eq!(settled["items"][2]["status"], "succeeded");
+    assert!(!settled["items"][2]["assetIds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn a_batch_that_asks_for_too_much_is_refused_before_a_provider_hears_of_it() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
+    harness
+        .configure(&provider, &[(PAINTER, Capability::Image)])
+        .await;
+    harness.project("Story Limits").await;
+
+    // Nothing in it.
+    let (status, body) = harness.start(batch("keyframeArt", Vec::new())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["details"]["issues"][0]["code"], "STORY_JOB_ITEM_LIMIT");
+
+    // A story that is not there.
+    let (status, body) = harness
+        .start(json!({
+            "storyId": "story-9",
+            "kind": "keyframeArt",
+            "items": [piece(
+                "kf:1",
+                keyframe_target("chapter-1", "act-1", "frame-1"),
+                "image",
+                "一格"
+            )],
+        }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["details"]["issues"][0]["code"], "STORY_NOT_FOUND");
+
+    // A piece aimed at a slot of another kind.
+    let (status, body) = harness
+        .start(batch(
+            "actVideo",
+            vec![piece(
+                "kf:1",
+                keyframe_target("chapter-1", "act-1", "frame-1"),
+                "image",
+                "一格",
+            )],
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["details"]["issues"][0]["code"], "STORY_TARGET_INVALID");
+
+    // A reference to a file the project does not have.
+    let (status, body) = harness
+        .start(batch(
+            "keyframeArt",
+            vec![json!({
+                "id": "kf:1",
+                "target": keyframe_target("chapter-1", "act-1", "frame-1"),
+                "capability": "image",
+                "prompt": "一格",
+                "inputs": [{ "role": "reference", "assetId": "asset-missing" }],
+            })],
+        ))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["details"]["issues"][0]["code"], "ASSET_MISSING");
+
+    // A piece asking for a parameter its capability does not take.
+    let (status, body) = harness
+        .start(batch(
+            "keyframeArt",
+            vec![json!({
+                "id": "kf:1",
+                "target": keyframe_target("chapter-1", "act-1", "frame-1"),
+                "capability": "image",
+                "prompt": "一格",
+                "params": { "seconds": 5 },
+            })],
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["details"]["issues"][0]["code"], "VALIDATION_FAILED");
+
+    assert_eq!(recorded.count(), 0, "nothing reached the provider");
+    assert!(
+        harness.jobs().await.as_array().unwrap().is_empty(),
+        "and no record was written"
+    );
+}
+
+#[tokio::test]
+async fn a_story_that_is_already_running_is_not_asked_for_again() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let finished = Arc::new(AtomicBool::new(false));
+    let provider = serve(answering(Recorded::default(), Arc::clone(&finished))).await;
+    harness
+        .configure(&provider, &[(SHOOTER, Capability::Video)])
+        .await;
+    harness.project("Story Busy").await;
+
+    let request = batch(
+        "actVideo",
+        vec![piece("act", act_video_target("act-1"), "video", "站台")],
+    );
+    let first = harness.start_ok(request.clone()).await;
+    let (status, body) = harness.start(request).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["details"]["issues"][0]["code"], "STORY_JOB_BUSY");
+
+    // A batch that has ended leaves the story free again, which is what a
+    // second attempt needs.
+    finished.store(true, Ordering::SeqCst);
+    harness.settled(first["id"].as_str().unwrap()).await;
+    harness
+        .start_ok(batch(
+            "actVideo",
+            vec![piece("act:2", act_video_target("act-2"), "video", "车厢")],
+        ))
+        .await;
+}
+
+#[tokio::test]
+async fn a_batch_a_previous_process_was_running_is_failed_on_the_next_open() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let provider = serve(answering(
+        Recorded::default(),
+        Arc::new(AtomicBool::new(true)),
+    ))
+    .await;
+    harness
+        .configure(&provider, &[(PAINTER, Capability::Image)])
+        .await;
+    let project = harness.project("Story Sweep").await;
+
+    // A batch nothing will ever answer: no shot was placed, so no handle is
+    // out there and the work stopped with the process.
+    leave_record(&project, abandoned_job(None));
+
+    harness.reopen().await;
+
+    let swept = harness.job("job-abandoned").await;
+    assert_eq!(swept["status"], "failed");
+    assert_eq!(
+        swept["error"],
+        json!("The app stopped while this job was in progress")
+    );
+    assert_eq!(swept["items"][0]["status"], "failed");
+    assert_eq!(
+        swept["items"][0]["retryable"],
+        json!(true),
+        "the same request is worth asking again"
+    );
+}
+
+#[tokio::test]
+async fn a_batch_whose_pieces_already_answered_is_not_asked_for_them_again() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
+    harness
+        .configure(&provider, &[(SHOOTER, Capability::Video)])
+        .await;
+    let project = harness.project("Story Resent").await;
+
+    // A batch that answered one piece and was interrupted before the next: the
+    // piece that came back is on the record, and asking for it again would pay
+    // twice for one act.
+    let mut job = abandoned_job(None);
+    job["items"] = json!([
+        {
+            "id": "act-1",
+            "target": act_video_target("act-1"),
+            "capability": "video",
+            "prompt": "站台上的灯一盏一盏亮起来",
+            "params": {},
+            "status": "succeeded",
+            "assetIds": ["asset-already-made"],
+        },
+        {
+            "id": "act-2",
+            "target": act_video_target("act-2"),
+            "capability": "video",
+            "prompt": "列车进站，风把雨吹成斜的",
+            "params": {},
+            "status": "queued",
+            "taskId": TASK,
+        },
+    ]);
+    leave_record(&project, job);
+    leave_job_note(&project, TASK);
+
+    harness.reopen().await;
+
+    let mut settled = harness.job("job-abandoned").await;
+    for _ in 0..240 {
+        settled = harness.job("job-abandoned").await;
+        if settled["status"] == json!("succeeded") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    assert_eq!(
+        settled["items"][0]["assetIds"],
+        json!(["asset-already-made"])
+    );
+    assert!(!settled["items"][1]["assetIds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(
+        recorded.placed().is_empty(),
+        "the piece that had answered was not asked for again: {:?}",
+        recorded.placed()
+    );
+    assert_eq!(
+        recorded.looks(),
+        vec![JOB.to_string()],
+        "the piece that had not answered was waited out rather than shot"
+    );
+}
+
+#[tokio::test]
+async fn a_batch_that_has_finished_cannot_be_cancelled() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let provider = serve(answering(
+        Recorded::default(),
+        Arc::new(AtomicBool::new(true)),
+    ))
+    .await;
+    harness
+        .configure(&provider, &[(WRITER, Capability::Text)])
+        .await;
+    harness.project("Story Late Cancel").await;
+
+    let outline = json!({ "kind": "outline" });
+    let job = harness
+        .start_ok(batch(
+            "outline",
+            vec![piece("outline", outline, "text", "拆成两集")],
+        ))
+        .await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+    harness.settled(&job_id).await;
+
+    let (status, body) = harness.cancel(&job_id).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "STORY_JOB_NOT_CANCELLABLE");
+}

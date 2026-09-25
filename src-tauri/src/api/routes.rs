@@ -5,7 +5,7 @@ use super::dto::{
     GenerationPreviewRequest, GenerationPreviewResponse, ImportProjectRequest, ModelKeyRequest,
     OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput,
     PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse, SecretStorageRequest,
-    StartRunRequest, UpsertModelRequest,
+    StartRunRequest, StartStoryJobRequest, StoryJobItemDraft, StoryJobQuery, UpsertModelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::{filesystem, ApiState};
@@ -13,7 +13,9 @@ use crate::clip::jobs::{drive, ArtifactSink, ExportRun, ExportTask, ProjectSink}
 use crate::clip::locate::ClipCapabilities;
 use crate::clip::plan::build_plan;
 use crate::config::RuntimeMode;
-use crate::domain::{now_iso, DocumentCommand, ResourceRegistry, RunRecord, RunStatus};
+use crate::domain::{
+    now_iso, DocumentCommand, ResourceRegistry, RunRecord, RunStatus, ValidationIssue,
+};
 use crate::generate::models::ModelsView;
 use crate::generate::{
     collect_generation_inputs, Cancel, DeltaSink, GenerateInput, GenerateRequest, GenerateResult,
@@ -24,6 +26,7 @@ use crate::metadata::RecentProject;
 use crate::project::{
     AssetShelfEdit, ByteRange, CreateProject, OpenProject, PackageScope, ProjectStore, StagedAsset,
 };
+use crate::story::{StoryJobItem, StoryJobRecord};
 use crate::workflow::events::RunEvent;
 use axum::{
     body::Body,
@@ -238,8 +241,10 @@ pub async fn open_project(
     upsert_recent(&state, &opened).await;
     // The project is open, so there is somewhere for an answer to go again. The
     // sweep on open has already failed whatever cannot be picked up, and what is
-    // left is waiting on a job a provider is still running.
+    // left is waiting on a job a provider is still running — a run's step or a
+    // story's shot, and the two are picked up by the machine that drives them.
     state.runs.resume_interrupted().await;
+    state.story_jobs.resume_interrupted().await;
     Ok(Json(open_response(opened)))
 }
 
@@ -895,6 +900,123 @@ pub async fn retry_run(
 ) -> Result<(StatusCode, Json<RunRecord>), Problem> {
     let run = state.runs.retry(&id).await.map_err(start_run_problem)?;
     Ok((StatusCode::CREATED, Json(run)))
+}
+
+/// Refuses a batch with the status its first issue is filed under.
+///
+/// Several things can be wrong with one request, and a client reads the first
+/// because that is the one it would fix first; the whole list travels beside it
+/// so nothing is discovered one round trip at a time.
+fn story_issues_problem(issues: Vec<ValidationIssue>, message: &str) -> Problem {
+    let status = issues
+        .first()
+        .map(|issue| crate::api::problem::status_for_code(&issue.code))
+        .unwrap_or(StatusCode::UNPROCESSABLE_ENTITY);
+    Problem::new(status, "VALIDATION_FAILED", message)
+        .with_details(serde_json::json!({ "issues": issues }))
+}
+
+/// Starts a batch of story generations.
+///
+/// The story is checked here and the pieces are checked here, and the model is
+/// resolved once for the whole batch: forty drawings of one chapter go to the
+/// model a reader is set to, not to forty readings of the settings that could
+/// disagree with each other.
+pub async fn start_story_job(
+    State(state): State<ApiState>,
+    json: Result<Json<StartStoryJobRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<StoryJobRecord>), Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let opened = state.store.current().await?.ok_or_else(|| {
+        Problem::new(
+            StatusCode::CONFLICT,
+            "PROJECT_NOT_OPEN",
+            "No project is open",
+        )
+    })?;
+    let items: Vec<StoryJobItem> = request
+        .items
+        .into_iter()
+        .map(StoryJobItemDraft::into_item)
+        .collect();
+
+    let mut issues = match crate::story::validate_start(
+        &opened.moka,
+        &request.story_id,
+        request.kind,
+        &items,
+        &opened.moka.resources,
+        state.story_jobs.limits(),
+    ) {
+        Ok(()) => Vec::new(),
+        Err(issues) => issues,
+    };
+    // Asked only once the request itself makes sense: a busy story is not a
+    // reason to also report the four other things wrong with a batch.
+    if issues.is_empty() {
+        let jobs = state.store.list_story_jobs().await?;
+        let active = jobs.iter().filter(|job| !job.status.is_terminal()).count();
+        if active >= state.story_jobs.limits().max_active_jobs_per_project {
+            issues.push(crate::story::validate::busy_issue(
+                "This project already has a job in progress",
+            ));
+        } else if let Some(issue) = crate::story::validate::check_not_busy(&jobs, &request.story_id)
+        {
+            issues.push(issue);
+        }
+    }
+    if !issues.is_empty() {
+        return Err(story_issues_problem(
+            issues,
+            "The requested story job is not valid",
+        ));
+    }
+
+    let resolved = state
+        .models
+        .resolve_default(request.kind.capability())
+        .await
+        .map_err(Problem::from)?;
+    let job = state
+        .story_jobs
+        .start(request.story_id, request.kind, resolved.config_id, items)
+        .await?;
+    Ok((StatusCode::CREATED, Json(job)))
+}
+
+pub async fn list_story_jobs(
+    State(state): State<ApiState>,
+    Query(query): Query<StoryJobQuery>,
+) -> Result<Json<Vec<StoryJobRecord>>, Problem> {
+    let jobs = state.store.list_story_jobs().await?;
+    let jobs = jobs
+        .into_iter()
+        .filter(|job| {
+            query
+                .story_id
+                .as_deref()
+                .map(|story_id| job.story_id == story_id)
+                .unwrap_or(true)
+        })
+        .take(query.limit.unwrap_or(20).min(100))
+        .collect();
+    Ok(Json(jobs))
+}
+
+pub async fn get_story_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<StoryJobRecord>, Problem> {
+    let job = state.store.get_story_job(&id).await?;
+    Ok(Json(job))
+}
+
+pub async fn cancel_story_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<StoryJobRecord>, Problem> {
+    let job = state.story_jobs.cancel(&id).await?;
+    Ok(Json(job))
 }
 
 /// What one node will send, answered by the same resolver a run uses.

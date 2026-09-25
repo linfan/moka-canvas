@@ -555,6 +555,9 @@ function encodeProvenance(
     doc.operationNodeId = provenance.operationNodeId;
   if (provenance.assistantSessionId !== undefined)
     doc.assistantSessionId = provenance.assistantSessionId;
+  if (provenance.storyJobId !== undefined)
+    doc.storyJobId = provenance.storyJobId;
+  if (provenance.storyId !== undefined) doc.storyId = provenance.storyId;
   if (provenance.inputAssetIds !== undefined)
     doc.inputAssetIds = [...provenance.inputAssetIds];
   if (provenance.parameterSnapshot !== undefined)
@@ -729,6 +732,8 @@ function decodeProvenance(value: unknown): ResourceEntry["provenance"] {
     canvasId: optionalString(doc.canvasId),
     operationNodeId: optionalString(doc.operationNodeId),
     assistantSessionId: optionalString(doc.assistantSessionId),
+    storyJobId: optionalString(doc.storyJobId),
+    storyId: optionalString(doc.storyId),
     inputAssetIds: Array.isArray(doc.inputAssetIds)
       ? (doc.inputAssetIds as string[])
       : undefined,

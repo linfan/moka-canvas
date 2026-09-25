@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod project;
 pub mod prompts;
 pub mod server;
+pub mod story;
 pub mod telemetry;
 pub mod workflow;
 

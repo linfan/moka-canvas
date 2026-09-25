@@ -791,6 +791,8 @@ mod tests {
                 canvas_id: Some("canvas-1".to_string()),
                 operation_node_id: Some("node-1".to_string()),
                 assistant_session_id: Some(SESSION.to_string()),
+                story_job_id: None,
+                story_id: None,
                 input_asset_ids: Some(vec!["asset-brought".to_string()]),
                 parameter_snapshot: Some(serde_json::json!({
                     "model": "a-model",

@@ -50,7 +50,7 @@ use crate::metadata::Protocol;
 pub use context::{collect_generation_inputs, context_node_ids, ResolvedInputs};
 pub use error::ProviderError;
 pub use gateway::Gateway;
-pub use ingest::ingest_generated;
+pub use ingest::{file_incoming, ingest_generated, Incoming};
 pub use jobs::TaskRegistry;
 pub use models::{ModelRepo, ResolvedModel};
 
