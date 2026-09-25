@@ -26,6 +26,7 @@ import {
 } from "./factories";
 import {
   actPlannedMs,
+  actsRegenerationCost,
   chapterRegenerationCost,
   chunkWaves,
   currentTake,
@@ -1407,6 +1408,40 @@ describe("chapterRegenerationCost", () => {
       acts: 1,
     });
     expect(chapterRegenerationCost(story)).toEqual({ chapters: 2, acts: 0 });
+  });
+});
+
+describe("actsRegenerationCost", () => {
+  it("counts the acts a new board writes over, and what is already made of them", () => {
+    const story = buildStoryMokaFile().stories![0];
+    const chapter = story.chapters[0]!;
+    const act = chapter.acts[0]!;
+    // The fixture's act: two shots, one of them drawn, and a clip of the act.
+    expect(actsRegenerationCost(chapter)).toEqual({
+      acts: 1,
+      drawn: 1,
+      filmed: 1,
+    });
+
+    act.video = emptyStorySlot();
+    act.keyframes[1]!.art = {
+      takes: [{ assetId: "asset-other-frame", createdAt: NOW }],
+      confirmed: false,
+    };
+    expect(actsRegenerationCost(chapter)).toEqual({
+      acts: 1,
+      drawn: 2,
+      filmed: 0,
+    });
+  });
+
+  it("costs nothing to board an episode that has no board yet", () => {
+    const story = buildStoryMokaFile().stories![0];
+    expect(actsRegenerationCost(story.chapters[1]!)).toEqual({
+      acts: 0,
+      drawn: 0,
+      filmed: 0,
+    });
   });
 });
 

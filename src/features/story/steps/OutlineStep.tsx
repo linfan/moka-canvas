@@ -36,6 +36,7 @@ import {
 import { useStoryStore } from "../stores/storyStore";
 import { ResplitDialog } from "../components/ResplitDialog";
 import { useField } from "../panels/useField";
+import { useElapsed } from "./useElapsed";
 
 /** How much of a manuscript one chapter is written from. */
 const SOURCE_CHUNK_MAX = 12_000;
@@ -618,18 +619,6 @@ function stepDuration(chapter: StoryChapter, by: number): number {
 
 function clampDuration(ms: number): number {
   return Math.min(MAX_TOTAL_DURATION_MS, Math.max(MIN_TOTAL_DURATION_MS, ms));
-}
-
-/** How long a batch has been out, ticking once a second while it is. */
-function useElapsed(since: string | undefined): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (since === undefined) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [since]);
-  if (since === undefined) return 0;
-  return Math.max(0, now - Date.parse(since));
 }
 
 // -----------------------------------------------------------------------------

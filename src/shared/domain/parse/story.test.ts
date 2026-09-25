@@ -336,6 +336,35 @@ describe("the words a board is written with", () => {
       expect(read.warnings.join()).toContain("medium shot");
     }
   });
+
+  it("marks the cells it chose a value for, with the answer's own words", () => {
+    const read = board({
+      acts: [
+        act({
+          keyframes: [
+            shot({
+              shotSize: "遥遥远景",
+              cameraMove: "缓缓地绕过去",
+              angle: "eyeLevel",
+            }),
+            shot({ shotSize: "远景", cameraMove: "固定", angle: "歪着看" }),
+          ],
+        }),
+      ],
+    });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value[0].guessed).toEqual([
+      { keyframe: 1, field: "shotSize", from: "遥遥远景" },
+      { keyframe: 1, field: "cameraMove", from: "缓缓地绕过去" },
+      { keyframe: 2, field: "angle", from: "歪着看" },
+    ]);
+  });
+
+  it("marks nothing on a board every word of which it knows", () => {
+    const read = board({ acts: [act()] });
+    expect(read.ok && read.value[0].guessed).toBeUndefined();
+  });
 });
 
 describe("how long a shot is held", () => {

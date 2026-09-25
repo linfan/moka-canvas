@@ -141,6 +141,29 @@ function videoCeiling(): number {
     : MAX_VIDEO_SECONDS;
 }
 
+/**
+ * A clip's parameters: how long it runs, in what shape, and the machine's own
+ * answers about sound and a watermark.
+ *
+ * The story decides the first two — a clip is as long as the story planned and
+ * as wide as the story is told — and the preferences decide the rest, since
+ * whether a provider writes sound into its clip is not a thing a telling has
+ * an opinion about.
+ */
+function videoParams(
+  ratio: StoryAspect,
+  seconds: number,
+): Record<string, unknown> {
+  const video = useModelStore.getState().view?.preferences.video;
+  return {
+    seconds,
+    ratio,
+    ...(video?.resolution ? { resolution: video.resolution } : {}),
+    generateAudio: video?.generateAudio ?? false,
+    watermark: video?.watermark ?? false,
+  };
+}
+
 function factsOf(story: StoryDocument): StoryFacts {
   return {
     aspect: story.brief.aspect,
@@ -459,7 +482,7 @@ export function planActVideos(
           seconds,
         }),
         inputs,
-        params: { seconds, ratio: story.brief.aspect },
+        params: videoParams(story.brief.aspect, seconds),
       },
     ];
   });
@@ -509,7 +532,7 @@ export function planKeyframeVideos(
           seconds,
         }),
         inputs,
-        params: { seconds, ratio: story.brief.aspect },
+        params: videoParams(story.brief.aspect, seconds),
       },
     ];
   });

@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createServer,
   type IncomingMessage,
@@ -17,9 +19,10 @@ export const PROVIDER_PORT = Number(process.env.MOKA_E2E_PROVIDER_PORT ?? 8972);
 export const PROVIDER_ORIGIN = `http://127.0.0.1:${PROVIDER_PORT}`;
 export const PROVIDER_ADDRESS = `${PROVIDER_ORIGIN}/v1`;
 
-/** The two models on offer, one per capability the suite drives. */
+/** The models on offer, one per capability the suite drives. */
 export const PAINTER = "painter";
 export const STORYTELLER = "storyteller";
+export const VIDEOGRAPHER = "videographer";
 
 /**
  * What the stand-in says, whole and in the pieces it arrives in.
@@ -55,6 +58,19 @@ const PICTURE = (() => {
   }
   return readFileSync(custom).toString("base64");
 })();
+
+/**
+ * The one-second shot the stand-in hands back when it is asked for a clip.
+ *
+ * A video endpoint answers with a job rather than with the bytes: the job is
+ * started, polled, and collected from a third route, so a stand-in that only
+ * spoke the first of the three would leave every clip hanging.
+ */
+const SHOT = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "fixtures", "shot.mp4"),
+).toString("base64");
+/** The handle the one job the stand-in ever starts is polled by. */
+const SHOT_JOB = "video-job-1";
 
 /** What the stand-in was asked for, holding nothing a credential could be in. */
 export interface ProviderCall {
@@ -193,6 +209,61 @@ function jsonAnswer(prompt: string): string | undefined {
       synopsis: `What happens in part ${part[1]} of the manuscript.`,
     });
   }
+  // One episode's board: two acts of two shots each, with the cast the
+  // elements answer above gives the story — a board naming anyone else would
+  // be a board whose references the reading drops.
+  if (prompt.includes("Board this chapter as acts")) {
+    return JSON.stringify({
+      acts: [
+        {
+          title: "The platform",
+          summary: "She waits under the one lamp still burning.",
+          characters: ["Keeper", "Traveller"],
+          scene: "Last carriage",
+          props: [],
+          sound: { music: "low strings", sfx: "rain", ambience: "empty hall" },
+          keyframes: [
+            {
+              shotSize: "wide",
+              cameraMove: "pushIn",
+              angle: "eyeLevel",
+              content: "Rain over the platform, one figure under the lamp.",
+              durationMs: 3_000,
+              dialogue: [
+                { speaker: "Keeper", text: "It stopped running years ago." },
+              ],
+            },
+            {
+              shotSize: "close",
+              cameraMove: "static",
+              angle: "overTheShoulder",
+              content: "The other one turns.",
+              durationMs: 2_000,
+              dialogue: [],
+            },
+          ],
+        },
+        {
+          title: "The last carriage",
+          summary: "The doors close on both of them.",
+          characters: ["Traveller"],
+          scene: "Last carriage",
+          props: ["Old ticket"],
+          sound: { music: "", sfx: "door chime", ambience: "carriage hum" },
+          keyframes: [
+            {
+              shotSize: "medium",
+              cameraMove: "handheld",
+              angle: "low",
+              content: "The ticket is held up to the light.",
+              durationMs: 2_000,
+              dialogue: [],
+            },
+          ],
+        },
+      ],
+    });
+  }
   // The cast of a telling, asked for by the chapters it stands in.
   if (prompt.includes("List what this telling is made of")) {
     return JSON.stringify({
@@ -267,6 +338,20 @@ export async function startMockProvider(): Promise<MockProvider> {
       calls.length = 0;
       return send(200, { ok: true });
     }
+    // A clip is asked for as a job: started, looked at, then collected. The
+    // stand-in's job is over before the first look, which is what "succeeded"
+    // says; the bytes are served from the third route.
+    if (path === `/v1/videos/${SHOT_JOB}` && request.method === "GET") {
+      return send(200, { id: SHOT_JOB, status: "succeeded" });
+    }
+    if (path === `/v1/videos/${SHOT_JOB}/content` && request.method === "GET") {
+      const bytes = Buffer.from(SHOT, "base64");
+      response.writeHead(200, {
+        "Content-Type": "video/mp4",
+        "Content-Length": String(bytes.length),
+      });
+      return response.end(bytes);
+    }
     if (request.method !== "POST") return missing();
 
     const raw = await bodyOf(request);
@@ -317,6 +402,9 @@ export async function startMockProvider(): Promise<MockProvider> {
           revised_prompt: prompt,
         })),
       });
+    }
+    if (path === "/v1/videos") {
+      return send(200, { id: SHOT_JOB, status: "queued" });
     }
     if (path === "/v1/chat/completions") {
       const json = jsonAnswer(prompt);

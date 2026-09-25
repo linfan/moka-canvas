@@ -27,7 +27,7 @@ import {
   MIN_KEYFRAME_MS,
 } from "../constants";
 import type { StoryChapterDraft, StoryElementDraft } from "../story";
-import type { ActDraft, KeyframeDraft } from "../story";
+import type { ActDraft, KeyframeDraft, StoryGuess } from "../story";
 import type {
   StoryActSound,
   StoryDialogueLine,
@@ -328,6 +328,25 @@ function readAct(
     warnings.push(`act ${at} was left without a summary`);
 
   const kept = keyframes.slice(0, MAX_KEYFRAMES_PER_ACT);
+  const guesses: StoryGuess[] = [];
+  // What a shot does not say about its length is shared out of the episode,
+  // which is the only thing that knows how long the whole is.
+  const plannedMs =
+    kept.length === 0
+      ? ctx.targetDurationMs
+      : ctx.targetDurationMs / kept.length;
+  const shots: KeyframeDraft[] = kept.flatMap((entry, index) => {
+    const shot = readShot(
+      entry,
+      plannedMs,
+      at,
+      index + 1,
+      ctx,
+      warnings,
+      guesses,
+    );
+    return shot === undefined ? [] : [shot];
+  });
   const scene = matchedNames(
     value.scene === undefined ? [] : [value.scene],
     ctx.elements,
@@ -364,16 +383,10 @@ function readAct(
       "thing",
     ),
     sound: readSound(value.sound),
-    keyframes: kept.flatMap((entry, index) => {
-      // What a shot does not say about its length is shared out of the
-      // episode, which is the only thing that knows how long the whole is.
-      const plannedMs =
-        kept.length === 0
-          ? ctx.targetDurationMs
-          : ctx.targetDurationMs / kept.length;
-      const shot = readShot(entry, plannedMs, at, index + 1, ctx, warnings);
-      return shot === undefined ? [] : [shot];
-    }),
+    // The shots are read before the act is written out, since reading them is
+    // what fills in the marks: an act written first would carry the empty list.
+    ...(guesses.length === 0 ? {} : { guessed: guesses }),
+    keyframes: shots,
   };
 }
 
@@ -457,6 +470,7 @@ function readShot(
   at: number,
   ctx: BoardContext,
   warnings: string[],
+  guesses: StoryGuess[],
 ): KeyframeDraft | undefined {
   if (!isObject(value)) {
     warnings.push(`shot ${at} of act ${actAt} was not an object`);
@@ -485,6 +499,18 @@ function readShot(
     warnings.push(
       `shot ${at} of act ${actAt} was seen from "${String(value.angle)}", which was read as eye level`,
     );
+  // Which of the three the parser chose for: the cell is shown with a mark, so
+  // a reader can tell a framing nobody offered from one the telling asked for.
+  for (const [field, read] of [
+    ["shotSize", shotSize],
+    ["cameraMove", cameraMove],
+    ["angle", angle],
+  ] as const) {
+    if (read !== undefined) continue;
+    const said = value[field];
+    if (said === undefined) continue;
+    guesses.push({ keyframe: at, field, from: String(said) });
+  }
 
   const given = readDuration(value.durationMs);
   const durationMs =

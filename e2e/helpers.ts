@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { expect, type Locator, type Page } from "@playwright/test";
-import { PAINTER, PROVIDER_ADDRESS, STORYTELLER } from "./mock-provider";
+import {
+  PAINTER,
+  PROVIDER_ADDRESS,
+  STORYTELLER,
+  VIDEOGRAPHER,
+} from "./mock-provider";
 
 /** The server under test, for the calls a test makes beside the browser's. */
 export const APP = `http://127.0.0.1:${process.env.MOKA_E2E_PORT ?? 8971}`;
@@ -247,10 +252,27 @@ export async function backToLauncher(page: Page) {
 export const CHANNEL_KEY = "e2e-stand-in-credential";
 
 /** The full endpoint address each category speaks at on the stand-in. */
-function endpoint(capability: "text" | "image"): string {
-  return capability === "text"
-    ? `${PROVIDER_ADDRESS}/chat/completions`
-    : `${PROVIDER_ADDRESS}/images/generations`;
+function endpoint(capability: Capability): string {
+  switch (capability) {
+    case "text":
+      return `${PROVIDER_ADDRESS}/chat/completions`;
+    case "image":
+      return `${PROVIDER_ADDRESS}/images/generations`;
+    case "video":
+      return `${PROVIDER_ADDRESS}/videos`;
+  }
+}
+
+/** How each category is spoken to, which is one protocol per shape. */
+function protocolOf(capability: Capability): string {
+  switch (capability) {
+    case "text":
+      return "openaiChat";
+    case "image":
+      return "openaiImages";
+    case "video":
+      return "openaiVideos";
+  }
 }
 
 /**
@@ -263,7 +285,7 @@ function endpoint(capability: "text" | "image"): string {
 export async function configureModels(
   models: readonly {
     id: string;
-    capability: "text" | "image";
+    capability: Capability;
     alias: string;
   }[],
 ): Promise<void> {
@@ -274,7 +296,7 @@ export async function configureModels(
       body: JSON.stringify({
         id: model.id,
         category: model.capability,
-        protocol: model.capability === "text" ? "openaiChat" : "openaiImages",
+        protocol: protocolOf(model.capability),
         url: endpoint(model.capability),
         model: model.id,
         displayName: model.alias,
@@ -317,3 +339,18 @@ export async function configureWordsAndPictures(): Promise<void> {
     { id: STORYTELLER, capability: "text", alias: "Storyteller" },
   ]);
 }
+
+/**
+ * Pictures, words and clips: everything a telling is made of, up to the point
+ * where the shots are filmed.
+ */
+export async function configureTheWholeStudio(): Promise<void> {
+  await configureModels([
+    { id: PAINTER, capability: "image", alias: "Painter" },
+    { id: STORYTELLER, capability: "text", alias: "Storyteller" },
+    { id: VIDEOGRAPHER, capability: "video", alias: "Videographer" },
+  ]);
+}
+
+/** Which of the four things a model is asked for. */
+type Capability = "text" | "image" | "video";

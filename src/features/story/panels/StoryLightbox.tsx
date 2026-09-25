@@ -17,6 +17,7 @@ export function StoryLightbox({
   assetId,
   label,
   note,
+  video,
   onClose,
 }: {
   assetId: string;
@@ -24,6 +25,8 @@ export function StoryLightbox({
   label: string;
   /** A line about the view, when there is one worth saying. */
   note?: string;
+  /** Whether the place holds a clip rather than a picture. */
+  video?: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -51,7 +54,11 @@ export function StoryLightbox({
         className="story-lightbox-body"
         role="dialog"
       >
-        <img alt={label} src={assetUrl(assetId)} />
+        {video === true ? (
+          <video controls preload="metadata" src={assetUrl(assetId)} />
+        ) : (
+          <img alt={label} src={assetUrl(assetId)} />
+        )}
         <div className="story-lightbox-foot">
           <span>{label}</span>
           {note !== undefined && <span className="story-hint">{note}</span>}

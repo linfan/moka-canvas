@@ -18,16 +18,9 @@ import { execute } from "../../editor/commands/execute";
 import { planElementArt } from "../jobs/plan";
 import { useStoryRun } from "../stores/storyJobStore";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { frameRatio } from "./ratios";
 import { StorySlotView } from "./StorySlotView";
 import { useField } from "./useField";
-
-/** An element's drawing sizes, as the frame the story is told in. */
-const RATIOS: Record<string, string> = {
-  "9:16": "9 / 16",
-  "1:1": "1 / 1",
-  "4:3": "4 / 3",
-  "21:9": "21 / 9",
-};
 
 /** A place with nothing in it, for a slot a character has not been given yet. */
 const EMPTY_SLOT: StorySlot = { takes: [], confirmed: false };
@@ -73,7 +66,7 @@ export function ElementCard({
     // A name nobody could read is not a name: the element keeps the one it had.
     if (name !== "" && name !== element.name) write(story, element, { name });
   });
-  const ratio = RATIOS[story.brief.aspect] ?? "16 / 9";
+  const ratio = frameRatio(story);
 
   const generate = (view: "main" | "turnaround") => {
     const [item] = planElementArt(story, [{ elementId: element.id, view }]);

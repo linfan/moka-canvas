@@ -256,6 +256,30 @@ export interface StoryElementDraft {
   chapterIndexes?: number[];
 }
 
+/** The fields of a shot the parser had to read a value it did not recognise into. */
+export const STORY_GUESSED_FIELDS = [
+  "shotSize",
+  "cameraMove",
+  "angle",
+] as const;
+export type StoryGuessedField = (typeof STORY_GUESSED_FIELDS)[number];
+
+/**
+ * One value the parser did not recognise and read as a default instead.
+ *
+ * Kept beside the board rather than inside it: what the document holds is the
+ * board, and what a reader needs to see is which of its cells a model did not
+ * really answer — a shot framed as something nobody offered is a shot whose
+ * framing is the parser's word, not the telling's.
+ */
+export interface StoryGuess {
+  /** Which shot of the act, counted from one. */
+  keyframe: number;
+  field: StoryGuessedField;
+  /** What the answer said, which is what was not recognised. */
+  from: string;
+}
+
 /** A shot as the board was written, before it meets the board on file. */
 export interface KeyframeDraft {
   shotSize: StoryShotSize;
@@ -286,6 +310,8 @@ export interface ActDraft {
   props: string[];
   sound: StoryActSound;
   keyframes: KeyframeDraft[];
+  /** The shots whose framing, movement or angle the parser chose. */
+  guessed?: StoryGuess[];
 }
 
 // -----------------------------------------------------------------------------
@@ -794,6 +820,40 @@ export function chapterRegenerationCost(
     acts: story.chapters
       .slice(kept)
       .reduce((sum, chapter) => sum + chapter.acts.length, 0),
+  };
+}
+
+/**
+ * What boarding an episode again writes over.
+ *
+ * A board is written onto the acts in their places, so an act standing where
+ * it stood keeps its frames and its clip — the words of the board are what a
+ * new answer replaces. What the question is about is therefore the work that
+ * would be left standing on nothing: acts the new board has no room for, and
+ * the pictures and clips made for the shots inside them.
+ */
+export function actsRegenerationCost(chapter: StoryChapter): {
+  acts: number;
+  drawn: number;
+  filmed: number;
+} {
+  return {
+    acts: chapter.acts.length,
+    drawn: chapter.acts.reduce(
+      (sum, act) =>
+        sum +
+        act.keyframes.filter((keyframe) => keyframe.art.takes.length > 0)
+          .length,
+      0,
+    ),
+    filmed: chapter.acts.reduce(
+      (sum, act) =>
+        sum +
+        (act.video.takes.length > 0 ? 1 : 0) +
+        act.keyframes.filter((keyframe) => keyframe.video.takes.length > 0)
+          .length,
+      0,
+    ),
   };
 }
 

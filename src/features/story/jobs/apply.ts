@@ -27,6 +27,7 @@ import {
   type ChapterWrite,
   type StoryChapterDraft,
   type StoryElementDraft,
+  type StoryGuess,
 } from "../../../shared/domain/story";
 import { chapterTargetMs } from "../../../shared/domain/factories";
 import {
@@ -199,6 +200,89 @@ export function readOutlineAnswer(text: string): OutlineReading {
 
 function chaptersIn(item: StoryJobItem): StoryChapterDraft[] | undefined {
   return readOutlineAnswer(item.text ?? "").drafts;
+}
+
+/** What a board's answer said, as the reading of it came out. */
+export interface BoardReading {
+  drafts?: ActDraft[];
+  warnings: string[];
+  /** The cells the reading chose a framing, a movement or an angle for. */
+  guesses: StoryGuess[];
+  /** Why it could not be read, when it could not. */
+  error?: string;
+}
+
+/**
+ * What one board's answer said, read the way the batch read it.
+ *
+ * The step shows the board it was given: what the reading had to warn about,
+ * and which cells it chose a framing for because the answer offered one nobody
+ * knows. Reading it here rather than in the step keeps the one reading — what
+ * a repaired answer is judged by and what a reader is shown come from the same
+ * place.
+ */
+export function readBoardAnswer(
+  story: StoryDocument,
+  item: StoryJobItem,
+): BoardReading {
+  const read = parseStoryJson(item.text ?? "");
+  if (!read.ok) return { warnings: [], guesses: [], error: read.error };
+  const target = item.target;
+  const chapter =
+    target.kind === "storyboard"
+      ? story.chapters.find((held) => held.id === target.chapterId)
+      : undefined;
+  const parsed = parseStoryboard(read.value, {
+    elements: story.elements,
+    targetDurationMs: chapter?.targetDurationMs ?? 0,
+  });
+  if (!parsed.ok) {
+    return { warnings: [], guesses: [], error: parsed.error };
+  }
+  return {
+    drafts: parsed.value,
+    warnings: parsed.warnings,
+    guesses: parsed.value.flatMap((act) => act.guessed ?? []),
+  };
+}
+
+/**
+ * The cells of a chapter's board that the reading chose rather than read.
+ *
+ * Read off the batch that wrote the board rather than kept in the document: a
+ * mark is about an answer, not about a board, and a board the reader has since
+ * edited by hand is a board they have already looked at. Acts are matched by
+ * their place, which is the order the answer wrote them in.
+ */
+export function chapterGuesses(
+  story: StoryDocument,
+  chapterId: string,
+  jobs: StoryJobRecord[],
+): Map<string, StoryGuess[]> {
+  const marks = new Map<string, StoryGuess[]>();
+  const chapter = story.chapters.find((held) => held.id === chapterId);
+  if (chapter === undefined) return marks;
+  // The batches are newest first, and the board as it stands came from the
+  // newest answer that could be read into it.
+  const written = jobs
+    .filter((job) => job.kind === "storyboard")
+    .flatMap((job) => job.items)
+    .find(
+      (item) =>
+        item.target.kind === "storyboard" &&
+        item.target.chapterId === chapterId &&
+        item.status === "succeeded" &&
+        (item.text ?? "").trim() !== "",
+    );
+  if (written === undefined) return marks;
+  const read = readBoardAnswer(story, written);
+  (read.drafts ?? []).forEach((draft, index) => {
+    const act = chapter.acts[index];
+    if (act !== undefined && draft.guessed !== undefined) {
+      marks.set(act.id, draft.guessed);
+    }
+  });
+  return marks;
 }
 
 /** The part of a manuscript an outline piece was asked for, when it was one. */

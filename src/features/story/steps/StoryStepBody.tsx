@@ -3,6 +3,7 @@ import type { StoryDocument, StoryStep } from "../../../shared/domain";
 import { ElementsStep } from "./ElementsStep";
 import { IdeaStep } from "./IdeaStep";
 import { OutlineStep } from "./OutlineStep";
+import { StoryboardStep } from "./StoryboardStep";
 
 /**
  * What is standing in the middle of the room: the step the reader picked.
@@ -22,6 +23,7 @@ export function StoryStepBody({
   if (step === "idea") return <IdeaStep story={story} />;
   if (step === "outline") return <OutlineStep story={story} />;
   if (step === "elements") return <ElementsStep story={story} />;
+  if (step === "storyboard") return <StoryboardStep story={story} />;
   return <StepWaiting step={step} story={story} />;
 }
 

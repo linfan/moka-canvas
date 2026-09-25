@@ -6163,6 +6163,388 @@ body.is-dragging-split {
   resize: vertical;
 }
 
+/* ---------------------------------------------------------------------------
+   The board: the strip of episodes, the acts, and the table a board is read
+   in. The table is the room's first, and its own rules stand here rather than
+   with the cutting room's sheets — a board is read a row at a time, with the
+   numbers and the controls side by side, so its cells are tighter and quieter
+   than a panel of files.
+   --------------------------------------------------------------------------- */
+
+.story-chapter-strip {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.story-granularity {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.story-board-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.story-board-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.story-acts {
+  display: grid;
+  gap: 16px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.story-act {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.story-act-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.story-act-index {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.story-act-title {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--ink);
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 120px;
+  padding: 4px 6px;
+}
+
+.story-act-title:hover:not(:disabled),
+.story-act-title:focus {
+  background: var(--canvas);
+  border-color: var(--stroke);
+}
+
+.story-act-title:disabled {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.story-act-state {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.story-act-confirm {
+  cursor: pointer;
+}
+
+.story-clamp {
+  color: var(--yellow);
+  font-size: 11px;
+}
+
+.story-refs-row {
+  display: grid;
+  gap: 6px;
+}
+
+.story-refs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  position: relative;
+}
+
+.story-refs-label {
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 32px;
+}
+
+.story-ref {
+  align-items: center;
+  background: var(--canvas);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+}
+
+.story-ref.is-gone {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.story-ref-off {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 2px;
+}
+
+.story-ref-off:hover {
+  color: var(--coral);
+}
+
+.story-ref-add {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  justify-content: center;
+  line-height: 1;
+  padding: 4px 9px;
+}
+
+.story-ref-menu {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  max-height: 260px;
+  min-width: 200px;
+  overflow: auto;
+  padding: 6px;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 40;
+}
+
+.story-ref-search {
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  margin-bottom: 4px;
+  padding: 5px 8px;
+}
+
+.story-ref-choice {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 5px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.story-ref-choice:hover {
+  background: var(--surface-raised);
+}
+
+.story-ref-choice.is-on {
+  color: var(--success);
+}
+
+.story-act-summary {
+  font-size: 12px;
+}
+
+.story-act-sound {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.story-act-sound input {
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.story-table-wrap {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  overflow: auto;
+}
+
+.story-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  width: 100%;
+}
+
+.story-table th {
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 8px 10px;
+  position: sticky;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.story-table td {
+  border-top: 1px solid var(--stroke);
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.story-table tr:hover td {
+  background: rgb(255 255 255 / 2%);
+}
+
+.story-table select,
+.story-table input,
+.story-table textarea {
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.story-table textarea {
+  resize: none;
+}
+
+.story-col-index {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 40px;
+}
+
+.story-col-content {
+  min-width: 240px;
+}
+
+.story-kf-seconds {
+  min-width: 72px;
+  width: 92px;
+}
+
+.story-kf-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 2px 6px;
+}
+
+.story-kf-remove:hover:not(:disabled) {
+  color: var(--coral);
+}
+
+/* A cell the answer did not really answer: the framing standing there is the
+   parser's, and the reader is the only one who can say whether it is right. */
+.story-guessed {
+  color: var(--yellow);
+  font-size: 9px;
+  margin-left: 4px;
+  vertical-align: super;
+}
+
+.story-dialogue-toggle {
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.story-dialogue-row td {
+  background: var(--canvas);
+}
+
+.story-dialogue {
+  display: grid;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.story-dialogue-line {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 120px 1fr 120px 28px;
+}
+
+.story-dialogue-line input {
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.story-dialogue-line button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 2px 6px;
+}
+
+.story-dialogue-line button:hover:not(:disabled) {
+  color: var(--coral);
+}
+
+.story-kf-clip {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.story-kf-clip video {
+  border-radius: var(--radius-sm);
+  max-width: 96px;
+}
+
+.story-act-foot {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.story-act-clip {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.story-act-play {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.story-act-play video {
+  border-radius: var(--radius-sm);
+  display: block;
+  max-width: 160px;
+}
+
 /* The column folds away with the window, as the other rooms' columns do; the
    rule stands here rather than with theirs because a later rule of equal
    weight is the one that wins, and this section is the last in the file. */

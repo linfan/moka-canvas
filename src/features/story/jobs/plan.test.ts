@@ -285,7 +285,15 @@ describe("planning the clips", () => {
     expect(items[0].id).toBe(`actVideo:${ids.chapterFirst}:${ids.act}`);
     expect(items[0].capability).toBe("video");
     // The act is five seconds of shots, so five seconds are asked for.
-    expect(items[0].params).toEqual({ seconds: 5, ratio: "16:9" });
+    // The story says how long and how wide; the machine's preferences say the
+    // rest, since whether a provider writes sound into its clip is not the
+    // telling's opinion.
+    expect(items[0].params).toEqual({
+      seconds: 5,
+      ratio: "16:9",
+      generateAudio: false,
+      watermark: false,
+    });
     expect(items[0].inputs).toEqual([
       { role: "firstFrame", assetId: ids.frameArt },
       { role: "lastFrame", assetId: "asset-frame-second" },
@@ -320,7 +328,12 @@ describe("planning the clips", () => {
       `keyframeVideo:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
     );
     // The shot is drawn for two seconds; the ceiling is sixty by default.
-    expect(items[0].params).toEqual({ seconds: 2, ratio: "16:9" });
+    expect(items[0].params).toEqual({
+      seconds: 2,
+      ratio: "16:9",
+      generateAudio: false,
+      watermark: false,
+    });
     expect(items[0].inputs).toEqual([
       { role: "firstFrame", assetId: ids.frameArt },
       { role: "lastFrame", assetId: "asset-frame-second" },
@@ -377,7 +390,12 @@ describe("planning the clips", () => {
     });
 
     const items = planActVideos(drawnStory(), ids.chapterFirst, [ids.act]);
-    expect(items[0].params).toEqual({ seconds: 3, ratio: "16:9" });
+    expect(items[0].params).toEqual({
+      seconds: 3,
+      ratio: "16:9",
+      generateAudio: false,
+      watermark: false,
+    });
   });
 });
 
