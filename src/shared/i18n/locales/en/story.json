@@ -58,6 +58,16 @@
     "aspect": "Frame",
     "granularity": "Clips"
   },
+  "models": {
+    "label": "This step asks",
+    "default": "Settings default",
+    "musicDefault": "The music model from settings",
+    "text": "Words",
+    "image": "Pictures",
+    "video": "Clips",
+    "audio": "Voices",
+    "music": "Score"
+  },
   "steps": {
     "label": "The five steps",
     "locked": "{{step}} comes first."

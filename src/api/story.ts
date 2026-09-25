@@ -111,15 +111,23 @@ export type StoryJobItemDraft = Pick<
 const jobsPath = "/api/v1/projects/current/story/jobs";
 
 export const storyApi = {
+  /**
+   * Starts a batch of one kind.
+   *
+   * The model is the room's own choice, when it has one: a reference names a
+   * model configuration, and none leaves the deployment's default to answer —
+   * which for a score is the music model rather than the voice one.
+   */
   start(
     storyId: string,
     kind: StoryJobKind,
     items: StoryJobItemDraft[],
+    model?: string | null,
     signal?: AbortSignal,
   ): Promise<StoryJobRecord> {
     return http.request<StoryJobRecord>(jobsPath, {
       method: "POST",
-      body: { storyId, kind, items },
+      body: { storyId, kind, items, model: model ?? null },
       signal,
     });
   },

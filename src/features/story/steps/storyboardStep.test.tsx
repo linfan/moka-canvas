@@ -300,6 +300,15 @@ afterEach(() => {
 });
 
 describe("writing an episode's board", () => {
+  it("stands a picker for every kind of work the step asks", () => {
+    openAtBoard(boarded());
+    // Words, pictures, clips, voices and the score are all asked for from
+    // step four, so a reader sets each of them here rather than in settings.
+    for (const place of ["text", "image", "video", "audio", "music"]) {
+      expect(screen.getByTestId(`story-model-${place}`)).toBeDefined();
+    }
+  });
+
   it("asks for the board as a table of chapters, and writes it into the story", async () => {
     openAtBoard(boarded(), 1);
     answers[`storyboard:${story().chapters[1]!.id}`] = boardAnswer(

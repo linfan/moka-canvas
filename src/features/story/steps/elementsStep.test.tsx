@@ -21,16 +21,23 @@ import { actCast } from "../../../shared/domain/story";
 import { undo } from "../../editor/commands/execute";
 import { SHELF_PAGE } from "../../editor/panels/shelfFilter";
 import { useAppStore } from "../../editor/stores/appStore";
+import { useModelStore } from "../../settings/modelStore";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { StoryPage } from "../StoryPage";
 import { useStoryJobStore } from "../stores/storyJobStore";
+import { useStoryModels } from "../stores/storyModels";
 import { useStoryStore } from "../stores/storyStore";
 
 const ids = storyIds();
 
 /** What the room handed the server, in the order it handed it over. */
-let starts: Array<{ kind: StoryJobKind; items: StoryJobItemDraft[] }> = [];
+let starts: Array<{
+  kind: StoryJobKind;
+  items: StoryJobItemDraft[];
+  /** The model the batch named, which is none until the room is set to one. */
+  model: string | null;
+}> = [];
 /** The batches the server is holding, newest first. */
 let held: StoryJobRecord[] = [];
 /** What each piece of the next batch is answered with, by the piece's id. */
@@ -64,8 +71,13 @@ function serving(): void {
           const body = JSON.parse(String(init?.body ?? "{}")) as {
             kind: StoryJobKind;
             items: StoryJobItemDraft[];
+            model?: string | null;
           };
-          starts.push({ kind: body.kind, items: body.items });
+          starts.push({
+            kind: body.kind,
+            items: body.items,
+            model: body.model ?? null,
+          });
           const record = batchOf(starts.length, body.kind, body.items);
           held = [record, ...held];
           return json(record);
@@ -201,6 +213,7 @@ beforeEach(() => {
   useHistoryStore.getState().clear();
   useStoryStore.getState().forget();
   useStoryJobStore.getState().reset();
+  useStoryModels.setState({ choices: {} });
   useAppStore.setState({ toasts: [] });
 });
 
@@ -288,6 +301,90 @@ describe("finding the cast in the chapters", () => {
       expect(starts).toHaveLength(1);
     });
     expect(starts[0]?.kind).toBe("elements");
+  });
+});
+
+describe("the model a reading is asked of", () => {
+  /** The two storytellers a deployment that keeps a spare looks like. */
+  const storyteller = (id: string, displayName: string) => ({
+    id,
+    category: "text" as const,
+    protocol: "openaiChat",
+    url: "https://api.example.com/v1/chat/completions",
+    model: `${id}-1`,
+    displayName,
+    enabled: true,
+    apiKey: { set: true, masked: "sk-…abcd" },
+  });
+
+  beforeEach(() => {
+    useModelStore.setState({
+      view: {
+        version: 1,
+        revision: 3,
+        models: [
+          storyteller("scribe-1", "Scribe One"),
+          storyteller("scribe-2", "Scribe Two"),
+        ],
+        defaults: {
+          text: "scribe-1",
+          image: null,
+          audio: null,
+          music: null,
+          video: null,
+          asr: null,
+        },
+        preferences: {
+          systemPrompt: "",
+          reasoningEffort: "auto",
+          image: { size: "1:1", quality: "auto", background: "auto", count: 1 },
+          video: {
+            seconds: 6,
+            resolution: "720",
+            generateAudio: true,
+            watermark: false,
+            mode: "auto",
+            ratio: "",
+          },
+          audio: {
+            voice: "",
+            format: "mp3",
+            speed: 1,
+            instructions: "",
+            sampleRate: 22050,
+            volume: 50,
+            rate: 1,
+            pitch: 1,
+          },
+        },
+        secretStorage: "unset",
+      },
+    });
+  });
+
+  it("asks the model the room is set to rather than the deployment's default", async () => {
+    openAtElements(buildStoryMokaFile());
+
+    const picker = within(screen.getByTestId("story-model-text")).getByRole(
+      "combobox",
+    );
+    expect(
+      within(picker)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Settings default", "Scribe One", "Scribe Two"]);
+    fireEvent.change(picker, { target: { value: "scribe-2" } });
+
+    fireEvent.click(screen.getByTestId("story-elements-recognise"));
+    fireEvent.click(screen.getByTestId("recognise-elements-confirm"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+    expect(starts[0]?.model).toBe("scribe-2");
+    // The choice is the machine's, so the next reading is asked of it too.
+    expect(localStorage.getItem("moka-canvas:story-models")).toBe(
+      JSON.stringify({ text: "scribe-2" }),
+    );
   });
 });
 

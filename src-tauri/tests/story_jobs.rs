@@ -55,6 +55,8 @@ const PAINTER: &str = "painter-1";
 const SHOOTER: &str = "shooter-1";
 const SPEAKER: &str = "speaker-1";
 const COMPOSER: &str = "composer-1";
+/// A second storyteller, which is what a room set to a model of its own asks.
+const READER_CHOICE: &str = "scribe-2";
 
 const API_KEY: &str = "sk-test-1234567890abcd";
 
@@ -128,36 +130,43 @@ fn harness_at(tmp: &TempDir) -> Harness {
 }
 
 impl Harness {
+    /// Keeps one model of a capability, with its credential, and leaves the
+    /// defaults alone: a model beside the deployment's own is what a reader's
+    /// own choice is.
+    async fn add_model(&self, base_url: &str, id: &str, capability: Capability) {
+        let (protocol, suffix) = match capability {
+            Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
+            Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
+            Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
+            Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
+            Capability::Asr => (Protocol::Custom, "/v1/transcription"),
+        };
+        self.state
+            .models
+            .upsert(ModelDraft {
+                id: id.into(),
+                category: capability,
+                protocol,
+                url: format!("{base_url}{suffix}"),
+                model: id.into(),
+                display_name: id.into(),
+                enabled: true,
+                expected_revision: None,
+            })
+            .await
+            .expect("the model is stored");
+        self.state
+            .models
+            .set_key(id, Some(API_KEY))
+            .await
+            .expect("the credential is stored");
+    }
+
     /// Points the app at throwaway models and makes them the defaults.
     async fn configure(&self, base_url: &str, models: &[(&str, Capability)]) {
         let mut defaults = Defaults::default();
         for (id, capability) in models {
-            let (protocol, suffix) = match capability {
-                Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
-                Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
-                Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
-                Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
-                Capability::Asr => (Protocol::Custom, "/v1/transcription"),
-            };
-            self.state
-                .models
-                .upsert(ModelDraft {
-                    id: (*id).into(),
-                    category: *capability,
-                    protocol,
-                    url: format!("{base_url}{suffix}"),
-                    model: (*id).into(),
-                    display_name: (*id).into(),
-                    enabled: true,
-                    expected_revision: None,
-                })
-                .await
-                .expect("the model is stored");
-            self.state
-                .models
-                .set_key(id, Some(API_KEY))
-                .await
-                .expect("the credential is stored");
+            self.add_model(base_url, id, *capability).await;
             match capability {
                 Capability::Text => defaults.text = Some((*id).to_string()),
                 Capability::Image => defaults.image = Some((*id).to_string()),
@@ -918,6 +927,62 @@ async fn a_score_is_composed_by_the_model_kept_for_music() {
             .any(|entry| entry["id"] == json!(asset_id)),
         "the song is filed as music"
     );
+}
+
+#[tokio::test]
+async fn a_batch_is_asked_of_the_model_the_reader_named() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let recorded = Recorded::default();
+    let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
+    // The deployment keeps a storyteller and answers with it by default; the
+    // room is set to a second one, which is the model a named batch must reach.
+    harness
+        .configure(&provider, &[(WRITER, Capability::Text)])
+        .await;
+    harness
+        .add_model(&provider, READER_CHOICE, Capability::Text)
+        .await;
+    harness.project("Story Own Model").await;
+
+    let mut request = batch(
+        "outline",
+        vec![piece(
+            "outline",
+            json!({ "kind": "outline" }),
+            "text",
+            "把它拆成两集",
+        )],
+    );
+    request["model"] = json!(READER_CHOICE);
+    let job = harness.start_ok(request).await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+
+    assert_eq!(job["model"], READER_CHOICE);
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(settled["status"], "succeeded", "{settled}");
+    let asked = recorded
+        .asks()
+        .into_iter()
+        .find(|asked| asked["input"] == json!("把它拆成两集"))
+        .expect("the storyteller was asked");
+    assert_eq!(asked["model"], READER_CHOICE);
+
+    // A name the deployment cannot serve is refused rather than quietly swapped
+    // for the default, which is what tells the room to be set again.
+    let mut unknown = batch(
+        "outline",
+        vec![piece(
+            "outline",
+            json!({ "kind": "outline" }),
+            "text",
+            "再来一次",
+        )],
+    );
+    unknown["model"] = json!("nobody");
+    let (status, view) = harness.start(unknown).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{view}");
+    assert_eq!(view["code"], "PROVIDER_NOT_CONFIGURED");
 }
 
 #[tokio::test]

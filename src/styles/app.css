@@ -5338,6 +5338,24 @@ body.is-dragging-split {
   margin: -12px 0 0;
 }
 
+/* The models a step's buttons will ask, under the words that say what the step
+   is for. A row rather than a panel: it is read on the way to the button, and
+   each picker is as wide as the name of the model chosen in it. */
+.story-models {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.story-model {
+  max-width: 260px;
+}
+
+.story-model select {
+  max-width: 100%;
+}
+
 .story-tabs {
   border-bottom: 1px solid var(--stroke);
   display: flex;

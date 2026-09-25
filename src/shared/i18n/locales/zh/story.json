@@ -58,6 +58,16 @@
     "aspect": "画幅",
     "granularity": "视频粒度"
   },
+  "models": {
+    "label": "本步骤问的模型",
+    "default": "设置里的默认",
+    "musicDefault": "设置里的配乐模型",
+    "text": "文字",
+    "image": "图片",
+    "video": "视频",
+    "audio": "配音",
+    "music": "配乐"
+  },
   "steps": {
     "label": "五个步骤",
     "locked": "要先完成{{step}}。"

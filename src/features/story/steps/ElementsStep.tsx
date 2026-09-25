@@ -17,6 +17,7 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { SHELF_PAGE } from "../../editor/panels/shelfFilter";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { StoryModelPicks } from "../components/StoryModelPicks";
 import { ElementCard } from "../panels/ElementCard";
 import { jobKey, planElementArt, planElements } from "../jobs/plan";
 import {
@@ -147,6 +148,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
       <div className="story-step-wide">
         <h2>{t("story:step.elements")}</h2>
         <p className="story-step-lead">{t("story:elements.lead")}</p>
+        <StoryModelPicks places={["text", "image"]} />
 
         <div className="story-elements-bar">
           <div

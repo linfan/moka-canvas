@@ -29,6 +29,7 @@ import { useProjectStore } from "../../editor/stores/projectStore";
 import { useModelStore } from "../../settings/modelStore";
 import { applyJobResults } from "../jobs/apply";
 import { itemsForTargets, jobKey } from "../jobs/plan";
+import { storyAskModel } from "./storyModels";
 
 /** How often a batch that is running is looked at. It runs for minutes. */
 export const POLL_MS = 1500;
@@ -252,7 +253,16 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
           toast("error", i18n.t("story:common.stillSaving"));
           return null;
         }
-        const record = await storyApi.start(storyId, kind, items);
+        // Read here rather than where a batch is planned: every ask is made
+        // with the model the room is set to now, which is what the pickers in
+        // the steps stand for — a retry after the picker was changed is asked
+        // of the model the reader changed it to.
+        const record = await storyApi.start(
+          storyId,
+          kind,
+          items,
+          storyAskModel(kind),
+        );
         // A batch started for the story the room is showing: the list it is
         // put at the head of is that story's, whichever one it was.
         set({ storyId, jobs: [record, ...get().jobs], starting: false });

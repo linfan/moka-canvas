@@ -972,16 +972,26 @@ pub async fn start_story_job(
         ));
     }
 
-    // A telling's score is asked of the music model rather than of whatever
-    // reads its lines aloud: the two are the same capability, and a deployment
-    // that keeps both says which one composes.
-    let resolved = if request.kind == StoryJobKind::Music {
-        state.models.resolve_music().await
-    } else {
-        state
-            .models
-            .resolve_default(request.kind.capability())
-            .await
+    // A reader may name the model a batch is asked of — the room's own choice,
+    // kept on their machine — and a named one is resolved as it stands rather
+    // than swapped for a default: a model that has since been disabled is said
+    // to be disabled, which is a thing the room can be set right about. With
+    // none named, the deployment answers: a telling's score is asked of the
+    // music model rather than of whatever reads its lines aloud.
+    let named = request
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    let resolved = match named {
+        Some(model) => state.models.resolve(model, request.kind.capability()).await,
+        None if request.kind == StoryJobKind::Music => state.models.resolve_music().await,
+        None => {
+            state
+                .models
+                .resolve_default(request.kind.capability())
+                .await
+        }
     }
     .map_err(Problem::from)?;
     let job = state

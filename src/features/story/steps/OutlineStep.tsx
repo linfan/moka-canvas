@@ -22,6 +22,7 @@ import {
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
+import { StoryModelPicks } from "../components/StoryModelPicks";
 import { applyFixedOutline, readOutlineAnswer } from "../jobs/apply";
 import { planOutline } from "../jobs/plan";
 import { readTextAsset } from "../readText";
@@ -227,6 +228,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
       <div className="story-step-narrow">
         <h2>{t("story:step.outline")}</h2>
         <p className="story-step-lead">{t("story:outline.lead")}</p>
+        <StoryModelPicks places={["text"]} />
 
         <div className="story-outline-bar">
           <div

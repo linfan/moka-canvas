@@ -10,6 +10,12 @@ interface Props {
   disabled?: boolean;
   /** What choosing nothing is called: a node falls back to the provider's own. */
   noneLabel?: string;
+  /**
+   * What the field is called here, when the capability's own name is not what
+   * this place calls it: a telling's score and its voice are both asked of an
+   * audio model, and the two are not the same thing to ask for.
+   */
+  label?: string;
 }
 
 /**
@@ -26,6 +32,7 @@ export function ModelPicker({
   onChange,
   disabled = false,
   noneLabel,
+  label,
 }: Props) {
   const { t } = useTranslation();
   const view = useModelStore((state) => state.view);
@@ -38,7 +45,7 @@ export function ModelPicker({
 
   return (
     <label className="dialog-field">
-      <span>{t(CAPABILITY_LABELS[capability])}</span>
+      <span>{label ?? t(CAPABILITY_LABELS[capability])}</span>
       <select
         disabled={disabled}
         onChange={(event) =>

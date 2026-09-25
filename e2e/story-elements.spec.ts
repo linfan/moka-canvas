@@ -73,10 +73,15 @@ test("the chapters are read for their cast, drawn, and agreed to", async ({
     });
     await page.getByTestId("story-outline-confirm-all").click();
 
-    // Step three: the cast is read out of the chapters.
+    // Step three: the cast is read out of the chapters, by the model the room
+    // is set to — the deployment's default until a reader picks another.
     await page.getByTestId("story-step-elements").click();
     await expect(page.getByTestId("story-step-body-elements")).toBeVisible();
     await expect(page.getByTestId("story-elements-empty")).toBeVisible();
+    await expect(page.getByTestId("story-model-text")).toBeVisible();
+    await expect(
+      page.getByTestId("story-model-text").getByRole("combobox"),
+    ).toHaveValue("");
     await page.getByTestId("story-elements-recognise").click();
 
     await expect(page.locator(".story-element")).toHaveCount(4, {

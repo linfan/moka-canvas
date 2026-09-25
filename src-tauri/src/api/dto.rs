@@ -58,6 +58,10 @@ pub struct StartStoryJobRequest {
     pub story_id: String,
     pub kind: StoryJobKind,
     pub items: Vec<StoryJobItemDraft>,
+    /// The model a reader picked for this batch in the room's own bar, when
+    /// they picked one; the deployment's default answers otherwise.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Which batches a reader is asking for: one story's, or the project's.

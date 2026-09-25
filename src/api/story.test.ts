@@ -73,6 +73,7 @@ describe("story job client", () => {
     expect(sent[0].body).toEqual({
       storyId: "story-1",
       kind: "keyframeArt",
+      model: null,
       items: [
         {
           id: "keyframe:chapter-1:act-1:frame-1",
@@ -87,6 +88,14 @@ describe("story job client", () => {
         },
       ],
     });
+  });
+
+  it("carries the model the room picked, when it picked one", async () => {
+    stub(record());
+
+    await storyApi.start("story-1", "outline", [], "scribe-2");
+
+    expect(sent[0].body).toMatchObject({ model: "scribe-2" });
   });
 
   it("lists one story's batches, or the project's when none is named", async () => {

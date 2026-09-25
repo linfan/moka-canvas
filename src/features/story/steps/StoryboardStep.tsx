@@ -18,6 +18,7 @@ import {
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { StoryModelPicks } from "../components/StoryModelPicks";
 import { ActCard } from "../panels/ActCard";
 import { chapterGuesses } from "../jobs/apply";
 import { jobKey, planKeyframeArt, planStoryboard } from "../jobs/plan";
@@ -177,6 +178,9 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
       <div className="story-step-wide">
         <h2>{t("story:step.storyboard")}</h2>
         <p className="story-step-lead">{t("story:storyboard.lead")}</p>
+        <StoryModelPicks
+          places={["text", "image", "video", "audio", "music"]}
+        />
 
         <div className="story-chapter-strip" role="tablist">
           {story.chapters.map((held, at) => {
