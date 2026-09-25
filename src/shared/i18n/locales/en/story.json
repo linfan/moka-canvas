@@ -81,6 +81,27 @@
   "history": {
     "create": "Create a story",
     "rename": "Rename the story",
-    "delete": "Delete the story"
+    "delete": "Delete the story",
+    "apply": {
+      "outline": "Write the chapters from the model",
+      "elements": "Write the elements from the model",
+      "storyboard": "Write the board from the model",
+      "elementArt": "File a drawing",
+      "keyframeArt": "File a frame",
+      "actVideo": "File an act's clip",
+      "keyframeVideo": "File a shot's clip"
+    }
+  },
+  "jobs": {
+    "done": "{{count}} answers were written into the story.",
+    "failed": "{{failed}} of {{total}} pieces did not come back.",
+    "nothingToAsk": "There is nothing to ask for here yet.",
+    "stepFailed": "{{failed}} pieces did not come back.",
+    "retryFailed": "Ask again",
+    "openSettings": "Open settings",
+    "busy": "{{done}}/{{total}}…",
+    "targetGone": "{{label}} is no longer in the story.",
+    "storyGone": "The story this batch was told for is gone.",
+    "unreadableAnswer": "The answer to {{at}} could not be read; it is kept for you to fix."
   }
 }

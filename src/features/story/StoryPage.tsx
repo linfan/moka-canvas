@@ -13,6 +13,7 @@ import { StoryFlow } from "./StoryFlow";
 import { StoryIcon } from "./components/StoryIcons";
 import { StoryTopBar } from "./components/StoryTopBar";
 import { StorySide } from "./panels/StorySide";
+import { useStoryJobStore } from "./stores/storyJobStore";
 import { useActiveStory, useStoryStore } from "./stores/storyStore";
 
 /**
@@ -49,6 +50,19 @@ export function StoryPage() {
   }, [moka]);
 
   /**
+   * The batches out for the story being looked at.
+   *
+   * Read on entering the room, on the story being changed, and on the project
+   * being opened again — all of which are this one effect, since what it
+   * watches is the story. A batch that ended while the app was closed is read
+   * into the story here; a batch still out is waited on from here.
+   */
+  const storyId = story?.id ?? null;
+  useEffect(() => {
+    void useStoryJobStore.getState().load(storyId);
+  }, [storyId]);
+
+  /**
    * Going home from here puts the project down first.
    *
    * There is no dialog about unsaved work on this page, since nothing on it
@@ -78,6 +92,9 @@ export function StoryPage() {
       }
       after.close();
       useStoryStore.getState().forget();
+      // The batches were that project's: a reader who put the project down is
+      // not waited on for anything, and the records are read again on opening.
+      useStoryJobStore.getState().reset();
     }
     useAppStore.getState().setPhase("launcher");
   };

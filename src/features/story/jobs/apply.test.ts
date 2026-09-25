@@ -1,0 +1,360 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it } from "vitest";
+
+import type {
+  StoryJobItem,
+  StoryJobRecord,
+  StoryTarget,
+} from "../../../api/story";
+import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
+import type { StoryDocument } from "../../../shared/domain/types";
+import { useHistoryStore } from "../../editor/stores/historyStore";
+import { useProjectStore } from "../../editor/stores/projectStore";
+import { applyJobResults } from "./apply";
+
+const ids = storyIds();
+
+/** The room's project, open, with the fixture story in it. */
+function open(): void {
+  useProjectStore.getState().hydrate({
+    moka: buildStoryMokaFile(),
+    root: "/tmp/moka-story-apply-test",
+    selfCheck: { ok: true, issues: [] },
+  });
+}
+
+function story(): StoryDocument {
+  const held = useProjectStore
+    .getState()
+    .moka?.stories?.find((each) => each.id === ids.story);
+  if (held === undefined) throw new Error("the fixture story is open");
+  return held;
+}
+
+function item(overrides: Partial<StoryJobItem> = {}): StoryJobItem {
+  return {
+    id: "keyframe:chapter-1:act-1:frame-1",
+    target: { kind: "keyframeArt", chapterId: "", actId: "", keyframeId: "" },
+    capability: "image",
+    prompt: "雨中的站台",
+    inputs: [],
+    params: {},
+    status: "succeeded",
+    ...overrides,
+  };
+}
+
+function record(
+  kind: StoryJobRecord["kind"],
+  items: StoryJobItem[],
+): StoryJobRecord {
+  return {
+    id: `job-${kind}`,
+    projectId: "project-1",
+    storyId: ids.story,
+    kind,
+    status: "succeeded",
+    model: "a-model",
+    items,
+    cancelRequested: false,
+    createdAt: "2026-01-02T00:00:00Z",
+    updatedAt: "2026-01-02T00:00:00Z",
+  };
+}
+
+function keyframeItem(
+  keyframeId: string,
+  assetId: string,
+  extra: Partial<StoryJobItem> = {},
+): StoryJobItem {
+  return item({
+    id: `keyframe:${ids.chapterFirst}:${ids.act}:${keyframeId}`,
+    target: {
+      kind: "keyframeArt",
+      chapterId: ids.chapterFirst,
+      actId: ids.act,
+      keyframeId,
+    },
+    assetIds: [assetId],
+    ...extra,
+  });
+}
+
+beforeEach(() => {
+  useProjectStore.getState().close();
+  useHistoryStore.getState().clear();
+  open();
+});
+
+describe("writing a batch's answers into the story", () => {
+  it("files a drawing at the place its piece was for", () => {
+    const report = applyJobResults(
+      record("keyframeArt", [keyframeItem(ids.frameSecond, "asset-new-frame")]),
+    );
+
+    expect(report.applied).toBe(1);
+    expect(report.skipped).toBe(0);
+    const frame = story().chapters[0].acts[0].keyframes.find(
+      (each) => each.id === ids.frameSecond,
+    );
+    expect(frame?.art.takes.map((take) => take.assetId)).toEqual([
+      "asset-new-frame",
+    ]);
+    // The ask that drew it is written on the take, so a redraw can tell its own
+    // work from a reader's.
+    expect(frame?.art.takes[0].jobId).toBe("job-keyframeArt");
+    expect(frame?.art.takes[0].itemId).toBe(
+      `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameSecond}`,
+    );
+  });
+
+  it("adds a drawing to the place rather than replacing what is there", () => {
+    const report = applyJobResults(
+      record("keyframeArt", [
+        keyframeItem(ids.frameFirst, "asset-another-frame"),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    const frame = story().chapters[0].acts[0].keyframes.find(
+      (each) => each.id === ids.frameFirst,
+    );
+    expect(frame?.art.takes.map((take) => take.assetId)).toEqual([
+      ids.frameArt,
+      "asset-another-frame",
+    ]);
+  });
+
+  it("writes the chapters an outline answered with, keeping the boards", () => {
+    const report = applyJobResults(
+      record("outline", [
+        item({
+          id: "outline",
+          target: { kind: "outline" },
+          capability: "text",
+          text: '```json\n{ "chapters": [ { "title": "第一章 站台", "synopsis": "新的梗概。" }, { "title": "第二章 车厢", "synopsis": "车厢比站台更暗。" } ] }\n```',
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    // The first chapter kept its board and only took the new words.
+    expect(story().chapters[0].title).toBe("第一章 站台");
+    expect(story().chapters[0].synopsis).toBe("新的梗概。");
+    expect(story().chapters[0].acts).toHaveLength(1);
+  });
+
+  it("reads a part of a manuscript that answered with one chapter", () => {
+    const report = applyJobResults(
+      record("outline", [
+        item({
+          id: "outline:1",
+          target: { kind: "outline" },
+          capability: "text",
+          text: '{ "title": "第一章 站台", "synopsis": "他在站台上等列车。" }',
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    expect(story().chapters[0].synopsis).toBe("他在站台上等列车。");
+  });
+
+  it("writes the elements an answer found, keeping the drawings of those it knew", () => {
+    const report = applyJobResults(
+      record("elements", [
+        item({
+          id: "elements",
+          target: { kind: "elements" },
+          capability: "text",
+          text: JSON.stringify({
+            characters: [
+              {
+                name: "林",
+                description: "四十岁上下，灰呢大衣。",
+                chapters: [1],
+              },
+            ],
+            scenes: [],
+            props: [],
+          }),
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    const hero = story().elements.find((each) => each.id === ids.hero);
+    expect(hero?.description).toBe("四十岁上下，灰呢大衣。");
+    expect(hero?.main.takes.map((take) => take.assetId)).toEqual([
+      ids.heroMain,
+    ]);
+  });
+
+  it("writes a board onto the episode its piece was for", () => {
+    const report = applyJobResults(
+      record("storyboard", [
+        item({
+          id: `storyboard:${ids.chapterSecond}`,
+          target: { kind: "storyboard", chapterId: ids.chapterSecond },
+          capability: "text",
+          text: JSON.stringify({
+            acts: [
+              {
+                title: "第 1 幕 车厢",
+                summary: "车厢比站台更暗。",
+                characters: ["周"],
+                scene: "末班车车厢",
+                props: [],
+                sound: { music: "", sfx: "车轮声" },
+                keyframes: [
+                  {
+                    shotSize: "close",
+                    cameraMove: "pushIn",
+                    angle: "eyeLevel",
+                    content: "周抬起头。",
+                    durationMs: 2000,
+                    dialogue: [],
+                  },
+                ],
+              },
+            ],
+          }),
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    const chapter = story().chapters.find(
+      (each) => each.id === ids.chapterSecond,
+    );
+    expect(chapter?.acts).toHaveLength(1);
+    expect(chapter?.acts[0].characterIds).toEqual([ids.partner]);
+    expect(chapter?.acts[0].sound.sfx).toBe("车轮声");
+    expect(chapter?.acts[0].keyframes[0].content).toBe("周抬起头。");
+  });
+
+  it("files a clip where its act is, without confirming it for the reader", () => {
+    const report = applyJobResults(
+      record("actVideo", [
+        item({
+          id: `actVideo:${ids.chapterFirst}:${ids.act}`,
+          target: {
+            kind: "actVideo",
+            chapterId: ids.chapterFirst,
+            actId: ids.act,
+          },
+          capability: "video",
+          assetIds: ["asset-new-act"],
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    const act = story().chapters[0].acts[0];
+    expect(act.video.takes.map((take) => take.assetId)).toEqual([
+      ids.actVideo,
+      "asset-new-act",
+    ]);
+    // Which take is the right one is the reader's word, not the batch's.
+    expect(act.videoConfirmed).toBe(true);
+  });
+});
+
+describe("what applying an answer twice does", () => {
+  it("writes nothing the second time, and pushes nothing onto the history", () => {
+    const held = record("keyframeArt", [
+      keyframeItem(ids.frameSecond, "asset-new-frame"),
+    ]);
+    applyJobResults(held);
+    const afterFirst = useHistoryStore.getState().undoStack.length;
+
+    const again = applyJobResults(held);
+
+    expect(again.applied).toBe(0);
+    expect(again.skipped).toBe(1);
+    expect(useHistoryStore.getState().undoStack.length).toBe(afterFirst);
+  });
+
+  it("writes nothing for a batch whose pieces are all already written", () => {
+    // The fixture already keeps this drawing at this place.
+    const report = applyJobResults(
+      record("keyframeArt", [keyframeItem(ids.frameFirst, ids.frameArt)]),
+    );
+    expect(report.applied).toBe(0);
+    expect(useHistoryStore.getState().undoStack).toHaveLength(0);
+  });
+});
+
+describe("what applying does not write", () => {
+  it("leaves the pieces that did not succeed alone", () => {
+    const report = applyJobResults(
+      record("keyframeArt", [
+        keyframeItem(ids.frameFirst, "asset-one"),
+        keyframeItem(ids.frameSecond, "asset-two", { status: "failed" }),
+        item({
+          id: "keyframe:three",
+          target: {
+            kind: "keyframeArt",
+            chapterId: ids.chapterFirst,
+            actId: ids.act,
+            keyframeId: "frame-gone",
+          },
+          capability: "image",
+          assetIds: ["asset-three"],
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(1);
+    expect(report.skipped).toBe(2);
+    // The place that is no longer there is said out loud rather than dropped.
+    expect(report.notes.join(" ")).toContain("frame-gone");
+    const act = story().chapters[0].acts[0];
+    expect(
+      act.keyframes.find((each) => each.id === ids.frameSecond)?.art.takes,
+    ).toEqual([]);
+  });
+
+  it("says a story it can no longer find is gone", () => {
+    const report = applyJobResults({
+      ...record("keyframeArt", [keyframeItem(ids.frameSecond, "asset-x")]),
+      storyId: "story-gone",
+    });
+    expect(report.applied).toBe(0);
+    expect(report.notes.join(" ")).toContain("gone");
+  });
+
+  it("keeps an answer it could not read, and says which piece it was", () => {
+    const report = applyJobResults(
+      record("outline", [
+        item({
+          id: "outline",
+          target: { kind: "outline" },
+          capability: "text",
+          text: "I could not write this as json.",
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(0);
+    expect(report.notes.join(" ")).toContain("outline");
+  });
+});
+
+describe("undoing a batch", () => {
+  it("takes back the whole batch as one step", () => {
+    applyJobResults(
+      record("keyframeArt", [
+        keyframeItem(ids.frameFirst, "asset-one"),
+        keyframeItem(ids.frameSecond, "asset-two"),
+      ]),
+    );
+
+    const entry = useHistoryStore.getState().takeUndo();
+    expect(entry?.forwardCommands).toHaveLength(2);
+    expect(entry?.label).toContain("File");
+  });
+});
+
+/** The place a target names, for the tests that read one out of a record. */
+export type { StoryTarget };

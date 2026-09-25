@@ -19,6 +19,7 @@ import { useAppStore } from "../editor/stores/appStore";
 import { useHistoryStore } from "../editor/stores/historyStore";
 import { useProjectStore } from "../editor/stores/projectStore";
 import { StoryPage } from "./StoryPage";
+import { useStoryJobStore } from "./stores/storyJobStore";
 import { useStoryStore } from "./stores/storyStore";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -69,18 +70,24 @@ function activeRow(): string | null {
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  fetchMock.mockImplementation(() =>
-    Promise.resolve(
-      new Response(
-        JSON.stringify({ revision: 2, updatedAt: "2026-01-02T00:00:00.000Z" }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    ),
-  );
+  fetchMock.mockImplementation((input: RequestInfo | URL) => {
+    // Entering the room asks what batches are out for its story; the tests
+    // that care about one answer it themselves.
+    const payload = String(input).includes("/story/jobs")
+      ? []
+      : { revision: 2, updatedAt: "2026-01-02T00:00:00.000Z" };
+    return Promise.resolve(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  });
   localStorage.clear();
   useProjectStore.getState().close();
   useHistoryStore.getState().clear();
   useStoryStore.getState().forget();
+  useStoryJobStore.getState().reset();
   useAppStore.setState({ toasts: [] });
 });
 
@@ -143,6 +150,66 @@ describe("the five steps", () => {
     }
     expect(screen.getByTestId("story-step-body-idea")).toBeTruthy();
     expect(screen.queryByTestId("story-step-body-outline")).toBeNull();
+  });
+
+  it("marks the step whose pieces did not come back", async () => {
+    // A batch that ran, answered nothing, and ended: what the step shows is a
+    // count of the pieces that failed, which the document cannot know.
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes("/story/jobs")
+        ? [
+            {
+              id: "job-1",
+              projectId: "project-1",
+              storyId: storyIds().story,
+              kind: "storyboard",
+              status: "failed",
+              model: "a-writer",
+              items: [
+                {
+                  id: `storyboard:${storyIds().chapterFirst}`,
+                  target: {
+                    kind: "storyboard",
+                    chapterId: storyIds().chapterFirst,
+                  },
+                  capability: "text",
+                  prompt: "board this",
+                  inputs: [],
+                  params: {},
+                  status: "failed",
+                  error: "the provider refused",
+                },
+              ],
+              cancelRequested: false,
+              createdAt: "2026-01-02T00:00:00Z",
+              updatedAt: "2026-01-02T00:00:00Z",
+            },
+          ]
+        : {
+            root: "/tmp/moka-story-test",
+            moka: buildStoryMokaFile(),
+            selfCheck: { ok: true, issues: [] },
+          };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
+    openRoom(buildStoryMokaFile());
+
+    const badge = await screen.findByTestId("story-step-failed-storyboard");
+    expect(badge.textContent).toBe("1");
+    const button = screen.getByTestId("story-step-storyboard");
+    expect(button.className).toContain("is-failed");
+    // The step is still behind the elements, and a step that cannot be walked
+    // to says that first: the failure is on the badge beside it.
+    expect(button.getAttribute("title")).toBe("Elements comes first.");
+    // The step with nothing wrong with it carries no mark.
+    expect(screen.queryByTestId("story-step-failed-outline")).toBeNull();
   });
 
   it("walks to a step that has been earned, and stops at the ones that have not", () => {

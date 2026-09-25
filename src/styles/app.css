@@ -5243,6 +5243,18 @@ body.is-dragging-split {
   color: var(--yellow);
 }
 
+/* The count of pieces a step asked for and did not get back: a mark beside the
+   step's own count rather than instead of it, since a step can have both. */
+.story-step-failed {
+  background: var(--danger);
+  border-radius: 999px;
+  color: var(--canvas);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
 .story-step-body {
   flex: 1;
   min-width: 0;

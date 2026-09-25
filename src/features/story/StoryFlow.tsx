@@ -13,6 +13,7 @@ import {
 } from "../../shared/domain";
 import { execute } from "../editor/commands/execute";
 import { StoryStepBody } from "./steps/StoryStepBody";
+import { useStoryStepFailure } from "./stores/storyJobStore";
 import { useStoryStore } from "./stores/storyStore";
 
 /**
@@ -164,6 +165,7 @@ export function StoryFlow({ story }: { story: StoryDocument }) {
               key={each}
               progress={progress}
               step={each}
+              storyId={story.id}
             />
           ))}
         </nav>
@@ -187,30 +189,39 @@ function StepButton({
   index,
   current,
   progress,
+  storyId,
 }: {
   step: StoryStep;
   index: number;
   current: boolean;
   progress: Record<StoryStep, StoryStepProgress>;
+  storyId: string;
 }) {
   const { t } = useTranslation();
   const held = progress[step];
   const reachable = stepReachable(progress, step);
   const previous = STORY_STEPS[Math.max(0, index - 1)];
+  // What a step is waiting on is not in the document, so the count of pieces
+  // that did not come back is laid over the step rather than read off it.
+  const failure = useStoryStepFailure(storyId, step);
   return (
     <button
       aria-controls={`story-step-panel-${step}`}
       aria-selected={current}
-      className={`story-step is-${held.state}${current ? " is-active" : ""}`}
+      className={`story-step is-${held.state}${current ? " is-active" : ""}${
+        failure === null ? "" : " is-failed"
+      }`}
       data-testid={`story-step-${step}`}
       disabled={!reachable}
       id={`story-step-tab-${step}`}
       onClick={() => useStoryStore.getState().goStep(step)}
       role="tab"
       title={
-        reachable
-          ? t(`story:stepHint.${step}`)
-          : t("story:steps.locked", { step: t(`story:step.${previous}`) })
+        !reachable
+          ? t("story:steps.locked", { step: t(`story:step.${previous}`) })
+          : failure === null
+            ? t(`story:stepHint.${step}`)
+            : t("story:jobs.stepFailed", { failed: failure.failed })
       }
       type="button"
     >
@@ -219,6 +230,14 @@ function StepButton({
       <span className="story-step-count">
         {held.total > 0 ? `${held.done}/${held.total}` : ""}
       </span>
+      {failure !== null && (
+        <span
+          className="story-step-failed"
+          data-testid={`story-step-failed-${step}`}
+        >
+          {failure.failed}
+        </span>
+      )}
     </button>
   );
 }

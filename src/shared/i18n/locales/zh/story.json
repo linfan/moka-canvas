@@ -81,6 +81,27 @@
   "history": {
     "create": "新建故事",
     "rename": "重命名故事",
-    "delete": "删除故事"
+    "delete": "删除故事",
+    "apply": {
+      "outline": "应用模型分的章",
+      "elements": "应用模型找出的元素",
+      "storyboard": "应用模型写的分镜",
+      "elementArt": "归档一张元素图",
+      "keyframeArt": "归档一张关键帧",
+      "actVideo": "归档一幕的片段",
+      "keyframeVideo": "归档一格的片段"
+    }
+  },
+  "jobs": {
+    "done": "{{count}} 项结果已写进故事。",
+    "failed": "{{total}} 项里有 {{failed}} 项没有回来。",
+    "nothingToAsk": "这里还没有可以发起的请求。",
+    "stepFailed": "{{failed}} 项没有回来。",
+    "retryFailed": "再问一次",
+    "openSettings": "打开设置",
+    "busy": "{{done}}/{{total}}…",
+    "targetGone": "{{label}} 已经不在这个故事里了。",
+    "storyGone": "这批作业要讲的故事已经不在了。",
+    "unreadableAnswer": "{{at}} 的回答读不出来；原话已留给你手动修正。"
   }
 }
