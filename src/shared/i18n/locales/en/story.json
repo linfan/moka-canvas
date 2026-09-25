@@ -90,7 +90,9 @@
       "keyframeArt": "File a frame",
       "actVideo": "File an act's clip",
       "keyframeVideo": "File a shot's clip"
-    }
+    },
+    "brief": "Write the premise",
+    "source": "Upload a manuscript"
   },
   "jobs": {
     "done": "{{count}} answers were written into the story.",
@@ -103,5 +105,45 @@
     "targetGone": "{{label}} is no longer in the story.",
     "storyGone": "The story this batch was told for is gone.",
     "unreadableAnswer": "The answer to {{at}} could not be read; it is kept for you to fix."
+  },
+  "idea": {
+    "lead": "Say what the story is about, and how long it runs. Everything after this is written from here.",
+    "tabs": "Where the story comes from",
+    "tabWrite": "Write a premise",
+    "tabUpload": "Upload a novel or a script",
+    "writeLabel": "The premise",
+    "writePlaceholder": "Eleven at night, and the last train stops at a platform it has no business stopping at…",
+    "liftOpening": "Start from the manuscript's opening",
+    "dropHere": "Drop it here",
+    "chooseFile": "or choose a file",
+    "uploading": "Reading it in…",
+    "accepted": ".txt or .md, up to 8 MB",
+    "badType": "That is not a text file. Turn it into a .txt first.",
+    "tooBig": "That file is larger than 8 MB.",
+    "tooLong": "That manuscript is longer than a story will hold.",
+    "stillSaving": "Changes are still saving — try again in a moment",
+    "sourceUnnamed": "the uploaded file",
+    "sourceChars": "{{count}} characters",
+    "sourceBytes": "{{count}} not read yet",
+    "sourceUnread": "not read yet",
+    "showPreview": "Show the opening",
+    "hidePreview": "Hide the opening",
+    "removeSource": "Remove",
+    "duration": "Running time",
+    "shorter": "One minute shorter",
+    "longer": "One minute longer",
+    "minutes": "min",
+    "minutesCount": "{{count}} min",
+    "durationHint": "About {{chapters}} chapters of a minute each; the film runs {{duration}}.",
+    "aspect": "Frame",
+    "aspectHint": "The finished film is {{width}}×{{height}}.",
+    "genre": "Genre",
+    "genreHint": "Written into the outline, the elements and the board.",
+    "style": "Look",
+    "styleHint": "Written into every picture prompt, which is what the pictures look like.",
+    "styleHintMissing": "Without a genre and a look, the prompts ask for them plainly.",
+    "afterOutline": "Changing the premise does not re-split the chapters by itself — the outline step has “split again”.",
+    "needsIdea": "Write a premise, or upload a manuscript.",
+    "next": "Next: the outline"
   }
 }

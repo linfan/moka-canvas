@@ -18,6 +18,7 @@ import {
 import type {
   StoryAct,
   StoryActSound,
+  StoryAspect,
   StoryCameraAngle,
   StoryCameraMove,
   StoryChapter,
@@ -586,6 +587,49 @@ export function stepReachable(
   if (index <= 0) return true;
   const before = progress[STORY_STEPS[index - 1]];
   return before.state === "confirmed";
+}
+
+/**
+ * The frame a finished film is cut to, in pixels.
+ *
+ * The frame a story is told in is a proportion, and a proportion is not a size:
+ * what a story asks its pictures for is a shape, while what the cutting room
+ * exports is a size. This is the one place the two meet, so a story told in one
+ * frame is not exported in another.
+ */
+export function timelineSizeForAspect(aspect: StoryAspect): {
+  width: number;
+  height: number;
+} {
+  switch (aspect) {
+    case "9:16":
+      return { width: 1080, height: 1920 };
+    case "1:1":
+      return { width: 1080, height: 1080 };
+    case "4:3":
+      return { width: 1440, height: 1080 };
+    case "21:9":
+      return { width: 2560, height: 1080 };
+    default:
+      return { width: 1920, height: 1080 };
+  }
+}
+
+/** The shortest a premise may be and still be one. */
+export const STORY_IDEA_MIN = 10;
+
+/**
+ * Whether step one has what the steps after it need.
+ *
+ * A premise of one line is not a premise — the outline it would be written
+ * into has nothing to go on — and a manuscript is a premise of its own, since
+ * the second step reads the text rather than the summary. The look and the
+ * genre may be left empty; they are asked about again at every step that uses
+ * them, and a story without them is drawn plainly rather than not drawn.
+ */
+export function ideaReady(story: StoryDocument): boolean {
+  const written = story.brief.idea.trim().length >= STORY_IDEA_MIN;
+  return written || story.brief.sourceAssetId !== undefined;
 }
 
 /** A running time a reader can read: `mm:ss`, or `h:mm:ss` past an hour. */

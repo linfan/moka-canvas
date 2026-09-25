@@ -1,15 +1,27 @@
 import { useTranslation } from "react-i18next";
 import type { StoryDocument, StoryStep } from "../../../shared/domain";
+import { IdeaStep } from "./IdeaStep";
 
 /**
  * What is standing in the middle of the room: the step the reader picked.
  *
  * Each step is drawn by a component of its own, so the room's shell does not
  * have to know what an outline or a board is made of — and so that a board
- * being edited does not re-render the elements beside it. Until a step has
- * been built, what stands here is the sentence saying what it will be.
+ * being edited does not re-render the elements beside it. A step that has not
+ * been built yet says what it will be rather than standing empty.
  */
 export function StoryStepBody({
+  step,
+  story,
+}: {
+  step: StoryStep;
+  story: StoryDocument;
+}) {
+  if (step === "idea") return <IdeaStep story={story} />;
+  return <StepWaiting step={step} story={story} />;
+}
+
+function StepWaiting({
   step,
   story,
 }: {

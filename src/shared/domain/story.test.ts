@@ -27,12 +27,15 @@ import {
   actPlannedMs,
   currentTake,
   elementOf,
+  formatDuration,
+  ideaReady,
   keyframeCount,
   mergeActs,
   mergeChapters,
   mergeElements,
   storyProgress,
   targetKey,
+  timelineSizeForAspect,
   withTake,
   type ActDraft,
   type StoryChapterDraft,
@@ -230,6 +233,57 @@ describe("counting a story's parts", () => {
     chapter.acts = [act];
     expect(actPlannedMs(act)).toBe(5_000);
     expect(keyframeCount(chapter)).toBe(2);
+  });
+});
+
+describe("what a story is told and cut to", () => {
+  it("turns a frame into the size a film is exported at", () => {
+    expect(timelineSizeForAspect("16:9")).toEqual({
+      width: 1920,
+      height: 1080,
+    });
+    expect(timelineSizeForAspect("9:16")).toEqual({
+      width: 1080,
+      height: 1920,
+    });
+    expect(timelineSizeForAspect("1:1")).toEqual({ width: 1080, height: 1080 });
+    expect(timelineSizeForAspect("4:3")).toEqual({ width: 1440, height: 1080 });
+    expect(timelineSizeForAspect("21:9")).toEqual({
+      width: 2560,
+      height: 1080,
+    });
+  });
+
+  it("reads a running time the way a reader says it", () => {
+    expect(formatDuration(30_000)).toBe("00:30");
+    expect(formatDuration(180_000)).toBe("03:00");
+    expect(formatDuration(8 * 60 * 60 * 1000)).toBe("8:00:00");
+  });
+});
+
+describe("whether the premise is one", () => {
+  const story = () => {
+    const held = createStory("一个故事");
+    return held;
+  };
+
+  it("wants words or a manuscript before anything can be written from it", () => {
+    expect(ideaReady(story())).toBe(false);
+    expect(
+      ideaReady({ ...story(), brief: { ...story().brief, idea: "太短" } }),
+    ).toBe(false);
+    expect(
+      ideaReady({
+        ...story(),
+        brief: { ...story().brief, idea: "末班列车上，两个陌生人交换了话。" },
+      }),
+    ).toBe(true);
+    expect(
+      ideaReady({
+        ...story(),
+        brief: { ...story().brief, sourceAssetId: "asset-novel" },
+      }),
+    ).toBe(true);
   });
 });
 

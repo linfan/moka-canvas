@@ -5275,6 +5275,276 @@ body.is-dragging-split {
   font-size: 12px;
 }
 
+/* One column, read top to bottom: a step is a thing done in order, and a
+   second column beside it would be a second place to look. */
+.story-step-narrow {
+  display: grid;
+  gap: 22px;
+  margin: 0 auto;
+  max-width: 720px;
+  padding-bottom: 24px;
+  width: 100%;
+}
+
+.story-step-lead {
+  color: var(--muted);
+  margin: -12px 0 0;
+}
+
+.story-tabs {
+  border-bottom: 1px solid var(--stroke);
+  display: flex;
+  gap: 4px;
+}
+
+.story-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.story-tab.is-active {
+  border-bottom-color: var(--primary);
+  color: var(--ink);
+}
+
+.story-idea-block {
+  display: grid;
+  gap: 8px;
+}
+
+.story-idea-input {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.7;
+  min-height: 200px;
+  padding: 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.story-idea-input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.story-idea-foot {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.story-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.story-count.is-near {
+  color: var(--yellow);
+}
+
+.story-count.is-full {
+  color: var(--coral);
+}
+
+.story-drop {
+  align-items: center;
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 28px 16px;
+  text-align: center;
+}
+
+.story-drop.is-over {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
+.story-file {
+  display: none;
+}
+
+.story-source {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.story-source-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.story-source-name {
+  font-weight: 600;
+}
+
+.story-source-size {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.story-source-peek {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.story-field {
+  display: grid;
+  gap: 8px;
+}
+
+.story-field-label {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.story-chips {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.story-choice {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.story-choice:hover {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
+.story-choice.is-on {
+  background: var(--surface-raised);
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
+.story-aspect-glyph {
+  color: currentColor;
+  display: block;
+}
+
+.story-choice-input {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font: inherit;
+  min-width: 140px;
+  padding: 6px 10px;
+}
+
+.story-duration {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.story-stepper {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.story-stepper button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 10px;
+}
+
+.story-stepper button:hover {
+  color: var(--ink);
+}
+
+.story-stepper input {
+  background: none;
+  border: none;
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 64px;
+}
+
+.story-stepper input:focus {
+  outline: none;
+}
+
+.story-stepper-unit {
+  color: var(--muted);
+  font-size: 12px;
+  padding-right: 8px;
+}
+
+.story-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.story-callout {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-left: 3px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.story-step-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
 /* The column folds away with the window, as the other rooms' columns do; the
    rule stands here rather than with theirs because a later rule of equal
    weight is the one that wins, and this section is the last in the file. */

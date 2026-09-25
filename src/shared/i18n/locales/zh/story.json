@@ -90,7 +90,9 @@
       "keyframeArt": "归档一张关键帧",
       "actVideo": "归档一幕的片段",
       "keyframeVideo": "归档一格的片段"
-    }
+    },
+    "brief": "写下创意",
+    "source": "上传稿子"
   },
   "jobs": {
     "done": "{{count}} 项结果已写进故事。",
@@ -103,5 +105,45 @@
     "targetGone": "{{label}} 已经不在这个故事里了。",
     "storyGone": "这批作业要讲的故事已经不在了。",
     "unreadableAnswer": "{{at}} 的回答读不出来；原话已留给你手动修正。"
+  },
+  "idea": {
+    "lead": "说说这个故事讲的是什么、要讲多久。后面每一步都从这里写起。",
+    "tabs": "故事从哪里来",
+    "tabWrite": "写一段创意",
+    "tabUpload": "上传小说 / 剧本",
+    "writeLabel": "创意",
+    "writePlaceholder": "夜里十一点，末班列车停在一个不该停的站台……",
+    "liftOpening": "从原文开头写起",
+    "dropHere": "拖进来",
+    "chooseFile": "或选择文件",
+    "uploading": "正在读入…",
+    "accepted": ".txt / .md，不超过 8 MB",
+    "badType": "这不是文本文件。请先转成 .txt。",
+    "tooBig": "文件超过 8 MB。",
+    "tooLong": "这部稿子比一个故事能装下的更长。",
+    "stillSaving": "更改仍在保存中——请稍后重试",
+    "sourceUnnamed": "已上传的文件",
+    "sourceChars": "{{count}} 字",
+    "sourceBytes": "{{count}}，尚未读入",
+    "sourceUnread": "尚未读入",
+    "showPreview": "预览开头",
+    "hidePreview": "收起开头",
+    "removeSource": "移除",
+    "duration": "总时长",
+    "shorter": "缩短一分钟",
+    "longer": "延长一分钟",
+    "minutes": "分钟",
+    "minutesCount": "{{count}} 分钟",
+    "durationHint": "按每章约一分钟，预计 {{chapters}} 章；成片 {{duration}}。",
+    "aspect": "画幅",
+    "aspectHint": "成片 {{width}}×{{height}}。",
+    "genre": "影片风格",
+    "genreHint": "写进大纲、元素与分镜的提示词。",
+    "style": "视觉风格",
+    "styleHint": "写进所有画面提示词，决定画面长什么样。",
+    "styleHintMissing": "没有影片风格与视觉风格时，提示词只按画面本身来写。",
+    "afterOutline": "改动创意不会自动重拆章节——大纲那一步有「重新拆解」。",
+    "needsIdea": "写一段创意，或上传一部稿子。",
+    "next": "下一步：剧本大纲"
   }
 }
