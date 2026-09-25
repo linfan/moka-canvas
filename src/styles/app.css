@@ -6545,6 +6545,75 @@ body.is-dragging-split {
   max-width: 160px;
 }
 
+/* ---------------------------------------------------------------------------
+   The fifth step: what an assembly will do, the film it makes, and the clips
+   it was made of. The export bar is the cutting room's own, borrowed rather
+   than rebuilt — a render in progress looks the same wherever it was started.
+   --------------------------------------------------------------------------- */
+
+.story-assembly,
+.story-film-card,
+.story-film-clips {
+  display: grid;
+  gap: 10px;
+}
+
+.story-film-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.story-film-card h3,
+.story-assembly h3,
+.story-film-clips h3 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.story-check {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.story-check input {
+  width: auto;
+}
+
+.story-film-video {
+  background: #000;
+  border-radius: var(--radius-sm);
+  max-height: 320px;
+  width: 100%;
+}
+
+.story-clip-list {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.story-clip-row {
+  align-items: center;
+  border-top: 1px solid var(--stroke);
+  display: grid;
+  font-size: 12px;
+  gap: 10px;
+  grid-template-columns: 40px 1fr auto auto;
+  padding: 6px 2px;
+}
+
+.story-warnings li {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
 /* The column folds away with the window, as the other rooms' columns do; the
    rule stands here rather than with theirs because a later rule of equal
    weight is the one that wins, and this section is the last in the file. */

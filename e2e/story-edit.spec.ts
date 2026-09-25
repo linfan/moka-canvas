@@ -11,59 +11,61 @@ import {
 } from "./helpers";
 
 /**
- * The fourth step: one episode's board, its frames and its clip.
+ * The fifth step: a telling's clips laid end to end as one timeline.
  *
- * A whole telling is taken as far as the board the last step needs: the premise
- * becomes chapters, the chapters become a cast, the cast is drawn and agreed
- * to, and then one episode is boarded, framed, and filmed.
+ * The whole telling is taken there — premise, chapters, cast, board, one filmed
+ * act — and then assembled: what the step is for is that the shots a reader has
+ * agreed to one at a time come out as one cut, on a timeline of its own that
+ * the cutting room can go on working on.
  */
 
-/** What the server holds of the first story's first act. */
-async function persistedBoard(page: Page): Promise<{
-  acts: number;
-  frames: number;
-  drawn: number;
-  clips: number;
+/** The timeline the server has for the first story, as the document holds it. */
+async function persistedTimeline(page: Page): Promise<{
+  name: string;
+  isTheStories: boolean;
+  clips: Array<{ kind: string; startMs: number; durationMs: number }>;
 }> {
   return page.evaluate(async () => {
     const response = await fetch("/api/v1/projects/current");
     const body = (await response.json()) as {
       moka?: {
-        stories?: {
-          chapters?: {
-            acts?: {
-              keyframes?: { art?: { takes?: unknown[] } }[];
-              video?: { takes?: unknown[] };
-            }[];
-          }[];
+        stories?: { edit?: { timelineId?: string } }[];
+        timelines?: {
+          id?: string;
+          name?: string;
+          clips?: { kind?: string; startMs?: number; durationMs?: number }[];
         }[];
       };
     };
-    const acts = (body.moka?.stories?.[0]?.chapters ?? []).flatMap(
-      (chapter) => chapter.acts ?? [],
+    const wanted = body.moka?.stories?.[0]?.edit?.timelineId;
+    const timeline = (body.moka?.timelines ?? []).find(
+      (held) => held.id === wanted,
     );
     return {
-      acts: acts.length,
-      frames: acts.flatMap((act) => act.keyframes ?? []).length,
-      drawn: acts
-        .flatMap((act) => act.keyframes ?? [])
-        .filter((keyframe) => (keyframe.art?.takes ?? []).length > 0).length,
-      clips: acts.filter((act) => (act.video?.takes ?? []).length > 0).length,
+      name: timeline?.name ?? "",
+      isTheStories: timeline !== undefined,
+      clips: (timeline?.clips ?? []).map((clip) => ({
+        kind: clip.kind ?? "",
+        startMs: clip.startMs ?? 0,
+        durationMs: clip.durationMs ?? 0,
+      })),
     };
   });
 }
 
-test("an episode is boarded, framed, and filmed", async ({ page }) => {
-  const home = projectHome("story-storyboard");
+test("a telling is assembled into one timeline and handed to the cutting room", async ({
+  page,
+}) => {
+  const home = projectHome("story-edit");
   await forgetProjects();
   await configureTheWholeStudio();
   try {
     await page.goto("/");
-    await createProject(page, join(home, "project"), "Story Board");
+    await createProject(page, join(home, "project"), "Story Edit");
     await openStoryRoom(page);
     await newStory(page, "Rain at Night");
 
-    // A premise, the chapters it is told in, and the cast they hold.
+    // Steps one to four: a premise, chapters, a cast, a board, one shot filmed.
     await page
       .getByTestId("story-idea-input")
       .fill("Eleven at night, and the last train stops where it should not.");
@@ -101,62 +103,59 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
       timeout: 30_000,
     });
 
-    // Step four: the episode the room opens on is boarded.
     await page.getByTestId("story-step-storyboard").click();
-    await expect(page.getByTestId("story-step-body-storyboard")).toBeVisible();
-    await expect(page.getByTestId("story-board-empty")).toBeVisible();
     await page.getByTestId("story-board-generate").click();
-
-    // Every act of the board stands on the page at once, and a row's name is
-    // its place within its own act — so each card is looked at on its own.
     const firstAct = page.getByTestId("story-act-0");
     await expect(firstAct.getByTestId("story-table")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(page.getByTestId("story-act-1")).toBeVisible();
-    await expect(firstAct.getByTestId("story-kf-0")).toBeVisible();
-
-    // Nothing is drawn until the table has been agreed to.
-    await expect(firstAct.getByTestId("story-act-draw-0")).toBeDisabled();
     await firstAct.getByTestId("story-act-keys-0").click();
-    await expect(firstAct.getByTestId("story-act-draw-0")).toBeEnabled();
-
-    // One frame of the act, drawn from the cast step three settled on.
-    await firstAct.getByTestId("story-kf-slot-0-generate").click();
+    await firstAct.getByTestId("story-act-draw-0").click();
     await expect(firstAct.getByTestId("story-kf-slot-0-confirm")).toBeVisible({
       timeout: 60_000,
     });
     await firstAct.getByTestId("story-kf-slot-0-confirm").click();
-
-    // The rest of the act at once, and then every frame has been agreed to.
-    await firstAct.getByTestId("story-act-draw-0").click();
     await expect(firstAct.getByTestId("story-kf-slot-1-confirm")).toBeVisible({
       timeout: 60_000,
     });
     await firstAct.getByTestId("story-kf-slot-1-confirm").click();
-    await expect(
-      firstAct.getByTestId("story-act-images-confirm-0"),
-    ).toBeEnabled();
     await firstAct.getByTestId("story-act-images-confirm-0").click();
-
-    // And the clip itself, which the stand-in's job hands back at once.
-    await expect(firstAct.getByTestId("story-act-video-go-0")).toBeEnabled();
     await firstAct.getByTestId("story-act-video-go-0").click();
     await expect(firstAct.getByTestId("story-act-video-0")).toBeVisible({
       timeout: 60_000,
     });
-
-    // The fifth step's door waits on that clip being agreed to.
     await firstAct.getByTestId("story-act-video-confirm-0").click();
-    await expect(page.getByTestId("story-step-edit")).toBeEnabled();
 
-    // The document is read back off the server, which is a flush behind the
-    // window: what is asserted is what the server ends up holding.
-    await expect.poll(async () => (await persistedBoard(page)).clips).toBe(1);
-    const board = await persistedBoard(page);
-    expect(board.acts).toBe(2);
-    expect(board.frames).toBe(3);
-    expect(board.drawn).toBe(2);
+    // Step five: the filmed act is laid down as a timeline of the telling's own.
+    await page.getByTestId("story-step-edit").click();
+    await expect(page.getByTestId("story-step-edit-body")).toBeVisible();
+    await expect(page.getByTestId("story-assembly-summary")).toContainText("1");
+    await page.getByTestId("story-assemble").click();
+
+    await expect
+      .poll(async () => (await persistedTimeline(page)).name, {
+        timeout: 30_000,
+      })
+      .toContain("Rain at Night");
+    const timeline = await persistedTimeline(page);
+    expect(timeline.isTheStories).toBe(true);
+    // The clip of the act, then the words said in it — laid down from zero,
+    // the length coming from the material the stand-in handed back.
+    expect(timeline.clips.map((clip) => clip.kind)).toEqual(["video", "text"]);
+    expect(timeline.clips[0]?.startMs).toBe(0);
+    expect(timeline.clips[0]?.durationMs).toBe(1_000);
+    expect(timeline.clips[1]?.startMs).toBe(0);
+
+    // And the cutting room opens on that same timeline.
+    await page.getByTestId("story-film-open").click();
+    await expect(page.getByTestId("clip-page")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(
+      page
+        .getByRole("tablist", { name: "Timelines" })
+        .getByRole("tab", { name: /Rain at Night/ }),
+    ).toHaveAttribute("aria-selected", "true");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

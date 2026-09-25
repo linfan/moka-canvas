@@ -64,9 +64,10 @@ function toast(
  * a chapter written a moment ago is asked for against a document that does not
  * have it yet. Which is what this is for: the server reads the document, so
  * everything in the window has to be the server's before anything is asked of
- * it.
+ * it — or before the document is read back whole, which would drop what was
+ * still waiting.
  */
-async function saveEverything(): Promise<boolean> {
+export async function saveEverything(): Promise<boolean> {
   for (let turn = 0; turn < 8; turn += 1) {
     await useProjectStore.getState().flush();
     const { pending, saveStatus } = useProjectStore.getState();
