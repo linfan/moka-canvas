@@ -397,6 +397,10 @@ describe("writing an episode's board", () => {
       "medium",
     );
 
+    // With no board yet the header's ask writes one straight away, and says so.
+    expect(screen.getByTestId("story-board-generate").textContent).toBe(
+      "Write the board",
+    );
     fireEvent.click(screen.getByTestId("story-board-generate"));
     await waitFor(() => expect(starts).toHaveLength(1));
     const [item] = starts[0]!.items;
@@ -543,7 +547,7 @@ describe("writing an episode's board", () => {
         .disabled,
     ).toBe(false);
     expect(
-      (screen.getByTestId("story-board-generate") as HTMLButtonElement)
+      (screen.getByTestId("story-board-regenerate") as HTMLButtonElement)
         .disabled,
     ).toBe(false);
   });
@@ -686,6 +690,11 @@ describe("writing an episode's board", () => {
 
   it("asks before writing an episode's board again, and lists what it costs", async () => {
     openAtBoard(boarded());
+    // An episode that already has a board is asked for by its second name, and
+    // the ask stands behind a question rather than writing over it at once.
+    expect(screen.getByTestId("story-board-regenerate").textContent).toBe(
+      "Write the board again",
+    );
     fireEvent.click(screen.getByTestId("story-board-regenerate"));
     const dialog = screen.getByTestId("regenerate-board");
     expect(dialog.textContent).toContain("1 act");
