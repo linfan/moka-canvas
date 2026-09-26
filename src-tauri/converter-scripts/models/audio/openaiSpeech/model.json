@@ -5,5 +5,6 @@
   "script": "openai-speech.lua",
   "order": 10,
   "auth": { "header": "Authorization", "scheme": "Bearer" },
-  "version": 3
+  "features": { "needsVoice": true },
+  "version": 4
 }

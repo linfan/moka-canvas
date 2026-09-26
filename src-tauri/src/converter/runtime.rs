@@ -405,6 +405,77 @@ mod tests {
         assert_eq!(body["input"]["text"], "hello");
         assert_eq!(body["input"]["voice"], "longxiaochun");
 
+        // The pace and the acting direction the room sends arrive as the
+        // service's: `instructions` as `instruction` — the field the engine
+        // reads a role or an emotion from — and the generic `speed` as `rate`
+        // for a caller that stated no pace in the service's own name. Before
+        // this, both were dropped and the ask went out as a voice-only read of
+        // the lines.
+        let out = rt
+            .call_json_value(
+                &speech,
+                "build_request",
+                vec![
+                    serde_json::json!({"url": "https://ws.test/tts", "model": "cosyvoice-v1"}),
+                    serde_json::json!({
+                        "prompt": "hello",
+                        "params": {
+                            "voice": "longxiaochun",
+                            "format": "mp3",
+                            "speed": 1.2,
+                            "instructions": "平稳地念",
+                        },
+                    }),
+                    serde_json::json!([]),
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(out["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["input"]["rate"], 1.2);
+        assert_eq!(body["input"]["instruction"], "平稳地念");
+
+        // Both pace names stated, as a generation carries them once the audio
+        // settings have filled the service's own: `rate` is the pace, and the
+        // generic `speed` beside it is not a second one.
+        let out = rt
+            .call_json_value(
+                &speech,
+                "build_request",
+                vec![
+                    serde_json::json!({"url": "https://ws.test/tts", "model": "cosyvoice-v1"}),
+                    serde_json::json!({
+                        "prompt": "hello",
+                        "params": {"voice": "longxiaochun", "rate": 1.6, "speed": 0.8},
+                    }),
+                    serde_json::json!([]),
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(out["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["input"]["rate"], 1.6);
+
+        // A pace the service does not take — the room's fields allow 0.25 to 4
+        // — is brought to the nearest end rather than sent to be refused.
+        let out = rt
+            .call_json_value(
+                &speech,
+                "build_request",
+                vec![
+                    serde_json::json!({"url": "https://ws.test/tts", "model": "cosyvoice-v1"}),
+                    serde_json::json!({
+                        "prompt": "hello",
+                        "params": {"voice": "longxiaochun", "speed": 3},
+                    }),
+                    serde_json::json!([]),
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(out["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["input"]["rate"], 2);
+
         // Video: the async DashScope task shape.
         let video = rt
             .load(&scripts.join("models/video/bailianVideo/bailian-video.lua"))

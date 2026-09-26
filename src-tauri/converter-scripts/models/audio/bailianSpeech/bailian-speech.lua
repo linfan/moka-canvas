@@ -13,13 +13,26 @@ function build_request(call, req, inputs)
     local body = {model = call.model}
     body.input = {text = req.prompt}
 
-    -- Map request params to Bailian TTS parameters
+    -- The room's audio settings, under this service's own names: the pace,
+    -- pitch, volume and sample rate arrive as `rate`, `pitch`, `volume` and
+    -- `sample_rate`, and the acting direction as `instructions`, which this
+    -- engine spells `instruction`. A caller that stated only the generic
+    -- `speed` is paced by it as well. The engine takes a pace between 0.5 and
+    -- 2, so one outside that is brought to the nearest end rather than sent to
+    -- be refused.
     if req.params.voice then body.input.voice = req.params.voice end
     if req.params.format then body.input.format = req.params.format end
     if req.params.sample_rate then body.input.sample_rate = tonumber(req.params.sample_rate) end
     if req.params.volume then body.input.volume = tonumber(req.params.volume) end
-    if req.params.rate then body.input.rate = tonumber(req.params.rate) end
+    local rate = tonumber(req.params.rate or req.params.speed)
+    if rate then
+        if rate < 0.5 then rate = 0.5 end
+        if rate > 2 then rate = 2 end
+        body.input.rate = rate
+    end
     if req.params.pitch then body.input.pitch = tonumber(req.params.pitch) end
+    local instruction = req.params.instructions
+    if instruction and instruction ~= "" then body.input.instruction = instruction end
 
     return {
         method = "POST",
