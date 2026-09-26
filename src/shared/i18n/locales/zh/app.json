@@ -8,6 +8,7 @@
   "loading": "加载中…",
   "noProjects": "还没有项目。新建一个开始吧。",
   "removeRecent": "从最近项目中移除 {{name}}",
+  "openRecentRooms": "打开 {{name}}",
   "newProject": "新建项目",
   "openProject": "打开项目",
   "importProject": "导入项目",
@@ -69,9 +70,9 @@
     "openWithMissing": "带着缺失素材打开"
   },
   "homeMenu": {
-    "button": "主页菜单",
-    "hint": "主页、画布、故事与剪辑",
-    "home": "主页",
+    "button": "项目菜单",
+    "hint": "项目、画布、故事与剪辑",
+    "home": "项目",
     "canvas": "画布",
     "clip": "剪辑",
     "story": "故事"

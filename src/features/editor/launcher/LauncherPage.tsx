@@ -3,10 +3,33 @@ import { useTranslation } from "react-i18next";
 import { recentApi, type RecentProject } from "../../../api";
 import type { SelfCheckReport } from "../../../shared/domain";
 import { useModelStore } from "../../settings/modelStore";
-import { useAppStore } from "../stores/appStore";
+import { useAppStore, type AppPhase } from "../stores/appStore";
 import { useProjectStore } from "../stores/projectStore";
 import { MissingAssetsDialog } from "./MissingAssetsDialog";
 import { ProjectDialog, type DialogMode } from "./ProjectDialog";
+
+/**
+ * The rooms a recent project can be opened onto, in telling order.
+ *
+ * A row is taken to be a way into the work rather than a way into one room of
+ * it, so which room is meant is answered before the project is put on — the
+ * board a reader did not ask for is never built on the way past it.
+ */
+type Room = "story" | "canvas" | "clip";
+
+const ROOMS: Room[] = ["story", "canvas", "clip"];
+
+const ROOM_PHASE: Record<Room, AppPhase> = {
+  story: "story",
+  canvas: "editing",
+  clip: "clip",
+};
+
+const ROOM_LABEL: Record<Room, string> = {
+  story: "app:homeMenu.story",
+  canvas: "app:homeMenu.canvas",
+  clip: "app:homeMenu.clip",
+};
 
 export function LauncherPage() {
   const { t } = useTranslation();
@@ -14,9 +37,12 @@ export function LauncherPage() {
   const phase = useAppStore((state) => state.phase);
   const [recents, setRecents] = useState<RecentProject[] | null>(null);
   const [dialog, setDialog] = useState<DialogMode | null>(null);
-  const [pendingCheck, setPendingCheck] = useState<SelfCheckReport | null>(
-    null,
-  );
+  // Which row stands open over its rooms, if any.
+  const [roomsFor, setRoomsFor] = useState<string | null>(null);
+  const [pendingCheck, setPendingCheck] = useState<{
+    report: SelfCheckReport;
+    onto: AppPhase;
+  } | null>(null);
 
   const refreshRecents = useCallback(() => {
     recentApi
@@ -27,14 +53,17 @@ export function LauncherPage() {
 
   useEffect(refreshRecents, [refreshRecents]);
 
-  const enterProject = useCallback((selfCheck: SelfCheckReport) => {
-    if (selfCheck.ok) {
-      useAppStore.getState().setPhase("editing");
-    } else {
-      // Hold in "opening" until the user chooses how to proceed.
-      setPendingCheck(selfCheck);
-    }
-  }, []);
+  const enterProject = useCallback(
+    (selfCheck: SelfCheckReport, onto: AppPhase = "editing") => {
+      if (selfCheck.ok) {
+        useAppStore.getState().setPhase(onto);
+      } else {
+        // Hold in "opening" until the user chooses how to proceed.
+        setPendingCheck({ report: selfCheck, onto });
+      }
+    },
+    [],
+  );
 
   const cancelOpen = useCallback(() => {
     setPendingCheck(null);
@@ -43,10 +72,10 @@ export function LauncherPage() {
   }, []);
 
   const openRecent = useCallback(
-    async (path: string) => {
+    async (path: string, onto: AppPhase) => {
       useAppStore.getState().setPhase("opening");
       try {
-        enterProject(await useProjectStore.getState().open(path));
+        enterProject(await useProjectStore.getState().open(path), onto);
       } catch (error) {
         useAppStore.getState().setPhase("launcher");
         useAppStore
@@ -84,8 +113,10 @@ export function LauncherPage() {
           className="brand-mark"
           src="/favicon.png"
         />
-        <h1>{t("app:name")}</h1>
-        <p>{t("app:tagline")}</p>
+        <div className="launcher-hero-words">
+          <h1>{t("app:name")}</h1>
+          <p>{t("app:tagline")}</p>
+        </div>
       </header>
 
       <section
@@ -99,27 +130,55 @@ export function LauncherPage() {
           <p className="launcher-empty">{t("app:noProjects")}</p>
         ) : (
           <ul>
-            {recents.map((project) => (
-              <li key={project.id}>
-                <button
-                  className="launcher-recent"
-                  disabled={busy}
-                  onClick={() => void openRecent(project.path)}
-                  type="button"
-                >
-                  <strong title={project.name}>{project.name}</strong>
-                  <span title={project.path}>{project.path}</span>
-                </button>
-                <button
-                  aria-label={t("app:removeRecent", { name: project.name })}
-                  className="launcher-recent-remove"
-                  onClick={() => void removeRecent(project.id)}
-                  type="button"
-                >
-                  ×
-                </button>
-              </li>
-            ))}
+            {recents.map((project) => {
+              const roomsOpen = roomsFor === project.id;
+              return (
+                <li key={project.id}>
+                  <div className="launcher-recent-head">
+                    <button
+                      aria-expanded={roomsOpen}
+                      className="launcher-recent"
+                      disabled={busy}
+                      onClick={() => setRoomsFor(roomsOpen ? null : project.id)}
+                      type="button"
+                    >
+                      <strong title={project.name}>{project.name}</strong>
+                      <span title={project.path}>{project.path}</span>
+                    </button>
+                    <button
+                      aria-label={t("app:removeRecent", { name: project.name })}
+                      className="launcher-recent-remove"
+                      onClick={() => void removeRecent(project.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {roomsOpen && (
+                    <div
+                      aria-label={t("app:openRecentRooms", {
+                        name: project.name,
+                      })}
+                      className="launcher-recent-rooms"
+                      role="group"
+                    >
+                      {ROOMS.map((room) => (
+                        <button
+                          disabled={busy}
+                          key={room}
+                          onClick={() =>
+                            void openRecent(project.path, ROOM_PHASE[room])
+                          }
+                          type="button"
+                        >
+                          {t(ROOM_LABEL[room])}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -167,11 +226,14 @@ export function LauncherPage() {
         <MissingAssetsDialog
           onCancel={cancelOpen}
           onOpenAnyway={() => {
+            const onto = pendingCheck.onto;
             setPendingCheck(null);
-            useAppStore.getState().setPhase("editing");
+            useAppStore.getState().setPhase(onto);
           }}
-          onReportChange={setPendingCheck}
-          report={pendingCheck}
+          onReportChange={(report) =>
+            setPendingCheck((held) => (held ? { ...held, report } : held))
+          }
+          report={pendingCheck.report}
         />
       )}
     </div>

@@ -79,7 +79,7 @@ test("the interface follows the language chosen in settings", async ({
   // Back through the launcher to put the language back: a language picked
   // outright is not a trap.
   await page.getByTestId("home-menu-button").click();
-  await page.getByRole("menuitem", { name: "主页" }).click();
+  await page.getByRole("menuitem", { name: "项目" }).click();
   await expect(page.getByRole("heading", { name: "摩卡画布" })).toBeVisible({
     timeout: 10_000,
   });

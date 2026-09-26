@@ -109,6 +109,17 @@ describe("app boot", () => {
     const recent = await screen.findByText("Golden Fixture");
     fireEvent.click(recent);
 
+    // The row opens over the rooms a project can be entered by rather than
+    // taking the project straight onto the board: the board is the room asked
+    // for here.
+    const rooms = within(
+      screen.getByRole("group", { name: "Open Golden Fixture" }),
+    );
+    expect(
+      rooms.getAllByRole("button").map((each) => each.textContent),
+    ).toEqual(["Story", "Canvas", "Clip"]);
+    fireEvent.click(rooms.getByRole("button", { name: "Canvas" }));
+
     // The board a project opens onto has a tab, and the tree holds them both.
     const tab = await screen.findByTestId("canvas-tab-Canvas 1");
     expect(tab).toBeTruthy();
@@ -124,12 +135,26 @@ describe("app boot", () => {
     expect(screen.getByTestId("canvas-tab-Canvas 2")).toBeTruthy();
   });
 
+  it("enters a project in the room its row was asked for", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByText("Golden Fixture"));
+    fireEvent.click(await screen.findByRole("button", { name: "Story" }));
+
+    // The room is a place in the work rather than a step through the board:
+    // the story room stands, and the project was never put on a canvas first.
+    expect(await screen.findByTestId("story-page")).toBeTruthy();
+    expect(useAppStore.getState().phase).toBe("story");
+    expect(useProjectStore.getState().moka).not.toBeNull();
+    expect(screen.queryByTestId("canvas-host")).toBeNull();
+  });
+
   it("walks between the board and the cutting room from the corner menu", async () => {
     render(<App />);
     fireEvent.click(await screen.findByText("Golden Fixture"));
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     await screen.findByTestId("canvas-host");
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
     const menu = screen.getByRole("menu");
     expect(
       within(menu)
@@ -146,7 +171,7 @@ describe("app boot", () => {
     // Stepping over to the cutting room is not a close: the project stands.
     expect(useProjectStore.getState().moka).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
     const clipMenu = screen.getByRole("menu");
     expect(
       within(clipMenu)
@@ -157,9 +182,11 @@ describe("app boot", () => {
     expect(useAppStore.getState().phase).toBe("editing");
     expect(screen.getByTestId("canvas-host")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
     fireEvent.click(
-      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Home" }),
+      within(screen.getByRole("menu")).getByRole("menuitem", {
+        name: "Projects",
+      }),
     );
     expect(
       await screen.findByRole("heading", { name: "Moka Canvas" }),

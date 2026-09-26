@@ -43,9 +43,9 @@ test("the corner menu leads to the story room, above the board", async ({
 
   // The corner menu walks between three working pages in telling order, and
   // marks the one being stood on.
-  await page.getByRole("button", { name: "Home menu" }).click();
+  await page.getByRole("button", { name: "Projects menu" }).click();
   const rows = page.getByTestId("home-menu").getByRole("menuitem");
-  await expect(rows).toHaveText(["Home", "Story", "Canvas", "Clip"]);
+  await expect(rows).toHaveText(["Projects", "Story", "Canvas", "Clip"]);
   await expect(rows.filter({ hasText: "Story" })).toHaveAttribute(
     "aria-current",
     "page",

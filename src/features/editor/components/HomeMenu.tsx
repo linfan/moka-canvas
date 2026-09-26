@@ -40,8 +40,8 @@ function CoffeeIcon() {
   );
 }
 
-/** A house with a chimney: where the projects are. */
-function HomeIcon() {
+/** Sheets stacked: the projects a reader keeps. */
+function ProjectsIcon() {
   return (
     <svg
       aria-hidden="true"
@@ -54,10 +54,9 @@ function HomeIcon() {
       viewBox="0 0 24 24"
       width="16"
     >
-      <path d="M4 10.5 12 4l8 6.5" />
-      <path d="M6 9.8V19h12V9.8" />
-      <path d="M16.5 7.6V4.8h2v4.2" />
-      <path d="M10 19v-4.5h4V19" />
+      <rect height="10" rx="2" width="16" x="4" y="10" />
+      <path d="M6.8 7.2h10.4" />
+      <path d="M9.6 4.2h4.8" />
     </svg>
   );
 }
@@ -217,7 +216,7 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
                 role="menuitem"
                 type="button"
               >
-                <HomeIcon />
+                <ProjectsIcon />
                 <span>{t("app:homeMenu.home")}</span>
               </button>
             </div>

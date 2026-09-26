@@ -206,13 +206,36 @@ test("a timeline holding work is deleted only after a question that stands insid
   rmSync(home, { recursive: true, force: true });
 });
 
+test("a recent project opens straight into the room its row was asked for", async ({
+  page,
+}) => {
+  const home = await clippedProject(page);
+  await newTimeline(page, "Timeline 1");
+  await expect
+    .poll(async () => persistedTimelineNames(page))
+    .toEqual(["Timeline 1"]);
+
+  // The launcher's row asks which room the project is for before it is put
+  // on, so the cutting room is reached without the board being stood on and
+  // left behind on the way.
+  await page.reload();
+  await openRecent(page, "Cutting Room", "Clip");
+  await expect(page.getByTestId("clip-page")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("canvas-host")).toHaveCount(0);
+  await expect(
+    strip(page).getByRole("tab", { name: "Timeline 1" }),
+  ).toHaveAttribute("aria-selected", "true");
+
+  rmSync(home, { recursive: true, force: true });
+});
+
 test("the corner menu marks the cutting room, and the board is one step beside it", async ({
   page,
 }) => {
   const home = await clippedProject(page);
   await newTimeline(page, "Timeline 1");
 
-  await page.getByRole("button", { name: "Home menu" }).click();
+  await page.getByRole("button", { name: "Projects menu" }).click();
   const menu = page.getByTestId("home-menu");
   await expect(menu.getByRole("menuitem", { name: "Clip" })).toHaveAttribute(
     "aria-current",
