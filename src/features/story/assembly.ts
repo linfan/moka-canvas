@@ -14,6 +14,7 @@
  */
 
 import { CommandError } from "../../shared/domain/commands";
+import { MAX_CLIPS_PER_TIMELINE } from "../../shared/domain/constants";
 import {
   createClipFromAsset,
   createTextClip,
@@ -398,6 +399,66 @@ export function assemblyCommands(
     });
   }
   return { commands, clipByAct };
+}
+
+/**
+ * A telling's clips on a timeline of the reader's own naming.
+ *
+ * The fifth step's assembly writes into the timeline the telling owns and
+ * rearranges it every time another act is filmed. This is the other way out: a
+ * cut that stands beside it and that the telling never touches again, so a
+ * reader can move its clips about freely without the next assembly walking over
+ * their work. What is laid down is the same arithmetic — every clip the fourth
+ * step made, in telling order, with each act's voice and score cued under it —
+ * and no captions: a reader who wants the lines written on the cut can add them
+ * in the cutting room, where they are theirs to place.
+ */
+export function importTimelineCommands(
+  story: StoryDocument,
+  moka: MokaFile,
+  name: string,
+): { commands: DocumentCommand[]; timelineId: string; clips: number } {
+  const plan = planAssembly(story, moka);
+  if (plan.units.length === 0) {
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("story:edit.nothingToAssemble"),
+    );
+  }
+  const size = timelineSizeForAspect(story.brief.aspect);
+  const timeline = createTimeline(name, {
+    width: size.width,
+    height: size.height,
+    fps: ASSEMBLY_FPS,
+    background: ASSEMBLY_BACKGROUND,
+  });
+  const sound = soundRows(story, timeline.tracks);
+  const tracks = [...timeline.tracks, ...sound.added].map((track) =>
+    track.id === sound.rows.voice
+      ? { ...track, name: i18n.t("story:edit.voiceTrack") }
+      : track,
+  );
+  const { clips } = layDown(story, moka, plan, {
+    tracks,
+    rows: sound.rows,
+    withSubtitles: false,
+  });
+  // A standing timeline is added whole, which is the one way clips land without
+  // the command that counts them — so the ceiling a cut holds is asked here
+  // rather than discovered by a document that would carry more than it may.
+  if (clips.length > MAX_CLIPS_PER_TIMELINE) {
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("story:import.tooManyClips", { max: MAX_CLIPS_PER_TIMELINE }),
+    );
+  }
+  return {
+    commands: [
+      { type: "addTimeline", timeline: { ...timeline, tracks, clips } },
+    ],
+    timelineId: timeline.id,
+    clips: clips.length,
+  };
 }
 
 /** The clips a plan makes, and where each of them came from. */

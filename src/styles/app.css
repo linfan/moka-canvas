@@ -5425,6 +5425,33 @@ body.is-dragging-split {
   margin: -12px 0 0;
 }
 
+/* A step's name, and the things that act on the whole step beside it: a step
+   is read top to bottom, so what belongs to all of it stands on its own line
+   rather than among the controls of one of its parts. */
+.story-step-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+/* Taking the telling into another room: a way out of the step rather than a
+   move within it, so it is drawn the way the head's own small buttons are. */
+.story-import {
+  background: none;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  flex: none;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+.story-import:hover:enabled {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
 /* The models a step's buttons will ask, under the words that say what the step
    is for. A row rather than a panel: it is read on the way to the button, and
    each picker is as wide as the name of the model chosen in it. */

@@ -77,14 +77,14 @@
     "outline": "Outline",
     "elements": "Elements",
     "storyboard": "Storyboard",
-    "edit": "Edit"
+    "edit": "Compose"
   },
   "stepHint": {
     "idea": "Say what the story is about, and how long it runs.",
     "outline": "Break the premise into the episodes it is told in.",
     "elements": "Find the characters, places, and things the story needs, and draw them.",
     "storyboard": "Write each episode's acts and shots, then draw them and film them.",
-    "edit": "Lay the acts down on a timeline and render the film."
+    "edit": "Lay the acts down on a timeline, render the film, and hand a cut of it to the cutting room."
   },
   "state": {
     "empty": "not started",
@@ -113,7 +113,9 @@
     "chapters": "Write the chapters",
     "storyboard": "Write the board",
     "sound": "Choose the sound of an act",
-    "assemble": "Assemble the film"
+    "assemble": "Assemble the film",
+    "importCanvas": "Import the story into a canvas",
+    "importClips": "Import the story into the cutting room"
   },
   "parse": {
     "failed": "That answer did not read as a chapter table"
@@ -436,6 +438,33 @@
     "line": "{{speaker}}: {{text}}",
     "unconfirmedShort": "not agreed to",
     "ownSoundNote": "The clips carry their own sound too, so two things may be heard at once; turn one of them down in the cutting room."
+  },
+  "import": {
+    "name": "Name",
+    "cancel": "Cancel",
+    "premise": "Premise",
+    "main": "main",
+    "turnaround": "turn-around",
+    "frame": "frame",
+    "clip": "clip",
+    "voice": "voice-over",
+    "score": "score",
+    "tooManyClips": "This telling has more clips than one timeline holds ({{max}}). Film fewer acts, or fewer shots in each.",
+    "canvas": {
+      "button": "Import to canvas…",
+      "title": "Import to canvas",
+      "hint": "What this telling has generated so far becomes a board: the words, the drawings, the clips and the sound, each card carrying the ask it was made with and wired to what it came from.",
+      "empty": "The telling has generated nothing yet — nothing to import.",
+      "done": "Imported {{count}} cards into “{{name}}”."
+    },
+    "timeline": {
+      "button": "Import to the cutting room…",
+      "title": "Import to the cutting room",
+      "hint": "A cut of its own is made from this telling's clips and sound, laid down in telling order. The telling keeps the timeline it assembled; this cut is yours to rearrange.",
+      "empty": "No clip has been filmed yet — nothing to import.",
+      "done": "Imported {{count}} clips into “{{name}}”.",
+      "name": "{{name}} · cut"
+    }
   },
   "voice": {
     "rowLabel": "Sound",

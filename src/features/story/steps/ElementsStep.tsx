@@ -18,6 +18,8 @@ import { execute } from "../../editor/commands/execute";
 import { SHELF_PAGE } from "../../editor/panels/shelfFilter";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
+import { StoryImportButton } from "../components/StoryImportButton";
+import { StepHeading } from "../components/StepHeading";
 import { ElementCard } from "../panels/ElementCard";
 import { readElementsAnswer } from "../jobs/apply";
 import { planElementArt, planElements, storyReadChars } from "../jobs/plan";
@@ -195,7 +197,10 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-elements-body">
       <div className="story-step-wide">
-        <h2>{t("story:step.elements")}</h2>
+        <StepHeading
+          action={<StoryImportButton story={story} target="canvas" />}
+          step="elements"
+        />
         <p className="story-step-lead">{t("story:elements.lead")}</p>
         <StoryModelPicks places={["text", "image"]} />
 

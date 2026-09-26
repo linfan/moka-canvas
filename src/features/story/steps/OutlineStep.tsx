@@ -23,6 +23,8 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
 import { StoryModelPicks } from "../components/StoryModelPicks";
+import { StoryImportButton } from "../components/StoryImportButton";
+import { StepHeading } from "../components/StepHeading";
 import { applyFixedOutline, readOutlineAnswer } from "../jobs/apply";
 import { planOutline, storySplitChars } from "../jobs/plan";
 import { readTextAsset } from "../readText";
@@ -239,7 +241,10 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-outline-body">
       <div className="story-step-narrow">
-        <h2>{t("story:step.outline")}</h2>
+        <StepHeading
+          action={<StoryImportButton story={story} target="canvas" />}
+          step="outline"
+        />
         <p className="story-step-lead">{t("story:outline.lead")}</p>
         <StoryModelPicks places={["text"]} />
 
