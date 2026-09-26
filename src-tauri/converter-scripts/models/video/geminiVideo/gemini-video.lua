@@ -37,66 +37,17 @@ local function whole_param(params, key)
   return nil
 end
 
--- Where a frame belongs in the shot: the ports label the ends, and anything
--- unlabelled keeps its place in between.
-local function frame_rank(role)
-  if role == "firstFrame" then
-    return 0
-  end
-  if role == "lastFrame" then
-    return 2
-  end
-  return 1
-end
-
--- The image inputs, opening frame first. Sorted by what the sort was told
--- rather than by a bare comparison, so two unlabelled frames keep the order
--- they arrived in.
+-- The image inputs, in the order the request carried them. What each one is for
+-- is settled by the role it came with rather than by where it sits.
 local function frames_of(inputs)
-  local ranked = {}
-  for index, input in ipairs(inputs or {}) do
+  local frames = {}
+  for _, input in ipairs(inputs or {}) do
     local mime = input.mime or ""
     if mime:sub(1, 6) == "image/" then
-      table.insert(ranked, {rank = frame_rank(input.role), index = index, input = input})
+      table.insert(frames, input)
     end
-  end
-  table.sort(ranked, function(left, right)
-    if left.rank ~= right.rank then
-      return left.rank < right.rank
-    end
-    return left.index < right.index
-  end)
-  local frames = {}
-  for _, entry in ipairs(ranked) do
-    table.insert(frames, entry.input)
   end
   return frames
-end
-
--- What a request does with its images. The caller's preference is read first;
--- the count has the final say, because no provider takes three frames and a
--- request with more images than that becomes a reference request instead.
-local function layout_of(frames, mode)
-  local asked = "auto"
-  if type(mode) == "string" then
-    asked = mode
-  end
-  if asked == "reference" then
-    if #frames == 0 then
-      return "prompt"
-    end
-    return "reference"
-  end
-  if #frames == 0 then
-    return "prompt"
-  end
-  if #frames == 1 then
-    return "opening"
-  end
-  if #frames == 2 then
-    return "both"
-  end
-  return "reference"
 end
 
 -- A frame as a job names it, which is a field of its own rather than a part of
@@ -106,20 +57,50 @@ local function named(frame)
 end
 
 function build_task_request(call, req, inputs)
-  local frames = frames_of(inputs)
   local shot = {prompt = req.prompt}
-  local layout = layout_of(frames, req.params.mode)
-  if layout == "opening" or layout == "both" then
-    shot.image = named(frames[1])
-    if frames[2] ~= nil then
-      shot.lastFrame = named(frames[2])
+  -- The two pictures the caller labelled as the shot's ends are the frames it
+  -- lands on, and anything given beside them travels as a reference: an act is
+  -- filmed this way, opening on its first board and closing on its last with
+  -- the shots in between asked for as references. Where no such pair is
+  -- labelled there is only the count to go on — one picture opens the shot, two
+  -- open and close it, and three or more are references, since no provider
+  -- takes three frames — and a request that asked for references is given
+  -- references and nothing else.
+  local frames = frames_of(inputs)
+  local opening, closing = nil, nil
+  for _, frame in ipairs(frames) do
+    if frame.role == "firstFrame" and opening == nil then
+      opening = frame
+    elseif frame.role == "lastFrame" and closing == nil then
+      closing = frame
     end
-  elseif layout == "reference" then
-    local references = {}
+  end
+
+  local references = {}
+  if req.params.mode == "reference" then
+    references = frames
+  elseif opening ~= nil and closing ~= nil then
+    shot.image = named(opening)
+    shot.lastFrame = named(closing)
     for _, frame in ipairs(frames) do
-      table.insert(references, {referenceType = "ASSET", image = named(frame)})
+      if frame ~= opening and frame ~= closing then
+        table.insert(references, frame)
+      end
     end
-    shot.referenceImages = references
+  elseif #frames == 1 then
+    shot.image = named(frames[1])
+  elseif #frames == 2 then
+    shot.image = named(frames[1])
+    shot.lastFrame = named(frames[2])
+  else
+    references = frames
+  end
+  if #references > 0 then
+    local images = {}
+    for _, frame in ipairs(references) do
+      table.insert(images, {referenceType = "ASSET", image = named(frame)})
+    end
+    shot.referenceImages = images
   end
 
   local parameters = {}

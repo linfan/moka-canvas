@@ -968,6 +968,41 @@ async fn a_video_generation_is_started_polled_and_collected() {
     assert_eq!(recorded.asked(), ["start", "poll", "poll", "content"]);
 }
 
+/// How an act is filmed: the ends the ports labelled are the frames the shot
+/// lands on, and a board given beside them is asked for as a reference rather
+/// than taking one of their places.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_picture_beside_the_labelled_ends_rides_as_a_reference() {
+    let recorded = Recorded::default();
+    let base_url = video_provider(recorded.clone()).await;
+    let call = channel(&base_url, "a-video-model", Capability::Video);
+
+    let inputs = [
+        reference("opening", InputRole::FirstFrame),
+        reference("middle", InputRole::Reference),
+        reference("closing", InputRole::LastFrame),
+    ];
+    scripted()
+        .await
+        .create_task(
+            &call,
+            &generation(Capability::Video, "a slow pan", json!({})),
+            &inputs,
+            &Cancel::new(),
+        )
+        .await
+        .expect("the job starts");
+
+    let sent = recorded.body(0);
+    assert_eq!(sent["first_frame"], inputs[0].data_url(), "{sent}");
+    assert_eq!(sent["last_frame"], inputs[2].data_url(), "{sent}");
+    assert_eq!(
+        sent["reference_images"],
+        json!([inputs[1].data_url()]),
+        "{sent}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_job_the_provider_has_forgotten_ends_the_polling() {
     let base_url = serve(Router::new().route(
@@ -1592,6 +1627,9 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
 
     let inputs = [
         reference("opening", InputRole::FirstFrame),
+        // How an act is filmed: the ends the ports labelled are the frames the
+        // shot lands on, and a board between them rides as a reference.
+        reference("middle", InputRole::Reference),
         reference("closing", InputRole::LastFrame),
     ];
     let task = scripted()
@@ -1619,6 +1657,17 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
     assert!(
         sent["instances"][0]["lastFrame"]["bytesBase64Encoded"].is_string(),
         "and so was the closing one: {sent}"
+    );
+    assert_eq!(
+        sent["instances"][0]["referenceImages"]
+            .as_array()
+            .map(Vec::len),
+        Some(1),
+        "the board between the ends rode as a reference: {sent}"
+    );
+    assert_eq!(
+        sent["instances"][0]["referenceImages"][0]["referenceType"],
+        "ASSET"
     );
     assert_eq!(sent["parameters"]["durationSeconds"], 6);
     assert_eq!(sent["parameters"]["aspectRatio"], "16:9");

@@ -7,10 +7,10 @@
 -- document — so what they are comes from sniffing them, and the type the answer
 -- announced is a claim checked against the bytes rather than trusted over.
 --
--- The frames a shot is built on travel under names rather than as a list: the
+-- The pictures a shot is built on travel under names rather than as a list: the
 -- opening frame, then the closing one, because the provider does not guess
--- which end of a list is which. A request with more pictures than that is a
--- request for references, which is a different field.
+-- which end of a list is which. A picture that is not one of the labelled ends
+-- rides beside them as a reference, which is a different field.
 
 local POLL_MS = 5000
 
@@ -51,28 +51,16 @@ local function flag_param(params, key)
   return nil
 end
 
--- The pictures a shot uses, opening frame first: the ports label the frames,
--- and anything unlabelled keeps its place between them.
-local function frames_of(inputs)
-  local frames = {}
+-- The pictures a shot uses, in the order the request carried them: what each
+-- one is for is settled by the role it came with rather than by where it sits.
+local function pictures_of(inputs)
+  local pictures = {}
   for _, input in ipairs(inputs or {}) do
     if (input.mime or ""):sub(1, 6) == "image/" then
-      table.insert(frames, input)
+      table.insert(pictures, input)
     end
   end
-  local function order(input)
-    if input.role == "firstFrame" then
-      return 0
-    end
-    if input.role == "lastFrame" then
-      return 2
-    end
-    return 1
-  end
-  table.sort(frames, function(left, right)
-    return order(left) < order(right)
-  end)
-  return frames
+  return pictures
 end
 
 function build_task_request(call, req, inputs)
@@ -96,22 +84,49 @@ function build_task_request(call, req, inputs)
     body.watermark = watermark
   end
 
-  -- The mode is the caller's preference; the count has the final say, because
-  -- no provider takes three frames, and a shot with more pictures than that is
-  -- asking for references whether or not it said so.
-  local frames = frames_of(inputs)
-  local wanted = text_param(req.params, "mode") or "auto"
-  if #frames > 2 or (wanted == "reference" and #frames > 0) then
+  -- The two pictures the caller labelled as the shot's ends are the frames it
+  -- lands on, and anything given beside them travels as a reference: an act is
+  -- filmed this way, opening on its first board and closing on its last with
+  -- the shots in between asked for as references. Where no such pair is
+  -- labelled there is only the count to go on — one picture opens the shot, two
+  -- open and close it, and three or more are references, since no provider
+  -- takes three frames — and a request that asked for references is given
+  -- references and nothing else.
+  local pictures = pictures_of(inputs)
+  local opening, closing = nil, nil
+  for _, picture in ipairs(pictures) do
+    if picture.role == "firstFrame" and opening == nil then
+      opening = picture
+    elseif picture.role == "lastFrame" and closing == nil then
+      closing = picture
+    end
+  end
+
+  local references = {}
+  if text_param(req.params, "mode") == "reference" then
+    references = pictures
+  elseif opening ~= nil and closing ~= nil then
+    body.first_frame = opening.data_url
+    body.last_frame = closing.data_url
+    for _, picture in ipairs(pictures) do
+      if picture ~= opening and picture ~= closing then
+        table.insert(references, picture)
+      end
+    end
+  elseif #pictures == 1 then
+    body.first_frame = pictures[1].data_url
+  elseif #pictures == 2 then
+    body.first_frame = pictures[1].data_url
+    body.last_frame = pictures[2].data_url
+  else
+    references = pictures
+  end
+  if #references > 0 then
     local sent = {}
-    for _, frame in ipairs(frames) do
-      table.insert(sent, frame.data_url)
+    for _, picture in ipairs(references) do
+      table.insert(sent, picture.data_url)
     end
     body.reference_images = sent
-  elseif #frames == 2 then
-    body.first_frame = frames[1].data_url
-    body.last_frame = frames[2].data_url
-  elseif #frames == 1 then
-    body.first_frame = frames[1].data_url
   end
 
   return {
