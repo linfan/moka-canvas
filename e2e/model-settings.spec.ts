@@ -183,7 +183,8 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
   const protocol = dialog.getByLabel("Protocol");
   await expect(protocol).toHaveValue("openaiVideos");
   // A chat endpoint cannot serve a video model, so it is not on offer; the
-  // registry's own video scripts are, beside the built-ins.
+  // shapes deployed under the video capability are, in the order their own
+  // documents ask for.
   await expect(protocol.locator("option")).toHaveText([
     "OpenAI-compatible · Videos API",
     "Google Gemini · long-running (Veo)",
@@ -194,7 +195,7 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
   );
 });
 
-test("a built-in protocol is offered without a script standing behind it", async ({
+test("every shape a category offers comes from its converter's model.json", async ({
   page,
 }) => {
   await page.goto("/");
@@ -205,9 +206,9 @@ test("a built-in protocol is offered without a script standing behind it", async
   await dialog.getByRole("button", { name: "New image model" }).click();
 
   const protocol = dialog.getByLabel("Protocol");
-  // Bailian's shapes are implemented by the program rather than by a deployed
-  // script, so no converter directory stands behind them and the form names
-  // and addresses them from what this build knows.
+  // Both image shapes are converter directories deployed on this machine, so
+  // the form names and addresses them from what each one's model.json says —
+  // this program holds no table of protocols of its own.
   await expect(protocol.locator("option")).toHaveText([
     "OpenAI-compatible · Images API",
     "Alibaba Cloud · Bailian Image (Wan)",
@@ -240,9 +241,8 @@ test("speech recognition offers the script that serves it", async ({
     .getByRole("button", { name: "New speech recognition model" })
     .click();
   const protocol = dialog.getByLabel("Protocol");
-  // Nothing built in speaks a transcription endpoint, so the deployed script
-  // is the whole of what the category offers — there is no fallback for it to
-  // fall back to.
+  // The deployed converter is the whole of what the category offers: a
+  // recognition shape is a script and a document, and nothing else.
   await expect(protocol).toHaveValue("bailianAsr");
   await expect(protocol.locator("option")).toHaveText([
     "Alibaba Cloud · Bailian Speech Recognition (recording file)",

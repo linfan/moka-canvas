@@ -45,18 +45,6 @@
     "video": "Video",
     "videos": "Videos"
   },
-  "protocol": {
-    "bailianImage": "Alibaba Cloud · Bailian Image (Wan)",
-    "bailianText": "Alibaba Cloud · Bailian Text (Qwen)",
-    "custom": "Custom (reserved)",
-    "gemini": "Google Gemini · generateContent",
-    "geminiVideo": "Google Gemini · long-running (Veo)",
-    "openaiChat": "OpenAI-compatible · Chat Completions",
-    "openaiImages": "OpenAI-compatible · Images API",
-    "openaiResponses": "OpenAI-compatible · Responses",
-    "openaiSpeech": "OpenAI-compatible · Speech API",
-    "openaiVideos": "OpenAI-compatible · Videos API"
-  },
   "shotSize": {
     "extremeClose": "Extreme close-up",
     "close": "Close-up",

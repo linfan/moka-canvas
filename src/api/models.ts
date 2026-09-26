@@ -21,9 +21,9 @@ export interface ModelView {
   id: string;
   category: Capability;
   /**
-   * The protocol's wire name. Built-in protocols are the names
-   * `MODEL_PROTOCOLS` lists; a Lua converter script carries its registry id
-   * (e.g. `"bailianVideo"`), so this is the open set of strings, not a union.
+   * The protocol's wire name, which is the id of the converter directory that
+   * serves it — a name read from disk rather than a union this build knows,
+   * so a converter added later is one a stored model can speak.
    */
   protocol: string;
   /** The full endpoint address requests are sent to — not a base URL. */
@@ -165,8 +165,21 @@ function modelPath(id: string, suffix = ""): string {
  */
 export interface ProtocolEntry {
   script: string;
+  /** What the converter calls itself, in English. */
   displayName: string;
+  /** What it calls itself in other languages, keyed by language tag. */
+  labels?: Record<string, string>;
   urlExample: string;
+  /** Where it sits among the protocols of its capability, ascending. */
+  order?: number;
+  /** Where its credential travels, as the document declared it. */
+  auth?: { header: string; scheme: string };
+  /**
+   * What it declares about itself beyond speaking its wire shape, for
+   * whichever part of the program knows that feature — a mask of its own, for
+   * instance.
+   */
+  features?: Record<string, boolean>;
 }
 
 /** The registry's protocols: capability → protocol id → entry. */

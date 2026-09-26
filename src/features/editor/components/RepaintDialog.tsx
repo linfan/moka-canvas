@@ -20,7 +20,7 @@ import {
   type MarkTool,
   type Size,
 } from "../canvas/repaint";
-import { useModelStore } from "../../settings/modelStore";
+import { useModelStore, protocolFeatures } from "../../settings/modelStore";
 import { fileRepaint } from "../interactions/actions";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -62,6 +62,8 @@ export function RepaintDialog() {
   const asked = useEditorStore((state) => state.pictureTool);
   const moka = useProjectStore((state) => state.moka);
   const view = useModelStore((state) => state.view);
+  const protocols = useModelStore((state) => state.protocols);
+  const loadProtocols = useModelStore((state) => state.loadProtocols);
   const surface = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [marks, setMarks] = useState<Mark[]>([]);
@@ -85,6 +87,14 @@ export function RepaintDialog() {
   // a drag adds.
   const open = useRef<Mark | null>(null);
   open.current = draft;
+
+  // What a protocol takes a mask as is declared in its own model.json, so the
+  // registry is read before the note below is drawn. A read already held is
+  // reused; one that failed leaves the cautious note in place, which is what
+  // an unknown protocol deserves.
+  useEffect(() => {
+    void loadProtocols();
+  }, [loadProtocols]);
 
   useEffect(() => {
     if (!painting) return;
@@ -288,7 +298,8 @@ export function RepaintDialog() {
     (reference !== null
       ? view?.models.find((model) => model.id === reference)?.protocol
       : null) ?? null;
-  const takesMask = protocol === "openaiImages";
+  const takesMask =
+    protocol !== null && protocolFeatures(protocols, protocol).mask === true;
 
   return (
     <div className="dialog-backdrop" onClick={close} role="presentation">

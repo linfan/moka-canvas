@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react";
 import App from "../../App";
 import type { ModelsView } from "../../api";
-import type { ModelProtocol, SelfCheckReport } from "../../shared/domain";
+import type { SelfCheckReport } from "../../shared/domain";
 import { CASCADE_DROP_OFFSET, DEFAULT_NODE_WIDTH } from "../../shared/domain";
 import {
   buildGoldenMokaFile,
@@ -62,8 +62,30 @@ const filed: { name: string; type: string; bytes: number }[] = [];
 
 const fetchMock = vi.fn<typeof fetch>();
 
+/**
+ * The converter registry as the server reports it: what each image protocol
+ * declares about itself, which is what the dialog reads to word its note.
+ */
+const REGISTRY = {
+  image: {
+    openaiImages: {
+      script: "image/openai-images.lua",
+      displayName: "OpenAI-compatible · Images API",
+      urlExample: "https://api.example.com/v1/images/generations",
+      order: 10,
+      features: { mask: true },
+    },
+    bailianImage: {
+      script: "image/bailian-image.lua",
+      displayName: "Alibaba Cloud · Bailian Image (Wan)",
+      urlExample: "https://example.com/bailian",
+      order: 20,
+    },
+  },
+};
+
 /** Which protocol the image model answers with, so a test can pick the degrade. */
-let protocol: ModelProtocol | null = "openaiImages";
+let protocol: string | null = "openaiImages";
 
 function providers(): ModelsView {
   return {
@@ -131,6 +153,9 @@ function route(selfCheck: SelfCheckReport) {
     if (url === "/api/health") return json({ status: "ok" });
     if (url === "/api/v1/recent-projects") return json(RECENTS);
     if (url === "/api/v1/models") return json(providers());
+    if (url === "/api/v1/converter/protocols") {
+      return json({ protocols: REGISTRY });
+    }
     if (url === "/api/v1/projects/open") {
       return json({
         root: "/tmp/golden",
@@ -909,15 +934,23 @@ async function openRepaintAgain() {
 }
 
 describe("saying whether the region can be held to", () => {
-  it.each<[ModelProtocol | null, string, string]>([
+  it.each<[string | null, string, string]>([
     [
       "openaiImages",
       "dialog-note",
       "This model has a field of its own for a mask",
     ],
-    ["gemini", "dialog-error", "This model has no field of its own for a mask"],
+    // A protocol whose document declares no mask of its own, whichever
+    // platform it belongs to.
     [
-      "custom",
+      "bailianImage",
+      "dialog-error",
+      "This model has no field of its own for a mask",
+    ],
+    // A shape no converter on this machine stands behind any more: what it
+    // takes is unknown, so the cautious wording is the honest one.
+    [
+      "wanImageDraft",
       "dialog-error",
       "It travels as a second picture beside the words",
     ],

@@ -29,7 +29,7 @@ interface FormState {
   id: string;
   /** Whether the identifier was typed, or is still the suggested one. */
   idTouched: boolean;
-  /** A protocol id from the converter registry, or a built-in name. */
+  /** The id of a converter directory, which is the protocol's wire name. */
   protocol: string;
   url: string;
   model: string;

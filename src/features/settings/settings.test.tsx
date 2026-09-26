@@ -10,7 +10,8 @@ import {
 } from "@testing-library/react";
 import App from "../../App";
 import type { ModelDraft, ModelsView, ModelView } from "../../api";
-import { useModelStore } from "./modelStore";
+import { i18n } from "../../shared/i18n";
+import { protocolChoices, protocolLabel, useModelStore } from "./modelStore";
 
 const CONFIG = {
   productName: "Moka Canvas",
@@ -31,26 +32,38 @@ const MASKED = "sk-…abcd";
 
 /**
  * The converter registry as the server reports it: protocols grouped by the
- * capability they serve — one entry per converter directory, read from the
- * model.json it carries.
+ * capability they serve — one entry per converter directory, each carrying
+ * what its own model.json declares about itself.
  */
 const REGISTRY = {
   text: {
     openaiChat: {
       script: "text/openai-chat.lua",
       displayName: "OpenAI-compatible · Chat Completions",
+      labels: { zh: "OpenAI 兼容 · Chat Completions" },
       urlExample: "https://api.openai.com/v1/chat/completions",
+      order: 10,
     },
     openaiResponses: {
       script: "text/openai-responses.lua",
       displayName: "OpenAI-compatible · Responses API",
       urlExample: "https://api.openai.com/v1/responses",
+      order: 20,
     },
     gemini: {
       script: "text/gemini.lua",
       displayName: "Google Gemini · generateContent",
       urlExample:
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      order: 30,
+    },
+    bailianText: {
+      script: "text/bailian-text.lua",
+      displayName: "Alibaba Cloud · Bailian Text (Qwen)",
+      labels: { zh: "阿里云百炼 · 文本生成（通义千问）" },
+      urlExample:
+        "https://ws.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+      order: 40,
     },
   },
   image: {
@@ -58,6 +71,16 @@ const REGISTRY = {
       script: "image/openai-images.lua",
       displayName: "OpenAI-compatible · Images API",
       urlExample: "https://api.openai.com/v1/images/generations",
+      order: 10,
+      features: { mask: true },
+    },
+    bailianImage: {
+      script: "image/bailian-image.lua",
+      displayName: "Alibaba Cloud · Bailian Image (Wan)",
+      labels: { zh: "阿里云百炼 · 图像生成与编辑（万相）" },
+      urlExample:
+        "https://ws.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+      order: 20,
     },
   },
   audio: {
@@ -65,16 +88,19 @@ const REGISTRY = {
       script: "audio/openai-speech.lua",
       displayName: "OpenAI-compatible · Speech API",
       urlExample: "https://api.openai.com/v1/audio/speech",
+      order: 10,
     },
     bailianSpeech: {
       script: "audio/bailian-speech.lua",
       displayName: "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
       urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/tts",
+      order: 20,
     },
     bailianMusic: {
       script: "audio/bailian-music.lua",
       displayName: "Alibaba Cloud · Music Generation (fun-music)",
       urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/music",
+      order: 30,
     },
   },
   video: {
@@ -82,17 +108,20 @@ const REGISTRY = {
       script: "video/openai-videos.lua",
       displayName: "OpenAI-compatible · Videos API",
       urlExample: "https://api.openai.com/v1/videos",
+      order: 10,
     },
     geminiVideo: {
       script: "video/gemini-video.lua",
       displayName: "Google Gemini · long-running (Veo)",
       urlExample:
         "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
+      order: 20,
     },
     bailianVideo: {
       script: "video/bailian-video.lua",
       displayName: "Alibaba Cloud · Bailian Video",
       urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/video-synthesis",
+      order: 30,
     },
   },
 };
@@ -532,8 +561,8 @@ describe("model settings", () => {
     const protocol = (await screen.findByLabelText(
       "Protocol",
     )) as HTMLSelectElement;
-    // The registry's own scripts join the built-ins: a video the build has
-    // never heard of is still one a reader can pick.
+    // Each video shape comes from the converter deployed under that
+    // capability, placed where its own document asks to be.
     await screen.findByRole("option", { name: /Bailian Video/ });
     expect([...protocol.options].map((option) => option.value)).toEqual([
       "openaiVideos",
@@ -549,11 +578,11 @@ describe("model settings", () => {
     expect(url.value).toContain("video-synthesis");
   });
 
-  it("offers a built-in protocol whether or not a script stands behind it", async () => {
+  it("takes every shape from the registry, its own address included", async () => {
     await openSettings();
-    // The registry holds no script for Bailian: these shapes are implemented
-    // by the program itself, so a category offers them all the same, with the
-    // names and addresses this build knows them by.
+    // This program holds no table of protocols: what a category offers is
+    // whatever its converter directories declare, so the form can name and
+    // address a shape no build has ever heard of.
     fireEvent.click(await screen.findByRole("tab", { name: "Image" }));
     fireEvent.click(
       await screen.findByRole("button", { name: "New image model" }),
@@ -985,6 +1014,29 @@ describe("model settings", () => {
     expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
   });
 
+  it("says so when the registry holds no shape for a category", async () => {
+    await openSettings();
+    // Recognition's shapes come from converter scripts alone, and this
+    // registry holds none: the form says so rather than naming a shape
+    // nothing on this machine stands behind, and cannot be saved.
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "Speech recognition" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "New speech recognition model",
+      }),
+    );
+
+    await screen.findByText(/No protocol is available/);
+    const protocol = screen.getByLabelText("Protocol") as HTMLSelectElement;
+    expect(protocol.options).toHaveLength(0);
+    expect(
+      (screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
   it("re-reads the converter registry each time it opens", async () => {
     await openSettings();
     await screen.findByText("Writer");
@@ -997,5 +1049,49 @@ describe("model settings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
     await screen.findByRole("dialog", { name: "Settings" });
     await waitFor(() => expect(readsOf("/api/v1/converter/protocols")).toBe(2));
+  });
+});
+
+describe("naming a protocol", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  it("uses the converter's own words for the language the interface is drawn in", async () => {
+    await i18n.changeLanguage("zh");
+    expect(protocolLabel(REGISTRY, "bailianImage")).toBe(
+      "阿里云百炼 · 图像生成与编辑（万相）",
+    );
+    // A converter that speaks one language only is named in it, whatever the
+    // interface is drawn in — a name beats a blank line.
+    expect(protocolLabel(REGISTRY, "openaiImages")).toBe(
+      "OpenAI-compatible · Images API",
+    );
+    // A shape no converter on this machine holds is named by its bare id, so a
+    // stored model still shows what it speaks.
+    expect(protocolLabel(REGISTRY, "wanImageDraft")).toBe("wanImageDraft");
+  });
+
+  it("places a shape where its own document asks to be", () => {
+    // The order is the document's, not this program's: a converter added
+    // later can ask to be first.
+    expect(
+      protocolChoices(REGISTRY, "image").map((choice) => choice.id),
+    ).toEqual(["openaiImages", "bailianImage"]);
+    expect(
+      protocolChoices(
+        {
+          text: {
+            late: {
+              script: "text/late.lua",
+              displayName: "Late",
+              urlExample: "https://example.com/late",
+              order: 5,
+            },
+          },
+        },
+        "text",
+      ).map((choice) => choice.id),
+    ).toEqual(["late"]);
   });
 });

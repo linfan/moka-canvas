@@ -45,18 +45,6 @@
     "video": "视频",
     "videos": "视频"
   },
-  "protocol": {
-    "bailianImage": "阿里云百炼 · 图像生成与编辑（万相）",
-    "bailianText": "阿里云百炼 · 文本生成（通义千问）",
-    "custom": "自定义（预留）",
-    "gemini": "Google Gemini · generateContent",
-    "geminiVideo": "Google Gemini · 长任务（Veo）",
-    "openaiChat": "OpenAI 兼容 · Chat Completions",
-    "openaiImages": "OpenAI 兼容 · Images API",
-    "openaiResponses": "OpenAI 兼容 · Responses",
-    "openaiSpeech": "OpenAI 兼容 · Speech API",
-    "openaiVideos": "OpenAI 兼容 · Videos API"
-  },
   "shotSize": {
     "extremeClose": "大特写",
     "close": "特写",

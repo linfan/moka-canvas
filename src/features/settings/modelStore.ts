@@ -9,13 +9,7 @@ import {
   type ProtocolGroups,
   type SecretStorageChoice,
 } from "../../api";
-import {
-  PROTOCOLS_BY_CATEGORY,
-  PROTOCOL_LABELS,
-  PROTOCOL_URL_EXAMPLES,
-  type Capability,
-  type ModelProtocol,
-} from "../../shared/domain";
+import type { Capability } from "../../shared/domain";
 import { i18n } from "../../shared/i18n";
 
 /** The settings tabs: one per model category, plus the global preferences. */
@@ -96,61 +90,79 @@ export interface ProtocolChoice {
   urlExample: string;
 }
 
+/** Where a converter sits among its capability's protocols when it does not say. */
+const DEFAULT_ORDER = 1000;
+
 /**
- * The protocols a category offers: the built-ins, then the registry's scripts.
+ * The protocols a category offers, read from the converter registry.
  *
- * A built-in is implemented by this program, so it is offered whether or not a
- * script stands beside it; what the registry contributes is the scripts
- * deployed on this machine, which may be ones this build has never heard of.
- * Built-in ids keep their familiar order and go first — with the registry's
- * own label and address example where it holds one, since a deployment may
- * point its own script at another region — and the scripts beyond them follow,
- * alphabetically by the name a reader picks one by. While the registry has not
- * arrived — or the read failed — a built-in falls back to the name and address
- * this build knows it by, so the form is never empty.
+ * This program holds no list of protocols: a shape is on offer because a
+ * converter directory declares it, under the capability that directory sits
+ * in. Each one is placed where its own document asks to be, and the name a
+ * reader sees breaks a tie — so a deployment that ships converters of its own
+ * decides both what is offered and in what order.
+ *
+ * The registry is read through the server, so before it arrives — or after a
+ * read that failed — a category offers nothing, and the form says so rather
+ * than naming a shape nothing on this machine stands behind.
  */
 export function protocolChoices(
   protocols: ProtocolGroups | null,
   capability: Capability,
 ): ProtocolChoice[] {
   const group = protocols?.[capability];
-  const builtin = PROTOCOLS_BY_CATEGORY[capability];
-  if (!group) {
-    return builtin.map((id) => ({
+  if (!group) return [];
+  return Object.entries(group)
+    .map(([id, entry]) => ({
       id,
-      label: i18n.t(PROTOCOL_LABELS[id]),
-      urlExample: PROTOCOL_URL_EXAMPLES[id],
-    }));
-  }
-  const extra = Object.keys(group)
-    .filter((id) => !builtin.includes(id as ModelProtocol))
-    .sort((a, b) => group[a].displayName.localeCompare(group[b].displayName));
-  return [...builtin, ...extra].map((id) => ({
-    id,
-    label: protocolLabel(protocols, id),
-    urlExample: protocolUrlExample(protocols, id),
-  }));
+      label: protocolLabel(protocols, id),
+      urlExample: entry.urlExample ?? "",
+      order: entry.order ?? DEFAULT_ORDER,
+    }))
+    .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
+    .map(({ id, label, urlExample }) => ({ id, label, urlExample }));
 }
 
-/** What a protocol is called, registry first and its bare id last. */
+/**
+ * What a protocol is called, in the language the interface is drawn in.
+ *
+ * A converter's own words for that language come first, then its English
+ * ones, then the name it gives itself in whichever language it chose. A
+ * protocol the registry does not hold is named by its bare id, so a stored
+ * configuration whose converter has left the tree still shows what it speaks.
+ */
 export function protocolLabel(
   protocols: ProtocolGroups | null,
   id: string,
 ): string {
   const entry = findProtocol(protocols, id);
-  if (entry) return entry.displayName;
-  const label = PROTOCOL_LABELS[id as ModelProtocol];
-  return label ? i18n.t(label) : id;
+  if (!entry) return id;
+  const labels = entry.labels ?? {};
+  const language = (i18n.resolvedLanguage ?? "en").split("-")[0];
+  return labels[language] || labels.en || entry.displayName || id;
 }
 
-/** The example address a protocol speaks at, empty when none is known. */
+/**
+ * The example address a protocol speaks at, empty when the registry does not
+ * hold it: an address is a property of the converter, not of this program.
+ */
 export function protocolUrlExample(
   protocols: ProtocolGroups | null,
   id: string,
 ): string {
-  const entry = findProtocol(protocols, id);
-  if (entry) return entry.urlExample;
-  return PROTOCOL_URL_EXAMPLES[id as ModelProtocol] ?? "";
+  return findProtocol(protocols, id)?.urlExample ?? "";
+}
+
+/**
+ * What a protocol declares about itself beyond speaking its wire shape. An
+ * unknown protocol declares nothing, which is the safe reading: a feature is
+ * a promise the converter makes, not one this program can assume.
+ */
+export function protocolFeatures(
+  protocols: ProtocolGroups | null,
+  id: string,
+): Record<string, boolean> {
+  return findProtocol(protocols, id)?.features ?? {};
 }
 
 function findProtocol(protocols: ProtocolGroups | null, id: string) {
@@ -214,9 +226,9 @@ interface ModelState {
   copyOf: string | null;
   view: ModelsView | null;
   /**
-   * The converter registry's protocols, grouped by capability. Null until
-   * the read lands — or forever, if it failed, and the built-in list stands
-   * in. Re-read whenever settings opens: a converter is added by dropping a
+   * The converter registry's protocols, grouped by capability. Null until the
+   * read lands — or forever, if it failed, and a category then offers nothing.
+   * Re-read whenever settings opens: a converter is added by dropping a
    * directory into the models tree, and that happens while the app runs.
    */
   protocols: ProtocolGroups | null;
@@ -387,8 +399,8 @@ export const useModelStore = create<ModelState>()((set, get) => {
         const response = await modelsApi.fetchProtocols();
         set({ protocols: response.protocols });
       } catch {
-        // Quiet on purpose: the form falls back to the built-in list, and
-        // a settings dialog that cannot save says so loudly enough.
+        // Quiet on purpose: a category with no registry read offers nothing,
+        // and the dialog says so where a reader would look for a shape.
       }
     },
 
