@@ -951,8 +951,11 @@ pub async fn start_story_job(
         Ok(()) => Vec::new(),
         Err(issues) => issues,
     };
-    // Asked only once the request itself makes sense: a busy story is not a
-    // reason to also report the four other things wrong with a batch.
+    // Asked only once the request itself makes sense: a busy project is not a
+    // reason to also report the four other things wrong with a batch. What is
+    // bounded is how many batches a project drives at once, not how many a
+    // story has out: two drawings of one story are two independent asks, and
+    // the client is what keeps one place from being asked for twice.
     if issues.is_empty() {
         let jobs = state.store.list_story_jobs().await?;
         let active = jobs.iter().filter(|job| !job.status.is_terminal()).count();
@@ -960,9 +963,6 @@ pub async fn start_story_job(
             issues.push(crate::story::validate::busy_issue(
                 "This project already has a job in progress",
             ));
-        } else if let Some(issue) = crate::story::validate::check_not_busy(&jobs, &request.story_id)
-        {
-            issues.push(issue);
         }
     }
     if !issues.is_empty() {

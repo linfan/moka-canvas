@@ -437,7 +437,11 @@ pub struct StoryConfig {
     pub max_items_per_job: usize,
     /// How many generations may be in flight at once, across every batch.
     pub max_parallel_items: usize,
-    /// How many batches one project may be running at once.
+    /// How many batches one project may be driving at once. Generous on
+    /// purpose — a reader drawing a cast one card at a time makes a batch per
+    /// card, and those are independent asks — while still bounding what a
+    /// runaway can leave waiting. How many generations are really in flight is
+    /// [`Self::max_parallel_items`], which every batch shares.
     pub max_active_jobs_per_project: usize,
     /// How many ended records a project keeps, besides the ones still running.
     pub keep_records: usize,
@@ -449,7 +453,7 @@ impl Default for StoryConfig {
             max_stories_per_project: 20,
             max_items_per_job: 40,
             max_parallel_items: 2,
-            max_active_jobs_per_project: 1,
+            max_active_jobs_per_project: 16,
             keep_records: 100,
         }
     }

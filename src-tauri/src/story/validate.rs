@@ -12,7 +12,6 @@ use super::{STORY_JOB_BUSY, STORY_JOB_ITEM_LIMIT, STORY_NOT_FOUND, STORY_TARGET_
 use crate::config::StoryConfig;
 use crate::domain::validate::{generation_param_keys, MAX_PROMPT_LENGTH};
 use crate::domain::{Capability, MokaFile, ResourceRegistry, ValidationIssue};
-use crate::story::jobs::StoryJobStatus;
 
 /// The longest an item id may be, and the characters it may be made of.
 ///
@@ -148,25 +147,6 @@ pub fn validate_start(
 /// The issue a batch is refused with when something is already running.
 pub fn busy_issue(message: impl Into<String>) -> ValidationIssue {
     issue(STORY_JOB_BUSY, message)
-}
-
-/// Whether a story already has a batch running, answered with the issue to
-/// refuse the new one by or with nothing when it is free.
-///
-/// Its own check rather than part of the validation above, because what it
-/// reads is not the request at all: it is what the project has been asked for
-/// already. One batch at a time per story is what keeps a room's re-send from
-/// paying twice for the same drawings, and what keeps two batches from writing
-/// two answers into the same slot.
-pub fn check_not_busy(
-    jobs: &[super::jobs::StoryJobRecord],
-    story_id: &str,
-) -> Option<ValidationIssue> {
-    let busy = jobs.iter().any(|job| {
-        job.story_id == story_id
-            && matches!(job.status, StoryJobStatus::Queued | StoryJobStatus::Running)
-    });
-    busy.then(|| busy_issue("This story already has a job in progress"))
 }
 
 fn item_id_shaped(id: &str) -> bool {

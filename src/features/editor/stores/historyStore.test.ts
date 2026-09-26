@@ -18,6 +18,20 @@ function labels() {
   return useHistoryStore.getState().undoStack.map((item) => item.label);
 }
 
+/** One landing of a batch: an answer of the same work arriving on its own. */
+function piece(name: string, group: string): HistoryEntry {
+  const commands: DocumentCommand[] = [
+    { type: "renameCanvas", canvasId: "canvas-1", name },
+  ];
+  return {
+    id: name,
+    label: "Drawings",
+    group,
+    forwardCommands: commands,
+    inverseCommands: commands,
+  };
+}
+
 describe("historyStore", () => {
   beforeEach(() => {
     useHistoryStore.getState().clear();
@@ -83,5 +97,36 @@ describe("historyStore", () => {
     history.record(entry("after switch"));
     expect(useHistoryStore.getState().takeUndo()?.label).toBe("after switch");
     expect(useHistoryStore.getState().takeUndo()).toBeNull();
+  });
+
+  it("joins the landings of one batch into one step", () => {
+    const history = useHistoryStore.getState();
+    const first = piece("first", "job-1");
+    const second = piece("second", "job-1");
+
+    history.record(first);
+    history.record(second);
+
+    // One step, and undoing it undoes what came last first.
+    expect(labels()).toEqual(["Drawings"]);
+    const merged = useHistoryStore.getState().undoStack[0] as HistoryEntry;
+    expect(merged.forwardCommands.map((each) => JSON.stringify(each))).toEqual([
+      JSON.stringify(first.forwardCommands[0]),
+      JSON.stringify(second.forwardCommands[0]),
+    ]);
+    expect(merged.inverseCommands.map((each) => JSON.stringify(each))).toEqual([
+      JSON.stringify(second.inverseCommands[0]),
+      JSON.stringify(first.inverseCommands[0]),
+    ]);
+
+    // An edit of the reader's between two landings keeps them apart: a step
+    // joins the batch's own pieces and never reaches back over the edit.
+    history.record(entry("An edit"));
+    history.record(piece("third", "job-1"));
+    expect(labels()).toEqual(["Drawings", "An edit", "Drawings"]);
+
+    // Another batch is another step, even one right after this one.
+    history.record(piece("fourth", "job-2"));
+    expect(labels()).toEqual(["Drawings", "An edit", "Drawings", "Drawings"]);
   });
 });

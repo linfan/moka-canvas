@@ -38,15 +38,15 @@ const EMPTY_SLOT: StorySlot = { takes: [], confirmed: false };
 export function ElementCard({
   story,
   element,
-  busy,
-  running,
+  busyMain,
+  busyTurnaround,
 }: {
   story: StoryDocument;
   element: StoryElement;
-  /** Whether this element is being drawn just now. */
-  busy: boolean;
-  /** Whether a batch is out for the story at all, which is when none starts. */
-  running: boolean;
+  /** Whether this element's own picture is being drawn just now. */
+  busyMain: boolean;
+  /** Whether this element's four views are being drawn just now. */
+  busyTurnaround: boolean;
 }) {
   const { t } = useTranslation();
   const [removing, setRemoving] = useState(false);
@@ -81,9 +81,8 @@ export function ElementCard({
     >
       <div className="story-element-pictures">
         <StorySlotView
-          busy={busy}
-          canGenerate={!running}
-          disabledReason={t("story:elements.oneAtATime")}
+          busy={busyMain}
+          canGenerate
           label={t("story:elements.main")}
           onChoose={(assetId) => choose(story, element, "main", assetId)}
           onConfirm={() =>
@@ -99,8 +98,8 @@ export function ElementCard({
         />
         {character && (
           <StorySlotView
-            busy={busy}
-            canGenerate={main !== undefined && !running}
+            busy={busyTurnaround}
+            canGenerate={main !== undefined}
             disabledReason={
               main === undefined ? t("story:elements.needMainFirst") : undefined
             }

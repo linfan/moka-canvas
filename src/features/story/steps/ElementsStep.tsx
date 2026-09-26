@@ -20,14 +20,11 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { ElementCard } from "../panels/ElementCard";
 import { readElementsAnswer } from "../jobs/apply";
-import {
-  jobKey,
-  planElementArt,
-  planElements,
-  storyReadChars,
-} from "../jobs/plan";
+import { planElementArt, planElements, storyReadChars } from "../jobs/plan";
 import {
   jobProgress,
+  kindRunning,
+  targetRunning,
   useRunningJob,
   useStoryJobs,
   useStoryJobStore,
@@ -47,6 +44,11 @@ const EMPTY = { takes: [], confirmed: false };
  * bulk without saying how many pieces it is — a shelf of drawings is minutes of
  * a provider's time — and a description is agreed to before the pictures of it
  * are drawn, since the words are what every one of them is made from.
+ *
+ * Every picture is an ask of its own: a card whose painter is working says so
+ * and is not asked for twice, while the cards beside it go on being drawable.
+ * The one thing that waits on the whole story is a reading, which writes the
+ * cast every card stands in.
  *
  * A telling too long to read in one ask is read a part at a time, and what a
  * part finds is added to what the parts before it found.
@@ -84,6 +86,16 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
     setKind(next);
     setPages(1);
   };
+  /** Whether one of a card's own pictures is being made just now. */
+  const drawing = (
+    element: StoryElement,
+    view: "main" | "turnaround",
+  ): boolean =>
+    targetRunning(
+      jobs,
+      story.id,
+      targetKey({ kind: "element", elementId: element.id, view }),
+    );
   const undrawn = story.elements.filter(
     (element) => currentTake(element.main) === undefined,
   );
@@ -93,12 +105,20 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
       currentTake(element.main) !== undefined &&
       currentTake(element.turnaround ?? EMPTY) === undefined,
   );
+  // What a bulk button hands over: the places still missing that picture and
+  // not already being drawn, since asking for a place twice pays for it twice.
+  // It is also what the button counts, so its number is the work it would ask
+  // for — while a card waits on its painter, the rest go on being askable.
+  const drawable = undrawn.filter((element) => !drawing(element, "main"));
+  const viewable = viewsMissing.filter(
+    (element) => !drawing(element, "turnaround"),
+  );
   const everyDrawn = story.elements.length > 0 && undrawn.length === 0;
   const spoken = story.elements.some((element) => element.descriptionConfirmed);
   // The reading itself, rather than one of the drawings that follow it: a
   // chapter's worth of words takes a while, and the button that asked for it
   // is where a reader looks to see that it is still going.
-  const recognising = running?.kind === "elements";
+  const reading = kindRunning(jobs, "elements");
   // What the newest reading had to say about what it could not read. Shown
   // rather than only logged, because a group of an answer that was not read is
   // a loss the document shows as simply not being there.
@@ -118,11 +138,11 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   // The parts of a long telling are read one after another, the next one
   // beginning when the one before it is over rather than when the reader
   // presses again — and not while a part is still being handed over, since two
-  // batches out for one story are both written into the same cast and the last
-  // one home is the only one left standing.
+  // readings out for one story are both written into the same cast and the last
+  // one home is the only one left standing. A drawing batch is not a reading:
+  // it is its own work on its own cards, and it does not hold the rest back.
   useEffect(() => {
-    if (starting.current || sending || running !== null || waves.length === 0)
-      return;
+    if (starting.current || sending || reading || waves.length === 0) return;
     const next = waves[0];
     if (next === undefined) return;
     const part = totalWaves - waves.length + 1;
@@ -144,7 +164,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
       .finally(() => {
         starting.current = false;
       });
-  }, [running, waves, totalWaves, story, sending]);
+  }, [reading, waves, totalWaves, story, sending]);
 
   /** Reads the telling, whole or a part at a time. */
   const begin = async () => {
@@ -226,18 +246,17 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
             ))}
           </div>
           <div className="story-step-actions">
-            {undrawn.length > 0 && (
+            {drawable.length > 0 && (
               <button
                 className="primary"
                 data-testid="story-elements-draw-all"
-                disabled={running !== null}
                 onClick={() =>
                   void run(
                     story.id,
                     "elementArt",
                     planElementArt(
                       story,
-                      undrawn.map((element) => ({
+                      drawable.map((element) => ({
                         elementId: element.id,
                         view: "main" as const,
                       })),
@@ -246,20 +265,19 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
                 }
                 type="button"
               >
-                {t("story:elements.drawAll", { count: undrawn.length })}
+                {t("story:elements.drawAll", { count: drawable.length })}
               </button>
             )}
-            {viewsMissing.length > 0 && (
+            {viewable.length > 0 && (
               <button
                 data-testid="story-elements-views-all"
-                disabled={running !== null}
                 onClick={() =>
                   void run(
                     story.id,
                     "elementArt",
                     planElementArt(
                       story,
-                      viewsMissing.map((element) => ({
+                      viewable.map((element) => ({
                         elementId: element.id,
                         view: "turnaround" as const,
                       })),
@@ -268,13 +286,13 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
                 }
                 type="button"
               >
-                {t("story:elements.viewsAll", { count: viewsMissing.length })}
+                {t("story:elements.viewsAll", { count: viewable.length })}
               </button>
             )}
             {story.elements.length > 0 && (
               <button
                 data-testid="story-elements-confirm-all"
-                disabled={!everyDrawn || running !== null}
+                disabled={!everyDrawn}
                 onClick={() => confirmAll(story)}
                 title={
                   everyDrawn
@@ -300,7 +318,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
             <button
               className="link"
               data-testid="story-elements-recognise"
-              disabled={running !== null}
+              disabled={reading}
               onClick={() =>
                 story.elements.length === 0 || !spoken
                   ? void begin()
@@ -308,8 +326,8 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
               }
               type="button"
             >
-              {recognising && <span className="story-spin" />}
-              {recognising
+              {reading && <span className="story-spin" />}
+              {reading
                 ? t("story:elements.reading")
                 : story.elements.length === 0
                   ? t("story:elements.recognise")
@@ -357,12 +375,12 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
               <button
                 className="primary"
                 data-testid="story-elements-empty-recognise"
-                disabled={running !== null}
+                disabled={reading}
                 onClick={() => void begin()}
                 type="button"
               >
-                {recognising && <span className="story-spin" />}
-                {recognising
+                {reading && <span className="story-spin" />}
+                {reading
                   ? t("story:elements.reading")
                   : t("story:elements.recognise")}
               </button>
@@ -373,10 +391,10 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
             <ul className="story-elements">
               {visible.map((element) => (
                 <ElementCard
-                  busy={busyAt(jobs, element)}
+                  busyMain={drawing(element, "main")}
+                  busyTurnaround={drawing(element, "turnaround")}
                   element={element}
                   key={element.id}
-                  running={running !== null}
                   story={story}
                 />
               ))}
@@ -426,24 +444,6 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
         />
       )}
     </div>
-  );
-}
-
-/** Whether this element's own picture is the piece being made right now. */
-function busyAt(
-  jobs: ReturnType<typeof useStoryJobs>,
-  element: StoryElement,
-): boolean {
-  const keys = [
-    targetKey({ kind: "element", elementId: element.id, view: "main" }),
-    targetKey({ kind: "element", elementId: element.id, view: "turnaround" }),
-  ];
-  return jobs.some((job) =>
-    job.items.some(
-      (item) =>
-        (item.status === "queued" || item.status === "running") &&
-        keys.includes(jobKey(item.target)),
-    ),
   );
 }
 

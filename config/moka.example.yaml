@@ -84,8 +84,10 @@ story:
   # How many generations may be in flight at once, across every batch. A batch
   # of twenty pieces waits its turn here rather than opening twenty calls.
   maxParallelItems: 2
-  # How many batches one project may be running at once.
-  maxActiveJobsPerProject: 1
+  # How many batches one project may be driving at once. A reader drawing a
+  # cast one card at a time makes a batch per card, and those are independent
+  # asks; how many generations are really in flight is maxParallelItems.
+  maxActiveJobsPerProject: 16
   # How many ended records a project keeps, besides the ones still running.
   keepRecords: 100
 clip:

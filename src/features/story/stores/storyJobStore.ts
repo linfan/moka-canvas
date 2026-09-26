@@ -107,72 +107,127 @@ interface StoryJobState {
 }
 
 /**
- * The batches this process has already read into the document.
+ * What has been read out of a batch so far, by batch id.
  *
  * An optimisation, not the record: what says whether an answer has been applied
  * is the document itself, and reading an applied answer again writes nothing.
  * This is here so a room that is open all afternoon does not reload the project
- * once a second for batches that ended hours ago.
+ * once a second for batches that ended hours ago — and so a batch still running
+ * is known by the pieces of it already written in.
  */
-let readIn = new Set<string>();
+interface BatchRead {
+  /** The pieces whose answers are already written into the document. */
+  pieces: Set<string>;
+  /** How many answers of this batch were written in all. */
+  applied: number;
+  /** Whether the batch's ending — its count, and what did not come back — is said. */
+  endingSaid: boolean;
+}
+
+let readIn = new Map<string, BatchRead>();
+
+/**
+ * The places a batch being handed over is asking for, named by story and place.
+ *
+ * Read only while an ask is on its way, which is the one moment the jobs list
+ * cannot say that a place is already being asked for.
+ */
+let handingOver = new Set<string>();
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 export const useStoryJobStore = create<StoryJobState>()((set, get) => {
   /**
-   * Reads one batch's answers into the document, whether it just ended or
-   * ended while the app was closed.
+   * Reads what has come home of a batch into the document, whether it just
+   * landed or landed while the app was closed.
    *
-   * The project is re-read first and for a reason: the assets a batch filed
-   * arrived on the server's side of the document, and a command that points at
-   * one of them is refused until this client has been told about it.
+   * Read as the batch runs rather than only once it ends: a batch of drawings
+   * comes home one picture at a time, and each one is shown as it lands rather
+   * than the whole lot at the end. A look that brought answers for several
+   * batches reloads the project once for all of them, and for a reason: the
+   * assets a batch filed arrived on the server's side of the document, and a
+   * command that points at one of them is refused until this client has been
+   * told about it.
    */
-  const readAnswers = async (record: StoryJobRecord): Promise<void> => {
-    if (readIn.has(record.id)) return;
-    readIn.add(record.id);
-    set({ applying: [...get().applying, record.id] });
-    try {
+  const readAnswers = async (records: StoryJobRecord[]): Promise<void> => {
+    const waiting = records.flatMap((record) => {
+      const known = readIn.get(record.id) ?? {
+        pieces: new Set<string>(),
+        applied: 0,
+        endingSaid: false,
+      };
+      readIn.set(record.id, known);
+      const fresh = record.items.filter(
+        (item) => item.status === "succeeded" && !known.pieces.has(item.id),
+      );
+      const ending = !isRunning(record.status);
+      // A batch still going with nothing new to write has nothing to say; one
+      // that has ended says its count once, even when every answer of it was
+      // written in as it landed.
+      if (fresh.length === 0 && !(ending && !known.endingSaid)) return [];
+      return [{ record, known, fresh, ending }];
+    });
+    if (waiting.length === 0) return;
+    if (waiting.some(({ fresh }) => fresh.length > 0)) {
       try {
         await useProjectStore.getState().reload();
       } catch {
         // The project could not be read again, so nothing can be written into
-        // it just now. The answers are on the record and are read in the next
-        // time the room stands up.
-        readIn.delete(record.id);
+        // it just now. The answers are on the records and are read in by the
+        // next look — and by the room the next time it stands up.
         return;
       }
-      const report = applyJobResults(record);
-      const failed = record.items.filter(
-        (item) => item.status === "failed",
-      ).length;
-      if (report.applied > 0) {
-        toast("success", i18n.t("story:jobs.done", { count: report.applied }));
-      }
-      if (failed > 0) {
-        const story = useProjectStore
-          .getState()
-          .moka?.stories?.find((held) => held.id === record.storyId);
-        toast(
-          "error",
-          i18n.t("story:jobs.failed", { failed, total: record.items.length }),
-          story === undefined
-            ? undefined
-            : {
-                label: i18n.t("story:jobs.retryFailed"),
-                go: () => void retryFailed(story, record),
-              },
-        );
-      }
-      if (report.notes.length > 0) {
-        toast("info", report.notes.join(" "));
+    }
+    set({
+      applying: [...get().applying, ...waiting.map(({ record }) => record.id)],
+    });
+    try {
+      for (const { record, known, fresh, ending } of waiting) {
+        if (fresh.length > 0) {
+          const report = applyJobResults({ ...record, items: fresh });
+          for (const item of fresh) known.pieces.add(item.id);
+          known.applied += report.applied;
+          if (report.notes.length > 0) toast("info", report.notes.join(" "));
+        }
+        if (ending && !known.endingSaid) {
+          known.endingSaid = true;
+          const failed = record.items.filter(
+            (item) => item.status === "failed",
+          ).length;
+          if (known.applied > 0) {
+            toast(
+              "success",
+              i18n.t("story:jobs.done", { count: known.applied }),
+            );
+          }
+          if (failed > 0) {
+            const story = useProjectStore
+              .getState()
+              .moka?.stories?.find((held) => held.id === record.storyId);
+            toast(
+              "error",
+              i18n.t("story:jobs.failed", {
+                failed,
+                total: record.items.length,
+              }),
+              story === undefined
+                ? undefined
+                : {
+                    label: i18n.t("story:jobs.retryFailed"),
+                    go: () => void retryFailed(story, record),
+                  },
+            );
+          }
+        }
       }
     } finally {
-      set({ applying: get().applying.filter((id) => id !== record.id) });
+      const finished = new Set(waiting.map(({ record }) => record.id));
+      set({ applying: get().applying.filter((id) => !finished.has(id)) });
     }
   };
 
   /** Puts a record where it belongs: newest first, replacing an older copy. */
-  const integrate = async (record: StoryJobRecord): Promise<void> => {
+  const integrate = (record: StoryJobRecord): void => {
     const held = get().jobs;
     const at = held.findIndex((job) => job.id === record.id);
     const jobs =
@@ -180,7 +235,6 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
         ? [record, ...held]
         : held.map((job) => (job.id === record.id ? record : job));
     set({ jobs });
-    if (!isRunning(record.status)) await readAnswers(record);
   };
 
   const pollOnce = async (): Promise<void> => {
@@ -191,7 +245,8 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
     }
     try {
       const read = await storyApi.list(storyId);
-      for (const record of read) await integrate(record);
+      for (const record of read) integrate(record);
+      await readAnswers(read);
     } catch {
       // A poll that failed is a poll: the next one asks again, and a room that
       // has been closed has stopped asking anyway.
@@ -224,14 +279,12 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       }
       // What was read in for another story says nothing about this one, and a
       // room reopened reads the whole story's batches again by design.
-      if (get().storyId !== storyId) readIn = new Set<string>();
+      if (get().storyId !== storyId) readIn = new Map<string, BatchRead>();
       set({ storyId });
       try {
         const read = await storyApi.list(storyId);
         set({ jobs: read, error: null });
-        for (const record of read) {
-          if (!isRunning(record.status)) await readAnswers(record);
-        }
+        await readAnswers(read);
         if (read.some((record) => isRunning(record.status))) startPolling();
         else stopPolling();
       } catch (problem) {
@@ -242,6 +295,14 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
     },
 
     async start(storyId, kind, items) {
+      // A place asked for twice at once is paid for twice: the second ask is
+      // planned against a document the first has not finished saving, so it
+      // carries the same description and the same reference as the first. The
+      // pieces on their way are remembered by their own names, and one that is
+      // already out is left to come home. Places beside it are unaffected.
+      const asking = items.map((item) => `${storyId}:${jobKey(item.target)}`);
+      if (asking.some((key) => handingOver.has(key))) return null;
+      for (const key of asking) handingOver.add(key);
       set({ starting: true, error: null });
       try {
         // The server reads the document it holds when it is asked for a batch:
@@ -281,22 +342,27 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
           });
         }
         return null;
+      } finally {
+        for (const key of asking) handingOver.delete(key);
       }
     },
 
     async cancel(id) {
       const record = await storyApi.cancel(id);
-      await integrate(record);
+      integrate(record);
+      await readAnswers([record]);
     },
 
     async adopt(id) {
       const record = await storyApi.get(id);
-      await integrate(record);
+      integrate(record);
+      await readAnswers([record]);
     },
 
     reset() {
       stopPolling();
-      readIn = new Set<string>();
+      readIn = new Map<string, BatchRead>();
+      handingOver = new Set<string>();
       set({
         storyId: null,
         jobs: [],
@@ -407,6 +473,14 @@ export function jobProgress(job: StoryJobRecord): {
 } {
   const done = job.items.filter((item) => !isRunning(item.status)).length;
   return { done, total: job.items.length };
+}
+
+/** Whether a story has a batch of this one kind out just now. */
+export function kindRunning(
+  jobs: StoryJobRecord[],
+  kind: StoryJobKind,
+): boolean {
+  return jobs.some((job) => job.kind === kind && isRunning(job.status));
 }
 
 /** Given a story's batches, only the ones working on this step. */

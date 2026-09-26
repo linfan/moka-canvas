@@ -4,6 +4,13 @@ import { HISTORY_LIMIT, type DocumentCommand } from "../../../shared/domain";
 export interface HistoryEntry {
   id: string;
   label: string;
+  /**
+   * The work an entry is a landing of, when it is one of several: a batch of
+   * drawings arrives a picture at a time, and the pieces of one batch are one
+   * step to undo however many looks wrote them in. Absent for an edit made in
+   * one go, which is an entry of its own.
+   */
+  group?: string;
   forwardCommands: DocumentCommand[];
   inverseCommands: DocumentCommand[];
 }
@@ -40,7 +47,28 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
 
   record(entry) {
     set((state) => {
-      const undoStack = [...state.undoStack, entry];
+      const undoStack = [...state.undoStack];
+      const top = undoStack[undoStack.length - 1];
+      // A landing of a piece of work already on top of the stack is not a step
+      // of its own: a batch read in over several looks is one step to undo, as
+      // the batch itself was. An edit made in between stands where it is, so
+      // the step that joins the batch only ever reaches back over the batch's
+      // own pieces.
+      if (
+        entry.group !== undefined &&
+        top !== undefined &&
+        !isBoundary(top) &&
+        top.group === entry.group
+      ) {
+        undoStack[undoStack.length - 1] = {
+          ...top,
+          forwardCommands: [...top.forwardCommands, ...entry.forwardCommands],
+          // Newest first, so undoing the one step undoes what came last first.
+          inverseCommands: [...entry.inverseCommands, ...top.inverseCommands],
+        };
+        return { undoStack, redoStack: [] };
+      }
+      undoStack.push(entry);
       while (undoStack.length > HISTORY_LIMIT) {
         const index = undoStack.findIndex((item) => !isBoundary(item));
         if (index === -1) break;

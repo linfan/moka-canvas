@@ -671,6 +671,70 @@ async fn references_turn_an_image_generation_into_a_multipart_edit() {
     assert!(recorded.asked_once("edits"));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_address_with_no_edit_door_is_asked_for_the_edit_at_its_own_endpoint() {
+    let picture = png(3, 3);
+    let recorded = Recorded::default();
+    let refusing = recorded.clone();
+    let answering = recorded.clone();
+    let stored = picture.clone();
+    let base_url = serve(
+        Router::new()
+            // The address a standard shape names the edits beside the
+            // generations with, absent at a gateway that serves one only.
+            .route(
+                "/v1/images/edits",
+                post(move |headers: HeaderMap| {
+                    let recorded = refusing.clone();
+                    async move {
+                        recorded.note("edits", &headers, None);
+                        StatusCode::NOT_FOUND
+                    }
+                }),
+            )
+            .route(
+                "/v1/images/generations",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = answering.clone();
+                    let picture = stored.clone();
+                    async move {
+                        recorded.note("generations", &headers, None);
+                        recorded.note_body(&body);
+                        Json(json!({ "data": [{ "b64_json": base64(&picture) }] }))
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let call = channel(&base_url, "qwen-image-3.0", Capability::Image);
+    let result = openai_adapter()
+        .generate(
+            &call,
+            &generation(
+                Capability::Image,
+                "four views of the same character",
+                json!({ "size": "1024x1024" }),
+            ),
+            &[reference("photo", InputRole::Reference)],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the picture arrives");
+
+    // The edit address was tried first and the generation one answered, with
+    // the reference carried in the body itself.
+    assert_eq!(recorded.asked(), ["edits", "generations"]);
+    let sent = recorded.body(0);
+    assert_eq!(
+        sent["image"],
+        json!(format!("data:image/png;base64,{}", base64(&png(4, 3)))),
+        "{sent}"
+    );
+    assert_eq!(sent["size"], "1024x1024");
+    assert_eq!(result.items[0].bytes, picture);
+}
+
 // ------------------------------------------------------------------ audio
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

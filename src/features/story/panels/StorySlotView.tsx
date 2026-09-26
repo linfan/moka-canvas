@@ -98,6 +98,14 @@ export function StorySlotView({
           >
             <img alt={label} src={assetUrl(take.assetId)} />
           </button>
+          {busy === true && (
+            // A picture being made again over the one it will replace: the
+            // place says it is working on this picture and not on some other.
+            <span className="story-slot-veil" role="status">
+              <span className="story-spin" />
+              {t("story:panels.drawing")}
+            </span>
+          )}
           <button
             aria-pressed={slot.confirmed}
             className={`story-slot-stamp${slot.confirmed ? " is-on" : ""}`}

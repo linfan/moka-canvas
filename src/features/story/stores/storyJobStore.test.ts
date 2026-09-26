@@ -223,6 +223,57 @@ describe("starting a batch", () => {
     expect(calls.some((call) => call.method === "GET")).toBe(true);
   });
 
+  it("does not ask for a place that is already on its way", async () => {
+    serving({ "/api/v1/projects/current/story/jobs": job() });
+    const drafts = [
+      {
+        id: `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameSecond}`,
+        target: {
+          kind: "keyframeArt" as const,
+          chapterId: ids.chapterFirst,
+          actId: ids.act,
+          keyframeId: ids.frameSecond,
+        },
+        capability: "image" as const,
+        prompt: "雨中的站台",
+      },
+    ];
+
+    // Two clicks in one breath, before the first batch is on the record: the
+    // second is not a second ask for the same picture.
+    const first = useStoryJobStore
+      .getState()
+      .start(ids.story, "keyframeArt", drafts);
+    const second = useStoryJobStore
+      .getState()
+      .start(ids.story, "keyframeArt", drafts);
+    const [asked, refused] = await Promise.all([first, second]);
+
+    expect(asked?.id).toBe("job-1");
+    expect(refused).toBeNull();
+    expect(
+      calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/story/jobs"),
+      ),
+    ).toHaveLength(1);
+
+    // The place is askable again once the first ask is over, and a place
+    // beside it was never held back by the one on its way.
+    await useStoryJobStore.getState().start(ids.story, "keyframeArt", drafts);
+    await useStoryJobStore.getState().start(ids.story, "keyframeArt", [
+      {
+        ...drafts[0],
+        id: "keyframe-elsewhere",
+        target: { ...drafts[0].target, keyframeId: "frame-elsewhere" },
+      },
+    ]);
+    expect(
+      calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/story/jobs"),
+      ),
+    ).toHaveLength(3);
+  });
+
   it("keeps the reason when a batch cannot be started", async () => {
     vi.stubGlobal(
       "fetch",
@@ -276,6 +327,142 @@ describe("starting a batch", () => {
 });
 
 describe("a batch coming back", () => {
+  /** Two shots of one act, filmed as one batch. */
+  function filming(): StoryJobRecord {
+    const held = job({ kind: "keyframeVideo" });
+    return {
+      ...held,
+      items: [ids.frameFirst, ids.frameSecond].map((keyframeId) => ({
+        ...held.items[0],
+        id: `keyframeVideo:${ids.chapterFirst}:${ids.act}:${keyframeId}`,
+        target: {
+          kind: "keyframeVideo" as const,
+          chapterId: ids.chapterFirst,
+          actId: ids.act,
+          keyframeId,
+        },
+        capability: "video" as const,
+      })),
+    };
+  }
+
+  /** That batch as it stands: a piece answered here and there. */
+  function filmed(
+    held: StoryJobRecord,
+    answers: Array<{ at: number; assetId?: string; failed?: string }>,
+    status: StoryJobRecord["status"] = "running",
+  ): StoryJobRecord {
+    return {
+      ...held,
+      status,
+      items: held.items.map((item, index) => {
+        const answer = answers.find((each) => each.at === index);
+        if (answer === undefined) return item;
+        if (answer.failed !== undefined) {
+          return { ...item, status: "failed" as const, error: answer.failed };
+        }
+        return {
+          ...item,
+          status: "succeeded" as const,
+          assetIds: [answer.assetId ?? "asset-clip"],
+        };
+      }),
+    };
+  }
+
+  it("writes each answer in as it lands rather than at the end of the batch", async () => {
+    const held = filming();
+    serving({
+      "/api/v1/projects/current/story/jobs": [
+        filmed(held, [{ at: 0, assetId: "asset-clip-1" }]),
+      ],
+    });
+    const apply = vi.spyOn(useProjectStore.getState(), "applyLocal");
+
+    await useStoryJobStore.getState().load(ids.story);
+
+    // The clip that came home is written into its place while the batch is
+    // still filming, and nothing is said yet about the batch being over.
+    expect(apply).toHaveBeenCalledTimes(1);
+    const asked = apply.mock.calls[0]?.[0] ?? [];
+    expect(asked[0]).toMatchObject({
+      type: "setStorySlot",
+      target: { kind: "keyframeVideo", keyframeId: ids.frameFirst },
+    });
+    expect(JSON.stringify(asked[0])).toContain("asset-clip-1");
+    expect(useAppStore.getState().toasts).toEqual([]);
+
+    // The other lands and the batch ends: the answer of this look is written in
+    // as well, and the count of the whole batch is said once.
+    serving({
+      "/api/v1/projects/current/story/jobs": [
+        filmed(
+          held,
+          [
+            { at: 0, assetId: "asset-clip-1" },
+            { at: 1, assetId: "asset-clip-2" },
+          ],
+          "succeeded",
+        ),
+      ],
+    });
+    await useStoryJobStore.getState().load(ids.story);
+
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(apply.mock.calls[1]?.[0]?.[0]).toMatchObject({
+      target: { kind: "keyframeVideo", keyframeId: ids.frameSecond },
+    });
+    const toasts = useAppStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]?.kind).toBe("success");
+    expect(toasts[0]?.message).toContain("2 answers");
+
+    // A look at a batch that has already been read in says nothing twice.
+    await useStoryJobStore.getState().load(ids.story);
+    expect(useAppStore.getState().toasts).toHaveLength(1);
+    // And both landings are one step of the story's history: what is undone is
+    // the batch, not each picture.
+    expect(useHistoryStore.getState().undoStack).toHaveLength(1);
+    apply.mockRestore();
+  });
+
+  it("tells what did not come back once the batch is over, failed and applied together", async () => {
+    const held = filming();
+    // One shot came home, the other was refused, and the batch is over.
+    serving({
+      "/api/v1/projects/current/story/jobs": [
+        filmed(
+          held,
+          [
+            { at: 0, assetId: "asset-clip-1" },
+            { at: 1, failed: "the provider refused it" },
+          ],
+          "failed",
+        ),
+      ],
+    });
+    const apply = vi.spyOn(useProjectStore.getState(), "applyLocal");
+
+    await useStoryJobStore.getState().load(ids.story);
+
+    const messages = useAppStore
+      .getState()
+      .toasts.map((toast) => `${toast.kind}: ${toast.message}`);
+    expect(messages).toEqual([
+      "success: 1 answers were written into the story.",
+      "error: 1 of 2 pieces did not come back.",
+    ]);
+    expect(useAppStore.getState().toasts.at(-1)?.choice?.label).toContain(
+      "Ask again",
+    );
+
+    // Nothing new to read and nothing new to say, whatever the look after.
+    await useStoryJobStore.getState().load(ids.story);
+    expect(useAppStore.getState().toasts).toHaveLength(2);
+    expect(apply).toHaveBeenCalledTimes(1);
+    apply.mockRestore();
+  });
+
   it("reads the project again before writing the answers in", async () => {
     const order: string[] = [];
     const project = useProjectStore.getState();

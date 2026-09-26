@@ -1407,7 +1407,7 @@ async fn a_batch_that_asks_for_too_much_is_refused_before_a_provider_hears_of_it
 }
 
 #[tokio::test]
-async fn a_story_that_is_already_running_is_not_asked_for_again() {
+async fn another_batch_for_a_story_already_drawing_is_a_batch_of_its_own() {
     let tmp = TempDir::new().unwrap();
     let harness = harness_at(&tmp);
     let finished = Arc::new(AtomicBool::new(false));
@@ -1417,25 +1417,36 @@ async fn a_story_that_is_already_running_is_not_asked_for_again() {
         .await;
     harness.project("Story Busy").await;
 
+    // Two shots of one story, asked for while neither has answered: two
+    // independent asks, each placed with the provider in its own turn rather
+    // than one refused for the other's sake.
     let request = batch(
         "actVideo",
         vec![piece("act", act_video_target("act-1"), "video", "站台")],
     );
     let first = harness.start_ok(request.clone()).await;
-    let (status, body) = harness.start(request).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["details"]["issues"][0]["code"], "STORY_JOB_BUSY");
-
-    // A batch that has ended leaves the story free again, which is what a
-    // second attempt needs.
-    finished.store(true, Ordering::SeqCst);
-    harness.settled(first["id"].as_str().unwrap()).await;
-    harness
+    let second = harness
         .start_ok(batch(
             "actVideo",
             vec![piece("act:2", act_video_target("act-2"), "video", "车厢")],
         ))
         .await;
+    assert_ne!(first["id"], second["id"]);
+
+    finished.store(true, Ordering::SeqCst);
+    harness.settled(first["id"].as_str().unwrap()).await;
+    harness.settled(second["id"].as_str().unwrap()).await;
+
+    // Both recorded and both answered, which is what a room draws its two
+    // cards from.
+    let listed = harness.jobs().await;
+    assert_eq!(listed.as_array().unwrap().len(), 2, "{listed}");
+    for job in listed.as_array().unwrap() {
+        assert_eq!(
+            job["items"][0]["status"], "succeeded",
+            "no ask was left unanswered: {job}"
+        );
+    }
 }
 
 #[tokio::test]

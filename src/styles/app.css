@@ -6064,6 +6064,19 @@ button > .story-spin {
   position: relative;
 }
 
+.story-slot-veil {
+  align-items: center;
+  background: rgb(0 0 0 / 55%);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+}
+
 .story-slot-picture {
   background: var(--bg);
   border: 1px solid var(--stroke);

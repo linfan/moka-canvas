@@ -462,6 +462,13 @@ fn opening(call: &ModelCall, key: &str, request: &GenerateRequest) -> Map<String
 /// One image generation. References turn it into an edit, which is a different
 /// endpoint and a different body shape: the settings travel as form fields
 /// beside the bytes rather than as a JSON document.
+///
+/// Not every gateway has an edit address beside its generation one — the
+/// compatible mode of a Qwen deployment answers the derived address with 404
+/// and reads an edit from the generation body itself — so a reference request
+/// that finds no edit door is asked again at the configured address, with the
+/// references carried in the body. What a provider has no door for is told
+/// here rather than discovered as a failure of the drawing.
 async fn image(
     call: &ModelCall,
     request: &GenerateRequest,
@@ -476,22 +483,72 @@ async fn image(
         .filter(|input| input.is_image())
         .partition(|input| input.role == InputRole::Mask);
 
-    let placed = if references.is_empty() {
-        call.post().json(&image_body(call, request))
+    let reply = if references.is_empty() {
+        answer(
+            Kind::Generate,
+            call,
+            call.post().json(&image_body(call, request)),
+            Capability::Image,
+        )
+        .await?
     } else {
         let (body, content_type) = edit_body(call, request, &references, masks.first().copied());
-        call.post_at(&image_edit_url(call.endpoint()))
-            .header(CONTENT_TYPE, content_type)
-            .body(body)
+        let reply = exchange(
+            Kind::Generate,
+            call,
+            call.post_at(&image_edit_url(call.endpoint()))
+                .header(CONTENT_TYPE, content_type)
+                .body(body),
+            call.budgets.timeout_for(Capability::Image),
+            call.budgets.max_response_bytes,
+        )
+        .await?;
+        if reply.status == 404 {
+            answer(
+                Kind::Generate,
+                call,
+                call.post()
+                    .json(&referenced_image_body(call, request, &references)),
+                Capability::Image,
+            )
+            .await?
+        } else if succeeded(reply.status) {
+            reply
+        } else {
+            return Err(provider_error(&reply, &call.api_key));
+        }
     };
-    images(
-        call,
-        answer(Kind::Generate, call, placed, Capability::Image).await?,
-    )
-    .await
+    images(call, reply).await
+}
+
+/// The generation body with the references beside the prompt: one picture as a
+/// string and several as a list, which is the field an OpenAI-compatible
+/// address that serves its own edits reads them from. A mask has no field in
+/// this shape and is left out rather than sent as something else.
+fn referenced_image_body(
+    call: &ModelCall,
+    request: &GenerateRequest,
+    references: &[&MediaInput],
+) -> Value {
+    let pictures: Vec<Value> = references
+        .iter()
+        .map(|picture| json!(picture.data_url()))
+        .collect();
+    let carried = match pictures.len() {
+        1 => pictures[0].clone(),
+        _ => Value::Array(pictures),
+    };
+    let mut body = image_fields(call, request);
+    body.insert("image".into(), carried);
+    Value::Object(body)
 }
 
 fn image_body(call: &ModelCall, request: &GenerateRequest) -> Value {
+    Value::Object(image_fields(call, request))
+}
+
+/// The settings an image call carries, whichever body shape they travel in.
+fn image_fields(call: &ModelCall, request: &GenerateRequest) -> Map<String, Value> {
     let mut body = opening(call, "prompt", request);
     if let Some(size) = image_size(request) {
         body.insert("size".into(), json!(size));
@@ -507,7 +564,7 @@ fn image_body(call: &ModelCall, request: &GenerateRequest) -> Value {
     if let Some(count) = request.int_param("count").filter(|count| *count > 0) {
         body.insert("n".into(), json!(count));
     }
-    Value::Object(body)
+    body
 }
 
 /// The size this endpoint is told for the shape a request asked for.
@@ -1143,6 +1200,37 @@ mod tests {
         assert_eq!(text.matches("name=\"image[]\"").count(), 2, "{text}");
         assert_eq!(text.matches("name=\"mask\"").count(), 1, "{text}");
         assert_eq!(text.matches("name=\"image\"").count(), 0, "{text}");
+    }
+
+    #[test]
+    fn a_body_for_an_address_without_an_edit_door_carries_its_references_itself() {
+        let call = channel("qwen-image-3.0");
+        let request = generation(
+            Capability::Image,
+            "the same character, four views",
+            json!({ "size": "1024x1024" }),
+        );
+        let photo = media("photo", InputRole::Reference);
+
+        // One reference travels as a string, which is the shape the field is
+        // documented with beside the words.
+        assert_eq!(
+            referenced_image_body(&call, &request, &[&photo]),
+            json!({
+                "model": "qwen-image-3.0",
+                "prompt": "the same character, four views",
+                "size": "1024x1024",
+                "image": "data:image/png;base64,cG5n",
+            })
+        );
+
+        // Several as a list, in the order the caller gave them.
+        let second = media("second", InputRole::Reference);
+        let body = referenced_image_body(&call, &request, &[&photo, &second]);
+        assert_eq!(
+            body["image"],
+            json!(["data:image/png;base64,cG5n", "data:image/png;base64,cG5n",])
+        );
     }
 
     #[test]

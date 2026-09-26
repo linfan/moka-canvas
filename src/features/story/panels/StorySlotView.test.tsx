@@ -103,6 +103,23 @@ describe("a place with a picture", () => {
     ).toBe("true");
   });
 
+  it("says over the old picture that it is being drawn again", () => {
+    const { onGenerate } = draw({ busy: true, slot: slot(["asset-one"]) });
+    // What is there stays where it is, with the wait said over it: a place
+    // that looked empty while it was being redrawn would read as a loss.
+    expect(
+      screen.getByTestId("story-slot-main").querySelector("img"),
+    ).not.toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Drawing…");
+
+    const again = screen.getByTestId(
+      "story-slot-main-again",
+    ) as HTMLButtonElement;
+    expect(again.disabled).toBe(true);
+    fireEvent.click(again);
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
+
   it("lets a reader look at it closely, and closes on Escape", () => {
     draw({ slot: slot(["asset-one"]) });
     fireEvent.click(

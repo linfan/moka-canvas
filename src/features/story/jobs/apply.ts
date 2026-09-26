@@ -4,9 +4,12 @@
  * This is the one place a job's record meets the document. What it does is
  * planned first and applied once: every piece that answered is read into the
  * drafts a command takes, the drafts are merged with what the story already
- * holds, and the whole lot goes through the command pipeline as one step — so a
- * reader who does not like what came back undoes the batch, not twelve
- * drawings.
+ * holds, and the whole lot goes through the command pipeline as one step.
+ *
+ * A batch read in over several looks is one step just the same: the pieces one
+ * look brings are recorded under the batch's own name, and a landing that finds
+ * the one before it still on top of the stack joins it — so a reader who does
+ * not like what came back undoes the batch, not twelve drawings.
  *
  * Applying an answer twice is not two answers. A place that already keeps the
  * drawing is left as it is, a chapter that already has the words is written the
@@ -601,7 +604,7 @@ export function applyJobResults(record: StoryJobRecord): ApplyReport {
   }
 
   if (commands.length === 0) return report;
-  const applied = execute(historyLabel(record), commands);
+  const applied = execute(historyLabel(record), commands, record.id);
   if (applied === null) {
     // The document refused the change, which is the save conflict saying so.
     return {

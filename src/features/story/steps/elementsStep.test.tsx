@@ -691,6 +691,73 @@ describe("the pictures of an element", () => {
     ]);
   });
 
+  it("waits on the card being drawn while the rest of the cast stays askable", async () => {
+    openAtElements(buildStoryMokaFile());
+
+    // The one element with no picture is asked for, which leaves a batch out.
+    fireEvent.click(screen.getByTestId("story-elements-draw-all"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+
+    // Its own card says a picture is being made and offers no second ask of the
+    // same place; the bulk button, which would ask for that place again, is
+    // gone rather than counting work already handed over.
+    const prop = card("旧车票", "prop");
+    expect(within(prop).getByTestId("story-slot-main").textContent).toContain(
+      "Drawing…",
+    );
+    expect(within(prop).queryByTestId("story-slot-main-generate")).toBeNull();
+    expect(screen.queryByTestId("story-elements-draw-all")).toBeNull();
+
+    // Another card's own ask is still one a reader can make: one place waiting
+    // on its painter is not the whole cast waiting.
+    const views = within(card("周", "character")).getByTestId(
+      "story-slot-turnaround-generate",
+    ) as HTMLButtonElement;
+    expect(views.disabled).toBe(false);
+    fireEvent.click(views);
+    await waitFor(() => {
+      expect(starts).toHaveLength(2);
+    });
+    expect(starts[1]?.items[0]?.target).toEqual({
+      kind: "elementArt",
+      elementId: ids.partner,
+      view: "turnaround",
+    });
+  });
+
+  it("shows a picture being drawn again over the one it replaces, and only there", async () => {
+    openAtElements(buildStoryMokaFile());
+    const hero = card("林", "character");
+
+    fireEvent.click(within(hero).getByTestId("story-slot-main-again"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+
+    // The place being drawn again says so over its own picture...
+    const main = within(hero).getByTestId("story-slot-main");
+    expect(main.querySelector(".story-slot-veil")?.textContent).toContain(
+      "Drawing…",
+    );
+    expect(
+      (within(hero).getByTestId("story-slot-main-again") as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+
+    // ...and the same character's four views, which nobody is making, do not.
+    const turnaround = within(hero).getByTestId("story-slot-turnaround");
+    expect(turnaround.querySelector(".story-slot-veil")).toBeNull();
+    expect(
+      (
+        within(hero).getByTestId(
+          "story-slot-turnaround-again",
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
   it("keeps the take a reader picks, and the rest in the order they were", async () => {
     const moka = buildStoryMokaFile();
     const hero = moka.stories![0].elements[0]!;

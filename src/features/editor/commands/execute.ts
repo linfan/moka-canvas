@@ -11,10 +11,16 @@ function toastError(message: string) {
 /**
  * Applies commands optimistically and records them for undo.
  * Returns the inverse commands, or null when the change was rejected.
+ *
+ * A `group` names the work this change is a landing of, for changes that
+ * arrive a piece at a time: landings of one group join the step already on top
+ * of the stack rather than making a step each. What one batch is to undo is
+ * decided there, next to the stack itself.
  */
 export function execute(
   label: string,
   commands: DocumentCommand[],
+  group?: string,
 ): DocumentCommand[] | null {
   if (commands.length === 0) return [];
   try {
@@ -22,6 +28,7 @@ export function execute(
     useHistoryStore.getState().record({
       id: newId(),
       label,
+      ...(group === undefined ? {} : { group }),
       forwardCommands: commands,
       inverseCommands: inverse,
     });
