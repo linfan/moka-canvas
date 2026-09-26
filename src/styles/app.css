@@ -184,15 +184,40 @@ h2 {
 }
 
 /* The three ways into the project, floated under the row that asked for them:
-   the row stays where it stood, and the ways read as belonging to it. */
+   the row stays where it stood, and the ways read as belonging to it — a line
+   down their left is the app's own mark of one level in, the one the trees
+   wear as well. */
 .launcher-recent-rooms {
   animation: launcher-rooms-drop 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  border-left: 1px solid var(--stroke);
   display: flex;
   gap: 8px;
+  margin-left: 9px;
+  padding-left: 5px;
 }
 
+/* One step under the row they hang from: laid on the page rather than raised
+   off it, wearing mark and name a size down, so the three read as the row's
+   own ways in rather than as three more rows standing beside it. */
 .launcher-recent-rooms button {
+  align-items: center;
+  background: transparent;
+  color: var(--muted);
+  display: flex;
   flex: 1;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: center;
+  padding: 6px 10px;
+}
+
+.launcher-recent-rooms button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--ink);
+}
+
+.launcher-recent-rooms button svg {
+  flex: none;
 }
 
 @keyframes launcher-rooms-drop {
