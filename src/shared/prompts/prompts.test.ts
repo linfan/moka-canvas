@@ -205,6 +205,16 @@ describe("story prompts", () => {
     expect(prompt).toContain(
       "is still the one place, with the change written into its description",
     );
+    // "Each at their own workplace" is words that cover two places, and a
+    // picture of one place cannot stand for both: the entry has to name the
+    // concrete place a shot stands in, one entry per person's own.
+    expect(prompt).toContain("an entry is one concrete place");
+    expect(prompt).toContain(
+      "two people each at their own workplace are two scenes, one for each place",
+    );
+    expect(prompt).toContain(
+      "the one workplace they stand in together is still the one",
+    );
   });
 
   it("asks for props a shot must show, not light or weather", () => {
