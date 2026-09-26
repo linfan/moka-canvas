@@ -265,6 +265,7 @@ describe("story prompts", () => {
     expect(prompt).toContain("现代都市风");
     expect(prompt).toContain("16:9");
     expect(prompt).toContain("head to foot");
+    expect(prompt).toContain("plain white background");
     expect(prompt).toContain("no watermark");
     expect(prompt).not.toContain("{{");
   });
@@ -278,6 +279,20 @@ describe("story prompts", () => {
       description: "空车厢，灯管忽明忽暗。",
     });
     expect(prompt).toContain("unmistakable");
+    expect(prompt).not.toContain("head to foot");
+    expect(prompt).not.toContain("white background");
+  });
+
+  it("draws a thing on its own, with no place behind it", () => {
+    const prompt = storyElementMainPrompt({
+      aspect: "16:9",
+      style: "现代都市风",
+      kind: "prop",
+      name: "旧车票",
+      description: "发黄的车票，边角磨损。",
+    });
+    expect(prompt).toContain("旧车票 — 发黄的车票，边角磨损。");
+    expect(prompt).toContain("plain white background");
     expect(prompt).not.toContain("head to foot");
   });
 
