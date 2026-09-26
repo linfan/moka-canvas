@@ -2,6 +2,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
+  contrastOf,
   createProject,
   forgetProjects,
   newStory,
@@ -82,6 +83,14 @@ test("a story is begun under a name and stood on at its first step", async ({
     "Premise comes first.",
   );
   await expect(page.locator(".story-head-name")).toHaveText("Rain at Night");
+
+  // The step being stood on carries a fill of its own, and its name is read
+  // over that fill rather than in the colour the pressed-button rule would
+  // leave on it — a step whose words and ground are two darks is a step nobody
+  // can read, and which step is open is worth knowing at a glance.
+  expect(
+    await contrastOf(page.getByTestId("story-step-idea")),
+  ).toBeGreaterThanOrEqual(4.5);
 
   // The story is the document's, and reaches the server on the autosave alone.
   await expect

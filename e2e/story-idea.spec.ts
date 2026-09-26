@@ -1,7 +1,8 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
+  contrastOf,
   createProject,
   forgetProjects,
   newStory,
@@ -44,46 +45,6 @@ async function persistedStory(page: Page): Promise<StorySnapshot> {
     moka?: { stories?: StorySnapshot[] };
   };
   return (body.moka?.stories ?? [])[0] ?? {};
-}
-
-/**
- * How far the words of an element stand from the ground they are read on, as a
- * ratio: 1 is one colour twice, and 4.5 is the floor a reader reads at.
- *
- * The ground is the element's own where it has one and the nearest ancestor's
- * otherwise, because a transparent thing is read against whatever stands
- * behind it rather than against nothing.
- */
-async function contrastOf(locator: Locator): Promise<number> {
-  const drawn = await locator.evaluate((node) => {
-    type Drawn = { parentElement: Drawn | null };
-    const Browser = globalThis as unknown as {
-      getComputedStyle(target: Drawn): {
-        color: string;
-        backgroundColor: string;
-      };
-    };
-    const words = Browser.getComputedStyle(node as unknown as Drawn).color;
-    let behind: Drawn | null = node as unknown as Drawn;
-    let ground = "rgba(0, 0, 0, 0)";
-    while (behind !== null && ground === "rgba(0, 0, 0, 0)") {
-      ground = Browser.getComputedStyle(behind).backgroundColor;
-      behind = behind.parentElement;
-    }
-    return [words, ground] as const;
-  });
-  const luminance = (colour: string) => {
-    const [r, g, b] = (colour.match(/[\d.]+/g) ?? []).map(Number);
-    const channel = (value: number) => {
-      const c = value / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-  };
-  const [light, dark] = [luminance(drawn[0]), luminance(drawn[1])].sort(
-    (a, b) => b - a,
-  );
-  return (light + 0.05) / (dark + 0.05);
 }
 
 /** A project open on a story standing at its first step. */

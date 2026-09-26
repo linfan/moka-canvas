@@ -5320,8 +5320,12 @@ body.is-dragging-split {
 }
 
 .story-step.is-active {
+  /* The colour is said again at this weight because the pressed-button rule
+     matches here too: its dark on-primary colour would be left standing on
+     this step's own dark fill, which is no reading at all. */
   background: var(--surface-raised);
   border-color: var(--stroke);
+  color: var(--ink);
 }
 
 .story-step:disabled {
