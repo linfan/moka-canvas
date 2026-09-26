@@ -17,7 +17,7 @@ use moka_canvas::config::GenerateConfig;
 use moka_canvas::converter::deploy::ensure_deployed;
 use moka_canvas::converter::LuaAdapter;
 use moka_canvas::domain::Capability;
-use moka_canvas::generate::adapters::{for_protocol, ModelCall, ProviderAdapter};
+use moka_canvas::generate::adapters::{ModelCall, ProviderAdapter};
 use moka_canvas::generate::media::MediaInput;
 use moka_canvas::generate::models::ResolvedModel;
 use moka_canvas::generate::{Cancel, DeltaSink, GenerateRequest, InputRole, TaskState};
@@ -224,10 +224,6 @@ async fn converter_root() -> &'static std::path::Path {
 async fn scripted() -> &'static dyn ProviderAdapter {
     converter_root().await;
     LuaAdapter::get()
-}
-
-fn gemini_adapter() -> &'static dyn ProviderAdapter {
-    for_protocol(Protocol::new("gemini"))
 }
 
 fn generation(capability: Capability, prompt: &str, params: Value) -> GenerateRequest {
@@ -1129,7 +1125,8 @@ async fn a_gemini_generation_is_asked_on_the_models_own_address() {
     .await;
 
     let call = gemini_channel(&base_url, "gemini-2.5-flash", Capability::Text);
-    let result = gemini_adapter()
+    let result = scripted()
+        .await
         .generate(
             &call,
             &generation(
@@ -1203,7 +1200,8 @@ async fn an_image_a_gemini_model_made_arrives_inside_its_answer() {
 
     let call = gemini_channel(&base_url, "an-image-model", Capability::Image);
     let inputs = [reference("style", InputRole::Reference)];
-    let result = gemini_adapter()
+    let result = scripted()
+        .await
         .generate(
             &call,
             &generation(
@@ -1286,7 +1284,8 @@ async fn a_streamed_gemini_answer_is_asked_for_as_events_and_aggregated() {
         json!({ "stream": true }),
     );
     let (sink, seen) = watching();
-    let result = gemini_adapter()
+    let result = scripted()
+        .await
         .generate_stream(&call, &request, &[], &sink, &Cancel::new())
         .await
         .expect("the stream is read to its end");
@@ -1318,7 +1317,8 @@ async fn a_prompt_a_gemini_model_blocked_is_explained_rather_than_reported_as_em
     .await;
 
     let call = gemini_channel(&base_url, "gemini-2.5-flash", Capability::Text);
-    let error = gemini_adapter()
+    let error = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Text, "something refused", json!({})),
@@ -1331,6 +1331,176 @@ async fn a_prompt_a_gemini_model_blocked_is_explained_rather_than_reported_as_em
     assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
     assert!(error.to_string().contains("SAFETY"), "{error}");
     assert!(!error.retryable(), "{error} would be refused again");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_gemini_size_is_asked_as_the_shape_it_describes() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/an-image-model:generateContent",
+        post(move |body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note_body(&body);
+                Json(json!({ "candidates": [{ "content": { "parts": [{ "text": "done" }] } }] }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "an-image-model", Capability::Image);
+    let asked = |params: Value| {
+        let call = call.clone();
+        async move {
+            scripted()
+                .await
+                .generate(
+                    &call,
+                    &generation(Capability::Image, "a cat", params),
+                    &[],
+                    &Cancel::new(),
+                )
+                .await
+                .expect("the answer arrives");
+        }
+    };
+
+    // A shape already stated as one is the answer: reducing it again would turn
+    // a shape a provider lists into one it does not.
+    asked(json!({ "size": "16:9" })).await;
+    // A size this protocol has no shape for is left out rather than sent as
+    // something it would have to refuse.
+    asked(json!({ "size": "auto" })).await;
+    asked(json!({ "size": "1024x1536" })).await;
+    // One picture is what a request means unless it says otherwise.
+    asked(json!({ "size": "16:9", "count": 1 })).await;
+    asked(json!({ "size": "16:9", "count": 3 })).await;
+
+    let stated = recorded.body(0);
+    assert_eq!(
+        stated["generationConfig"]["imageConfig"]["aspectRatio"],
+        "16:9"
+    );
+    let shapeless = recorded.body(1);
+    assert!(
+        shapeless["generationConfig"].get("imageConfig").is_none(),
+        "{shapeless}"
+    );
+    let reduced = recorded.body(2);
+    assert_eq!(
+        reduced["generationConfig"]["imageConfig"]["aspectRatio"],
+        "2:3"
+    );
+    let one = recorded.body(3);
+    assert!(
+        one["generationConfig"].get("candidateCount").is_none(),
+        "{one}"
+    );
+    let several = recorded.body(4);
+    assert_eq!(several["generationConfig"]["candidateCount"], 3);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_gemini_answer_with_no_totals_reports_no_usage() {
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/gemini-2.5-flash:generateContent",
+        post(|| async {
+            // An all-empty totals document would still show up in the interface
+            // as a row of zeroes, which reads as a measurement rather than as an
+            // absence.
+            Json(json!({
+                "candidates": [{ "content": { "parts": [{ "text": "A lantern." }] } }],
+                "usageMetadata": {},
+            }))
+        }),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "gemini-2.5-flash", Capability::Text);
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Text, "describe a lantern", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern."));
+    assert_eq!(result.usage, None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gemini_media_that_is_not_base64_is_refused_rather_than_stored_empty() {
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/an-image-model:generateContent",
+        post(|| async {
+            Json(json!({
+                "candidates": [{ "content": { "parts": [
+                    { "inlineData": { "mimeType": "image/png", "data": "not base64 at all" } },
+                ] } }],
+            }))
+        }),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "an-image-model", Capability::Image);
+    let error = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Image, "a cat", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the bytes are not media");
+
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(!error.retryable(), "{error} will not improve on a retry");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gemini_speech_is_read_as_the_container_it_is_rather_than_as_the_name_it_came_with() {
+    // The shortest bytes that are a wave file as far as the sniffer is
+    // concerned: its own header, and nothing to play.
+    let spoken = b"RIFF\x24\x00\x00\x00WAVEfmt ".to_vec();
+    let encoded = base64(&spoken);
+    let base_url = serve(Router::new().route(
+        "/v1beta/models/a-voice:generateContent",
+        post(move || {
+            let encoded = encoded.clone();
+            async move {
+                Json(json!({
+                    "candidates": [{ "content": { "parts": [
+                        { "inlineData": { "mimeType": "audio/L16;codec=pcm", "data": encoded } },
+                    ] } }],
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = gemini_channel(&base_url, "a-voice", Capability::Audio);
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Audio, "read this", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the answer arrives");
+
+    // The name a provider gives a container is not always one a file can be
+    // stored under, so the bytes decide.
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].mime, "audio/x-wav");
+    assert_eq!(result.items[0].kind, Capability::Audio);
 }
 
 /// A provider that starts a job, answers one look with work still to do, and
@@ -1374,6 +1544,9 @@ async fn gemini_video_provider(recorded: Recorded) -> String {
                                 { "video": {
                                     "uri": format!("http://{host}/v1beta/files/shot:download"),
                                 } },
+                                // A sample with nothing to collect is passed over
+                                // rather than collected from nowhere.
+                                { "video": {} },
                             ] } },
                         }))
                     }
@@ -1410,7 +1583,8 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
         "a slow pan",
         json!({ "seconds": 6, "ratio": "16:9" }),
     );
-    let refused = gemini_adapter()
+    let refused = scripted()
+        .await
         .generate(&call, &request, &[], &cancel)
         .await
         .expect_err("a shot is a job rather than an answer");
@@ -1420,7 +1594,8 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
         reference("opening", InputRole::FirstFrame),
         reference("closing", InputRole::LastFrame),
     ];
-    let task = gemini_adapter()
+    let task = scripted()
+        .await
         .create_task(&call, &request, &inputs, &cancel)
         .await
         .expect("the job starts");
@@ -1449,13 +1624,14 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
     assert_eq!(sent["parameters"]["aspectRatio"], "16:9");
     assert!(sent.get("model").is_none(), "{sent}");
 
-    match gemini_adapter().poll_task(&call, &task, &cancel).await {
+    match scripted().await.poll_task(&call, &task, &cancel).await {
         Ok(TaskState::Pending { retry_after_ms }) => {
             assert!(retry_after_ms > 0, "another look is worth waiting for")
         }
         other => panic!("expected a job still running, got {other:?}"),
     }
-    match gemini_adapter()
+    match scripted()
+        .await
         .poll_task(&call, &task, &cancel)
         .await
         .expect("the job is collected")

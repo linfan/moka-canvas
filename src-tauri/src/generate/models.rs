@@ -412,24 +412,6 @@ impl ModelRepo {
     }
 }
 
-/// The streaming form of a Gemini content address. A configuration that names
-/// some other action is streamed at the address it names, and the provider
-/// gets to refuse it.
-pub fn gemini_stream_url(url: &str) -> String {
-    match url.strip_suffix(":generateContent") {
-        Some(prefix) => format!("{prefix}:streamGenerateContent"),
-        None => url.to_string(),
-    }
-}
-
-/// The root a Gemini job handle is relative to: everything before the
-/// `/models/` segment of the configured address. A handle arrives as a path
-/// under that root, so polling one needs the root rather than the endpoint.
-pub fn gemini_root(url: &str) -> Option<String> {
-    let cut = url.trim_end_matches('/').rfind("/models/")?;
-    Some(url[..cut].to_string())
-}
-
 fn defaults_by_capability(defaults: &Defaults) -> [(Capability, Option<&str>); 5] {
     [
         (Capability::Text, defaults.text.as_deref()),
@@ -815,27 +797,6 @@ mod tests {
         snapshot.defaults.music = Some("gone".to_string());
         let music = resolve_music_within(&snapshot).unwrap();
         assert_eq!(music.config_id, "speaker");
-    }
-
-    #[test]
-    fn a_stream_address_is_the_content_one_with_the_action_renamed() {
-        assert_eq!(
-            gemini_stream_url("https://api.test/v1beta/models/flash:generateContent"),
-            "https://api.test/v1beta/models/flash:streamGenerateContent"
-        );
-        assert_eq!(
-            gemini_stream_url("https://api.test/v1beta/models/veo:predictLongRunning"),
-            "https://api.test/v1beta/models/veo:predictLongRunning"
-        );
-    }
-
-    #[test]
-    fn a_gemini_root_is_everything_before_the_models_segment() {
-        assert_eq!(
-            gemini_root("https://api.test/v1beta/models/veo-3:predictLongRunning").as_deref(),
-            Some("https://api.test/v1beta")
-        );
-        assert_eq!(gemini_root("https://api.test/other"), None);
     }
 
     #[test]

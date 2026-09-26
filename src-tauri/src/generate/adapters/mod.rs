@@ -7,11 +7,10 @@
 //! boundary in either direction.
 
 mod custom;
-mod gemini;
 
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName};
+use reqwest::header::HeaderMap;
 
 use crate::config::GenerateConfig;
 use crate::converter;
@@ -39,11 +38,6 @@ const MAX_DETAIL_CHARS: usize = 300;
 const MIN_SCRUBBED_KEY_CHARS: usize = 8;
 
 const USER_AGENT: &str = concat!("moka-canvas/", env!("CARGO_PKG_VERSION"));
-
-/// The credential goes in a header for both protocols. The query parameter one
-/// of them also accepts is refused here: a URL is logged, and quoted back in
-/// error messages.
-const API_KEY_HEADER: HeaderName = HeaderName::from_static("x-goog-api-key");
 
 /// The sentinel that ends a server-sent stream.
 const STREAM_DONE: &str = "[DONE]";
@@ -97,56 +91,10 @@ impl ModelCall {
         })
     }
 
-    /// The address a generation is placed at: the configured endpoint itself.
-    /// Derived addresses — an edit endpoint, a job poll — are built by the
-    /// helpers in [`super::models`] and fetched through [`get`].
-    pub fn endpoint(&self) -> &str {
-        &self.url
-    }
-
     /// The origin of the configured address, so a caller can tell whether
     /// another URL belongs to the same provider.
     pub fn origin(&self) -> Option<String> {
         origin_of(&self.url)
-    }
-
-    fn post(&self) -> reqwest::RequestBuilder {
-        self.credentialed(self.client.post(self.url.clone()))
-    }
-
-    /// A post to an address derived from the configured one — an edit
-    /// endpoint beside a generation endpoint, say. The credential follows it
-    /// because the derivation cannot leave the origin.
-    pub(crate) fn post_at(&self, url: &str) -> reqwest::RequestBuilder {
-        self.credentialed(self.client.post(url.to_string()))
-    }
-
-    pub(crate) fn get(&self, url: &str) -> reqwest::RequestBuilder {
-        self.credentialed(self.client.get(url.to_string()))
-    }
-
-    /// A request for an address the provider handed back, rather than for the
-    /// configured endpoint. The credential follows it only where the address
-    /// is on the same origin: an image left on a third-party CDN is public by
-    /// nature, and a key sent after it would not be.
-    pub(crate) fn fetch(&self, address: &str) -> reqwest::RequestBuilder {
-        self.described("GET", address)
-    }
-
-    /// A request to an address somebody other than this module chose — a
-    /// converter script's, which may name an upload host or a document the
-    /// provider handed back.
-    ///
-    /// The credential follows the same rule as [`fetch`]: only inside the
-    /// configured origin, because an endpoint the script derived is the
-    /// provider's and a link it was given is nobody's.
-    pub(crate) fn described(&self, method: &str, address: &str) -> reqwest::RequestBuilder {
-        let request = self.without_credential(method, address);
-        if origin_of(address).is_some() && origin_of(address) == self.origin() {
-            self.credentialed(request)
-        } else {
-            request
-        }
     }
 
     /// The same request, with the credential placed the way a converter
@@ -156,7 +104,10 @@ impl ModelCall {
     /// A converter says where its key rides because that is a fact about the
     /// service rather than about this program — one endpoint wants a bearer
     /// token, another a key of its own in a header of its own, and a third
-    /// takes none.
+    /// takes none. The credential follows the configured origin and nothing
+    /// else: an endpoint a script derived is the provider's, and a link it was
+    /// handed is somebody else's. A link on a third-party CDN is public by
+    /// nature, and a key sent after it would not be going to the provider.
     pub(crate) fn described_with(
         &self,
         method: &str,
@@ -198,14 +149,6 @@ impl ModelCall {
             // Everything else is a POST: no protocol here speaks another
             // method, and a method nobody named is not one to invent.
             _ => self.client.post(address.to_string()),
-        }
-    }
-
-    fn credentialed(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        if matches!(self.protocol.wire_name(), "gemini" | "geminiVideo") {
-            request.header(API_KEY_HEADER, &self.api_key)
-        } else {
-            request.bearer_auth(&self.api_key)
         }
     }
 }
@@ -284,16 +227,15 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
-/// The adapter that speaks a protocol. One adapter covers a whole family of
-/// endpoint shapes: which shape a call uses is decided by the protocol variant
-/// the configuration named, inside the adapter. Lua-backed protocols are
-/// dispatched to the Lua adapter, which loads the appropriate converter script.
+/// The adapter that speaks a protocol. Every shape but the one this program
+/// refuses outright belongs to a converter script on this machine: which shape
+/// a call uses is decided by the name the configuration gave, and the script
+/// that name finds says the rest.
 pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
     // Dispatch by name, because a name is all a protocol is: a shape this
     // program implements itself answers to the names it invented, and every
     // other name belongs to a converter script on this machine.
     match protocol.wire_name() {
-        "gemini" | "geminiVideo" => &gemini::ADAPTER,
         "custom" => &custom::ADAPTER,
         _ => converter::LuaAdapter::get(),
     }
@@ -313,27 +255,6 @@ impl Reply {
     pub(crate) fn text(&self) -> Result<&str, ProviderError> {
         std::str::from_utf8(&self.body)
             .map_err(|_| ProviderError::Rejected("the answer is not valid UTF-8 text".to_string()))
-    }
-
-    fn decoded<T: serde::de::DeserializeOwned>(&self, what: &str) -> Result<T, ProviderError> {
-        serde_json::from_slice(&self.body).map_err(|error| {
-            ProviderError::Rejected(format!("the {what} is not the expected JSON: {error}"))
-        })
-    }
-
-    fn value(&self) -> Result<serde_json::Value, ProviderError> {
-        self.decoded("answer")
-    }
-
-    /// The mime of the body, without its parameters.
-    fn content_type(&self) -> Option<String> {
-        let value = self
-            .headers
-            .get(reqwest::header::CONTENT_TYPE)?
-            .to_str()
-            .ok()?;
-        let mime = value.split(';').next()?.trim();
-        (!mime.is_empty()).then(|| mime.to_string())
     }
 
     /// The provider's own advice about when to come back. A date is left alone:
@@ -389,29 +310,6 @@ pub(crate) async fn exchange(
             debug::broken(recording, &error.to_string(), status, &headers);
             Err(error)
         }
-    }
-}
-
-/// [`exchange`] under the deadline for this kind of generation and the ceiling
-/// for an answer, refusing one that is not a success.
-async fn answer(
-    kind: Kind,
-    call: &ModelCall,
-    request: reqwest::RequestBuilder,
-    capability: Capability,
-) -> Result<Reply, ProviderError> {
-    let reply = exchange(
-        kind,
-        call,
-        request,
-        call.budgets.timeout_for(capability),
-        call.budgets.max_response_bytes,
-    )
-    .await?;
-    if succeeded(reply.status) {
-        Ok(reply)
-    } else {
-        Err(provider_error(&reply, &call.api_key))
     }
 }
 
@@ -733,23 +631,6 @@ where
     }
 }
 
-/// The token totals of an answer, read from the field that carries them under
-/// whichever names the protocol uses.
-///
-/// An answer that reported neither total reported nothing: an all-empty struct
-/// would still show up in the interface as a row of zeroes.
-fn usage_of(counted: Option<&serde_json::Value>, input: &str, output: &str) -> Option<Usage> {
-    let counted = counted?;
-    let read = |key: &str| counted.get(key).and_then(serde_json::Value::as_u64);
-    let usage = Usage {
-        input_tokens: read(input),
-        output_tokens: read(output),
-        images: None,
-        seconds: None,
-    };
-    (usage.input_tokens.is_some() || usage.output_tokens.is_some()).then_some(usage)
-}
-
 /// An image item with its mime sniffed and its size read from the header.
 ///
 /// Neither is taken from the request: a provider that answers in a format it
@@ -917,7 +798,7 @@ fn origin_of(address: &str) -> Option<String> {
 mod tests {
     use super::*;
     use reqwest::header::HeaderValue;
-    use serde_json::{json, Value};
+    use serde_json::Value;
     use std::sync::{Arc, Mutex};
 
     /// A sink that records what it was shown, so a test can assert on the
@@ -1199,7 +1080,7 @@ mod tests {
 
     /// A protocol's name is its whole identity. Every shape a converter script
     /// serves — the OpenAI-compatible ones among them — arrives at the one
-    /// scripted adapter, whatever the name says, and the family Rust still
+    /// scripted adapter, whatever the name says, and the shape Rust still
     /// speaks itself stays apart from it.
     #[test]
     fn every_protocol_routes_to_the_adapter_of_its_family() {
@@ -1209,6 +1090,8 @@ mod tests {
             "openaiImages",
             "openaiSpeech",
             "openaiVideos",
+            "gemini",
+            "geminiVideo",
             "bailianText",
             "bailianImage",
             "bailianSpeech",
@@ -1224,15 +1107,10 @@ mod tests {
                 "{name}"
             );
         }
-        let gemini = for_protocol(Protocol::from_wire_name("gemini"));
-        assert!(std::ptr::eq(
-            gemini,
-            for_protocol(Protocol::from_wire_name("geminiVideo"))
-        ));
+        // The reserved name is refused by an adapter of its own rather than
+        // looked for as a script that does not exist.
         let reserved = for_protocol(Protocol::from_wire_name("custom"));
-        assert!(!std::ptr::eq(scripted, gemini));
         assert!(!std::ptr::eq(scripted, reserved));
-        assert!(!std::ptr::eq(gemini, reserved));
     }
 
     /// A real encoded image, so a test can assert on what sniffing and the
@@ -1327,21 +1205,5 @@ mod tests {
         )
         .expect_err("there is nothing to store");
         assert_eq!(error.code(), "PROVIDER_NO_OUTPUT");
-    }
-
-    #[test]
-    fn totals_that_reported_nothing_are_not_reported_as_zeroes() {
-        // An all-empty struct would still show up in the interface as a row of
-        // zeroes, which reads as a measurement rather than as an absence.
-        assert_eq!(usage_of(Some(&json!({})), "in", "out"), None);
-        assert_eq!(usage_of(None, "in", "out"), None);
-        assert_eq!(
-            usage_of(Some(&json!({ "in": 4, "out": 2 })), "in", "out"),
-            Some(Usage {
-                input_tokens: Some(4),
-                output_tokens: Some(2),
-                ..Usage::default()
-            })
-        );
     }
 }
