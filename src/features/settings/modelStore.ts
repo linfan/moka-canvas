@@ -97,30 +97,31 @@ export interface ProtocolChoice {
 }
 
 /**
- * The protocols a category offers, read from the converter registry.
+ * The protocols a category offers: the built-ins, then the registry's scripts.
  *
- * The registry is the truth: it deploys each script under the capability it
- * serves, and it may carry scripts this build has never heard of. Built-in
- * ids keep their familiar order and go first; scripts beyond them follow,
- * alphabetically by the name a reader picks one by. While the registry has
- * not arrived — or the read failed — the built-in list stands in, so the
- * form is never empty.
+ * A built-in is implemented by this program, so it is offered whether or not a
+ * script stands beside it; what the registry contributes is the scripts
+ * deployed on this machine, which may be ones this build has never heard of.
+ * Built-in ids keep their familiar order and go first — with the registry's
+ * own label and address example where it holds one, since a deployment may
+ * point its own script at another region — and the scripts beyond them follow,
+ * alphabetically by the name a reader picks one by. While the registry has not
+ * arrived — or the read failed — a built-in falls back to the name and address
+ * this build knows it by, so the form is never empty.
  */
 export function protocolChoices(
   protocols: ProtocolGroups | null,
   capability: Capability,
 ): ProtocolChoice[] {
   const group = protocols?.[capability];
+  const builtin = PROTOCOLS_BY_CATEGORY[capability];
   if (!group) {
-    return PROTOCOLS_BY_CATEGORY[capability].map((id) => ({
+    return builtin.map((id) => ({
       id,
       label: i18n.t(PROTOCOL_LABELS[id]),
       urlExample: PROTOCOL_URL_EXAMPLES[id],
     }));
   }
-  const builtin = PROTOCOLS_BY_CATEGORY[capability].filter(
-    (id): id is ModelProtocol => id in group,
-  );
   const extra = Object.keys(group)
     .filter((id) => !builtin.includes(id as ModelProtocol))
     .sort((a, b) => group[a].displayName.localeCompare(group[b].displayName));

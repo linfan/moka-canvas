@@ -387,6 +387,7 @@ fn event(payload: &Value) -> StreamEvent {
         text: (!text.is_empty()).then_some(text),
         complete: None,
         usage: tokens(payload),
+        ..StreamEvent::default()
     }
 }
 

@@ -6,6 +6,7 @@
 //! and answers with bytes and a mime type: no provider field name crosses this
 //! boundary in either direction.
 
+mod bailian;
 mod custom;
 mod gemini;
 mod openai;
@@ -249,6 +250,7 @@ pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
         | Protocol::OpenaiSpeech
         | Protocol::OpenaiVideos => &openai::ADAPTER,
         Protocol::Gemini | Protocol::GeminiVideo => &gemini::ADAPTER,
+        Protocol::BailianText | Protocol::BailianImage => &bailian::ADAPTER,
         Protocol::Custom => &custom::ADAPTER,
         Protocol::LuaScript(_) => converter::LuaAdapter::get(),
     }
@@ -535,17 +537,25 @@ where
         }
     };
     match ended {
-        Ok(()) => {
-            let result = reader.finish();
-            debug::streamed(
-                recording,
-                status,
-                &headers,
-                raw,
-                result.text.clone().unwrap_or_default(),
-            );
-            Ok(result)
-        }
+        Ok(()) => match reader.finish() {
+            Ok(result) => {
+                debug::streamed(
+                    recording,
+                    status,
+                    &headers,
+                    raw,
+                    result.text.clone().unwrap_or_default(),
+                );
+                Ok(result)
+            }
+            // A complaint that arrived with the stream is refused the same way
+            // a status would have been, and what arrived before it is still
+            // the evidence of what the provider was doing.
+            Err(error) => {
+                debug::stream_broken(recording, &error.to_string(), status, &headers, raw);
+                Err(error)
+            }
+        },
         Err(error) => {
             // What arrived before the end is still the evidence of what the
             // provider was doing, so it is kept rather than dropped with the call.
@@ -567,6 +577,10 @@ struct StreamEvent {
     complete: Option<String>,
     /// Totals, which some protocols send only with the last event.
     usage: Option<Usage>,
+    /// The provider's own complaint, where the event carried one instead of a
+    /// piece of the answer. A stream that has opened has no status left to
+    /// refuse with, so some protocols say what went wrong here.
+    failed: Option<String>,
 }
 
 /// Reads a server-sent stream: lines out of chunks, events out of lines.
@@ -581,6 +595,9 @@ struct SseReader<'a, F> {
     data: Vec<String>,
     aggregate: String,
     usage: Option<Usage>,
+    /// What the provider said instead of finishing the answer, where an event
+    /// carried a complaint rather than a piece.
+    failed: Option<String>,
     done: bool,
 }
 
@@ -596,6 +613,7 @@ where
             data: Vec::new(),
             aggregate: String::new(),
             usage: None,
+            failed: None,
             done: false,
         }
     }
@@ -636,6 +654,13 @@ where
         // front of the provider; dropping it loses nothing the model said.
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload.trim()) {
             let event = (self.parse)(&value);
+            // A complaint ends the stream: there is nothing more to read from
+            // a provider that has said what went wrong.
+            if let Some(failed) = event.failed {
+                self.failed = Some(failed);
+                self.done = true;
+                return;
+            }
             if let Some(text) = event.text {
                 self.sink.push(&text);
                 self.aggregate.push_str(&text);
@@ -651,13 +676,16 @@ where
 
     /// Ends the stream. A provider that closes without a blank line after the
     /// last event still ends it here.
-    fn finish(mut self) -> GenerateResult {
+    fn finish(mut self) -> Result<GenerateResult, ProviderError> {
         self.event();
-        GenerateResult {
+        if let Some(failed) = self.failed {
+            return Err(ProviderError::Rejected(failed));
+        }
+        Ok(GenerateResult {
             text: (!self.aggregate.is_empty()).then_some(self.aggregate),
             items: Vec::new(),
             usage: self.usage,
-        }
+        })
     }
 }
 
@@ -791,10 +819,13 @@ fn explain(status: u16, body: &str, api_key: &str) -> String {
     let text = serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|payload| {
+            // OpenAI-shaped envelopes nest the complaint under `error`;
+            // Bailian says it in a `message` beside a `code`, at the top of
+            // the body. Either way it is the provider's own explanation.
             payload
-                .get("error")?
-                .get("message")?
-                .as_str()
+                .pointer("/error/message")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| payload.get("message").and_then(serde_json::Value::as_str))
                 .map(str::to_string)
         })
         .unwrap_or_else(|| body.to_string());
@@ -866,12 +897,13 @@ mod tests {
     }
 
     /// An event shape of the test's own: text under `delta`, a whole answer
-    /// under `whole`, totals under `tokens`.
+    /// under `whole`, totals under `tokens`, a complaint under `complaint`.
     fn event(payload: &Value) -> StreamEvent {
         let text = |key: &str| payload.get(key).and_then(Value::as_str).map(str::to_string);
         StreamEvent {
             text: text("delta"),
             complete: text("whole"),
+            failed: text("complaint"),
             usage: payload
                 .get("tokens")
                 .and_then(Value::as_u64)
@@ -895,7 +927,12 @@ mod tests {
             }
             reader.feed(chunk.as_bytes());
         }
-        (reader.finish(), shown(&seen))
+        (
+            reader
+                .finish()
+                .expect("the stream ended without a complaint"),
+            shown(&seen),
+        )
     }
 
     fn event_with(payload: &str) -> String {
@@ -973,6 +1010,25 @@ mod tests {
         assert_eq!(result.usage.and_then(|usage| usage.input_tokens), Some(12));
     }
 
+    #[test]
+    fn an_event_that_complains_ends_the_stream_as_a_refusal() {
+        // A stream that has opened has no status left to refuse with, so a
+        // provider that fails halfway says so in an event. Reading that as an
+        // answer would hand back a truncated one as though it were whole.
+        let (sink, seen) = watching();
+        let mut reader = SseReader::new(&event, &sink);
+        reader.feed(event_with(r#"{"delta":"A lantern"}"#).as_bytes());
+        assert!(!reader.done);
+        reader.feed(event_with(r#"{"complaint":"the service is busy"}"#).as_bytes());
+        assert!(reader.done, "there is nothing more to read from it");
+
+        let error = reader.finish().expect_err("the stream was refused");
+        assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+        assert!(error.to_string().contains("the service is busy"), "{error}");
+        assert!(!error.retryable(), "the caller has already seen the pieces");
+        assert_eq!(shown(&seen), "A lantern");
+    }
+
     fn reply(status: u16, body: &str) -> Reply {
         Reply {
             status,
@@ -1022,6 +1078,14 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("status 403"), "{message}");
+
+        // Bailian states the complaint at the top of the body, beside the code
+        // that names it, rather than nesting it.
+        let bailian =
+            r#"{"code":"InvalidApiKey","message":"the key is not valid","request_id":"abc"}"#;
+        let message = provider_error(&reply(401, bailian), "a-key").to_string();
+        assert!(message.contains("the key is not valid"), "{message}");
+        assert!(message.contains("status 401"), "{message}");
     }
 
     #[test]
@@ -1106,6 +1170,12 @@ mod tests {
         let gemini = for_protocol(Protocol::Gemini);
         assert!(std::ptr::eq(gemini, for_protocol(Protocol::GeminiVideo)));
         assert!(!std::ptr::eq(openai, gemini));
+        // Both Bailian shapes are one service under two names, and one adapter
+        // speaks them.
+        let bailian = for_protocol(Protocol::BailianText);
+        assert!(std::ptr::eq(bailian, for_protocol(Protocol::BailianImage)));
+        assert!(!std::ptr::eq(openai, bailian));
+        assert!(!std::ptr::eq(gemini, bailian));
         assert!(!std::ptr::eq(openai, for_protocol(Protocol::Custom)));
     }
 

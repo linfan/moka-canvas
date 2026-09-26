@@ -250,22 +250,25 @@ export const MODEL_PROTOCOLS = [
   "openaiVideos",
   "gemini",
   "geminiVideo",
+  "bailianText",
+  "bailianImage",
   "custom",
 ] as const;
 export type ModelProtocol = (typeof MODEL_PROTOCOLS)[number];
 
 /**
- * The built-in protocols per category, the fallback the form offers while
- * the converter registry has not been read (or could not be). The registry
- * behind `/api/v1/converter/protocols` is the truth: it deploys `gemini`
- * under `text` alone, and may carry scripts no build ever heard of.
+ * The built-in protocols per category, each implemented by this program
+ * rather than by a converter script. A category therefore offers them whether
+ * or not the registry has been read; what the registry behind
+ * `/api/v1/converter/protocols` adds is the scripts deployed on this machine,
+ * including ones no build has ever heard of.
  */
 export const PROTOCOLS_BY_CATEGORY: Record<
   Capability,
   readonly ModelProtocol[]
 > = {
-  text: ["openaiChat", "openaiResponses", "gemini"],
-  image: ["openaiImages"],
+  text: ["openaiChat", "openaiResponses", "gemini", "bailianText"],
+  image: ["openaiImages", "bailianImage"],
   audio: ["openaiSpeech"],
   video: ["openaiVideos", "geminiVideo"],
   // Nothing built in speaks a recognition endpoint, so this list is empty on
@@ -282,6 +285,8 @@ export const PROTOCOL_LABELS: Record<ModelProtocol, string> = {
   openaiVideos: "domain:protocol.openaiVideos",
   gemini: "domain:protocol.gemini",
   geminiVideo: "domain:protocol.geminiVideo",
+  bailianText: "domain:protocol.bailianText",
+  bailianImage: "domain:protocol.bailianImage",
   custom: "domain:protocol.custom",
 };
 
@@ -300,6 +305,10 @@ export const PROTOCOL_URL_EXAMPLES: Record<ModelProtocol, string> = {
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
   geminiVideo:
     "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
+  bailianText:
+    "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+  bailianImage:
+    "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
   custom: "",
 };
 

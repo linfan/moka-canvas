@@ -194,6 +194,39 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
   );
 });
 
+test("a built-in protocol is offered without a script standing behind it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+
+  await dialog.getByRole("tab", { name: "Image" }).click();
+  await dialog.getByRole("button", { name: "New image model" }).click();
+
+  const protocol = dialog.getByLabel("Protocol");
+  // Bailian's shapes are implemented by the program rather than by a deployed
+  // script, so no converter directory stands behind them and the form names
+  // and addresses them from what this build knows.
+  await expect(protocol.locator("option")).toHaveText([
+    "OpenAI-compatible · Images API",
+    "Alibaba Cloud · Bailian Image (Wan)",
+  ]);
+  await protocol.selectOption("bailianImage");
+  await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
+    "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+  );
+
+  // The text shape keeps its own address: the multimodal one is derived from
+  // it at the moment a question carries a picture.
+  await dialog.getByRole("tab", { name: "Text" }).click();
+  await dialog.getByRole("button", { name: "New text model" }).click();
+  await protocol.selectOption("bailianText");
+  await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
+    "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+  );
+});
+
 test("speech recognition offers the script that serves it", async ({
   page,
 }) => {
