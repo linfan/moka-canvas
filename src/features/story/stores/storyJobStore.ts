@@ -568,12 +568,20 @@ export function jobProgress(job: StoryJobRecord): {
   return { done, total: job.items.length };
 }
 
+/** The batch of this one kind a story has out just now, if it has one. */
+export function kindJob(
+  jobs: StoryJobRecord[],
+  kind: StoryJobKind,
+): StoryJobRecord | null {
+  return jobs.find((job) => job.kind === kind && isRunning(job.status)) ?? null;
+}
+
 /** Whether a story has a batch of this one kind out just now. */
 export function kindRunning(
   jobs: StoryJobRecord[],
   kind: StoryJobKind,
 ): boolean {
-  return jobs.some((job) => job.kind === kind && isRunning(job.status));
+  return kindJob(jobs, kind) !== null;
 }
 
 /** Given a story's batches, only the ones working on this step. */
@@ -615,6 +623,19 @@ export function targetRunning(
       job.items.some(
         (item) => jobKey(item.target) === key && isRunning(item.status),
       ),
+  );
+}
+
+/**
+ * Whether the piece kept under this name is out just now, by the name it keeps.
+ *
+ * A place is not always enough to name what is being made — a telling's
+ * chapters are one table, and each chapter's own ask is a numbered piece of it
+ * — so a step that asks for one chapter at a time reads the piece itself.
+ */
+export function pieceRunning(jobs: StoryJobRecord[], id: string): boolean {
+  return jobs.some((job) =>
+    job.items.some((item) => item.id === id && isRunning(item.status)),
   );
 }
 
