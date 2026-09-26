@@ -1,0 +1,9 @@
+{
+  "displayName": "Alibaba Cloud · Bailian Image (Wan)",
+  "labels": { "zh": "阿里云百炼 · 图像生成与编辑（万相）" },
+  "urlExample": "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+  "script": "bailian-image.lua",
+  "order": 20,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "version": 1
+}

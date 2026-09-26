@@ -6,7 +6,6 @@
 //! and answers with bytes and a mime type: no provider field name crosses this
 //! boundary in either direction.
 
-mod bailian;
 mod custom;
 mod gemini;
 mod openai;
@@ -298,7 +297,6 @@ pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
         | Protocol::OpenaiSpeech
         | Protocol::OpenaiVideos => &openai::ADAPTER,
         Protocol::Gemini | Protocol::GeminiVideo => &gemini::ADAPTER,
-        Protocol::BailianText | Protocol::BailianImage => &bailian::ADAPTER,
         Protocol::Custom => &custom::ADAPTER,
         Protocol::LuaScript(_) => converter::LuaAdapter::get(),
     }
@@ -1219,13 +1217,18 @@ mod tests {
         let gemini = for_protocol(Protocol::Gemini);
         assert!(std::ptr::eq(gemini, for_protocol(Protocol::GeminiVideo)));
         assert!(!std::ptr::eq(openai, gemini));
-        // Both Bailian shapes are one service under two names, and one adapter
-        // speaks them.
-        let bailian = for_protocol(Protocol::BailianText);
-        assert!(std::ptr::eq(bailian, for_protocol(Protocol::BailianImage)));
-        assert!(!std::ptr::eq(openai, bailian));
-        assert!(!std::ptr::eq(gemini, bailian));
-        assert!(!std::ptr::eq(openai, for_protocol(Protocol::Custom)));
+        let reserved = for_protocol(Protocol::Custom);
+        assert!(!std::ptr::eq(openai, reserved));
+        // The Bailian shapes are converter scripts now, and every script of
+        // every platform is spoken by one adapter that no Rust family shares.
+        let scripted = for_protocol(Protocol::from_wire_name("bailianText"));
+        assert!(std::ptr::eq(
+            scripted,
+            for_protocol(Protocol::from_wire_name("bailianImage"))
+        ));
+        assert!(!std::ptr::eq(openai, scripted));
+        assert!(!std::ptr::eq(gemini, scripted));
+        assert!(!std::ptr::eq(reserved, scripted));
     }
 
     /// A real encoded image, so a test can assert on what sniffing and the

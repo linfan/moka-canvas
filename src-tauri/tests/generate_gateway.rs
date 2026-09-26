@@ -275,13 +275,9 @@ fn endpoint_of(base_url: &str, protocol: Protocol, model_id: &str) -> String {
         Protocol::GeminiVideo => {
             format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
         }
-        Protocol::BailianText => {
-            format!("{base_url}/api/v1/services/aigc/text-generation/generation")
-        }
-        Protocol::BailianImage => {
-            format!("{base_url}/api/v1/services/aigc/multimodal-generation/generation")
-        }
         Protocol::Custom => format!("{base_url}/v1/chat/completions"),
+        // Every converter script's address is the model's own, so the arm for
+        // scripts needs no knowledge of any particular platform.
         Protocol::LuaScript(_) => format!("{base_url}/v1/lua/{model_id}"),
     }
 }

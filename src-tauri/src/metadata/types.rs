@@ -71,14 +71,6 @@ pub enum Protocol {
     Gemini,
     /// Google Gemini long-running prediction (`POST ...:predictLongRunning`).
     GeminiVideo,
-    /// Alibaba Cloud Bailian (Model Studio) text generation
-    /// (`POST .../aigc/text-generation/generation`). A question carrying a
-    /// picture is asked at the multimodal sibling of that address.
-    BailianText,
-    /// Alibaba Cloud Bailian (Model Studio) image generation and editing
-    /// (`POST .../aigc/multimodal-generation/generation`, answered as it is
-    /// placed).
-    BailianImage,
     Custom,
     /// A protocol backed by a Lua converter script. The string is the name of
     /// the converter's directory in the models tree (e.g. `"wan3Video"`).
@@ -96,8 +88,6 @@ impl Protocol {
             Self::OpenaiVideos => "openaiVideos",
             Self::Gemini => "gemini",
             Self::GeminiVideo => "geminiVideo",
-            Self::BailianText => "bailianText",
-            Self::BailianImage => "bailianImage",
             Self::Custom => "custom",
             Self::LuaScript(_) => "luaScript",
         }
@@ -121,8 +111,6 @@ impl Protocol {
             "openaiVideos" => Self::OpenaiVideos,
             "gemini" => Self::Gemini,
             "geminiVideo" => Self::GeminiVideo,
-            "bailianText" => Self::BailianText,
-            "bailianImage" => Self::BailianImage,
             "custom" => Self::Custom,
             other => Self::LuaScript(other.to_string()),
         }
@@ -190,9 +178,8 @@ pub fn protocols_for(capability: Capability) -> &'static [Protocol] {
             Protocol::OpenaiChat,
             Protocol::OpenaiResponses,
             Protocol::Gemini,
-            Protocol::BailianText,
         ],
-        Capability::Image => &[Protocol::OpenaiImages, Protocol::BailianImage],
+        Capability::Image => &[Protocol::OpenaiImages],
         Capability::Audio => &[Protocol::OpenaiSpeech],
         Capability::Video => &[Protocol::OpenaiVideos, Protocol::GeminiVideo],
         // Speech recognition is a Lua script's business: no built-in protocol
@@ -578,27 +565,27 @@ mod tests {
             serde_json::to_string(&Protocol::GeminiVideo).unwrap(),
             "\"geminiVideo\""
         );
-        assert_eq!(
-            serde_json::to_string(&Protocol::BailianText).unwrap(),
-            "\"bailianText\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Protocol::BailianImage).unwrap(),
-            "\"bailianImage\""
-        );
         // A name is read back as the variant it names, so a configuration
         // written by one build is understood by the next.
-        for protocol in [
-            Protocol::BailianText,
-            Protocol::BailianImage,
-            Protocol::GeminiVideo,
-        ] {
+        for protocol in [Protocol::OpenaiChat, Protocol::GeminiVideo] {
             let written = serde_json::to_string(&protocol).unwrap();
             assert_eq!(
                 serde_json::from_str::<Protocol>(&written).unwrap(),
                 protocol
             );
         }
+
+        // A converter's id is carried as it stands rather than as a variant of
+        // its own, which is what lets a protocol arrive as a directory without
+        // a name for it being written down here first.
+        let scripted = Protocol::from_wire_name("wan3Image");
+        assert!(scripted.is_lua());
+        assert_eq!(scripted.wire_name(), "wan3Image");
+        assert_eq!(serde_json::to_string(&scripted).unwrap(), "\"wan3Image\"");
+        assert_eq!(
+            serde_json::from_str::<Protocol>("\"wan3Image\"").unwrap(),
+            scripted
+        );
     }
 
     #[test]
@@ -610,22 +597,18 @@ mod tests {
             &[
                 Protocol::OpenaiChat,
                 Protocol::OpenaiResponses,
-                Protocol::Gemini,
-                Protocol::BailianText
+                Protocol::Gemini
             ]
         );
         assert_eq!(
             protocols_for(Capability::Video),
             &[Protocol::OpenaiVideos, Protocol::GeminiVideo]
         );
-        // Bailian's image endpoint serves pictures and nothing else, so it is
-        // on the image list alone and the text list never offers it.
-        assert_eq!(
-            protocols_for(Capability::Image),
-            &[Protocol::OpenaiImages, Protocol::BailianImage]
-        );
+        assert_eq!(protocols_for(Capability::Image), &[Protocol::OpenaiImages]);
         assert!(!protocols_for(Capability::Image).contains(&Protocol::OpenaiChat));
-        assert!(!protocols_for(Capability::Text).contains(&Protocol::BailianImage));
+        // Recognition is a converter script's business: no built-in protocol
+        // speaks a transcription endpoint.
+        assert!(protocols_for(Capability::Asr).is_empty());
     }
 
     #[test]
@@ -636,13 +619,11 @@ mod tests {
         assert!(Protocol::Gemini.is_gemini());
         assert!(Protocol::GeminiVideo.is_gemini());
         assert!(!Protocol::Gemini.is_openai());
-        // Bailian sends the credential the way OpenAI does, and speaks bodies
-        // of its own: a family is the field names, not the header.
-        assert!(!Protocol::BailianText.is_openai());
-        assert!(!Protocol::BailianText.is_gemini());
-        assert!(!Protocol::BailianImage.is_openai());
-        assert!(!Protocol::BailianImage.is_gemini());
-        assert!(!Protocol::BailianText.is_lua());
+        // A converter is neither family: the credential it declares is where
+        // its key rides, whatever shape its bodies are in.
+        assert!(!Protocol::from_wire_name("bailianText").is_openai());
+        assert!(!Protocol::from_wire_name("bailianText").is_gemini());
+        assert!(Protocol::from_wire_name("bailianText").is_lua());
     }
 
     #[test]

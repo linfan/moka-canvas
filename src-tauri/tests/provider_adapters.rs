@@ -14,6 +14,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use moka_canvas::config::GenerateConfig;
+use moka_canvas::converter::deploy::ensure_deployed;
+use moka_canvas::converter::LuaAdapter;
 use moka_canvas::domain::Capability;
 use moka_canvas::generate::adapters::{for_protocol, ModelCall, ProviderAdapter};
 use moka_canvas::generate::media::MediaInput;
@@ -145,14 +147,52 @@ fn gemini_channel(base_url: &str, model_id: &str, capability: Capability) -> Mod
     speaking(protocol, base_url, model_id, capability)
 }
 
-/// A Bailian configuration. The protocol a call speaks is the shape its
-/// endpoint answers, and the credentials travel the same way for both.
+/// A Bailian configuration: the converters of that platform, addressed at the
+/// endpoint each one is configured with.
 fn bailian_channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
-    let protocol = match capability {
-        Capability::Image => Protocol::BailianImage,
-        _ => Protocol::BailianText,
+    let (id, path) = match capability {
+        Capability::Image => (
+            "bailianImage",
+            "/api/v1/services/aigc/multimodal-generation/generation",
+        ),
+        _ => (
+            "bailianText",
+            "/api/v1/services/aigc/text-generation/generation",
+        ),
     };
-    speaking(protocol, base_url, model_id, capability)
+    let resolved = ResolvedModel {
+        config_id: model_id.into(),
+        model: model_id.to_string(),
+        display_name: format!("Model {model_id}"),
+        category: capability,
+        protocol: Protocol::from_wire_name(id),
+        url: format!("{base_url}{path}"),
+    };
+    ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
+        .expect("a client builds")
+}
+
+/// The models directory the converters under test are read from.
+///
+/// The host reads one root per process, so the built-in converters are
+/// deployed once for the whole binary and the root is leaked: one that went
+/// away with its test would leave the rest of them reading a directory that no
+/// longer exists.
+async fn converter_root() -> &'static std::path::Path {
+    static ROOT: tokio::sync::OnceCell<&'static std::path::Path> =
+        tokio::sync::OnceCell::const_new();
+    ROOT.get_or_init(|| async {
+        let dir =
+            std::env::temp_dir().join(format!("moka-provider-adapters-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a models directory is writable");
+        let dir: &'static std::path::Path = Box::leak(dir.into_boxed_path());
+        ensure_deployed(dir)
+            .await
+            .expect("the built-in converters deploy");
+        dir
+    })
+    .await
 }
 
 /// A model configuration resolved to one call speaking a named protocol.
@@ -186,12 +226,6 @@ fn endpoint_of(protocol: Protocol, base_url: &str, model_id: &str) -> String {
         Protocol::Gemini => format!("{base_url}/v1beta/models/{model_id}:generateContent"),
         Protocol::GeminiVideo => {
             format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
-        }
-        Protocol::BailianText => {
-            format!("{base_url}/api/v1/services/aigc/text-generation/generation")
-        }
-        Protocol::BailianImage => {
-            format!("{base_url}/api/v1/services/aigc/multimodal-generation/generation")
         }
         Protocol::Custom => format!("{base_url}/v1/chat/completions"),
         Protocol::LuaScript(_) => format!("{base_url}/v1/lua/{model_id}"),
@@ -1458,8 +1492,10 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
 
 // ---------------------------------------------------------------- bailian
 
+/// The adapter both Bailian shapes run through, which is the converter host:
+/// each of them is a script now.
 fn bailian_adapter() -> &'static dyn ProviderAdapter {
-    for_protocol(Protocol::BailianText)
+    LuaAdapter::get()
 }
 
 /// One choice of an answer, as this service spells it: the words of the answer
@@ -1477,6 +1513,7 @@ fn bailian_answer(content: Value) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_question_of_words_is_asked_at_the_address_it_names() {
+    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1527,6 +1564,7 @@ async fn a_bailian_question_of_words_is_asked_at_the_address_it_names() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_question_with_a_picture_moves_to_the_multimodal_service() {
+    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(
@@ -1583,6 +1621,7 @@ async fn not_for_a_question_with_a_picture() -> Response {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
+    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1628,6 +1667,7 @@ async fn a_bailian_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_stream_that_complains_midway_is_refused_rather_than_truncated() {
+    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1668,6 +1708,7 @@ async fn a_bailian_stream_that_complains_midway_is_refused_rather_than_truncated
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_failure_is_reported_in_the_services_own_words() {
+    converter_root().await;
     let recorded = Recorded::default();
     let refusing = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1717,6 +1758,7 @@ async fn a_bailian_failure_is_reported_in_the_services_own_words() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_picture_is_asked_for_and_fetched_from_where_it_was_left() {
+    converter_root().await;
     let picture = png(6, 5);
     let elsewhere = Recorded::default();
     let serving = elsewhere.clone();
@@ -1793,4 +1835,143 @@ async fn a_bailian_picture_is_asked_for_and_fetched_from_where_it_was_left() {
         "a credential never follows an answer to a host that did not produce it"
     );
     assert_eq!(recorded.asked(), ["draw"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_shape_is_sent_as_the_pixels_that_describe_it() {
+    converter_root().await;
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/multimodal-generation/generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("draw", &headers, None);
+                recorded.note_body(&body);
+                // A drawing carried in the answer itself, so a case that only
+                // cares about the shape asked for has nothing to fetch.
+                Json(bailian_answer(json!([{
+                    "image": format!("data:image/png;base64,{}", base64(&png(4, 3))),
+                    "type": "image",
+                }])))
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "wan2.7-image-pro", Capability::Image);
+    for (asked, (shape, told)) in [
+        // About a megapixel in the proportion asked for, both sides a
+        // multiple of sixteen.
+        ("1:1", Some("1024*1024")),
+        ("16:9", Some("1360*768")),
+        ("9:16", Some("768*1360")),
+        ("3:4", Some("880*1184")),
+        ("21:9", Some("1568*672")),
+        // A size the service takes is passed on, in the spelling it reads.
+        ("1024x1024", Some("1024*1024")),
+        ("1280*720", Some("1280*720")),
+        ("2K", Some("2K")),
+        ("4k", Some("4K")),
+        // Its own way of leaving the choice to the service.
+        ("auto", None),
+        ("", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request = generation(Capability::Image, "a lighthouse", json!({ "size": shape }));
+        bailian_adapter()
+            .generate(&call, &request, &[], &Cancel::new())
+            .await
+            .expect("the drawing arrives");
+        assert_eq!(
+            recorded
+                .body(asked)
+                .pointer("/parameters/size")
+                .and_then(Value::as_str),
+            told,
+            "asked for {shape}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_refusal_that_arrived_as_a_success_is_an_error_rather_than_silence() {
+    converter_root().await;
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/text-generation/generation",
+        post(move |headers: HeaderMap| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("text-generation", &headers, None);
+                // A success carrying the complaint instead of a generation,
+                // which reading as an empty answer would blame on a quiet model.
+                Json(json!({
+                    "code": "DataInspectionFailed",
+                    "message": "the question was filtered",
+                    "request_id": "0a1b2c",
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
+    let error = bailian_adapter()
+        .generate(
+            &call,
+            &generation(Capability::Text, "a lighthouse", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the question was refused");
+
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(
+        error.to_string().contains("the question was filtered"),
+        "{error}"
+    );
+    assert!(!error.retryable(), "{error} will not improve on a retry");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_answer_without_a_message_is_read_from_its_bare_text() {
+    converter_root().await;
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/text-generation/generation",
+        post(move |headers: HeaderMap| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("text-generation", &headers, None);
+                // The older `result_format`, where the answer is a bare string
+                // rather than a message.
+                Json(json!({ "output": { "text": "a lighthouse at dusk" } }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
+    let result = bailian_adapter()
+        .generate(
+            &call,
+            &generation(Capability::Text, "a lighthouse", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(result.text.as_deref(), Some("a lighthouse at dusk"));
+    assert_eq!(
+        result.usage, None,
+        "totals nobody reported are not invented"
+    );
 }
