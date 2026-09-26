@@ -478,6 +478,7 @@ describe("editor shell integration", () => {
     render(<App />);
     const recent = await screen.findByText("Golden Fixture");
     fireEvent.click(recent);
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
   }
 
   it("shows asset metadata and actions for a selected image node", async () => {

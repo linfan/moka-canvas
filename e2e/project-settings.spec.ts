@@ -5,6 +5,7 @@ import {
   backToLauncher,
   createProject,
   forgetProjects,
+  openRecent,
   projectHome,
 } from "./helpers";
 
@@ -76,7 +77,7 @@ test("the project tab writes down what the project is called and what it is abou
   );
 
   // And the document keeps the words across a reopening.
-  await page.locator("button.launcher-recent").first().click();
+  await openRecent(page, "Autumn campaign");
   await expect(page.getByRole("banner")).toContainText("Autumn campaign", {
     timeout: 10_000,
   });

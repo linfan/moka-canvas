@@ -8,6 +8,7 @@
   "loading": "Loading…",
   "noProjects": "No projects yet. Create one to get started.",
   "removeRecent": "Remove {{name}} from recent projects",
+  "openRecentRooms": "Open {{name}}",
   "newProject": "New project",
   "openProject": "Open project",
   "importProject": "Import project",
@@ -69,9 +70,9 @@
     "openWithMissing": "Open with missing assets"
   },
   "homeMenu": {
-    "button": "Home menu",
-    "hint": "Home, canvas, story, and clip",
-    "home": "Home",
+    "button": "Projects menu",
+    "hint": "Projects, canvas, story, and clip",
+    "home": "Projects",
     "canvas": "Canvas",
     "clip": "Clip",
     "story": "Story"

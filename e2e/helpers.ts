@@ -102,11 +102,24 @@ export async function persistedNodeCount(page: Page): Promise<number> {
   });
 }
 
-/** Open a recent project from the launcher by its card label. */
-export async function openRecent(page: Page, name: string) {
+/**
+ * Open a recent project from the launcher by its card label.
+ *
+ * A card asks which room the project is meant for before it is put on, and the
+ * board is the room a test that says nothing else means.
+ */
+export async function openRecent(
+  page: Page,
+  name: string,
+  room: "Story" | "Canvas" | "Clip" = "Canvas",
+) {
   await page
     .locator("button.launcher-recent")
     .filter({ hasText: name })
+    .click();
+  await page
+    .getByRole("group", { name: `Open ${name}`, exact: true })
+    .getByRole("button", { name: room, exact: true })
     .click();
 }
 
@@ -117,7 +130,7 @@ export async function openRecent(page: Page, name: string) {
  * the two pages, and the Clip row is where the reader arrives.
  */
 export async function openClipRoom(page: Page) {
-  await page.getByRole("button", { name: "Home menu" }).click();
+  await page.getByRole("button", { name: "Projects menu" }).click();
   await page.getByRole("menuitem", { name: "Clip" }).click();
   await expect(page.getByTestId("clip-page")).toBeVisible({ timeout: 10_000 });
 }
@@ -130,7 +143,7 @@ export async function openClipRoom(page: Page) {
  * row is where the reader arrives.
  */
 export async function openStoryRoom(page: Page) {
-  await page.getByRole("button", { name: "Home menu" }).click();
+  await page.getByRole("button", { name: "Projects menu" }).click();
   await page.getByRole("menuitem", { name: "Story" }).click();
   await expect(page.getByTestId("story-page")).toBeVisible({ timeout: 10_000 });
 }
@@ -236,8 +249,8 @@ export async function exportWorkPackage(page: Page) {
  * the unsaved-work guard appears — resolve it by saving, like a user would.
  */
 export async function backToLauncher(page: Page) {
-  await page.getByRole("button", { name: "Home menu" }).click();
-  await page.getByRole("menuitem", { name: "Home" }).click();
+  await page.getByRole("button", { name: "Projects menu" }).click();
+  await page.getByRole("menuitem", { name: "Projects" }).click();
   const guard = page.getByRole("alertdialog", { name: "Unsaved changes" });
   const guarded = await guard
     .waitFor({ state: "visible", timeout: 2500 })

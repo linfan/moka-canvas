@@ -125,6 +125,7 @@ async function openGolden(options: RouteOptions = {}) {
   render(<App />);
   const recent = await screen.findByText("Golden Fixture");
   fireEvent.click(recent);
+  fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
 }
 
 function missingImageCheck(): SelfCheckReport {
@@ -456,8 +457,8 @@ describe("unsaved-work guard", () => {
     await screen.findByTestId("canvas-tab-Canvas 1");
     makeUnsavedEdit();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Projects" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Unsaved changes");
     expect(useAppStore.getState().phase).toBe("editing");
@@ -466,8 +467,8 @@ describe("unsaved-work guard", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(useAppStore.getState().phase).toBe("editing");
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Projects" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
     expect(useAppStore.getState().phase).toBe("launcher");
@@ -484,8 +485,8 @@ describe("unsaved-work guard", () => {
     await screen.findByTestId("canvas-tab-Canvas 1");
     makeUnsavedEdit();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Projects" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Save and close" }));
 
@@ -506,8 +507,8 @@ describe("unsaved-work guard", () => {
     await screen.findByTestId("canvas-tab-Canvas 1");
     makeUnsavedEdit();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Projects" }));
     const raised = await screen.findByRole("alertdialog");
     expect(raised.textContent).toContain("will be lost");
 
@@ -535,8 +536,8 @@ describe("unsaved-work guard", () => {
       useProjectStore.setState({ saveStatus: "conflicted" });
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Projects" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("revision conflict");
     expect(

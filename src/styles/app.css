@@ -121,9 +121,23 @@ h2 {
   padding: 9vh 24px 64px;
 }
 
+/* The mark stands beside the name rather than over it: the title is read as
+   one thing with it, and at twice the size the boot screens carry it, it is
+   what the eye lands on first. */
 .launcher-hero {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+}
+
+.launcher-hero .brand-mark {
+  height: 56px;
+  width: 56px;
+}
+
+.launcher-hero-words {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   justify-items: start;
 }
 
@@ -145,12 +159,49 @@ h2 {
      instead of widening the track past the page it stands on. */
   grid-template-columns: minmax(0, 1fr);
   list-style: none;
+  /* A machine that has opened many projects scrolls this list instead of
+     growing it: the page keeps its shape, and the buttons under the list stay
+     where they are. Around six rows stand in the region at a time. */
+  max-height: 320px;
+  overflow-y: auto;
   padding: 0;
 }
 
+/* A column holding the row and, when it is asked for, the rooms under it. The
+   floor of zero is what lets the row wear an ellipsis rather than widening
+   the whole list with the name it holds. */
 .launcher-recents li {
   display: flex;
+  flex-direction: column;
   gap: 8px;
+  min-width: 0;
+}
+
+.launcher-recent-head {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The three ways into the project, floated under the row that asked for them:
+   the row stays where it stood, and the ways read as belonging to it. */
+.launcher-recent-rooms {
+  animation: launcher-rooms-drop 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  display: flex;
+  gap: 8px;
+}
+
+.launcher-recent-rooms button {
+  flex: 1;
+}
+
+@keyframes launcher-rooms-drop {
+  from {
+    transform: translateY(-8px);
+  }
+  to {
+    transform: none;
+  }
 }
 
 .launcher-recent {

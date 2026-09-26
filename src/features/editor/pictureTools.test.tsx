@@ -162,6 +162,7 @@ async function openGolden(
   );
   render(<App />);
   fireEvent.click(await screen.findByText("Golden Fixture"));
+  fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
   // A project with something wrong in it is stopped at a gate first, and the
   // editor is only reached by going through it.
   if (!selfCheck.ok) {

@@ -1480,8 +1480,8 @@ describe("leaving with a generation going", () => {
     ];
     await openEditor();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Projects" }));
 
     const guard = await screen.findByRole("alertdialog");
     expect(guard.textContent).toContain("A generation is still running");

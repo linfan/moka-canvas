@@ -32,7 +32,7 @@ afterEach(() => {
 function openMenu() {
   render(<HomeMenu current="canvas" onHome={() => {}} />);
   render(<Underneath />);
-  fireEvent.click(screen.getByRole("button", { name: "Home menu" }));
+  fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
   return screen.getByTestId("home-menu");
 }
 
@@ -82,7 +82,7 @@ describe("the corner menu's guard", () => {
     const rooms = screen
       .getAllByRole("menuitem")
       .map((item) => item.textContent)
-      .filter((name) => name !== "Home");
+      .filter((name) => name !== "Projects");
     expect(rooms).toEqual(["Story", "Canvas", "Clip"]);
   });
 });

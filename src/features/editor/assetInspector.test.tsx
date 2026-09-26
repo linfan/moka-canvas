@@ -87,6 +87,7 @@ async function openShelf() {
   );
   render(<App />);
   fireEvent.click(await screen.findByText("Shelf Fixture"));
+  fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
   await screen.findByTestId("canvas-tab-Canvas 1");
   fireEvent.click(screen.getByTestId("left-tab-assets"));
 }
