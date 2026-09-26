@@ -6,8 +6,6 @@
 //! and answers with bytes and a mime type: no provider field name crosses this
 //! boundary in either direction.
 
-mod custom;
-
 use std::time::Duration;
 
 use reqwest::header::HeaderMap;
@@ -45,11 +43,6 @@ const STREAM_DONE: &str = "[DONE]";
 /// The mime that says nothing. An answer carrying it did not name what it sent,
 /// which is a different case from one that named something else.
 const UNSPECIFIED_MIME: &str = "application/octet-stream";
-
-/// What the reserved protocol answers to everything. Kept in one place so
-/// configuring such a channel and generating through it explain themselves the
-/// same way.
-const CUSTOM_RESERVED: &str = "the custom protocol is reserved and has no implementation";
 
 /// One model configuration, addressed for a single call.
 ///
@@ -227,18 +220,11 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
-/// The adapter that speaks a protocol. Every shape but the one this program
-/// refuses outright belongs to a converter script on this machine: which shape
-/// a call uses is decided by the name the configuration gave, and the script
-/// that name finds says the rest.
-pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
-    // Dispatch by name, because a name is all a protocol is: a shape this
-    // program implements itself answers to the names it invented, and every
-    // other name belongs to a converter script on this machine.
-    match protocol.wire_name() {
-        "custom" => &custom::ADAPTER,
-        _ => converter::LuaAdapter::get(),
-    }
+/// The adapter every protocol is spoken by. A protocol is a name and nothing
+/// more, so which shape a call has is decided by the converter script that
+/// name finds — no family is built into this program at all.
+pub fn for_protocol(_protocol: Protocol) -> &'static dyn ProviderAdapter {
+    converter::LuaAdapter::get()
 }
 
 /// A provider's answer, reduced to what an adapter acts on.
@@ -1078,10 +1064,11 @@ mod tests {
         assert_eq!(origin_of("not a url"), None);
     }
 
-    /// A protocol's name is its whole identity. Every shape a converter script
-    /// serves — the OpenAI-compatible ones among them — arrives at the one
-    /// scripted adapter, whatever the name says, and the shape Rust still
-    /// speaks itself stays apart from it.
+    /// A protocol's name is its whole identity, and what a name reaches is the
+    /// one scripted adapter: the shapes this program once implemented itself —
+    /// the Gemini and Bailian ones among them — are converters like any other,
+    /// and a name nothing was written for is looked for by that same adapter,
+    /// which is what can say no script was found.
     #[test]
     fn every_protocol_routes_to_the_adapter_of_its_family() {
         let scripted = for_protocol(Protocol::from_wire_name("openaiChat"));
@@ -1098,8 +1085,9 @@ mod tests {
             "bailianMusic",
             "bailianVideo",
             "bailianAsr",
-            // A name nothing was written for is a converter that was not found
-            // yet, not a family: the scripted adapter is what looks and says so.
+            // Nothing serves these names: the adapter is what goes looking and
+            // says which converter was missing.
+            "custom",
             "aProtocolNobodyHasHeardOf",
         ] {
             assert!(
@@ -1107,10 +1095,6 @@ mod tests {
                 "{name}"
             );
         }
-        // The reserved name is refused by an adapter of its own rather than
-        // looked for as a script that does not exist.
-        let reserved = for_protocol(Protocol::from_wire_name("custom"));
-        assert!(!std::ptr::eq(scripted, reserved));
     }
 
     /// A real encoded image, so a test can assert on what sniffing and the

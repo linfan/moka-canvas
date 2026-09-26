@@ -48,6 +48,47 @@ The interface carries English and Simplified Chinese side by side. The catalogue
 
 The packaged app names each have their own rule, described in the Windows installer and macOS DMG sections below.
 
+## Converter protocols
+
+Every protocol this program speaks is a converter, and a converter is a directory under the models tree — there is no protocol table in Rust or TypeScript. On a desktop install that tree is `models/` beside the metadata directory (`~/Library/Application Support/MokaCanvas/models` on macOS, `%APPDATA%\MokaCanvas\models` on Windows); on a server it is `models/` beside the configured `metadata.dir`.
+
+```
+<models root>/<capability>/<id>/
+  model.json      what the protocol declares
+  <script>.lua    what it does
+```
+
+`<capability>` is one of `text`, `image`, `audio`, `video`, `asr`. `<id>` is the directory's own name: the wire name a model configuration stores, so it must not change once a model speaks it. The `.lua` file name is free — `model.json` names it.
+
+`model.json` is the whole declaration:
+
+| Field | Meaning |
+| --- | --- |
+| `displayName` | The name it goes by where no label matches, and the name the server's own messages use. Required. |
+| `labels` | Names per locale, e.g. `{"zh": "…"}`. A language with no entry falls back to `displayName`, then to the id. |
+| `urlExample` | An address shown to the reader as a shape to copy. Required. |
+| `script` | The Lua file beside this document. Required. |
+| `order` | Where it sits within its capability, ascending, ties by name (default 1000). |
+| `auth` | Where the credential rides: `{"header": "Authorization", "scheme": "Bearer"}` unless it says otherwise; `{"header": "x-goog-api-key", "scheme": ""}` for a key with no scheme; `{"header": ""}` for an endpoint that takes none. Only addresses inside the configured endpoint's origin are ever given it. |
+| `features` | Free-form flags the interface reads, e.g. `{"mask": true}` for an image protocol with a mask field of its own. |
+| `version` | How the built-in deploy decides whether to take over a directory (see below). Omit for a hand-written converter. |
+
+The Lua side is a set of hooks, all optional, and which ones a script exports is what the host believes it can do:
+
+| Hook | Purpose |
+| --- | --- |
+| `build_request(call, req, inputs)` | Describes one call: `{method, url, headers = {name = value}, body = …}`, or `{request = …, handler = …}` when the answer needs a function of its own to read it, or `{error = …}` to refuse before anything is sent. |
+| `parse_response(status, headers, body)` | Reads that answer into `{text, items, usage, error}`. |
+| `build_stream_request(call, req, inputs)` | The same, for an endpoint that answers in events; exporting it is what says the converter streams. Each event is read by `parse_event(event)`. |
+| `build_task_request` / `parse_task_response` | Starts a job that outlives one request; the reply names the provider's handle with `{reference = …}`. |
+| `build_poll_request` / `parse_poll_response` | One look at that job: `{status = "pending"}`, `{status = "succeeded", result = {items = …}}`, `{status = "failed", error = …}`, or `{status = "expired"}`. |
+
+Inside a script, `call` is `{url, model}` (the complete configured endpoint and the provider's model name), `req` is `{prompt, system, capability, params}`, and each input is `{role, filename, mime, data_url}` with its bytes base64-encoded in the data URL. An item may report its bytes as `{url = …}` (the host fetches it, with the credential following the same origin rule), `{data_url = …}`, `{base64 = …}`, or `{raw = true}` for the answer's own body. The host API is `json`, `base64`, `log` and `util`; the credential is never handed to a script.
+
+Built-in converters ship with the program: `src-tauri/build.rs` embeds every directory under `src-tauri/converter-scripts/models/` at compile time (a malformed directory fails the build), and startup writes each one into the models root unless the version already deployed there is at least as new — so a converter a reader edited survives until a later built-in version overtakes it. Directories this build does not know are never read, written, or removed.
+
+Adding a protocol is therefore that directory and nothing else: no Rust, no TypeScript, no i18n file. Drop it in, restart, and the name is offered in Settings beside the built-ins. `src-tauri/tests/converter_extensibility.rs` is the executable form of that claim.
+
 ## Package targets
 
 ### Web (any host)

@@ -50,10 +50,10 @@ fn draft(id: &str, category: Capability) -> ModelDraft {
             Protocol::new("openaiVideos"),
             "https://provider.test/v1/videos/",
         ),
-        // Nothing built in serves recognition: a suite that configures one
-        // places a converter script, and the reserved protocol stands in here.
+        // Recognition is served by a converter script alone; what one is
+        // asked at is that script's business rather than this suite's.
         Capability::Asr => (
-            Protocol::new("custom"),
+            Protocol::new("bailianAsr"),
             "https://provider.test/v1/transcription/",
         ),
     };
