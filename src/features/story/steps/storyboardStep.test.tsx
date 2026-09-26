@@ -26,6 +26,7 @@ import { currentTake } from "../../../shared/domain/story";
 import { clampSeconds } from "../jobs/plan";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { useModelStore } from "../../settings/modelStore";
 import { StoryPage } from "../StoryPage";
 import { useStoryJobStore } from "../stores/storyJobStore";
 import { useStoryStore } from "../stores/storyStore";
@@ -362,6 +363,56 @@ function boardAnswer(...shotSizes: string[]): string {
   });
 }
 
+/**
+ * A deployment whose video settings name a length.
+ *
+ * The number is what a canvas node asks for when nobody says — six seconds by
+ * default — and what a test sets here is what the room reads while planning a
+ * batch, which is where a telling's own lengths must survive it.
+ */
+function filmingAt(seconds: number): void {
+  useModelStore.setState({
+    view: {
+      version: 1,
+      revision: 1,
+      models: [],
+      defaults: {
+        text: null,
+        image: null,
+        audio: null,
+        music: null,
+        video: null,
+        asr: null,
+      },
+      preferences: {
+        systemPrompt: "",
+        reasoningEffort: "auto",
+        image: { size: "1:1", quality: "auto", background: "", count: 1 },
+        video: {
+          seconds,
+          resolution: "720",
+          generateAudio: true,
+          watermark: false,
+          mode: "auto",
+          ratio: "",
+        },
+        audio: {
+          voice: "",
+          format: "mp3",
+          speed: 1,
+          instructions: "",
+          sampleRate: 22050,
+          volume: 50,
+          rate: 1,
+          pitch: 1,
+        },
+        story: { splitChars: 12_000, readChars: 8_000 },
+      },
+      secretStorage: "unset",
+    },
+  });
+}
+
 beforeEach(() => {
   starts = [];
   held = [];
@@ -369,6 +420,9 @@ beforeEach(() => {
   landed = {};
   serving();
   localStorage.clear();
+  // Every test starts on a machine whose settings say nothing, which is the
+  // state a room is read in unless a test sets a deployment of its own.
+  useModelStore.setState({ view: null });
   useProjectStore.getState().close();
   useStoryStore.getState().forget();
   useStoryJobStore.getState().reset();
@@ -606,6 +660,10 @@ describe("writing an episode's board", () => {
   });
 
   it("films an act only once its frames are agreed to, for as long as it plans", async () => {
+    // The video settings say what a canvas node asks for when nobody says:
+    // three seconds here. What a board plans is its own, and the act is asked
+    // for the five seconds its shots add up to rather than for the default.
+    filmingAt(3);
     openAtBoard(withoutTheClip());
     expect(
       (screen.getByTestId("story-act-video-go-0") as HTMLButtonElement)
@@ -620,6 +678,7 @@ describe("writing an episode's board", () => {
     expect(starts[0]!.kind).toBe("actVideo");
     expect(item?.capability).toBe("video");
     expect(item?.params?.seconds).toBe(clampSeconds(5_000));
+    expect(item?.prompt).toContain("about 5 seconds");
     expect(item?.params?.ratio).toBe(story().brief.aspect);
     // First frame, last frame, and nothing in between: two shots, two pictures.
     expect(item?.inputs?.map((input) => input.role)).toEqual([

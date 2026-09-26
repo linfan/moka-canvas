@@ -137,29 +137,18 @@ export function imageSizeForAspect(aspect: StoryAspect): string {
 
 /**
  * How many seconds a clip is asked for: what the story plans for it, rounded to
- * seconds, never less than one and never past the ceiling the video settings
- * allow. Asking for longer than the deployment can film would come back cut
- * without saying so.
+ * seconds, never less than one and never past the length one clip may be.
+ *
+ * The ceiling is the app's own, and not the video settings' length: that
+ * number is the default a canvas node asks with when nobody says, while a
+ * telling says shot by shot what each clip is for — a shot planned to run
+ * longer than the default is a shot the reader asked to see run that long.
  */
 export function clampSeconds(
   ms: number,
   ceiling: number = MAX_VIDEO_SECONDS,
 ): number {
   return Math.min(ceiling, Math.max(1, Math.round(ms / 1000)));
-}
-
-/**
- * The longest a clip may be asked for, as the video settings say.
- *
- * Read at the moment a plan is made rather than held, since the setting is a
- * preference of the machine and a batch planned before it changed is a batch
- * already sent.
- */
-function videoCeiling(): number {
-  const seconds = useModelStore.getState().view?.preferences.video.seconds;
-  return typeof seconds === "number" && seconds > 0
-    ? seconds
-    : MAX_VIDEO_SECONDS;
 }
 
 /**
@@ -494,7 +483,6 @@ export function planActVideos(
   actIds: string[],
 ): StoryJobItemDraft[] {
   const look = lookOf(story);
-  const ceiling = videoCeiling();
   return actIds.flatMap((actId) => {
     const act = actAt(story, chapterId, actId);
     if (act === undefined || act.keyframes.length === 0) return [];
@@ -508,7 +496,7 @@ export function planActVideos(
     const first = drawn[0];
     const last = drawn[drawn.length - 1];
     const between = drawn.slice(1, -1);
-    const seconds = clampSeconds(actPlannedMs(act), ceiling);
+    const seconds = clampSeconds(actPlannedMs(act));
     const target: StoryTarget = { kind: "actVideo", chapterId, actId };
     const inputs: StoryJobInput[] = [
       { role: "firstFrame", assetId: first.assetId },
@@ -548,7 +536,6 @@ export function planKeyframeVideos(
   keyframeIds: string[],
 ): StoryJobItemDraft[] {
   const look = lookOf(story);
-  const ceiling = videoCeiling();
   const act = actAt(story, chapterId, actId);
   if (act === undefined) return [];
   return keyframeIds.flatMap((keyframeId) => {
@@ -559,7 +546,7 @@ export function planKeyframeVideos(
     const position = act.keyframes.indexOf(keyframe);
     const after = act.keyframes[position + 1] ?? keyframe;
     const lastFrame = currentTake(after.art)?.assetId;
-    const seconds = clampSeconds(keyframe.durationMs, ceiling);
+    const seconds = clampSeconds(keyframe.durationMs);
     const target: StoryTarget = {
       kind: "keyframeVideo",
       chapterId,
@@ -650,7 +637,7 @@ export function planActMusic(
   const sfx = act.sound.sfx.trim();
   const ambience = (act.sound.ambience ?? "").trim();
   if (music === "" && sfx === "" && ambience === "") return [];
-  const seconds = clampSeconds(actPlannedMs(act), audioCeiling());
+  const seconds = clampSeconds(actPlannedMs(act));
   const target: StoryTarget = { kind: "music", chapterId, actId };
   return [
     {
@@ -712,15 +699,6 @@ function audioParams(): Record<string, unknown> {
     ...(audio?.format ? { format: audio.format } : {}),
     ...(audio?.speed ? { speed: audio.speed } : {}),
   };
-}
-
-/**
- * The longest a piece of sound may be asked for. Sound has no ceiling of its
- * own in the settings — a score is as long as the act it sits under — so this
- * is the same one clips are filmed with rather than a second number.
- */
-function audioCeiling(): number {
-  return videoCeiling();
 }
 
 // -----------------------------------------------------------------------------

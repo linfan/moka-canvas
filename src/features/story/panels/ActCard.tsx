@@ -9,6 +9,7 @@ import {
   formatDuration,
   type StoryGuess,
 } from "../../../shared/domain";
+import { MAX_VIDEO_SECONDS } from "../../../shared/domain/constants";
 import type {
   MokaFile,
   StoryAct,
@@ -95,8 +96,9 @@ export function ActCard({
 
   const plannedMs = actPlannedMs(act);
   const seconds = clampSeconds(plannedMs);
-  // A plan that is not the length it was asked for is worth saying out loud:
-  // the reader agreed to a shot that runs 6.4 seconds and is getting five.
+  // A clip is asked for in whole seconds and no longer than one may run, so a
+  // plan that is not the length it will be made at is worth saying out loud:
+  // the reader agreed to a shot that runs 6.4 seconds and is getting six.
   const adjusted = seconds * 1000 !== plannedMs;
 
   const write = (patch: StoryActPatch) =>
@@ -216,7 +218,7 @@ export function ActCard({
           <span
             className="story-clamp"
             data-testid={`story-act-clamp-${index}`}
-            title={t("story:storyboard.clampHint")}
+            title={t("story:storyboard.clampHint", { max: MAX_VIDEO_SECONDS })}
           >
             {t("story:storyboard.clamped", { seconds })}
           </span>

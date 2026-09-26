@@ -2,5 +2,5 @@
   "displayName": "Google Gemini · long-running (Veo)",
   "urlExample": "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
   "script": "gemini-video.lua",
-  "version": 1
+  "version": 2
 }

@@ -17,7 +17,7 @@ use super::{
 use crate::domain::{new_id, now_iso, Capability};
 use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
-use crate::generate::media::{video_images, video_layout, MediaInput, VideoLayout};
+use crate::generate::media::{video_frames, MediaInput};
 use crate::generate::models::{gemini_root, gemini_stream_url};
 use crate::generate::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
@@ -444,27 +444,24 @@ fn decoded(inline: &str) -> Result<Vec<u8>, ProviderError> {
 }
 
 fn job_body(request: &GenerateRequest, inputs: &[MediaInput]) -> Value {
-    let frames = video_images(inputs);
     let mut shot = Map::from_iter([("prompt".to_string(), json!(request.prompt))]);
-    match video_layout(inputs, request) {
-        VideoLayout::Prompt => {}
-        // A shot that lands on a frame somebody chose names it, rather than
-        // leaving the provider to guess which end of a list is which.
-        VideoLayout::OpeningFrame | VideoLayout::OpeningAndClosingFrames => {
-            if let Some(frame) = frames.first() {
-                shot.insert("image".into(), inline_frame(frame));
-            }
-            if let Some(frame) = frames.get(1) {
-                shot.insert("lastFrame".into(), inline_frame(frame));
-            }
-        }
-        VideoLayout::Reference => {
-            let references: Vec<Value> = frames
-                .iter()
-                .map(|frame| json!({ "referenceType": "ASSET", "image": inline_frame(frame) }))
-                .collect();
-            shot.insert("referenceImages".into(), json!(references));
-        }
+    // A shot that lands on a frame somebody chose names it, rather than
+    // leaving the provider to guess which end of a list is which; whatever was
+    // given beside the frames is asked for as the references it came as.
+    let frames = video_frames(inputs, request);
+    if let Some(frame) = frames.opening {
+        shot.insert("image".into(), inline_frame(frame));
+    }
+    if let Some(frame) = frames.closing {
+        shot.insert("lastFrame".into(), inline_frame(frame));
+    }
+    if !frames.references.is_empty() {
+        let references: Vec<Value> = frames
+            .references
+            .iter()
+            .map(|frame| json!({ "referenceType": "ASSET", "image": inline_frame(frame) }))
+            .collect();
+        shot.insert("referenceImages".into(), json!(references));
     }
 
     let mut parameters = Map::new();
@@ -860,6 +857,29 @@ mod tests {
         assert_eq!(parameters["durationSeconds"], 6);
         assert_eq!(parameters["resolution"], "720p");
         assert_eq!(parameters["generateAudio"], true);
+    }
+
+    #[test]
+    fn a_middle_given_beside_the_ends_rides_as_a_reference() {
+        // How an act is filmed: the ends are the frames it lands on, and the
+        // shots in between travel as references rather than taking the ends'
+        // place.
+        let frames = [
+            media("opening", "image/png", InputRole::FirstFrame),
+            media("middle", "image/png", InputRole::Reference),
+            media("closing", "image/png", InputRole::LastFrame),
+        ];
+        let shot = &job_body(
+            &generation(Capability::Video, "a slow pan", json!({})),
+            &frames,
+        )["instances"][0];
+        assert!(shot.get("image").is_some(), "{shot}");
+        assert!(shot.get("lastFrame").is_some(), "{shot}");
+        assert_eq!(
+            shot["referenceImages"].as_array().map(Vec::len),
+            Some(1),
+            "{shot}"
+        );
     }
 
     #[test]

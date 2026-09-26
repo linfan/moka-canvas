@@ -9,18 +9,45 @@ function build_task_request(call, req, inputs)
             table.insert(frames, input)
         end
     end
-    local mode = req.params.mode or "auto"
-    if #frames > 2 or mode == "reference" then
-        local refs = {}
-        for _, f in ipairs(frames) do
-            table.insert(refs, {referenceType = "ASSET", image = {mimeType = f.mime, bytesBase64Encoded = f.base64 or ""}})
+    -- The two pictures the caller labelled as the shot's ends are the frames
+    -- it lands on, and anything given beside them travels as a reference: an
+    -- act is filmed this way. With no such pair there is only the count to go
+    -- on — one picture opens the shot, two open and close it, and three or
+    -- more are references, since no provider takes three frames.
+    local opening, closing = nil, nil
+    for _, frame in ipairs(frames) do
+        if frame.role == "firstFrame" and not opening then
+            opening = frame
+        elseif frame.role == "lastFrame" and not closing then
+            closing = frame
         end
-        shot.referenceImages = refs
+    end
+
+    local references = {}
+    if req.params.mode == "reference" then
+        references = frames
+    elseif opening and closing then
+        shot.image = {mimeType = opening.mime, bytesBase64Encoded = opening.base64 or ""}
+        shot.lastFrame = {mimeType = closing.mime, bytesBase64Encoded = closing.base64 or ""}
+        for _, frame in ipairs(frames) do
+            if frame ~= opening and frame ~= closing then
+                table.insert(references, frame)
+            end
+        end
     elseif #frames == 1 then
         shot.image = {mimeType = frames[1].mime, bytesBase64Encoded = frames[1].base64 or ""}
     elseif #frames == 2 then
         shot.image = {mimeType = frames[1].mime, bytesBase64Encoded = frames[1].base64 or ""}
         shot.lastFrame = {mimeType = frames[2].mime, bytesBase64Encoded = frames[2].base64 or ""}
+    else
+        references = frames
+    end
+    if #references > 0 then
+        local images = {}
+        for _, frame in ipairs(references) do
+            table.insert(images, {referenceType = "ASSET", image = {mimeType = frame.mime, bytesBase64Encoded = frame.base64 or ""}})
+        end
+        shot.referenceImages = images
     end
 
     local params = {}

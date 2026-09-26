@@ -2,5 +2,5 @@
   "displayName": "OpenAI-compatible · Videos API",
   "urlExample": "https://api.openai.com/v1/videos",
   "script": "openai-videos.lua",
-  "version": 1
+  "version": 2
 }

@@ -310,51 +310,82 @@ fn to_png(name: &str, bytes: &[u8]) -> Result<(Vec<u8>, String), ProviderError> 
     Ok((encoded, "image/png".to_string()))
 }
 
-/// How a video request uses the images it was given.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VideoLayout {
-    /// No image: the prompt alone describes the shot.
-    Prompt,
-    /// One image, as the opening frame.
-    OpeningFrame,
-    /// Two images, as the opening and closing frames.
-    OpeningAndClosingFrames,
-    /// Images as subject or style references rather than as frames.
-    Reference,
+/// How a video request uses the images it was given: the frames the shot moves
+/// between, and the pictures that ride beside them as references.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct VideoFrames<'a> {
+    /// The frame the shot opens on, where one was given.
+    pub opening: Option<&'a MediaInput>,
+    /// The frame it closes on.
+    pub closing: Option<&'a MediaInput>,
+    /// What is in the shot rather than where it stands: a look to keep, a
+    /// middle of an act to pass through.
+    pub references: Vec<&'a MediaInput>,
 }
 
-/// The image inputs a video request will use, opening frame first. The ports
-/// label the frames; anything unlabelled keeps its place in between, and the
-/// sort is stable so the caller's own order survives.
-pub fn video_images(inputs: &[MediaInput]) -> Vec<&MediaInput> {
-    let mut images: Vec<&MediaInput> = inputs.iter().filter(|input| input.is_image()).collect();
-    images.sort_by_key(|input| match input.role {
-        InputRole::FirstFrame => 0,
-        InputRole::LastFrame => 2,
-        _ => 1,
-    });
-    images
-}
-
-/// Settles what a video request does with its images.
+/// Reads a video request's images as the frames it lands on and the references
+/// beside them.
 ///
-/// The `mode` parameter is the caller's preference; the count has the final
-/// say, because no provider takes three frames and a request with more images
-/// than that becomes a reference request instead.
-pub fn video_layout(inputs: &[MediaInput], request: &GenerateRequest) -> VideoLayout {
-    let images = video_images(inputs).len();
+/// A caller that labelled both ends said what those pictures are for, and the
+/// labels are obeyed: the two it named are the frames, and everything given
+/// beside them is a reference the shot is asked to keep — an act is filmed
+/// this way, opening on its first board and closing on its last with the shots
+/// in between travelling as references.
+///
+/// Where no such pair is labelled there is only the count to go on, and it is
+/// the rule a canvas node's pictures follow: one image opens the shot, two
+/// open and close it, and three or more are references rather than frames,
+/// because no provider takes three frames. The `mode` parameter has the final
+/// say either way — a request that asked for references is given references,
+/// and nothing else.
+pub fn video_frames<'a>(inputs: &'a [MediaInput], request: &GenerateRequest) -> VideoFrames<'a> {
+    let images: Vec<&MediaInput> = inputs.iter().filter(|input| input.is_image()).collect();
     if request.text_param("mode").unwrap_or("auto") == "reference" {
-        return if images == 0 {
-            VideoLayout::Prompt
-        } else {
-            VideoLayout::Reference
+        return VideoFrames {
+            opening: None,
+            closing: None,
+            references: images,
         };
     }
-    match images {
-        0 => VideoLayout::Prompt,
-        1 => VideoLayout::OpeningFrame,
-        2 => VideoLayout::OpeningAndClosingFrames,
-        _ => VideoLayout::Reference,
+    let mut opening: Option<usize> = None;
+    let mut closing: Option<usize> = None;
+    for (at, image) in images.iter().enumerate() {
+        match image.role {
+            InputRole::FirstFrame if opening.is_none() => opening = Some(at),
+            InputRole::LastFrame if closing.is_none() => closing = Some(at),
+            _ => {}
+        }
+    }
+    if let (Some(first), Some(last)) = (opening, closing) {
+        let references = images
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| *at != first && *at != last)
+            .map(|(_, image)| *image)
+            .collect();
+        return VideoFrames {
+            opening: Some(images[first]),
+            closing: Some(images[last]),
+            references,
+        };
+    }
+    match images.len() {
+        0 => VideoFrames::default(),
+        1 => VideoFrames {
+            opening: Some(images[0]),
+            closing: None,
+            references: Vec::new(),
+        },
+        2 => VideoFrames {
+            opening: Some(images[0]),
+            closing: Some(images[1]),
+            references: Vec::new(),
+        },
+        _ => VideoFrames {
+            opening: None,
+            closing: None,
+            references: images,
+        },
     }
 }
 
@@ -604,74 +635,82 @@ mod tests {
         }
     }
 
+    /// The asset a frame names, for assertions that read like the request.
+    fn named(frame: Option<&MediaInput>) -> Option<&str> {
+        frame.map(|input| input.asset_id.as_str())
+    }
+
+    fn names<'a>(frames: &[&'a MediaInput]) -> Vec<&'a str> {
+        frames.iter().map(|input| input.asset_id.as_str()).collect()
+    }
+
     #[test]
-    fn the_image_count_settles_what_a_video_request_does_with_them() {
+    fn a_labelled_pair_of_ends_are_the_frames_a_shot_lands_on() {
+        let inputs = vec![
+            media_input("first", InputRole::FirstFrame, "image/png"),
+            media_input("middle", InputRole::Reference, "image/png"),
+            media_input("last", InputRole::LastFrame, "image/png"),
+        ];
+        let frames = video_frames(&inputs, &video_request(None));
+        // An act is filmed this way: the shots in between are asked for as
+        // references, and the ends stay the frames they were labelled as.
+        assert_eq!(named(frames.opening), Some("first"));
+        assert_eq!(named(frames.closing), Some("last"));
+        assert_eq!(names(&frames.references), ["middle"]);
+    }
+
+    #[test]
+    fn what_a_request_does_without_labelled_ends_is_settled_by_the_count() {
         let frame = |id: &str| media_input(id, InputRole::Reference, "image/png");
-        assert_eq!(video_layout(&[], &video_request(None)), VideoLayout::Prompt);
         assert_eq!(
-            video_layout(&[frame("a")], &video_request(None)),
-            VideoLayout::OpeningFrame
+            video_frames(&[], &video_request(None)),
+            VideoFrames::default()
         );
-        assert_eq!(
-            video_layout(
-                &[
-                    media_input("a", InputRole::FirstFrame, "image/png"),
-                    media_input("b", InputRole::LastFrame, "image/png"),
-                ],
-                &video_request(Some("frames"))
-            ),
-            VideoLayout::OpeningAndClosingFrames
-        );
-        // No provider takes three frames, so the request becomes a reference
-        // one instead of failing at the provider.
-        assert_eq!(
-            video_layout(
-                &[frame("a"), frame("b"), frame("c")],
-                &video_request(Some("frames"))
-            ),
-            VideoLayout::Reference
-        );
-        assert_eq!(
-            video_layout(&[frame("a")], &video_request(Some("reference"))),
-            VideoLayout::Reference
-        );
-        assert_eq!(
-            video_layout(&[], &video_request(Some("reference"))),
-            VideoLayout::Prompt
-        );
+
+        let only = [frame("a")];
+        let one = video_frames(&only, &video_request(None));
+        assert_eq!(named(one.opening), Some("a"));
+        assert!(one.closing.is_none(), "one image is one end of the shot");
+
+        let pair = [frame("a"), frame("b")];
+        let two = video_frames(&pair, &video_request(None));
+        assert_eq!(named(two.opening), Some("a"));
+        assert_eq!(named(two.closing), Some("b"));
+        assert!(two.references.is_empty());
+
+        // No provider takes three frames, so three pictures with no end among
+        // them are references rather than frames, in the order they were given.
+        let several = [frame("a"), frame("b"), frame("c")];
+        let referenced = video_frames(&several, &video_request(Some("frames")));
+        assert!(referenced.opening.is_none() && referenced.closing.is_none());
+        assert_eq!(names(&referenced.references), ["a", "b", "c"]);
+
         // An unrecognised mode is treated as the automatic one rather than
         // refused here; parameter values are the validator's business.
-        assert_eq!(
-            video_layout(&[frame("a")], &video_request(Some("turbo"))),
-            VideoLayout::OpeningFrame
-        );
+        let turbo = video_frames(&only, &video_request(Some("turbo")));
+        assert_eq!(named(turbo.opening), Some("a"));
     }
 
     #[test]
-    fn labelled_frames_keep_their_ends_and_only_images_count() {
+    fn a_request_that_asked_for_references_is_given_references_only() {
         let inputs = vec![
+            media_input("first", InputRole::FirstFrame, "image/png"),
+            media_input("extra", InputRole::Reference, "image/png"),
             media_input("last", InputRole::LastFrame, "image/png"),
-            media_input("voice", InputRole::ControlAudio, "audio/wav"),
-            media_input("middle", InputRole::Reference, "image/png"),
-            media_input("first", InputRole::FirstFrame, "image/jpeg"),
         ];
-        let ordered: Vec<&str> = video_images(&inputs)
-            .iter()
-            .map(|input| input.asset_id.as_str())
-            .collect();
-        assert_eq!(ordered, ["first", "middle", "last"]);
+        let frames = video_frames(&inputs, &video_request(Some("reference")));
+        assert!(frames.opening.is_none() && frames.closing.is_none());
+        assert_eq!(names(&frames.references), ["first", "extra", "last"]);
     }
 
     #[test]
-    fn unlabelled_images_keep_the_order_the_caller_gave() {
+    fn a_piece_of_media_that_is_not_a_picture_is_no_frame_of_a_shot() {
         let inputs = vec![
-            media_input("b", InputRole::Reference, "image/png"),
-            media_input("a", InputRole::Reference, "image/png"),
+            media_input("voice", InputRole::ControlAudio, "audio/wav"),
+            media_input("first", InputRole::FirstFrame, "image/png"),
         ];
-        let ordered: Vec<&str> = video_images(&inputs)
-            .iter()
-            .map(|input| input.asset_id.as_str())
-            .collect();
-        assert_eq!(ordered, ["b", "a"]);
+        let frames = video_frames(&inputs, &video_request(None));
+        assert_eq!(named(frames.opening), Some("first"));
+        assert!(frames.references.is_empty(), "{:?}", frames.references);
     }
 }

@@ -23,7 +23,7 @@ use super::{
 use crate::domain::{new_id, now_iso, Capability};
 use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
-use crate::generate::media::{video_images, video_layout, MediaInput, MultipartBody, VideoLayout};
+use crate::generate::media::{video_frames, MediaInput, MultipartBody};
 use crate::generate::models::image_edit_url;
 use crate::generate::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, InputRole,
@@ -749,24 +749,23 @@ fn video_body(call: &ModelCall, request: &GenerateRequest, inputs: &[MediaInput]
         body.insert("watermark".into(), json!(watermark));
     }
 
-    let frames = video_images(inputs);
-    match video_layout(inputs, request) {
-        VideoLayout::Prompt => {}
-        // A shot that lands on a frame the user chose names it, rather than
-        // leaving the provider to guess which end of a list is which.
-        VideoLayout::OpeningFrame | VideoLayout::OpeningAndClosingFrames => {
-            if let Some(frame) = frames.first() {
-                body.insert("first_frame".into(), json!(frame.data_url()));
-            }
-            if let Some(frame) = frames.get(1) {
-                body.insert("last_frame".into(), json!(frame.data_url()));
-            }
-        }
-        VideoLayout::Reference => {
-            let references: Vec<Value> =
-                frames.iter().map(|frame| json!(frame.data_url())).collect();
-            body.insert("reference_images".into(), json!(references));
-        }
+    // A shot that lands on a frame somebody chose names it, rather than
+    // leaving the provider to guess which end of a list is which; whatever was
+    // given beside the frames is asked for as the references it came as.
+    let frames = video_frames(inputs, request);
+    if let Some(frame) = frames.opening {
+        body.insert("first_frame".into(), json!(frame.data_url()));
+    }
+    if let Some(frame) = frames.closing {
+        body.insert("last_frame".into(), json!(frame.data_url()));
+    }
+    if !frames.references.is_empty() {
+        let references: Vec<Value> = frames
+            .references
+            .iter()
+            .map(|frame| json!(frame.data_url()))
+            .collect();
+        body.insert("reference_images".into(), json!(references));
     }
     Value::Object(body)
 }
@@ -1253,24 +1252,50 @@ mod tests {
             })
         );
 
-        let opening = media("opening", InputRole::FirstFrame);
-        let closing = media("closing", InputRole::LastFrame);
+        // Every picture here is its own, so a frame can be told from a
+        // reference by what the body carries rather than by how many.
+        let picture = |id: &str, role: InputRole| MediaInput {
+            bytes: id.as_bytes().to_vec(),
+            ..media(id, role)
+        };
+        let opening = picture("opening", InputRole::FirstFrame);
+        let closing = picture("closing", InputRole::LastFrame);
         let body = video_body(&call, &request, &[opening.clone(), closing.clone()]);
         assert_eq!(body["first_frame"], json!(opening.data_url()));
         assert_eq!(body["last_frame"], json!(closing.data_url()));
 
-        // More frames than a shot can land on become references, in the order
-        // the shared layout rules put them: opening first, closing last.
-        let extra = media("extra", InputRole::Reference);
+        // A picture given beside the two ends is a reference: the frames stay
+        // the frames they were labelled as — this is how an act is filmed —
+        // and what rides between them is asked for as what it is.
+        let middle = picture("middle", InputRole::Reference);
         let body = video_body(
             &call,
             &request,
-            &[opening.clone(), closing.clone(), extra.clone()],
+            &[opening.clone(), middle.clone(), closing.clone()],
+        );
+        assert_eq!(body["first_frame"], json!(opening.data_url()));
+        assert_eq!(body["last_frame"], json!(closing.data_url()));
+        assert_eq!(body["reference_images"], json!([middle.data_url()]));
+
+        // Pictures with no labelled end among them are references rather than
+        // frames, in the order they were given, since no provider takes three.
+        let body = video_body(
+            &call,
+            &request,
+            &[
+                picture("one", InputRole::Reference),
+                picture("two", InputRole::Reference),
+                picture("three", InputRole::Reference),
+            ],
         );
         assert!(body.get("first_frame").is_none(), "{body}");
         assert_eq!(
             body["reference_images"],
-            json!([opening.data_url(), extra.data_url(), closing.data_url(),])
+            json!([
+                picture("one", InputRole::Reference).data_url(),
+                picture("two", InputRole::Reference).data_url(),
+                picture("three", InputRole::Reference).data_url(),
+            ])
         );
     }
 

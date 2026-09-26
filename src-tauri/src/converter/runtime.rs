@@ -462,6 +462,71 @@ mod tests {
         );
     }
 
+    /// The video scripts whose names the built-in protocols also answer to, so
+    /// a copy taken as the basis of a model of one's own keeps the ends of a
+    /// shot where they were put rather than turning them into references.
+    #[test]
+    fn the_video_scripts_name_the_frames_a_shot_lands_on() {
+        let rt = test_runtime();
+        let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
+        let picture = |role: &str, url: &str| serde_json::json!({"role": role, "mime": "image/png", "data_url": url});
+        // An act filmed whole: its first board, its last, and a shot between.
+        let inputs = serde_json::json!([
+            picture("firstFrame", "https://img.test/first.png"),
+            picture("lastFrame", "https://img.test/last.png"),
+            picture("reference", "https://img.test/middle.png"),
+        ]);
+        let request = serde_json::json!({"prompt": "a slow pan", "params": {"seconds": "6"}});
+
+        let openai = rt
+            .load(&scripts.join("models/video/openai-videos/openai-videos.lua"))
+            .unwrap();
+        let built = rt
+            .call_json_value(
+                &openai,
+                "build_task_request",
+                vec![
+                    serde_json::json!({"url": "https://provider.test/v1/videos", "model": "a-video-model"}),
+                    request.clone(),
+                    inputs.clone(),
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(built["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["first_frame"], "https://img.test/first.png");
+        assert_eq!(body["last_frame"], "https://img.test/last.png");
+        assert_eq!(
+            body["reference_images"],
+            serde_json::json!(["https://img.test/middle.png"])
+        );
+
+        let gemini = rt
+            .load(&scripts.join("models/video/gemini-video/gemini-video.lua"))
+            .unwrap();
+        let built = rt
+            .call_json_value(
+                &gemini,
+                "build_task_request",
+                vec![
+                    serde_json::json!({"url": "https://provider.test/v1beta/models/veo:predictLongRunning", "model": ""}),
+                    request,
+                    inputs,
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(built["body"].as_str().unwrap()).expect("a JSON body");
+        let shot = &body["instances"][0];
+        assert!(shot["image"].is_object(), "{shot}");
+        assert!(shot["lastFrame"].is_object(), "{shot}");
+        assert_eq!(
+            shot["referenceImages"].as_array().map(Vec::len),
+            Some(1),
+            "{shot}"
+        );
+    }
+
     /// A policy answer as the provider writes one, and the state step one left.
     fn policy() -> serde_json::Value {
         serde_json::json!({
