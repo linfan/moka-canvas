@@ -17,6 +17,7 @@ use reqwest::header::{HeaderMap, HeaderName};
 
 use crate::config::GenerateConfig;
 use crate::converter;
+use crate::converter::registry::AuthSpec;
 use crate::domain::Capability;
 use crate::metadata::Protocol;
 
@@ -140,18 +141,65 @@ impl ModelCall {
     ///
     /// The credential follows the same rule as [`fetch`]: only inside the
     /// configured origin, because an endpoint the script derived is the
-    /// provider's and a link it was given is nobody's. Every method but a GET
-    /// goes out as a POST, which is all a script has been able to ask for.
+    /// provider's and a link it was given is nobody's.
     pub(crate) fn described(&self, method: &str, address: &str) -> reqwest::RequestBuilder {
-        let request = if method.eq_ignore_ascii_case("GET") {
-            self.client.get(address.to_string())
-        } else {
-            self.client.post(address.to_string())
-        };
+        let request = self.without_credential(method, address);
         if origin_of(address).is_some() && origin_of(address) == self.origin() {
             self.credentialed(request)
         } else {
             request
+        }
+    }
+
+    /// The same request, with the credential placed the way a converter
+    /// declared it: in the header it named, with the scheme it named, or not
+    /// at all where it named none.
+    ///
+    /// A converter says where its key rides because that is a fact about the
+    /// service rather than about this program — one endpoint wants a bearer
+    /// token, another a key of its own in a header of its own, and a third
+    /// takes none.
+    pub(crate) fn described_with(
+        &self,
+        method: &str,
+        address: &str,
+        auth: &AuthSpec,
+    ) -> Result<reqwest::RequestBuilder, ProviderError> {
+        let request = self.without_credential(method, address);
+        if origin_of(address).is_none() || origin_of(address) != self.origin() {
+            return Ok(request);
+        }
+        if auth.header.is_empty() {
+            return Ok(request);
+        }
+        let name =
+            reqwest::header::HeaderName::from_bytes(auth.header.as_bytes()).map_err(|e| {
+                ProviderError::invalid(format!("'{}' is not a header name: {e}", auth.header))
+            })?;
+        let value = if auth.scheme.is_empty() {
+            self.api_key.clone()
+        } else {
+            format!("{} {}", auth.scheme, self.api_key)
+        };
+        let value = reqwest::header::HeaderValue::from_str(&value).map_err(|e| {
+            // A credential carrying a newline is a stored-value problem rather
+            // than an outage, and saying so stops a client from retrying it.
+            ProviderError::invalid(format!("the credential cannot be sent in a header: {e}"))
+        })?;
+        Ok(request.header(name, value))
+    }
+
+    /// A request with nothing of this call's credential on it yet.
+    fn without_credential(&self, method: &str, address: &str) -> reqwest::RequestBuilder {
+        match reqwest::Method::from_bytes(method.trim().to_uppercase().as_bytes()) {
+            Ok(reqwest::Method::GET) => self.client.get(address.to_string()),
+            Ok(reqwest::Method::HEAD) => self.client.head(address.to_string()),
+            Ok(reqwest::Method::PUT) => self.client.put(address.to_string()),
+            Ok(reqwest::Method::PATCH) => self.client.patch(address.to_string()),
+            Ok(reqwest::Method::DELETE) => self.client.delete(address.to_string()),
+            // Everything else is a POST: no protocol here speaks another
+            // method, and a method nobody named is not one to invent.
+            _ => self.client.post(address.to_string()),
         }
     }
 
@@ -306,17 +354,18 @@ impl Reply {
     }
 }
 
-fn succeeded(status: u16) -> bool {
+pub(crate) fn succeeded(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
 /// Places a request under a deadline and reads the answer whole, leaving the
 /// status for the caller: one adapter has to see a 404 before it can decide to
-/// try a second endpoint.
+/// try a second endpoint, and a converter script reads one as an answer of its
+/// own.
 ///
 /// The kind says what the call was for, which is the only thing that tells two
 /// requests to the same address apart in a recording made afterwards.
-async fn exchange(
+pub(crate) async fn exchange(
     kind: Kind,
     call: &ModelCall,
     request: reqwest::RequestBuilder,
@@ -429,7 +478,7 @@ async fn next_chunk(response: &mut reqwest::Response) -> Result<Option<Vec<u8>>,
 /// Split out so an adapter that can try a second endpoint does so before a
 /// single character has reached anybody: once deltas are on screen, a fallback
 /// would repeat them.
-enum Opened {
+pub(crate) enum Opened {
     /// A stream that opened, with the recording waiting for its end. The
     /// recording travels with the stream rather than staying here, because the
     /// answer is not finished until the stream is. Boxed because a whole request
@@ -444,7 +493,7 @@ enum Opened {
 /// The request is prepared by the caller: one protocol asks for a stream on
 /// another endpoint, the other on the same endpoint with a query that changes
 /// the shape of the answer.
-async fn open_stream(
+pub(crate) async fn open_stream(
     kind: Kind,
     call: &ModelCall,
     request: reqwest::RequestBuilder,
@@ -491,7 +540,7 @@ async fn open_stream(
 /// When the stream is being recorded, the raw events are kept beside the reading
 /// of them, because the interesting failure is the one where the two disagree:
 /// what the provider sent is evidence, and what was made of it is an opinion.
-async fn read_stream<F>(
+pub(crate) async fn read_stream<F>(
     response: reqwest::Response,
     recording: Option<debug::Pending>,
     sink: &DeltaSink,
@@ -567,20 +616,20 @@ where
 
 /// What one event in a stream contributed.
 #[derive(Debug, Default)]
-struct StreamEvent {
+pub(crate) struct StreamEvent {
     /// Text to show as it arrives and to add to the aggregate.
-    text: Option<String>,
+    pub(crate) text: Option<String>,
     /// The whole answer, where a protocol sends a copy of it with the event
     /// that closes the stream. It replaces the aggregate rather than adding to
     /// it, so a provider that sends both is not counted twice, and one that
     /// buffers and sends only this still produces an answer.
-    complete: Option<String>,
+    pub(crate) complete: Option<String>,
     /// Totals, which some protocols send only with the last event.
-    usage: Option<Usage>,
+    pub(crate) usage: Option<Usage>,
     /// The provider's own complaint, where the event carried one instead of a
     /// piece of the answer. A stream that has opened has no status left to
     /// refuse with, so some protocols say what went wrong here.
-    failed: Option<String>,
+    pub(crate) failed: Option<String>,
 }
 
 /// Reads a server-sent stream: lines out of chunks, events out of lines.
@@ -711,7 +760,7 @@ fn usage_of(counted: Option<&serde_json::Value>, input: &str, output: &str) -> O
 /// Neither is taken from the request: a provider that answers in a format it
 /// was not asked for is answering, and storing that under the requested mime
 /// would produce an asset the canvas cannot open.
-fn image_item(bytes: Vec<u8>) -> Result<GeneratedItem, ProviderError> {
+pub(crate) fn image_item(bytes: Vec<u8>) -> Result<GeneratedItem, ProviderError> {
     let mime = infer::get(&bytes)
         .map(|kind| kind.mime_type().to_string())
         .filter(|mime| mime.starts_with("image/"))
@@ -745,7 +794,7 @@ fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 /// container's name is not always one a file can be stored under. A success
 /// that carried a different family is refused rather than stored: an asset that
 /// cannot be played is worse than an error that says why.
-fn media_item(
+pub(crate) fn media_item(
     bytes: Vec<u8>,
     claimed: Option<&str>,
     kind: Capability,
@@ -797,7 +846,7 @@ fn transport(error: reqwest::Error) -> ProviderError {
 }
 
 /// Maps a provider's answer onto a code the client can act on.
-fn provider_error(reply: &Reply, api_key: &str) -> ProviderError {
+pub(crate) fn provider_error(reply: &Reply, api_key: &str) -> ProviderError {
     let explained = explain(reply.status, reply.text().unwrap_or_default(), api_key);
     match reply.status {
         401 | 403 => ProviderError::Auth(explained),

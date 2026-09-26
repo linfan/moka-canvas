@@ -1,32 +1,39 @@
-//! Lua adapter: wraps the Lua runtime behind the ProviderAdapter trait.
+//! Lua adapter: the protocol implementation a converter script stands behind.
 //!
-//! This module executes Lua converter scripts to build HTTP requests and parse
-//! responses, enabling new vendor protocols without recompiling the backend.
+//! This module runs the script: it asks the script what to send, sends it, and
+//! hands the answer back for the script to read. Which protocols exist is the
+//! registry's business rather than this module's, so a protocol is added by
+//! adding a converter directory and nothing here changes.
 //!
 //! A protocol that needs more than one call for one step — an upload before a
 //! submit, a document behind a poll — describes the whole conversation to
-//! [`LuaAdapter::follow`], which runs it one exchange at a time.
+//! [`LuaAdapter`]'s `follow`, which runs it one exchange at a time. A protocol
+//! whose answer arrives in pieces describes its stream request to
+//! `build_stream_request`, and each piece is handed to `parse_event` as it
+//! lands.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::Value;
+use base64::Engine as _;
+use reqwest::header::HeaderMap;
+use serde_json::{json, Map, Value};
 
-use super::registry::{ConverterRegistry, ProtocolEntry};
-use super::runtime::LuaRuntime;
+use super::registry::{AuthSpec, ConverterRegistry, ProtocolEntry};
+use super::runtime::{LuaRuntime, ScriptRef};
 use crate::domain::Capability;
-use crate::generate::adapters::{drain, ModelCall, ProviderAdapter};
+use crate::generate::adapters::{
+    exchange, image_item, media_item, open_stream, provider_error, read_stream, succeeded,
+    ModelCall, Opened, ProviderAdapter, Reply, StreamEvent,
+};
+use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
 use crate::generate::media::{MediaInput, MultipartBody};
 use crate::generate::{
-    AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState,
+    AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
 };
-
-/// The ceiling for downloading media from a URL returned by a Lua script.
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
+use crate::metadata::Protocol;
 
 /// How many exchanges one step may take before a script is stopped.
 ///
@@ -58,326 +65,643 @@ impl LuaAdapter {
     pub fn get() -> &'static Self {
         &LUA_ADAPTER
     }
+}
 
-    /// Returns the protocol name from a LuaScript protocol.
-    fn protocol_name(call: &ModelCall) -> Result<&str, ProviderError> {
-        match &call.protocol {
-            crate::metadata::Protocol::LuaScript(name) => Ok(name),
-            _ => Err(ProviderError::invalid("not a Lua-backed protocol")),
+#[async_trait]
+impl ProviderAdapter for LuaAdapter {
+    async fn generate(
+        &self,
+        call: &ModelCall,
+        request: &GenerateRequest,
+        inputs: &[MediaInput],
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        let session = Session::open(call)?;
+        let asked = session.call(
+            "build_request",
+            vec![call_json(call), request_json(request), inputs_json(inputs)],
+        )?;
+        let ended = follow(
+            &session,
+            &asked,
+            "parse_response",
+            Step {
+                call,
+                inputs,
+                capability: request.capability,
+                cancel,
+                kind: Kind::Generate,
+            },
+        )
+        .await?;
+        result_of(&session, &ended, call, request.capability).await
+    }
+
+    /// The answer read as it arrives, where the script asked for a stream.
+    ///
+    /// A script that describes no stream request answers whole: a caller who is
+    /// reading the pieces is refused rather than surprised at the end, and one
+    /// who is not reading them — a story job waiting an answer out — is served
+    /// the whole answer, which is all it was asking for.
+    async fn generate_stream(
+        &self,
+        call: &ModelCall,
+        request: &GenerateRequest,
+        inputs: &[MediaInput],
+        sink: &DeltaSink,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        let session = Session::open(call)?;
+        if !session.has("build_stream_request") {
+            if sink.is_watched() {
+                return Err(ProviderError::invalid(
+                    "this converter does not stream, and its answer was being read piece by piece",
+                ));
+            }
+            return self.generate(call, request, inputs, cancel).await;
+        }
+        // A stream nobody could read is a mistake in the script rather than in
+        // the request: the pieces would arrive and be dropped, one at a time,
+        // with nothing said about it.
+        if !session.has("parse_event") {
+            return Err(ProviderError::invalid(
+                "this converter streams without exporting 'parse_event'",
+            ));
+        }
+        let asked = session.call(
+            "build_stream_request",
+            vec![call_json(call), request_json(request), inputs_json(inputs)],
+        )?;
+        if let Some(error) = asked.get("error").and_then(Value::as_str) {
+            return Err(ProviderError::Rejected(error.to_string()));
+        }
+        let request_builder = builder(call, &session.entry, &asked, inputs)?;
+        let deadline = call.budgets.timeout_for(request.capability);
+        match open_stream(Kind::Stream, call, request_builder).await? {
+            Opened::Streaming(response, recording) => {
+                let parse = |payload: &Value| session.event(payload);
+                read_stream(
+                    response,
+                    recording.map(|recording| *recording),
+                    sink,
+                    cancel,
+                    deadline,
+                    parse,
+                )
+                .await
+            }
+            Opened::Refused(reply) => Err(provider_error(&reply, &call.api_key)),
         }
     }
 
-    /// Looks up the protocol entry from the converter registry.
-    async fn lookup_entry(protocol: &str) -> Result<ProtocolEntry, ProviderError> {
-        let root = CONVERTER_ROOT
-            .get()
-            .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
-        let registry = ConverterRegistry::load(root);
-        registry.find(protocol).cloned().ok_or_else(|| {
-            ProviderError::invalid(format!("no converter script for protocol '{protocol}'"))
+    async fn create_task(
+        &self,
+        call: &ModelCall,
+        request: &GenerateRequest,
+        inputs: &[MediaInput],
+        cancel: &Cancel,
+    ) -> Result<AsyncTask, ProviderError> {
+        let session = Session::open(call)?;
+        if !session.has("build_task_request") {
+            return Err(ProviderError::invalid(format!(
+                "the '{}' converter does not start jobs",
+                call.protocol.wire_name()
+            )));
+        }
+        let asked = session.call(
+            "build_task_request",
+            vec![call_json(call), request_json(request), inputs_json(inputs)],
+        )?;
+        let ended = follow(
+            &session,
+            &asked,
+            "parse_task_response",
+            Step {
+                call,
+                inputs,
+                capability: request.capability,
+                cancel,
+                kind: Kind::TaskCreate,
+            },
+        )
+        .await?;
+        if let Some(error) = ended.reply.get("error").and_then(Value::as_str) {
+            return Err(ProviderError::Rejected(error.to_string()));
+        }
+        let reference = ended
+            .reply
+            .get("reference")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|reference| !reference.is_empty())
+            .ok_or_else(|| ProviderError::NoOutput("no task reference in response".to_string()))?
+            .to_string();
+
+        Ok(AsyncTask {
+            id: crate::domain::new_id(),
+            reference,
+            protocol: call.protocol.clone(),
+            // The capability the request came in on, not the one this adapter
+            // was written for: polling resolves the model configuration again,
+            // and a handle filed under the wrong category would be answered by
+            // whatever model that category happens to hold.
+            capability: request.capability,
+            model: call.config_id.clone(),
+            created_at: crate::domain::now_iso(),
         })
     }
 
-    /// Runs a Lua function synchronously. The runtime is created, the script is
-    /// loaded, the function is called, and everything is dropped before return,
-    /// so this can live inside an async fn without holding non-Send state
-    /// across an await point.
-    fn call_lua(
-        entry: &ProtocolEntry,
-        func: &str,
-        args: Vec<Value>,
-    ) -> Result<Value, ProviderError> {
-        let root = CONVERTER_ROOT
-            .get()
-            .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
-        let script_path = root.join(&entry.script);
-        let runtime = LuaRuntime::new()
-            .map_err(|e| ProviderError::invalid(format!("Lua runtime failed: {e}")))?;
-        let script = runtime.load(&script_path).map_err(|e| {
-            ProviderError::invalid(format!("failed to load script '{}': {e}", entry.script))
-        })?;
-        runtime
-            .call_json_value(&script, func, args)
-            .map_err(|e| ProviderError::invalid(format!("Lua '{func}' failed: {e}")))
-    }
+    async fn poll_task(
+        &self,
+        call: &ModelCall,
+        task: &AsyncTask,
+        cancel: &Cancel,
+    ) -> Result<TaskState, ProviderError> {
+        let session = Session::open(call)?;
+        let task_json = serde_json::json!({
+            "id": task.id,
+            "reference": task.reference,
+        });
+        let asked = session.call("build_poll_request", vec![call_json(call), task_json])?;
+        // No inputs: a poll describes a request about a job rather than one
+        // carrying media, so a script that asks for a file part here is told
+        // the request carried none.
+        let ended = follow(
+            &session,
+            &asked,
+            "parse_poll_response",
+            Step {
+                call,
+                inputs: &[],
+                capability: task.capability,
+                cancel,
+                kind: Kind::TaskPoll,
+            },
+        )
+        .await?;
 
-    /// Converts a `ModelCall` to a JSON value the Lua scripts understand.
-    fn call_to_json(call: &ModelCall) -> Value {
-        serde_json::json!({
-            "url": call.url,
-            "model": call.model,
-        })
-    }
+        if let Some(error) = ended.reply.get("error").and_then(Value::as_str) {
+            match ended.reply.get("status").and_then(Value::as_str) {
+                Some("expired") => {
+                    return Err(ProviderError::TaskExpired {
+                        task: task.id.clone(),
+                    })
+                }
+                _ => return Err(ProviderError::Rejected(error.to_string())),
+            }
+        }
 
-    /// Converts a `GenerateRequest` to a JSON value.
-    fn request_to_json(request: &GenerateRequest) -> Value {
-        serde_json::json!({
-            "prompt": request.prompt,
-            "params": request.params,
-        })
-    }
-
-    /// Converts `MediaInput`s to a JSON array.
-    ///
-    /// A script is told what each input is called and what it holds as well as
-    /// the bytes themselves: a protocol that has to leave the recording
-    /// somewhere names it, and one that has to describe it says what it is.
-    /// The filename is the one a multipart part would carry, so it is safe to
-    /// put in a URL.
-    fn inputs_to_json(inputs: &[MediaInput]) -> Value {
-        let list: Vec<Value> = inputs
-            .iter()
-            .map(|input| {
-                serde_json::json!({
-                    "role": input.role.as_str(),
-                    "filename": input.filename(),
-                    "mime": input.mime,
-                    "data_url": input.data_url(),
+        match ended.reply.get("status").and_then(Value::as_str) {
+            Some("succeeded") => {
+                let result = ended.reply.get("result");
+                let mut items = Vec::new();
+                if let Some(list) = result.and_then(|result| result.get("items")) {
+                    items = items_of(
+                        list,
+                        &ended.body,
+                        call,
+                        task.capability,
+                        &session.entry.auth,
+                    )
+                    .await?;
+                }
+                // Words travel the same way media does. A job that answers with
+                // them — a transcript, the point of a recognition job — has
+                // nothing to download and everything to say.
+                let text = result
+                    .and_then(|result| result.get("text"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                Ok(TaskState::Succeeded(GenerateResult {
+                    text,
+                    items,
+                    usage: usage_of(result.and_then(|result| result.get("usage"))),
+                }))
+            }
+            Some("pending") | None => {
+                let interval_ms = ended
+                    .reply
+                    .get("poll_interval_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(15000);
+                Ok(TaskState::Pending {
+                    retry_after_ms: interval_ms,
                 })
-            })
-            .collect();
-        Value::Array(list)
+            }
+            Some("failed") => Err(ProviderError::Rejected(
+                ended
+                    .reply
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("job failed")
+                    .to_string(),
+            )),
+            Some(other) => Err(ProviderError::Rejected(format!(
+                "unexpected status: {other}"
+            ))),
+        }
     }
+}
 
-    /// Refuses a handler the script does not export, before the request goes
-    /// out.
-    ///
-    /// The script is loaded twice per exchange — once here, once to run the
-    /// handler — because nothing may be held across the call in between. What
-    /// it buys is that a script naming a function it never wrote is refused
-    /// before an upload of tens of megabytes is sent to a provider.
-    fn require(entry: &ProtocolEntry, handler: &str) -> Result<(), ProviderError> {
+/// One call's Lua side: the converter it came from, a runtime, and the script
+/// loaded into it.
+///
+/// The runtime lives for the whole call rather than for one exchange, because
+/// building one is the same work every time and a stream is an exchange per
+/// event. Nothing is asked of it that one thread could not do: a runtime is
+/// created, used, and dropped inside the call that made it.
+struct Session {
+    entry: ProtocolEntry,
+    runtime: LuaRuntime,
+    script: ScriptRef,
+}
+
+impl Session {
+    /// Opens the converter the configured protocol names.
+    fn open(call: &ModelCall) -> Result<Self, ProviderError> {
+        let Protocol::LuaScript(name) = &call.protocol else {
+            return Err(ProviderError::invalid(
+                "this protocol is not a converter script",
+            ));
+        };
         let root = CONVERTER_ROOT
             .get()
             .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
+        let entry = ConverterRegistry::load(root)
+            .find(name)
+            .cloned()
+            .ok_or_else(|| {
+                ProviderError::invalid(format!("no converter script for protocol '{name}'"))
+            })?;
         let runtime = LuaRuntime::new()
             .map_err(|e| ProviderError::invalid(format!("Lua runtime failed: {e}")))?;
         let script = runtime.load(&root.join(&entry.script)).map_err(|e| {
             ProviderError::invalid(format!("failed to load script '{}': {e}", entry.script))
         })?;
-        if runtime.has_function(&script, handler) {
-            return Ok(());
-        }
-        Err(ProviderError::invalid(format!(
-            "script '{}' does not export '{handler}'",
-            entry.script
-        )))
-    }
-
-    /// Runs the exchanges a build hook asked for, and returns the reply that
-    /// ended the chain.
-    ///
-    /// The hook's reply is the first exchange, either as a request description
-    /// or as `{request, handler}` when the answer needs a function of its own
-    /// to read; a hook with nothing to ask for says so with `{error}`. From
-    /// there, a reply that carries `next` asks for one more exchange, which is
-    /// how a protocol needing several calls stays in Lua rather than in this
-    /// host. What a reply learned travels in `state`, handed to the next
-    /// handler as its fourth argument: each step runs in a runtime of its own,
-    /// so a value nobody wrote down is a value nobody has.
-    async fn follow(
-        entry: &ProtocolEntry,
-        asked: &Value,
-        fallback: &str,
-        call: &ModelCall,
-        inputs: &[MediaInput],
-        capability: Capability,
-        cancel: &Cancel,
-    ) -> Result<Value, ProviderError> {
-        if let Some(err) = asked.get("error").and_then(Value::as_str) {
-            return Err(ProviderError::Rejected(err.to_string()));
-        }
-        let mut exchange = Exchange::asked(asked, fallback)?;
-        let mut state = asked.get("state").cloned().unwrap_or(Value::Null);
-        for _ in 0..MAX_EXCHANGES {
-            cancel.check()?;
-            Self::require(entry, &exchange.handler)?;
-            let (status, headers, body) =
-                Self::execute(call, &exchange.request, inputs, capability).await?;
-            let reply = Self::call_lua(
-                entry,
-                &exchange.handler,
-                vec![
-                    Value::Number(serde_json::Number::from(status)),
-                    Value::String(headers),
-                    Value::String(body),
-                    state,
-                ],
-            )?;
-            match exchange.asked_by(&reply) {
-                Some(asked) => {
-                    exchange = asked?;
-                    state = reply.get("state").cloned().unwrap_or(Value::Null);
-                }
-                None => return Ok(reply),
-            }
-        }
-        Err(ProviderError::invalid(format!(
-            "the script asked for more than {MAX_EXCHANGES} exchanges in one step"
-        )))
-    }
-
-    /// The body a request description asks for, sent as it stands.
-    fn described_body(request_def: &Value, inputs: &[MediaInput]) -> Result<Body, ProviderError> {
-        match request_def.get("body") {
-            None | Some(Value::Null) => Ok(Body::None),
-            Some(Value::String(text)) => Ok(Body::Text(text.clone())),
-            Some(Value::Object(shape)) => {
-                let multipart = shape.get("multipart").ok_or_else(|| {
-                    ProviderError::invalid("the script described a body this host cannot send")
-                })?;
-                let (bytes, content_type) = Self::multipart(multipart, inputs)?;
-                Ok(Body::Multipart(bytes, content_type))
-            }
-            Some(_) => Err(ProviderError::invalid(
-                "the script described a body that is neither text nor a multipart form",
-            )),
-        }
-    }
-
-    /// A multipart form: the script's fields, and one of the inputs as the file.
-    ///
-    /// A script cannot carry bytes, so it says which of the inputs it sent
-    /// along belongs in the file part — counting from one, as Lua counts — and
-    /// the boundary is this host's business rather than the script's.
-    fn multipart(shape: &Value, inputs: &[MediaInput]) -> Result<(Vec<u8>, String), ProviderError> {
-        let mut body = MultipartBody::new();
-        if let Some(fields) = shape.get("fields").and_then(Value::as_object) {
-            for (name, value) in fields {
-                if let Some(text) = field_text(value) {
-                    body = body.field(name, &text);
-                }
-            }
-        }
-        if let Some(file) = shape.get("file").filter(|file| !file.is_null()) {
-            let part = file.get("part").and_then(Value::as_str).unwrap_or("file");
-            let index = file.get("input").and_then(Value::as_u64).unwrap_or(1);
-            let media = inputs
-                .get(index.saturating_sub(1) as usize)
-                .ok_or_else(|| {
-                    ProviderError::invalid(format!(
-                        "the script asked for input {index} and the request carried {}",
-                        inputs.len()
-                    ))
-                })?;
-            body = body.file(part, media);
-        }
-        Ok(body.finish())
-    }
-
-    /// Executes an HTTP request built from the Lua script's return value.
-    ///
-    /// The credential follows the address rather than the script: a request to
-    /// the configured origin carries it, and one to an upload host or a link
-    /// the provider handed back does not.
-    async fn execute(
-        call: &ModelCall,
-        request_def: &Value,
-        inputs: &[MediaInput],
-        capability: Capability,
-    ) -> Result<(u16, String, String), ProviderError> {
-        let method = request_def["method"].as_str().unwrap_or("POST");
-        let url = request_def["url"]
-            .as_str()
-            .ok_or_else(|| ProviderError::invalid("Lua script returned no URL"))?;
-
-        let mut builder = call.described(method, url);
-        if let Some(headers) = request_def["headers"].as_object() {
-            for (key, value) in headers {
-                if let Some(val) = value.as_str() {
-                    builder = builder.header(key.as_str(), val);
-                }
-            }
-        }
-
-        let builder = match Self::described_body(request_def, inputs)? {
-            Body::None => {
-                if !method.eq_ignore_ascii_case("GET") {
-                    return Err(ProviderError::invalid(
-                        "Lua script returned no body for POST",
-                    ));
-                }
-                builder
-            }
-            Body::Text(text) => builder.body(text),
-            // The content type is set after the script's own headers: a
-            // boundary a script wrote down itself would not be the one this
-            // body was assembled with.
-            Body::Multipart(bytes, content_type) => {
-                builder.header("Content-Type", content_type).body(bytes)
-            }
-        };
-
-        let response = builder
-            .timeout(call.budgets.timeout_for(capability))
-            .send()
-            .await
-            .map_err(|e| ProviderError::Unreachable(e.to_string()))?;
-
-        let reply = drain(response, call.budgets.max_response_bytes).await?;
-        let body_str = String::from_utf8_lossy(&reply.body).to_string();
-
-        Ok((reply.status, format!("{:?}", reply.headers), body_str))
-    }
-
-    /// Downloads a single item from a URL.
-    async fn download_item(
-        call: &ModelCall,
-        url: &str,
-        mime: &str,
-        kind: Capability,
-    ) -> Result<GeneratedItem, ProviderError> {
-        let response = call
-            .fetch(url)
-            .timeout(DOWNLOAD_TIMEOUT)
-            .send()
-            .await
-            .map_err(|e| ProviderError::Unreachable(e.to_string()))?;
-        let status = response.status().as_u16();
-        if !(200..300).contains(&status) {
-            return Err(ProviderError::Rejected(format!(
-                "download from '{url}' returned status {status}"
-            )));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| ProviderError::Unreachable(e.to_string()))?
-            .to_vec();
-        if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
-            return Err(ProviderError::TooLarge(format!(
-                "downloaded media exceeds {MAX_DOWNLOAD_BYTES} bytes"
-            )));
-        }
-        Ok(GeneratedItem {
-            bytes,
-            mime: mime.to_string(),
-            kind,
-            width: None,
-            height: None,
-            duration_ms: None,
+        Ok(Self {
+            entry,
+            runtime,
+            script,
         })
     }
 
-    /// Extracts URL-based items from a Lua parse_response result.
-    fn collect_url_items(items_val: &Value) -> Vec<(String, String)> {
-        let items = match items_val {
-            Value::Array(list) => list,
-            _ => return Vec::new(),
-        };
-        items
-            .iter()
-            .filter_map(|item| {
-                let obj = item.as_object()?;
-                let url = obj.get("url")?.as_str()?;
-                let mime = obj
-                    .get("mime")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("audio/mpeg");
-                Some((url.to_string(), mime.to_string()))
-            })
-            .collect()
+    /// Whether the script exports a function, which is also how it says
+    /// whether it can do a thing at all.
+    fn has(&self, func: &str) -> bool {
+        self.runtime.has_function(&self.script, func)
     }
+
+    /// Calls a hook with JSON arguments.
+    fn call(&self, func: &str, args: Vec<Value>) -> Result<Value, ProviderError> {
+        self.runtime
+            .call_json_value(&self.script, func, args)
+            .map_err(|e| ProviderError::invalid(format!("Lua '{func}' failed: {e}")))
+    }
+
+    /// Calls the handler that reads one answer: the status, the headers as a
+    /// table, the body as text, whatever the last step left behind, and the
+    /// body as it arrived — which is what a handler reads when the answer is
+    /// not text at all.
+    fn reply(&self, func: &str, reply: &Reply, state: Value) -> Result<Value, ProviderError> {
+        let headers = self
+            .runtime
+            .to_lua(&header_table(&reply.headers))
+            .map_err(|e| {
+                ProviderError::invalid(format!("headers could not be handed over: {e}"))
+            })?;
+        let body = self
+            .runtime
+            .to_lua(&Value::String(
+                String::from_utf8_lossy(&reply.body).to_string(),
+            ))
+            .map_err(|e| {
+                ProviderError::invalid(format!("the body could not be handed over: {e}"))
+            })?;
+        let raw = self.runtime.bytes(&reply.body).map_err(|e| {
+            ProviderError::invalid(format!("the body could not be handed over: {e}"))
+        })?;
+        let state = self
+            .runtime
+            .to_lua(&state)
+            .map_err(|e| ProviderError::invalid(format!("Lua '{func}' failed: {e}")))?;
+        let args = vec![
+            self.runtime
+                .to_lua(&json!(reply.status))
+                .map_err(|e| ProviderError::invalid(format!("Lua '{func}' failed: {e}")))?,
+            headers,
+            body,
+            state,
+            raw,
+        ];
+        self.runtime
+            .call_values(func, args)
+            .map_err(|e| ProviderError::invalid(format!("Lua '{func}' failed: {e}")))
+    }
+
+    /// One event of a stream, read by the script that asked for it.
+    ///
+    /// A script that fails here fails the stream rather than a call: the answer
+    /// has already begun arriving, and the complaint is what its reader is
+    /// told.
+    fn event(&self, payload: &Value) -> StreamEvent {
+        if !self.has("parse_event") {
+            return StreamEvent {
+                failed: Some("the script streams without exporting 'parse_event'".to_string()),
+                ..StreamEvent::default()
+            };
+        }
+        match self.call("parse_event", vec![Value::String(payload.to_string())]) {
+            Ok(reply) => StreamEvent {
+                text: reply
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                complete: reply
+                    .get("complete")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                usage: usage_of(reply.get("usage")),
+                failed: reply
+                    .get("failed")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            },
+            Err(error) => StreamEvent {
+                failed: Some(error.to_string()),
+                ..StreamEvent::default()
+            },
+        }
+    }
+}
+
+/// What a step ended with: the script's last reply, and the bytes of the answer
+/// it read — which is where an item that says `raw` comes from.
+struct Ended {
+    reply: Value,
+    body: Vec<u8>,
+}
+
+/// Runs the exchanges a build hook asked for, and returns the reply that ended
+/// the chain.
+///
+/// The hook's reply is the first exchange, either as a request description or
+/// as `{request, handler}` when the answer needs a function of its own to read;
+/// a hook with nothing to ask for says so with `{error}`. From there, a reply
+/// that carries `next` asks for one more exchange, which is how a protocol
+/// needing several calls stays in Lua rather than in this host. What a reply
+/// learned travels in `state`, handed to the next handler as its fourth
+/// argument.
+async fn follow(
+    session: &Session,
+    asked: &Value,
+    fallback: &str,
+    step: Step<'_>,
+) -> Result<Ended, ProviderError> {
+    if let Some(error) = asked.get("error").and_then(Value::as_str) {
+        return Err(ProviderError::Rejected(error.to_string()));
+    }
+    let mut exchange_step = Exchange::asked(asked, fallback)?;
+    let mut state = asked.get("state").cloned().unwrap_or(Value::Null);
+    for _ in 0..MAX_EXCHANGES {
+        step.cancel.check()?;
+        // Looked up before the request goes out: a script that names a function
+        // it never wrote is refused rather than sending an upload of tens of
+        // megabytes to a provider nobody will read.
+        if !session.has(&exchange_step.handler) {
+            return Err(ProviderError::invalid(format!(
+                "script '{}' does not export '{}'",
+                session.entry.script, exchange_step.handler
+            )));
+        }
+        let request_builder = builder(
+            step.call,
+            &session.entry,
+            &exchange_step.request,
+            step.inputs,
+        )?;
+        let reply = exchange(
+            step.kind,
+            step.call,
+            request_builder,
+            step.call.budgets.timeout_for(step.capability),
+            step.call.budgets.max_response_bytes,
+        )
+        .await?;
+        // A status the provider refused is the host's to explain, unless the
+        // script asked to read it: the code a client acts on comes from the
+        // status, and a script that read them all as one thing would report a
+        // rate limit as a refusal nothing may retry.
+        if !reads_failure(&exchange_step.request) && !succeeded(reply.status) {
+            return Err(provider_error(&reply, &step.call.api_key));
+        }
+        let parsed = session.reply(&exchange_step.handler, &reply, state)?;
+        match exchange_step.asked_by(&parsed) {
+            Some(next) => {
+                exchange_step = next?;
+                state = parsed.get("state").cloned().unwrap_or(Value::Null);
+            }
+            None => {
+                return Ok(Ended {
+                    reply: parsed,
+                    body: reply.body,
+                })
+            }
+        }
+    }
+    Err(ProviderError::invalid(format!(
+        "the script asked for more than {MAX_EXCHANGES} exchanges in one step"
+    )))
+}
+
+/// What one step of a chain is run with: the call it belongs to, the media the
+/// request carried, and what to do if the caller gives up.
+struct Step<'a> {
+    call: &'a ModelCall,
+    inputs: &'a [MediaInput],
+    capability: Capability,
+    cancel: &'a Cancel,
+    kind: Kind,
+}
+
+/// Whether a request description asks for the answer even when the provider
+/// refused it. A protocol whose failure carries an answer of its own — an edit
+/// address that does not exist, tried before the one that does — needs to read
+/// the failure rather than be handed a complaint about it.
+fn reads_failure(request_def: &Value) -> bool {
+    request_def
+        .get("read_failure")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// The answer one step ended with, read as media and words.
+async fn result_of(
+    session: &Session,
+    ended: &Ended,
+    call: &ModelCall,
+    capability: Capability,
+) -> Result<GenerateResult, ProviderError> {
+    if let Some(error) = ended.reply.get("error").and_then(Value::as_str) {
+        return Err(ProviderError::Rejected(error.to_string()));
+    }
+    let items = match ended.reply.get("items") {
+        Some(list) => items_of(list, &ended.body, call, capability, &session.entry.auth).await?,
+        None => Vec::new(),
+    };
+    let text = ended
+        .reply
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(GenerateResult {
+        text,
+        items,
+        usage: usage_of(ended.reply.get("usage")),
+    })
+}
+
+/// The media a reply described, each one stored as it arrived.
+///
+/// An item says where its bytes are: at an address the host fetches, inside a
+/// data URL, in base64, or in the answer itself. What the bytes are is settled
+/// by sniffing them rather than by what the script called them, because a
+/// container's name is not always one a file can be stored under.
+async fn items_of(
+    list: &Value,
+    body: &[u8],
+    call: &ModelCall,
+    capability: Capability,
+    auth: &AuthSpec,
+) -> Result<Vec<GeneratedItem>, ProviderError> {
+    let specs = match list.as_array() {
+        Some(specs) => specs,
+        // A Lua table with nothing in it crosses back as an empty document
+        // rather than as an empty list, which is the same answer said
+        // differently: a script that has no media to report is not describing
+        // media wrongly.
+        None if list.as_object().is_some_and(|shape| shape.is_empty()) => return Ok(Vec::new()),
+        None => {
+            return Err(ProviderError::invalid(
+                "the script described items that are not a list",
+            ))
+        }
+    };
+    let mut items = Vec::with_capacity(specs.len());
+    for spec in specs {
+        items.push(item_of(spec, body, call, capability, auth).await?);
+    }
+    Ok(items)
+}
+
+async fn item_of(
+    spec: &Value,
+    body: &[u8],
+    call: &ModelCall,
+    capability: Capability,
+    auth: &AuthSpec,
+) -> Result<GeneratedItem, ProviderError> {
+    let claimed = spec.get("mime").and_then(Value::as_str);
+    if let Some(address) = spec.get("url").and_then(Value::as_str) {
+        // The address is wherever the provider left the media, so it is asked
+        // for the way the configured endpoint was — the same rule every other
+        // address outside it follows.
+        let reply = exchange(
+            Kind::Media,
+            call,
+            call.described_with("GET", address, auth)?,
+            call.budgets.timeout_for(capability),
+            call.budgets.max_response_bytes,
+        )
+        .await?;
+        if !succeeded(reply.status) {
+            return Err(provider_error(&reply, &call.api_key));
+        }
+        return stored(reply.body, claimed, capability);
+    }
+    if let Some(data_url) = spec.get("data_url").and_then(Value::as_str) {
+        let (named, bytes) = decode_data_url(data_url)?;
+        return stored(bytes, claimed.or(named.as_deref()), capability);
+    }
+    if let Some(encoded) = spec.get("base64").and_then(Value::as_str) {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .map_err(|error| {
+                ProviderError::Rejected(format!("the answer carried unusable base64: {error}"))
+            })?;
+        return stored(bytes, claimed, capability);
+    }
+    if spec.get("raw").and_then(Value::as_bool).unwrap_or(false) {
+        return stored(body.to_vec(), claimed, capability);
+    }
+    Err(ProviderError::invalid(
+        "the script described an item with no bytes to store",
+    ))
+}
+
+/// One item's bytes, stored as the media the request was for.
+///
+/// An image is read for its size as well as its mime, because the canvas lays
+/// it out before anyone opens it. Anything else is stored under the family it
+/// belongs to, which is what keeps an answer that is not what was asked for
+/// from becoming an asset nothing can play.
+fn stored(
+    bytes: Vec<u8>,
+    claimed: Option<&str>,
+    capability: Capability,
+) -> Result<GeneratedItem, ProviderError> {
+    match capability {
+        Capability::Image => image_item(bytes),
+        other => media_item(bytes, claimed, other, fallback_for(other)),
+    }
+}
+
+/// What an answer with nothing recognisable in it is taken to be. Only reached
+/// when neither the bytes nor the script named a mime inside the family.
+fn fallback_for(capability: Capability) -> &'static str {
+    match capability {
+        Capability::Image => "image/png",
+        Capability::Audio => "audio/mpeg",
+        Capability::Video => "video/mp4",
+        Capability::Text | Capability::Asr => "application/octet-stream",
+    }
+}
+
+/// The bytes inside a `data:` URL, and the mime it named if it named one.
+fn decode_data_url(url: &str) -> Result<(Option<String>, Vec<u8>), ProviderError> {
+    let unusable =
+        || ProviderError::Rejected("the answer carried a data URL that cannot be read".to_string());
+    let without_scheme = url.strip_prefix("data:").ok_or_else(unusable)?;
+    let (header, encoded) = without_scheme.split_once(',').ok_or_else(unusable)?;
+    let named = header
+        .split(';')
+        .next()
+        .map(str::trim)
+        .filter(|mime| !mime.is_empty() && !mime.eq_ignore_ascii_case("base64"))
+        .map(str::to_string);
+    if !header.to_ascii_lowercase().contains("base64") {
+        return Err(unusable());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| unusable())?;
+    Ok((named, bytes))
+}
+
+/// The totals a script reported, under the names a request is counted by.
+fn usage_of(value: Option<&Value>) -> Option<Usage> {
+    let counted = value?.as_object()?;
+    let read = |key: &str| counted.get(key).and_then(Value::as_u64);
+    let usage = Usage {
+        input_tokens: read("input_tokens"),
+        output_tokens: read("output_tokens"),
+        images: read("images").map(|count| count as u32),
+        seconds: counted.get("seconds").and_then(Value::as_f64),
+    };
+    (usage.input_tokens.is_some()
+        || usage.output_tokens.is_some()
+        || usage.images.is_some()
+        || usage.seconds.is_some())
+    .then_some(usage)
 }
 
 /// One exchange: a request a script described, and the function that reads the
@@ -427,12 +751,118 @@ impl Exchange {
 
 /// What a request description says to send.
 enum Body {
-    /// Nothing, which only a GET may.
+    /// Nothing, which only a GET or a HEAD may.
     None,
     /// The text the script wrote.
     Text(String),
     /// A form, with the bytes and the content type that names its boundary.
     Multipart(Vec<u8>, String),
+}
+
+/// The request a description asks for, ready to be sent.
+///
+/// The credential follows the address rather than the script, and takes the
+/// shape the converter declared: an upload host or a link a provider handed
+/// back is a different origin from the configured endpoint, and a key sent
+/// there would not be going to the provider.
+fn builder(
+    call: &ModelCall,
+    entry: &ProtocolEntry,
+    request_def: &Value,
+    inputs: &[MediaInput],
+) -> Result<reqwest::RequestBuilder, ProviderError> {
+    let method = request_def["method"].as_str().unwrap_or("POST");
+    let url = request_def["url"]
+        .as_str()
+        .ok_or_else(|| ProviderError::invalid("Lua script returned no URL"))?;
+
+    let mut builder = call.described_with(method, url, &entry.auth)?;
+    if let Some(headers) = request_def["headers"].as_object() {
+        for (name, value) in headers {
+            if let Some(value) = value.as_str() {
+                builder = builder.header(name.as_str(), value);
+            }
+        }
+    }
+
+    match described_body(request_def, inputs)? {
+        Body::None => {
+            if !matches!(method.trim().to_ascii_uppercase().as_str(), "GET" | "HEAD") {
+                return Err(ProviderError::invalid(format!(
+                    "Lua script returned no body for a {method} request"
+                )));
+            }
+            Ok(builder)
+        }
+        Body::Text(text) => Ok(builder.body(text)),
+        // The content type is set after the script's own headers: a boundary a
+        // script wrote down itself would not be the one this body was
+        // assembled with.
+        Body::Multipart(bytes, content_type) => {
+            Ok(builder.header("Content-Type", content_type).body(bytes))
+        }
+    }
+}
+
+/// The body a request description asks for, sent as it stands.
+fn described_body(request_def: &Value, inputs: &[MediaInput]) -> Result<Body, ProviderError> {
+    match request_def.get("body") {
+        None | Some(Value::Null) => Ok(Body::None),
+        Some(Value::String(text)) => Ok(Body::Text(text.clone())),
+        Some(Value::Object(shape)) => {
+            let multipart = shape.get("multipart").ok_or_else(|| {
+                ProviderError::invalid("the script described a body this host cannot send")
+            })?;
+            let (bytes, content_type) = multipart_body(multipart, inputs)?;
+            Ok(Body::Multipart(bytes, content_type))
+        }
+        Some(_) => Err(ProviderError::invalid(
+            "the script described a body that is neither text nor a multipart form",
+        )),
+    }
+}
+
+/// A multipart form: the script's fields, and the inputs that travel as files.
+///
+/// A script cannot carry bytes, so it says which of the inputs it sent along
+/// belongs in a file part — counting from one, as Lua counts — and the boundary
+/// is this host's business rather than the script's. One file is written as
+/// `file = {part = ..., input = ...}`; several as `files = {{...}, {...}}`,
+/// which is what an edit that sends a mask beside its picture needs.
+fn multipart_body(
+    shape: &Value,
+    inputs: &[MediaInput],
+) -> Result<(Vec<u8>, String), ProviderError> {
+    let mut body = MultipartBody::new();
+    if let Some(fields) = shape.get("fields").and_then(Value::as_object) {
+        for (name, value) in fields {
+            if let Some(text) = field_text(value) {
+                body = body.field(name, &text);
+            }
+        }
+    }
+    let files: Vec<&Value> = match shape.get("files") {
+        Some(Value::Array(list)) => list.iter().collect(),
+        _ => shape
+            .get("file")
+            .filter(|file| !file.is_null())
+            .into_iter()
+            .collect(),
+    };
+    for file in files {
+        let part = file.get("part").and_then(Value::as_str).unwrap_or("file");
+        let index = file.get("input").and_then(Value::as_u64).unwrap_or(1);
+        let media = inputs
+            .get(index.saturating_sub(1) as usize)
+            .ok_or_else(|| {
+                ProviderError::invalid(format!(
+                    "the script asked for input {index} and the request carried {}",
+                    inputs.len()
+                ))
+            })?;
+        body = body.file(part, media);
+    }
+    Ok(body.finish())
 }
 
 /// A form field as text. A script may write a number or a flag where a field is
@@ -446,224 +876,59 @@ fn field_text(value: &Value) -> Option<String> {
     }
 }
 
-#[async_trait]
-impl ProviderAdapter for LuaAdapter {
-    async fn generate(
-        &self,
-        call: &ModelCall,
-        request: &GenerateRequest,
-        inputs: &[MediaInput],
-        cancel: &Cancel,
-    ) -> Result<GenerateResult, ProviderError> {
-        let protocol = Self::protocol_name(call)?;
-        let entry = Self::lookup_entry(protocol).await?;
-
-        let asked = Self::call_lua(
-            &entry,
-            "build_request",
-            vec![
-                Self::call_to_json(call),
-                Self::request_to_json(request),
-                Self::inputs_to_json(inputs),
-            ],
-        )?;
-
-        let parsed = Self::follow(
-            &entry,
-            &asked,
-            "parse_response",
-            call,
-            inputs,
-            request.capability,
-            cancel,
-        )
-        .await?;
-
-        if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-            return Err(ProviderError::Rejected(err.to_string()));
-        }
-
-        let kind = request.capability;
-        let mut items = Vec::new();
-        if let Some(items_val) = parsed.get("items") {
-            for (url, mime) in Self::collect_url_items(items_val) {
-                items.push(Self::download_item(call, &url, &mime, kind).await?);
+/// The answer's headers as a table, lowercased, a name sent twice joined by
+/// `", "` — the way a reader of one header wants to find both.
+fn header_table(headers: &HeaderMap) -> Value {
+    let mut table = Map::new();
+    for (name, value) in headers {
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        match table.get_mut(name.as_str()) {
+            Some(Value::String(existing)) => {
+                existing.push_str(", ");
+                existing.push_str(value);
+            }
+            _ => {
+                table.insert(name.as_str().to_string(), Value::String(value.to_string()));
             }
         }
+    }
+    Value::Object(table)
+}
 
-        let text = parsed
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+/// The model call as a script reads it: the endpoint it was configured with,
+/// and the provider's own name for the model.
+fn call_json(call: &ModelCall) -> Value {
+    json!({
+        "url": call.url,
+        "model": call.model,
+    })
+}
 
-        Ok(GenerateResult {
-            text,
-            items,
-            usage: None,
+/// The request as a script reads it.
+fn request_json(request: &GenerateRequest) -> Value {
+    json!({
+        "prompt": request.prompt,
+        "system": request.instruction(),
+        "capability": request.capability.as_str(),
+        "params": request.params,
+    })
+}
+
+/// The reference media, each with its name, its type, and its bytes inside a
+/// data URL.
+fn inputs_json(inputs: &[MediaInput]) -> Value {
+    let list: Vec<Value> = inputs
+        .iter()
+        .map(|input| {
+            json!({
+                "role": input.role.as_str(),
+                "filename": input.filename(),
+                "mime": input.mime,
+                "data_url": input.data_url(),
+            })
         })
-    }
-
-    /// A script answers whole: there are no pieces to read as they arrive, so a
-    /// caller who is reading them is refused rather than surprised at the end.
-    /// One who is not reading them — a story job waiting an answer out — is
-    /// served the whole answer, which is all it was asking for.
-    async fn generate_stream(
-        &self,
-        call: &ModelCall,
-        request: &GenerateRequest,
-        inputs: &[MediaInput],
-        sink: &DeltaSink,
-        cancel: &Cancel,
-    ) -> Result<GenerateResult, ProviderError> {
-        if sink.is_watched() {
-            return Err(ProviderError::invalid(
-                "Lua-backed protocols do not support streaming yet",
-            ));
-        }
-        self.generate(call, request, inputs, cancel).await
-    }
-
-    async fn create_task(
-        &self,
-        call: &ModelCall,
-        request: &GenerateRequest,
-        inputs: &[MediaInput],
-        cancel: &Cancel,
-    ) -> Result<AsyncTask, ProviderError> {
-        let protocol = Self::protocol_name(call)?;
-        let entry = Self::lookup_entry(protocol).await?;
-
-        let asked = Self::call_lua(
-            &entry,
-            "build_task_request",
-            vec![
-                Self::call_to_json(call),
-                Self::request_to_json(request),
-                Self::inputs_to_json(inputs),
-            ],
-        )?;
-
-        let parsed = Self::follow(
-            &entry,
-            &asked,
-            "parse_task_response",
-            call,
-            inputs,
-            request.capability,
-            cancel,
-        )
-        .await?;
-
-        if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-            return Err(ProviderError::Rejected(err.to_string()));
-        }
-
-        let reference = parsed
-            .get("reference")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ProviderError::NoOutput("no task reference in response".to_string()))?
-            .to_string();
-
-        Ok(AsyncTask {
-            id: crate::domain::new_id(),
-            reference,
-            protocol: call.protocol.clone(),
-            // The capability the request came in on, not the one this adapter
-            // was written for: polling resolves the model configuration again,
-            // and a handle filed under the wrong category would be answered by
-            // whatever model that category happens to hold.
-            capability: request.capability,
-            model: call.config_id.clone(),
-            created_at: crate::domain::now_iso(),
-        })
-    }
-
-    async fn poll_task(
-        &self,
-        call: &ModelCall,
-        task: &AsyncTask,
-        cancel: &Cancel,
-    ) -> Result<TaskState, ProviderError> {
-        let protocol = Self::protocol_name(call)?;
-        let entry = Self::lookup_entry(protocol).await?;
-
-        let task_json = serde_json::json!({
-            "id": task.id,
-            "reference": task.reference,
-        });
-
-        let asked = Self::call_lua(
-            &entry,
-            "build_poll_request",
-            vec![Self::call_to_json(call), task_json],
-        )?;
-
-        // No inputs: a poll describes a request about a job rather than one
-        // carrying media, so a script that asks for a file part here is told
-        // the request carried none.
-        let parsed = Self::follow(
-            &entry,
-            &asked,
-            "parse_poll_response",
-            call,
-            &[],
-            task.capability,
-            cancel,
-        )
-        .await?;
-
-        if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-            match parsed.get("status").and_then(|v| v.as_str()) {
-                Some("expired") => {
-                    return Err(ProviderError::TaskExpired {
-                        task: task.id.clone(),
-                    })
-                }
-                _ => return Err(ProviderError::Rejected(err.to_string())),
-            }
-        }
-
-        match parsed.get("status").and_then(|v| v.as_str()) {
-            Some("succeeded") => {
-                let result = parsed.get("result");
-                let mut items = Vec::new();
-                if let Some(items_val) = result.and_then(|r| r.get("items")) {
-                    for (url, mime) in Self::collect_url_items(items_val) {
-                        items.push(Self::download_item(call, &url, &mime, task.capability).await?);
-                    }
-                }
-                // Words travel the same way media does. A job that answers with
-                // them — a transcript, the point of a recognition job — has
-                // nothing to download and everything to say.
-                let text = result
-                    .and_then(|r| r.get("text"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                Ok(TaskState::Succeeded(GenerateResult {
-                    text,
-                    items,
-                    usage: None,
-                }))
-            }
-            Some("pending") | None => {
-                let interval_ms = parsed
-                    .get("poll_interval_ms")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(15000);
-                Ok(TaskState::Pending {
-                    retry_after_ms: interval_ms,
-                })
-            }
-            Some("failed") => Err(ProviderError::Rejected(
-                parsed
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("job failed")
-                    .to_string(),
-            )),
-            Some(other) => Err(ProviderError::Rejected(format!(
-                "unexpected status: {other}"
-            ))),
-        }
-    }
+        .collect();
+    Value::Array(list)
 }

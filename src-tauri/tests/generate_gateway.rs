@@ -1676,7 +1676,7 @@ async fn a_script_backed_answer_is_served_whole_to_a_caller_who_is_not_reading_t
         )
         .await
         .expect_err("a script cannot stream");
-    assert!(error.to_string().contains("Lua-backed"), "{error}");
+    assert!(error.to_string().contains("does not stream"), "{error}");
 }
 
 /// A build hook that names a reader it never wrote.

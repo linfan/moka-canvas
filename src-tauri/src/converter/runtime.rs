@@ -1,17 +1,32 @@
 //! Lua script runtime: loads scripts, registers the API surface a converter
 //! script can call, and invokes exported functions.
 //!
-//! Each script exports zero or more of the following functions by capability:
+//! A converter script is one file of global functions. Which of them a protocol
+//! implements is what it can be asked for:
 //!
 //! | Function | Input | Output | Used by |
 //! |---|---|---|---|
 //! | `build_request(call, req, inputs)` | 3 tables | `{method, url, headers, body}` | text, image, audio |
-//! | `parse_response(status, headers, body)` | number, table, string | `{text, items, usage}` | text, image, audio |
-//! | `parse_event(event_json)` | string | `{text, complete, usage}` | text streaming |
+//! | `build_stream_request(call, req, inputs)` | 3 tables | the same, for an answer that arrives in pieces | streaming |
+//! | `parse_response(status, headers, body, state, raw)` | number, table, string, table, bytes | `{text, items, usage, error}` | text, image, audio |
+//! | `parse_event(event_json)` | string | `{text, complete, usage, failed}` | streaming |
 //! | `build_task_request(call, req, inputs)` | 3 tables | `{method, url, headers, body}` | video, asr |
-//! | `parse_task_response(status, headers, body)` | number, table, string | `{reference, poll_interval_ms}` | video, asr |
+//! | `parse_task_response(status, headers, body, state, raw)` | as `parse_response` | `{reference, poll_interval_ms}` | video, asr |
 //! | `build_poll_request(call, task)` | 2 tables | `{method, url, headers}` | video, asr |
-//! | `parse_poll_response(status, headers, body)` | number, table, string | `{status, result, error}` | video, asr |
+//! | `parse_poll_response(status, headers, body, state, raw)` | as `parse_response` | `{status, result, error}` | video, asr |
+//!
+//! What those arguments hold:
+//!
+//! - `call` is `{url, model}`: the endpoint a configuration names, and the
+//!   provider's own name for the model.
+//! - `req` is `{prompt, system, capability, params}`, where `system` is the
+//!   instruction that frames the prompt rather than forming part of it.
+//! - `inputs[i]` is `{role, filename, mime, data_url}`: one piece of reference
+//!   media, with its bytes inside the data URL.
+//! - `headers` is the answer's headers as a table, lowercased, a name sent
+//!   twice joined by `", "`.
+//! - `body` is the answer as text, and `raw` is the answer as it arrived —
+//!   which is what a converter reads when the answer is not text.
 //!
 //! # Asking for another exchange
 //!
@@ -27,25 +42,53 @@
 //!
 //! as its reply, or may carry one under `next` beside the rest of what it
 //! answers. The host sends that request, calls `handler` with
-//! `(status, headers, body, state)`, and repeats until a reply carries no
+//! `(status, headers, body, state, raw)`, and repeats until a reply carries no
 //! `next`; the reply that ends the chain is that step's answer. Handlers are
 //! looked up before each request goes out, so a script that names a function it
 //! never wrote is refused rather than sending an upload nobody will read. What
-//! one step learns is only what it wrote into `state`: every step runs in a
-//! runtime of its own. A chain is capped, so a reply that asks for itself again
-//! is an error rather than a loop.
+//! one step learns is what it wrote into `state`: a runtime lives for one call
+//! rather than one step, but a chain says what it means to say through `state`
+//! and not through a global. A chain is capped, so a reply that asks for itself
+//! again is an error rather than a loop.
 //!
-//! A `body` is text, or a form whose file part is one of the inputs the request
-//! carried — Lua counts from one:
+//! A `body` is text, or a form whose file parts are inputs the request carried
+//! — Lua counts from one:
 //!
 //! ```lua
-//! body = {multipart = {fields = {key = "a-value"}, file = {part = "file", input = 1}}}
+//! body = {multipart = {fields = {key = "a-value"},
+//!                      files = {{part = "image", input = 1}}}}
 //! ```
 //!
-//! Requests are sent to the address the script named. The credential follows
-//! the address rather than the script: an upload host or a link a provider
-//! handed back is a different origin from the configured endpoint, and a key
-//! sent there would not be going to the provider.
+//! `file = {part = ..., input = ...}` describes one form with a single part,
+//! which is what most uploads are.
+//!
+//! # What a step may answer
+//!
+//! - `text`, and `usage` = `{input_tokens, output_tokens, images, seconds}`.
+//! - `items`: media, each one `{url = ...}` (fetched by the host),
+//!   `{data_url = ...}`, `{base64 = ..., mime = ...}`, or `{raw = true, mime =
+//!   ...}` for the bytes of the answer itself. The host sniffs what each one
+//!   is rather than trusting its name, and stores it under the family the
+//!   request was for.
+//! - `error`: the provider's own words, refused as something asking again
+//!   would not fix.
+//! - `failed` from `parse_event`: a complaint that arrived mid-stream, refused
+//!   the same way.
+//!
+//! # Failures and credentials
+//!
+//! A status the provider refused is the host's to explain: the code a caller
+//! acts on — a credential problem, a rate limit, an address that is wrong —
+//! comes from the status, and a host that handed every one of them to a script
+//! would report a rate limit as a refusal nothing may retry. A request that
+//! says `read_failure = true` is handed over anyway, for a protocol that reads
+//! a failure as an answer of its own.
+//!
+//! Credentials are not a script's business. The host attaches the one the
+//! converter's `model.json` declares, in the header and scheme it declares, and
+//! only for addresses inside the configured origin: an upload host or a link a
+//! provider handed back is a different origin, and a key sent there would not
+//! be going to the provider.
 
 use std::path::Path;
 
@@ -141,12 +184,34 @@ impl LuaRuntime {
         func: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, mlua::Error> {
+        let built: Result<Vec<mlua::Value>, mlua::Error> =
+            args.iter().map(|arg| self.to_lua(arg)).collect();
+        self.call_values(func, built?)
+    }
+
+    /// A Lua value for a JSON value, in this runtime.
+    pub fn to_lua(&self, value: &serde_json::Value) -> Result<mlua::Value, mlua::Error> {
+        json_to_lua(&self.lua, value)
+    }
+
+    /// A Lua string of these bytes as they are. Lua strings carry bytes rather
+    /// than text, which is what lets an answer that is not text — a recording,
+    /// a picture — reach a script whole.
+    pub fn bytes(&self, bytes: &[u8]) -> Result<mlua::Value, mlua::Error> {
+        Ok(mlua::Value::String(self.lua.create_string(bytes)?))
+    }
+
+    /// Calls a function with values already built for this runtime, spread as
+    /// arguments, and reads the reply as JSON.
+    pub fn call_values(
+        &self,
+        func: &str,
+        args: Vec<mlua::Value>,
+    ) -> Result<serde_json::Value, mlua::Error> {
         let lua = &self.lua;
-        let func: Function = lua.globals().get(func)?;
-        let lua_args: Result<Vec<mlua::Value>, mlua::Error> =
-            args.into_iter().map(|arg| json_to_lua(lua, &arg)).collect();
+        let called: Function = lua.globals().get(func)?;
         // Spread as arguments, not passed as one table: see `call_json`.
-        let result = func.call::<mlua::Value>(mlua::MultiValue::from_vec(lua_args?))?;
+        let result = called.call::<mlua::Value>(mlua::MultiValue::from_vec(args))?;
         Ok(table_to_json(&result))
     }
 }

@@ -30,7 +30,7 @@ image = "0.25"
 infer = "0.19"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 minijinja = "2.24.0"
-mlua = { version = "0.10", features = ["lua54", "vendored"] }
+mlua = { version = "0.10", features = ["lua54", "vendored", "send"] }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

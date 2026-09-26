@@ -4,11 +4,15 @@
 //!
 //! - `json.encode(value)` → string     — serde_json::to_string
 //! - `json.decode(string)` → value     — serde_json::from_str
-//! - `base64.encode(string)` → string  — encode to base64
-//! - `base64.decode(string)` → string  — decode from base64
+//! - `base64.encode(bytes)` → string   — encode to base64
+//! - `base64.decode(string)` → bytes   — decode from base64
 //! - `log.info(msg)`                   — tracing::info!
 //! - `log.warn(msg)`                   — tracing::warn!
 //! - `util.default_table()` → table    — empty table with safe __index
+//!
+//! Base64 works on bytes rather than on text, because the things it is for —
+//! a recording that arrived, a picture that has to travel inside a document —
+//! are not text.
 
 use mlua::{Lua, Result as LuaResult, Value};
 
@@ -47,19 +51,21 @@ fn register_json(lua: &Lua) -> LuaResult<()> {
 
 fn register_base64(lua: &Lua) -> LuaResult<()> {
     let base64 = lua.create_table()?;
+    // Bytes rather than text, both ways: a Lua string carries any bytes, and a
+    // converter that has to hand the host a recording it received, or read
+    // one it fetched, is working with bytes that are not text.
     base64.set(
         "encode",
-        lua.create_function(|_, bytes: String| Ok(base64_encode(bytes.as_bytes())))?,
+        lua.create_function(|_, bytes: mlua::String| Ok(base64_encode(&bytes.as_bytes())))?,
     )?;
     base64.set(
         "decode",
-        lua.create_function(|_, encoded: String| {
+        lua.create_function(|lua, encoded: mlua::String| {
             use base64::Engine;
             let bytes = base64::engine::general_purpose::STANDARD
-                .decode(encoded.as_bytes())
+                .decode(&encoded.as_bytes()[..])
                 .map_err(|e| mlua::Error::RuntimeError(format!("base64.decode: {e}")))?;
-            String::from_utf8(bytes)
-                .map_err(|e| mlua::Error::RuntimeError(format!("base64.decode: {e}")))
+            lua.create_string(bytes)
         })?,
     )?;
     lua.globals().set("base64", base64)?;
@@ -146,6 +152,24 @@ mod tests {
             assert(encoded == "aGVsbG8=", "base64 encode failed: " .. encoded)
             local decoded = base64.decode(encoded)
             assert(decoded == "hello", "base64 decode failed: " .. decoded)
+            "#,
+        )
+        .exec()
+        .unwrap();
+    }
+
+    #[test]
+    fn base64_carries_bytes_that_are_not_text() {
+        let lua = Lua::new();
+        register(&lua).unwrap();
+        // What a recording looks like rather than what a message looks like:
+        // these bytes are not UTF-8, and a converter has to be able to hand
+        // them over and get them back.
+        lua.load(
+            r#"
+            local bytes = base64.decode("//79AAECAwQF")
+            assert(#bytes == 9, "decoded length: " .. #bytes)
+            assert(base64.encode(bytes) == "//79AAECAwQF", "roundtrip changed the bytes")
             "#,
         )
         .exec()
