@@ -43,7 +43,12 @@ const ACT_TITLE_MAX = 40;
  * The card is where a board is agreed to. Everything under the table — the
  * frames and the clip — is made from what is written above it, so the table is
  * read-only once the reader has confirmed it, and the pictures are not asked for
- * until it has been.
+ * until it has been. Agreeing to it, and the pictures it leads to, are one row
+ * of actions under the table, in the order they are wanted.
+ *
+ * Every picture is an ask of its own: what this card's own painter is working
+ * on is asked for once and says so, while the rest of the card — and the acts
+ * beside it — go on being askable.
  */
 export function ActCard({
   story,
@@ -51,8 +56,9 @@ export function ActCard({
   act,
   index,
   guesses,
-  running,
+  boardBusy,
   busyKeyframes,
+  busyClips,
   videoBusy,
   voiceBusy,
   musicBusy,
@@ -64,9 +70,12 @@ export function ActCard({
   index: number;
   /** The cells of this act's board the reading chose rather than read. */
   guesses: StoryGuess[];
-  /** Whether a batch is out for the story at all, which is when none starts. */
-  running: boolean;
+  /** Whether this act's own table is being written just now. */
+  boardBusy: boolean;
+  /** The shots of this act being drawn just now, by the shot's own name. */
   busyKeyframes: Set<string>;
+  /** The shots of this act being filmed just now. */
+  busyClips: Set<string>;
   /** Whether this act's own clip is being made just now. */
   videoBusy: boolean;
   /** Whether this act's lines, or its score, are being made just now. */
@@ -112,6 +121,14 @@ export function ActCard({
   const missing = act.keyframes.filter(
     (keyframe) => keyframe.art.takes.length === 0,
   );
+  // What this card's own draw button hands over: the shots still missing a
+  // picture that are not already being drawn, since asking for a shot twice
+  // pays for it twice. It is also what the button counts, so its number is the
+  // work it would ask for — while a shot waits on its painter, the rest of the
+  // missing ones go on being askable.
+  const drawable = missing.filter(
+    (keyframe) => !busyKeyframes.has(keyframe.id),
+  );
   const drawn = act.keyframes.length - missing.length;
   const everyFrameConfirmed =
     act.keyframes.length > 0 &&
@@ -128,7 +145,7 @@ export function ActCard({
   const drawMissing = () => {
     const items = planKeyframeArt(
       story,
-      missing.map((keyframe) => ({
+      drawable.map((keyframe) => ({
         chapterId,
         actId: act.id,
         keyframeId: keyframe.id,
@@ -226,7 +243,7 @@ export function ActCard({
             <button
               className="story-chip story-act-confirm"
               data-testid={`story-act-keys-${index}`}
-              disabled={act.keyframes.length === 0 || running}
+              disabled={act.keyframes.length === 0 || boardBusy}
               onClick={() => write({ keysConfirmed: true })}
               title={
                 act.keyframes.length === 0
@@ -312,12 +329,11 @@ export function ActCard({
 
       <KeyframeTable
         act={act}
+        busyClips={busyClips}
         busyKeyframes={busyKeyframes}
         chapterId={chapterId}
         guesses={guesses}
-        running={running}
         story={story}
-        videoBusy={videoBusy}
       />
 
       <div className="story-act-foot">
@@ -355,16 +371,16 @@ export function ActCard({
           </span>
         )}
 
-        {missing.length > 0 && (
+        {drawable.length > 0 && (
           <button
             className="primary"
             data-testid={`story-act-draw-${index}`}
-            disabled={!locked || running || videoBusy}
+            disabled={!locked}
             onClick={drawMissing}
             title={locked ? undefined : t("story:storyboard.confirmTableFirst")}
             type="button"
           >
-            {t("story:storyboard.drawMissing", { count: missing.length })}
+            {t("story:storyboard.drawMissing", { count: drawable.length })}
           </button>
         )}
 
@@ -385,7 +401,7 @@ export function ActCard({
         ) : (
           <button
             data-testid={`story-act-images-confirm-${index}`}
-            disabled={!everyFrameConfirmed || running || videoBusy}
+            disabled={!everyFrameConfirmed}
             onClick={() => write({ imagesConfirmed: true })}
             title={
               everyFrameConfirmed
@@ -401,7 +417,7 @@ export function ActCard({
         {!perShot && clip === undefined && (
           <button
             data-testid={`story-act-video-go-${index}`}
-            disabled={!act.imagesConfirmed || running || videoBusy}
+            disabled={!act.imagesConfirmed || videoBusy}
             onClick={filmAct}
             title={
               act.imagesConfirmed
@@ -460,7 +476,7 @@ export function ActCard({
           {voice === undefined ? (
             <button
               data-testid={`story-act-voice-go-${index}`}
-              disabled={spoken === 0 || running || voiceBusy}
+              disabled={spoken === 0 || voiceBusy}
               onClick={speakAct}
               title={spoken === 0 ? t("story:voice.noLines") : undefined}
               type="button"
@@ -485,7 +501,7 @@ export function ActCard({
               <button
                 className="link"
                 data-testid={`story-act-voice-again-${index}`}
-                disabled={running || voiceBusy}
+                disabled={voiceBusy}
                 onClick={speakAct}
                 type="button"
               >
@@ -511,7 +527,7 @@ export function ActCard({
           {music === undefined ? (
             <button
               data-testid={`story-act-music-go-${index}`}
-              disabled={!hasSound || running || musicBusy}
+              disabled={!hasSound || musicBusy}
               onClick={scoreAct}
               title={hasSound ? undefined : t("story:voice.noSound")}
               type="button"
@@ -534,7 +550,7 @@ export function ActCard({
               <button
                 className="link"
                 data-testid={`story-act-music-again-${index}`}
-                disabled={running || musicBusy}
+                disabled={musicBusy}
                 onClick={scoreAct}
                 type="button"
               >

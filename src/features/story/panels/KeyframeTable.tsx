@@ -55,25 +55,22 @@ export function KeyframeTable({
   chapterId,
   act,
   guesses,
-  running,
   busyKeyframes,
-  videoBusy,
+  busyClips,
 }: {
   story: StoryDocument;
   chapterId: string;
   act: StoryAct;
   /** The cells whose framing the reading chose rather than read. */
   guesses: StoryGuess[];
-  /** Whether a batch is out for the story at all, which is when none starts. */
-  running: boolean;
-  /** The shots being drawn or filmed just now, by the place's own name. */
+  /** The shots being drawn just now, by the place's own name. */
   busyKeyframes: Set<string>;
-  /** Whether this act's own clip is being made just now. */
-  videoBusy: boolean;
+  /** The shots being filmed just now, by the place's own name. */
+  busyClips: Set<string>;
 }) {
   const { t } = useTranslation();
   const [dialogueAt, setDialogueAt] = useState<string | null>(null);
-  const locked = act.keysConfirmed || running;
+  const locked = act.keysConfirmed;
   const perShot = story.shotGranularity === "keyframe";
 
   const addShot = () => {
@@ -105,6 +102,7 @@ export function KeyframeTable({
             <KeyframeRow
               act={act}
               busy={busyKeyframes.has(keyframe.id)}
+              clipBusy={busyClips.has(keyframe.id)}
               chapterId={chapterId}
               dialogueOpen={dialogueAt === keyframe.id}
               guesses={guesses.filter((guess) => guess.keyframe === index + 1)}
@@ -117,7 +115,6 @@ export function KeyframeTable({
               }
               perShot={perShot}
               story={story}
-              videoBusy={videoBusy}
             />
           ))}
         </tbody>
@@ -153,7 +150,7 @@ function KeyframeRow({
   locked,
   perShot,
   busy,
-  videoBusy,
+  clipBusy,
   dialogueOpen,
   onDialogue,
 }: {
@@ -166,7 +163,8 @@ function KeyframeRow({
   locked: boolean;
   perShot: boolean;
   busy: boolean;
-  videoBusy: boolean;
+  /** Whether this shot's own clip is being made just now. */
+  clipBusy: boolean;
   dialogueOpen: boolean;
   onDialogue: () => void;
 }) {
@@ -319,7 +317,7 @@ function KeyframeRow({
         <td>
           <StorySlotView
             busy={busy}
-            canGenerate={act.keysConfirmed && !videoBusy}
+            canGenerate={act.keysConfirmed}
             disabledReason={
               act.keysConfirmed
                 ? undefined
@@ -347,7 +345,7 @@ function KeyframeRow({
               <button
                 className="link"
                 data-testid={`story-kf-video-${index}`}
-                disabled={!act.imagesConfirmed || videoBusy}
+                disabled={!act.imagesConfirmed || clipBusy}
                 onClick={film}
                 title={
                   act.imagesConfirmed
@@ -356,7 +354,7 @@ function KeyframeRow({
                 }
                 type="button"
               >
-                {videoBusy
+                {clipBusy
                   ? t("story:panels.drawing")
                   : t("story:storyboard.film")}
               </button>

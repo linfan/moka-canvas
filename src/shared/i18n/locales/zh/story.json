@@ -129,6 +129,7 @@
     "retryFailed": "再问一次",
     "openSettings": "打开设置",
     "busy": "{{done}}/{{total}}…",
+    "generating": "生成中",
     "targetGone": "{{label}} 已经不在这个故事里了。",
     "storyGone": "这批作业要讲的故事已经不在了。",
     "unreadableAnswer": "{{at}} 的回答读不出来；原话已留给你手动修正。",

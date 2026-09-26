@@ -21,8 +21,10 @@ import {
   buildStoryMokaFile,
   storyIds,
 } from "../../../shared/domain/fixtures";
+import { createAct, createKeyframe } from "../../../shared/domain/factories";
 import { currentTake } from "../../../shared/domain/story";
 import { clampSeconds } from "../jobs/plan";
+import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { StoryPage } from "../StoryPage";
 import { useStoryJobStore } from "../stores/storyJobStore";
@@ -37,6 +39,12 @@ let starts: Array<{ kind: StoryJobKind; items: StoryJobItemDraft[] }> = [];
 let held: StoryJobRecord[] = [];
 /** What each piece of the next batch is answered with, by the piece's id. */
 let answers: Record<string, string> = {};
+/**
+ * The pieces that have come home with a file, by the piece's id, when the test
+ * answers only some of them. Left empty, the whole batch answers at once, which
+ * is what most of these tests want.
+ */
+let landed: Record<string, string[]> = {};
 
 /** The server under the test, as the other steps' tests serve it. */
 function serving(): void {
@@ -132,21 +140,33 @@ function batchOf(
 
 /** The same batch as it comes home, every piece answered as the test said. */
 function answered(record: StoryJobRecord): StoryJobRecord {
-  return {
-    ...record,
-    status: "succeeded",
-    items: record.items.map((item) => ({
+  const partial = Object.keys(landed).length > 0;
+  const items = record.items.map((item) => {
+    const files = partial
+      ? landed[item.id]
+      : [`asset-${item.id.replace(/[^\w-]/g, "-")}`];
+    if (files === undefined) return item;
+    return {
       ...item,
       status: "succeeded" as const,
-      assetIds: [`asset-${item.id.replace(/[^\w-]/g, "-")}`],
+      assetIds: files,
       ...(answers[item.id] !== undefined ? { text: answers[item.id] } : {}),
-    })),
+    };
+  });
+  // A batch still owing a piece is still out, which is what a look at it says
+  // whether or not some of its answers have landed.
+  return {
+    ...record,
+    status: items.every((item) => item.status === "succeeded")
+      ? "succeeded"
+      : "running",
+    items,
   };
 }
 
-/** The batch the room started last, coming home with its answers. */
-async function comesBack(): Promise<void> {
-  const found = held.find((job) => job.id === `job-${starts.length}`);
+/** The batch the room started, coming home with its answers. */
+async function comesBack(which = starts.length): Promise<void> {
+  const found = held.find((job) => job.id === `job-${which}`);
   if (found === undefined) throw new Error("a batch was started first");
   await act(async () => {
     await useStoryJobStore.getState().adopt(found.id);
@@ -218,6 +238,50 @@ function withoutThePlace(): MokaFile {
   const moka = withOpenTable();
   settle(moka.stories![0], "末班车车厢", (element) => {
     element.main = { takes: [], confirmed: false };
+  });
+  return moka;
+}
+
+/**
+ * The same telling with its first act's table agreed to and both of its shots
+ * still waiting for a picture: the state a board is in just after the reader
+ * has read it and said yes to it.
+ */
+function withUndrawnFrames(): MokaFile {
+  const moka = boarded();
+  const act = moka.stories![0].chapters[0]!.acts[0]!;
+  act.keysConfirmed = true;
+  act.imagesConfirmed = false;
+  for (const keyframe of act.keyframes) {
+    keyframe.art = { takes: [], confirmed: false };
+  }
+  return moka;
+}
+
+/**
+ * The same act with one more shot, none of them drawn — room for a batch to be
+ * out on one shot while the shots beside it go on being askable.
+ */
+function withThreeUndrawnShots(): MokaFile {
+  const moka = withUndrawnFrames();
+  const act = moka.stories![0].chapters[0]!.acts[0]!;
+  act.keyframes = [
+    ...act.keyframes,
+    createKeyframe(act.keyframes.length, "medium", "static", "eyeLevel"),
+  ];
+  return moka;
+}
+
+/**
+ * The same episode with a second act whose table nobody has agreed to yet: the
+ * act a batch drawing the first one must leave alone.
+ */
+function withASecondOpenAct(): MokaFile {
+  const moka = withThreeUndrawnShots();
+  const chapter = moka.stories![0].chapters[0]!;
+  chapter.acts.push({
+    ...createAct("第 2 幕 空车厢", "灯管忽明忽暗。"),
+    keyframes: [createKeyframe(0)],
   });
   return moka;
 }
@@ -302,6 +366,7 @@ beforeEach(() => {
   starts = [];
   held = [];
   answers = {};
+  landed = {};
   serving();
   localStorage.clear();
   useProjectStore.getState().close();
@@ -376,6 +441,149 @@ describe("writing an episode's board", () => {
     expect(item?.prompt).toContain("2. 周");
     expect(item?.prompt).toContain("3. 末班车车厢");
     expect(item?.prompt).toContain("4. 旧车票");
+  });
+
+  it("agrees to the table, and leaves a clear way back to it", async () => {
+    openAtBoard(withOpenTable());
+    const first = card(0);
+    const confirm = () => within(first).getByTestId("story-act-keys-0");
+
+    // The drawer is shut until the table has been agreed to.
+    expect(
+      (within(first).getByTestId("story-act-draw-0") as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+
+    fireEvent.click(confirm());
+    await waitFor(() => expect(acts()[0]?.keysConfirmed).toBe(true));
+    expect(within(first).getByTestId("story-act-keys-on-0").textContent).toBe(
+      "Table agreed to ✓",
+    );
+    expect(
+      (within(first).getByTestId("story-act-draw-0") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+
+    // Unsaid, the framing is the reader's to change again, and agreeing to it
+    // once more is a step of the history like the ones before it.
+    const before = useHistoryStore.getState().undoStack.length;
+    fireEvent.click(within(first).getByTestId("story-act-unlock-0"));
+    expect(acts()[0]?.keysConfirmed).toBe(false);
+    fireEvent.change(within(first).getByTestId("story-kf-size-1"), {
+      target: { value: "medium" },
+    });
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[1]?.shotSize).toBe("medium"),
+    );
+    fireEvent.click(confirm());
+    expect(acts()[0]?.keysConfirmed).toBe(true);
+    expect(useHistoryStore.getState().undoStack).toHaveLength(before + 3);
+  });
+
+  it("waits on the shot being drawn while the rest of the act stays askable", async () => {
+    openAtBoard(withASecondOpenAct());
+    const first = card(0);
+
+    // Two shots of the one act are asked for on their own, one after the other:
+    // two batches out for one act, which is what nothing about them needs.
+    fireEvent.click(within(first).getByTestId("story-kf-slot-0-generate"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    fireEvent.click(within(first).getByTestId("story-kf-slot-1-generate"));
+    await waitFor(() => expect(starts).toHaveLength(2));
+
+    // The shots being drawn say so, offer no second ask of themselves — and the
+    // shot nobody is drawing is still one a reader can ask for on its own.
+    for (const at of [0, 1]) {
+      const slot = within(first).getByTestId(`story-kf-slot-${at}`);
+      expect(slot.textContent).toContain("Drawing…");
+      expect(
+        within(slot).queryByTestId(`story-kf-slot-${at}-generate`),
+      ).toBeNull();
+    }
+    const own = within(first).getByTestId(
+      "story-kf-slot-2-generate",
+    ) as HTMLButtonElement;
+    expect(own.disabled).toBe(false);
+    // Which is also what the act's own button and the board's count: the work
+    // still to ask for, not the work already handed over.
+    expect(within(first).getByTestId("story-act-draw-0").textContent).toBe(
+      "Draw the missing frames (1)",
+    );
+    expect(screen.getByTestId("story-board-draw-missing").textContent).toBe(
+      "Draw every missing frame (1)",
+    );
+
+    // One of the two answers while the other is still being painted: the place
+    // it landed in shows it, the place still being drawn still says so, and the
+    // rest of the episode is the reader's throughout — a batch drawing one shot
+    // is not the whole board waiting.
+    landed[`keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`] = [
+      "asset-frame-first",
+    ];
+    await comesBack(1);
+    await waitFor(() =>
+      expect(
+        within(first).getByTestId("story-kf-slot-0").querySelector("img"),
+      ).not.toBeNull(),
+    );
+    expect(within(first).getByTestId("story-kf-slot-1").textContent).toContain(
+      "Drawing…",
+    );
+    const second = card(1);
+    expect(
+      (within(second).getByTestId("story-kf-size-0") as HTMLSelectElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (within(second).getByTestId("story-act-keys-1") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByTestId("story-board-generate") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("shows a shot's picture as it lands while the rest are still being drawn", async () => {
+    openAtBoard(withUndrawnFrames());
+    const first = card(0);
+    fireEvent.click(within(first).getByTestId("story-act-draw-0"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+
+    // The first of the two answers while the batch is still out: its own place
+    // shows the picture rather than waiting for the whole batch to be over.
+    landed[`keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`] = [
+      "asset-frame-first",
+    ];
+    await comesBack();
+    await waitFor(() =>
+      expect(
+        within(first)
+          .getByTestId("story-kf-slot-0")
+          .querySelector("img")
+          ?.getAttribute("src"),
+      ).toBe("/api/v1/projects/current/assets/asset-frame-first"),
+    );
+
+    // The one still on its way shows a place being painted, not one drawn.
+    expect(within(first).getByTestId("story-kf-slot-1").textContent).toContain(
+      "Drawing…",
+    );
+    expect(
+      within(first).getByTestId("story-kf-slot-1").querySelector("img"),
+    ).toBeNull();
+
+    // The second lands and the batch is over: the act holds both pictures.
+    landed[`keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameSecond}`] = [
+      "asset-frame-second",
+    ];
+    await comesBack();
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[1]?.art.takes).toHaveLength(1),
+    );
+    expect(
+      within(first).getByTestId("story-kf-slot-1").querySelector("img"),
+    ).not.toBeNull();
   });
 
   it("says which references are missing rather than refusing to draw", async () => {

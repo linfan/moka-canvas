@@ -116,16 +116,34 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await expect(page.getByTestId("story-act-1")).toBeVisible();
     await expect(firstAct.getByTestId("story-kf-0")).toBeVisible();
 
-    // Nothing is drawn until the table has been agreed to.
+    // Nothing is drawn until the table has been agreed to, and the table is the
+    // reader's again the moment they take that back.
     await expect(firstAct.getByTestId("story-act-draw-0")).toBeDisabled();
+    await expect(firstAct.getByTestId("story-act-draw-0")).toHaveAttribute(
+      "title",
+      "Agree to the table first",
+    );
     await firstAct.getByTestId("story-act-keys-0").click();
     await expect(firstAct.getByTestId("story-act-draw-0")).toBeEnabled();
+    await expect(firstAct.getByTestId("story-act-keys-on-0")).toHaveText(
+      "Table agreed to ✓",
+    );
 
-    // One frame of the act, drawn from the cast step three settled on.
+    await firstAct.getByTestId("story-act-unlock-0").click();
+    await expect(firstAct.getByTestId("story-kf-size-0")).toBeEnabled();
+    await expect(firstAct.getByTestId("story-act-draw-0")).toBeDisabled();
+    await firstAct.getByTestId("story-act-keys-0").click();
+    await expect(firstAct.getByTestId("story-kf-size-0")).toBeDisabled();
+
+    // One frame of the act, drawn from the cast step three settled on, while
+    // its own ask is the only thing that waits on it.
     await firstAct.getByTestId("story-kf-slot-0-generate").click();
     await expect(firstAct.getByTestId("story-kf-slot-0-confirm")).toBeVisible({
       timeout: 60_000,
     });
+    await expect(
+      firstAct.getByTestId("story-kf-slot-1-generate"),
+    ).toBeEnabled();
     await firstAct.getByTestId("story-kf-slot-0-confirm").click();
 
     // The rest of the act at once, and then every frame has been agreed to.

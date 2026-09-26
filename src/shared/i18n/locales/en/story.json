@@ -129,6 +129,7 @@
     "retryFailed": "Ask again",
     "openSettings": "Open settings",
     "busy": "{{done}}/{{total}}…",
+    "generating": "Generating",
     "targetGone": "{{label}} is no longer in the story.",
     "storyGone": "The story this batch was told for is gone.",
     "unreadableAnswer": "The answer to {{at}} could not be read; it is kept for you to fix.",
