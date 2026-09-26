@@ -313,7 +313,7 @@
     "settled": "{{done}}/{{total}} acts agreed to",
     "generate": "Write the board",
     "generateAll": "Write the boards of every episode ({{count}})",
-    "regenerate": "Write this episode again",
+    "regenerate": "Write the board again",
     "regenerateTitle": "Write episode {{number}} again?",
     "regenerateBody": "The {{acts}} acts it holds now are replaced. The {{drawn}} frames and {{filmed}} clips already made stay on the shelf, but this episode no longer names them.",
     "regenerateNote": "An act in the same place keeps its pictures and clips and only has its words replaced.",

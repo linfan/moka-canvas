@@ -454,17 +454,40 @@ export function ActCard({
               />
             </button>
             {!perShot && (
-              <button
-                aria-pressed={act.videoConfirmed}
-                className="link"
-                data-testid={`story-act-video-confirm-${index}`}
-                onClick={() => write({ videoConfirmed: !act.videoConfirmed })}
-                type="button"
-              >
-                {act.videoConfirmed
-                  ? t("story:panels.confirmed")
-                  : t("story:panels.confirm")}
-              </button>
+              <>
+                {/*
+                  A clip already made is not the end of the ask that made it:
+                  the row that plays it keeps the ask beside it, the way an
+                  act's lines and score stand beside their own takes.
+                */}
+                <button
+                  className="link"
+                  data-testid={`story-act-video-again-${index}`}
+                  disabled={!act.imagesConfirmed || videoBusy}
+                  onClick={filmAct}
+                  title={
+                    act.imagesConfirmed
+                      ? undefined
+                      : t("story:storyboard.confirmImagesFirst")
+                  }
+                  type="button"
+                >
+                  {videoBusy
+                    ? t("story:panels.drawing")
+                    : t("story:voice.again")}
+                </button>
+                <button
+                  aria-pressed={act.videoConfirmed}
+                  className="link"
+                  data-testid={`story-act-video-confirm-${index}`}
+                  onClick={() => write({ videoConfirmed: !act.videoConfirmed })}
+                  type="button"
+                >
+                  {act.videoConfirmed
+                    ? t("story:panels.confirmed")
+                    : t("story:panels.confirm")}
+                </button>
+              </>
             )}
           </span>
         )}

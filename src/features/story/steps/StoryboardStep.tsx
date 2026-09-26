@@ -206,6 +206,11 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
   }
 
   const cost = actsRegenerationCost(chapter);
+  // One ask for the board stands in the header whichever state the episode is
+  // in: with no board it writes one straight away, and with one standing it
+  // takes the name of writing it again and asks first, since that replaces
+  // what is there.
+  const boarded = chapter.acts.length > 0;
 
   return (
     <div className="story-step-scroll" data-testid="story-step-storyboard-body">
@@ -288,29 +293,29 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
             )}
             <button
               className="primary"
-              data-testid="story-board-generate"
+              data-testid={
+                boarded ? "story-board-regenerate" : "story-board-generate"
+              }
               disabled={boarding(chapter.id)}
-              onClick={() =>
+              onClick={() => {
+                if (boarded) {
+                  setAsking(true);
+                  return;
+                }
                 void run(
                   story.id,
                   "storyboard",
                   planStoryboard(story, [chapter.id]),
-                )
-              }
+                );
+              }}
               type="button"
             >
-              {t("story:storyboard.generate")}
+              {t(
+                boarded
+                  ? "story:storyboard.regenerate"
+                  : "story:storyboard.generate",
+              )}
             </button>
-            {chapter.acts.length > 0 && (
-              <button
-                data-testid="story-board-regenerate"
-                disabled={boarding(chapter.id)}
-                onClick={() => setAsking(true)}
-                type="button"
-              >
-                {t("story:storyboard.regenerate")}
-              </button>
-            )}
             {boardable.length >= 2 && (
               <button
                 data-testid="story-board-all"
@@ -395,23 +400,6 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
         {chapter.acts.length === 0 ? (
           <div className="clip-empty" data-testid="story-board-empty">
             <p>{t("story:storyboard.empty")}</p>
-            <div className="story-step-actions">
-              <button
-                className="primary"
-                data-testid="story-board-empty-generate"
-                disabled={boarding(chapter.id)}
-                onClick={() =>
-                  void run(
-                    story.id,
-                    "storyboard",
-                    planStoryboard(story, [chapter.id]),
-                  )
-                }
-                type="button"
-              >
-                {t("story:storyboard.generate")}
-              </button>
-            </div>
           </div>
         ) : (
           <ol className="story-acts">

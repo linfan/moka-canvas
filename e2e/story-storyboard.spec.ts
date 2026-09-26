@@ -175,6 +175,17 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await firstAct.getByTestId("story-act-video-confirm-0").click();
     await expect(page.getByTestId("story-step-edit")).toBeEnabled();
 
+    // A clip is not the last word: the ask that made it stands beside the
+    // take, and asking again plays a fresh one in its place.
+    const played = firstAct.getByTestId("story-act-video-0").locator("video");
+    const wasPlaying = await played.getAttribute("src");
+    await expect(firstAct.getByTestId("story-act-video-again-0")).toHaveText(
+      "Ask for another",
+    );
+    await firstAct.getByTestId("story-act-video-again-0").click();
+    await expect.poll(() => played.getAttribute("src")).not.toBe(wasPlaying);
+    await expect(firstAct.getByTestId("story-act-video-again-0")).toBeEnabled();
+
     // The document is read back off the server, which is a flush behind the
     // window: what is asserted is what the server ends up holding.
     await expect.poll(async () => (await persistedBoard(page)).clips).toBe(1);
