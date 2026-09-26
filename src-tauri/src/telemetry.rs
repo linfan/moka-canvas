@@ -275,7 +275,7 @@ mod tests {
             model: "painter-1".into(),
             display_name: "Painter".into(),
             category: capability,
-            protocol: Protocol::OpenaiImages,
+            protocol: Protocol::from_wire_name("openaiImages"),
             url: "https://provider.example/v1/images/generations".into(),
         };
         ModelCall::new(&resolved, KEY.to_string(), GenerateConfig::default())

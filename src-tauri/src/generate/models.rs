@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{Capability, IsoTimestamp};
 use crate::metadata::{
-    protocols_for, Defaults, MetadataStore, ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot,
-    Preferences, Protocol, SecretInfo, SecretStorage,
+    Defaults, MetadataStore, ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot, Preferences,
+    Protocol, SecretInfo, SecretStorage,
 };
 
 use super::error::ProviderError;
@@ -233,40 +233,33 @@ impl ModelRepo {
         Ok(self.metadata.upsert_model(&draft).await?)
     }
 
-    /// Whether a protocol may serve one category of model: either it is on
-    /// the built-in list, or it names a Lua converter script the registry
-    /// holds under that category.
+    /// Whether a protocol may serve one category of model: it must name a
+    /// converter the models tree holds under that category.
     async fn protocol_serves(category: Capability, protocol: &Protocol) -> bool {
-        if protocols_for(category).contains(protocol) {
-            return true;
-        }
-        match protocol {
-            Protocol::LuaScript(name) => Self::offered_protocols(category)
-                .await
-                .iter()
-                .any(|offered| offered == name),
-            _ => false,
-        }
+        let name = protocol.wire_name();
+        Self::offered_protocols(category)
+            .await
+            .iter()
+            .any(|offered| offered == name)
     }
 
-    /// Every protocol name a category accepts: the built-ins plus whatever
-    /// the models directory holds under that category. When the converter
-    /// root is not set — a unit test, or a startup that failed before deploy
-    /// — only the built-ins are on offer.
+    /// Every protocol name a category accepts: the converters the models
+    /// directory holds under it. Before the root is set — a unit test, or a
+    /// startup that failed before deploy — the converters this build ships
+    /// stand in, which is the set deploy is about to write out.
     async fn offered_protocols(category: Capability) -> Vec<String> {
-        let mut offered: Vec<String> = protocols_for(category)
-            .iter()
-            .map(|protocol| protocol.as_str().to_string())
-            .collect();
         if let Some(root) = crate::converter::converter_root() {
             let registry = crate::converter::ConverterRegistry::load(root);
-            if let Some(group) = registry.protocols_for(category.as_str()) {
-                offered.extend(group.keys().cloned());
-            }
+            return registry
+                .protocols_for(category.as_str())
+                .map(|group| group.keys().cloned().collect())
+                .unwrap_or_default();
         }
-        offered.sort();
-        offered.dedup();
-        offered
+        crate::converter::deploy::BUILTIN_SCRIPTS
+            .iter()
+            .filter(|script| script.capability == category.as_str())
+            .map(|script| script.id.to_string())
+            .collect()
     }
 
     /// Removes a model configuration and its credential. A default that
@@ -407,7 +400,7 @@ impl ModelRepo {
         let draft = ModelDraft {
             id: SEED_MODEL_ID.to_string(),
             category: Capability::Text,
-            protocol: Protocol::OpenaiChat,
+            protocol: Protocol::from_wire_name("openaiChat"),
             url: SEED_URL.to_string(),
             model: SEED_MODEL_NAME.to_string(),
             display_name: SEED_DISPLAY_NAME.to_string(),
@@ -416,22 +409,6 @@ impl ModelRepo {
         };
         self.metadata.upsert_model(&draft).await?;
         Ok(true)
-    }
-}
-
-/// The images endpoint that accepts an edit, derived from the generation
-/// address a configuration carries.
-///
-/// A standard OpenAI-shaped address names both; anything else is used as it
-/// stands, because a gateway that serves one shape at one address is the
-/// likelier reading of a URL that names no `generations` to rename.
-pub fn image_edit_url(url: &str) -> String {
-    match url
-        .trim_end_matches('/')
-        .strip_suffix("/images/generations")
-    {
-        Some(prefix) => format!("{prefix}/images/edits"),
-        None => url.to_string(),
     }
 }
 
@@ -697,7 +674,10 @@ mod tests {
     use crate::metadata::{ImagePreferences, StoryPreferences, VideoPreferences};
 
     fn model(id: &str, category: Capability) -> ModelConfig {
-        let protocol = protocols_for(category)[0].clone();
+        let protocol = Protocol::from_wire_name(match category {
+            Capability::Image => "openaiImages",
+            _ => "openaiChat",
+        });
         ModelConfig {
             id: id.to_string(),
             category,
@@ -727,7 +707,7 @@ mod tests {
         assert_eq!(resolved.config_id, "painter");
         assert_eq!(resolved.model, "painter");
         assert_eq!(resolved.category, Capability::Image);
-        assert_eq!(resolved.protocol, Protocol::OpenaiImages);
+        assert_eq!(resolved.protocol, Protocol::from_wire_name("openaiImages"));
         assert_eq!(resolved.url, "https://provider.test/v1/chat/completions");
 
         let mismatch = resolve_in(&snapshot, "painter", Capability::Text).unwrap_err();
@@ -835,19 +815,6 @@ mod tests {
         snapshot.defaults.music = Some("gone".to_string());
         let music = resolve_music_within(&snapshot).unwrap();
         assert_eq!(music.config_id, "speaker");
-    }
-
-    #[test]
-    fn an_edit_address_is_derived_from_the_generation_one() {
-        assert_eq!(
-            image_edit_url("https://api.test/v1/images/generations"),
-            "https://api.test/v1/images/edits"
-        );
-        assert_eq!(
-            image_edit_url("https://gateway.test/image"),
-            "https://gateway.test/image",
-            "an address that names no generations is used as it stands"
-        );
     }
 
     #[test]

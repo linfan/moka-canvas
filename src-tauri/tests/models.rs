@@ -35,21 +35,27 @@ fn repo(root: &Path) -> ModelRepo {
 fn draft(id: &str, category: Capability) -> ModelDraft {
     let (protocol, url) = match category {
         Capability::Text => (
-            Protocol::OpenaiChat,
+            Protocol::new("openaiChat"),
             "https://provider.test/v1/chat/completions/",
         ),
         Capability::Image => (
-            Protocol::OpenaiImages,
+            Protocol::new("openaiImages"),
             "https://provider.test/v1/images/generations/",
         ),
         Capability::Audio => (
-            Protocol::OpenaiSpeech,
+            Protocol::new("openaiSpeech"),
             "https://provider.test/v1/audio/speech/",
         ),
-        Capability::Video => (Protocol::OpenaiVideos, "https://provider.test/v1/videos/"),
+        Capability::Video => (
+            Protocol::new("openaiVideos"),
+            "https://provider.test/v1/videos/",
+        ),
         // Nothing built in serves recognition: a suite that configures one
         // places a converter script, and the reserved protocol stands in here.
-        Capability::Asr => (Protocol::Custom, "https://provider.test/v1/transcription/"),
+        Capability::Asr => (
+            Protocol::new("custom"),
+            "https://provider.test/v1/transcription/",
+        ),
     };
     ModelDraft {
         id: id.to_string(),
@@ -175,7 +181,7 @@ async fn resolution_follows_the_configured_default() {
     let resolved = repo.resolve_default(Capability::Image).await.unwrap();
     assert_eq!(resolved.config_id, "painter");
     assert_eq!(resolved.model, "model-painter");
-    assert_eq!(resolved.protocol, Protocol::OpenaiImages);
+    assert_eq!(resolved.protocol, Protocol::new("openaiImages"));
     assert_eq!(resolved.url, "https://provider.test/v1/images/generations");
 
     let unset = repo.resolve_default(Capability::Video).await.unwrap_err();
@@ -235,7 +241,7 @@ async fn a_protocol_the_category_does_not_offer_is_refused() {
 
     // A chat endpoint cannot serve a video model, whatever its address says.
     let mismatched = ModelDraft {
-        protocol: Protocol::OpenaiChat,
+        protocol: Protocol::new("openaiChat"),
         ..draft("shot", Capability::Video)
     };
     let error = repo.upsert(mismatched).await.unwrap_err();
@@ -323,7 +329,7 @@ async fn recognition_is_served_by_its_script_and_by_nothing_else() {
     // And what recognition does offer is the script alone: a protocol built
     // for another category is refused rather than stored and never reached.
     let borrowed = ModelDraft {
-        protocol: Protocol::OpenaiChat,
+        protocol: Protocol::new("openaiChat"),
         ..draft("borrowed", Capability::Asr)
     };
     assert_eq!(

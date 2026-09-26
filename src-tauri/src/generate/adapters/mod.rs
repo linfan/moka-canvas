@@ -8,7 +8,6 @@
 
 mod custom;
 mod gemini;
-mod openai;
 
 use std::time::Duration;
 
@@ -203,7 +202,7 @@ impl ModelCall {
     }
 
     fn credentialed(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        if self.protocol.is_gemini() {
+        if matches!(self.protocol.wire_name(), "gemini" | "geminiVideo") {
             request.header(API_KEY_HEADER, &self.api_key)
         } else {
             request.bearer_auth(&self.api_key)
@@ -290,15 +289,13 @@ pub trait ProviderAdapter: Send + Sync {
 /// the configuration named, inside the adapter. Lua-backed protocols are
 /// dispatched to the Lua adapter, which loads the appropriate converter script.
 pub fn for_protocol(protocol: Protocol) -> &'static dyn ProviderAdapter {
-    match protocol {
-        Protocol::OpenaiChat
-        | Protocol::OpenaiResponses
-        | Protocol::OpenaiImages
-        | Protocol::OpenaiSpeech
-        | Protocol::OpenaiVideos => &openai::ADAPTER,
-        Protocol::Gemini | Protocol::GeminiVideo => &gemini::ADAPTER,
-        Protocol::Custom => &custom::ADAPTER,
-        Protocol::LuaScript(_) => converter::LuaAdapter::get(),
+    // Dispatch by name, because a name is all a protocol is: a shape this
+    // program implements itself answers to the names it invented, and every
+    // other name belongs to a converter script on this machine.
+    match protocol.wire_name() {
+        "gemini" | "geminiVideo" => &gemini::ADAPTER,
+        "custom" => &custom::ADAPTER,
+        _ => converter::LuaAdapter::get(),
     }
 }
 
@@ -1200,35 +1197,42 @@ mod tests {
         assert_eq!(origin_of("not a url"), None);
     }
 
+    /// A protocol's name is its whole identity. Every shape a converter script
+    /// serves — the OpenAI-compatible ones among them — arrives at the one
+    /// scripted adapter, whatever the name says, and the family Rust still
+    /// speaks itself stays apart from it.
     #[test]
     fn every_protocol_routes_to_the_adapter_of_its_family() {
-        let openai = for_protocol(Protocol::OpenaiChat);
-        for protocol in [
-            Protocol::OpenaiResponses,
-            Protocol::OpenaiImages,
-            Protocol::OpenaiSpeech,
-            Protocol::OpenaiVideos,
+        let scripted = for_protocol(Protocol::from_wire_name("openaiChat"));
+        for name in [
+            "openaiResponses",
+            "openaiImages",
+            "openaiSpeech",
+            "openaiVideos",
+            "bailianText",
+            "bailianImage",
+            "bailianSpeech",
+            "bailianMusic",
+            "bailianVideo",
+            "bailianAsr",
+            // A name nothing was written for is a converter that was not found
+            // yet, not a family: the scripted adapter is what looks and says so.
+            "aProtocolNobodyHasHeardOf",
         ] {
             assert!(
-                std::ptr::eq(openai, for_protocol(protocol.clone())),
-                "{protocol:?}"
+                std::ptr::eq(scripted, for_protocol(Protocol::from_wire_name(name))),
+                "{name}"
             );
         }
-        let gemini = for_protocol(Protocol::Gemini);
-        assert!(std::ptr::eq(gemini, for_protocol(Protocol::GeminiVideo)));
-        assert!(!std::ptr::eq(openai, gemini));
-        let reserved = for_protocol(Protocol::Custom);
-        assert!(!std::ptr::eq(openai, reserved));
-        // The Bailian shapes are converter scripts now, and every script of
-        // every platform is spoken by one adapter that no Rust family shares.
-        let scripted = for_protocol(Protocol::from_wire_name("bailianText"));
+        let gemini = for_protocol(Protocol::from_wire_name("gemini"));
         assert!(std::ptr::eq(
-            scripted,
-            for_protocol(Protocol::from_wire_name("bailianImage"))
+            gemini,
+            for_protocol(Protocol::from_wire_name("geminiVideo"))
         ));
-        assert!(!std::ptr::eq(openai, scripted));
-        assert!(!std::ptr::eq(gemini, scripted));
-        assert!(!std::ptr::eq(reserved, scripted));
+        let reserved = for_protocol(Protocol::from_wire_name("custom"));
+        assert!(!std::ptr::eq(scripted, gemini));
+        assert!(!std::ptr::eq(scripted, reserved));
+        assert!(!std::ptr::eq(gemini, reserved));
     }
 
     /// A real encoded image, so a test can assert on what sniffing and the

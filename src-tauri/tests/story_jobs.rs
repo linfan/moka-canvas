@@ -132,14 +132,16 @@ fn harness_at(tmp: &TempDir) -> Harness {
 impl Harness {
     /// Keeps one model of a capability, with its credential, and leaves the
     /// defaults alone: a model beside the deployment's own is what a reader's
-    /// own choice is.
+    /// own choice is. Every capability is served by a converter script here, so
+    /// the scripts are deployed before the first model is kept.
     async fn add_model(&self, base_url: &str, id: &str, capability: Capability) {
+        converters().await;
         let (protocol, suffix) = match capability {
-            Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
-            Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
-            Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
-            Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
-            Capability::Asr => (Protocol::Custom, "/v1/transcription"),
+            Capability::Text => (Protocol::new("openaiResponses"), "/v1/responses"),
+            Capability::Image => (Protocol::new("openaiImages"), "/v1/images/generations"),
+            Capability::Audio => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+            Capability::Video => (Protocol::new("openaiVideos"), "/v1/videos"),
+            Capability::Asr => (Protocol::new("bailianAsr"), "/v1/transcription"),
         };
         self.state
             .models
@@ -193,7 +195,7 @@ impl Harness {
                 category: Capability::Audio,
                 // A converter script's protocol: the model names it, and what
                 // it speaks is the script's business.
-                protocol: Protocol::LuaScript("bailianMusic".into()),
+                protocol: Protocol::new("bailianMusic"),
                 url: format!("{base_url}/api/v1/services/audio/music/generation"),
                 model: "fun-music-v1".into(),
                 display_name: id.into(),

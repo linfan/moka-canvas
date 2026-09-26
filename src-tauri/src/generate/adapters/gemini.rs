@@ -546,8 +546,11 @@ mod tests {
     /// nothing answers so that a body built for it cannot be sent by accident.
     fn channel(model_id: &str, capability: Capability) -> ModelCall {
         let (protocol, action) = match capability {
-            Capability::Video => (Protocol::GeminiVideo, ":predictLongRunning"),
-            _ => (Protocol::Gemini, ":generateContent"),
+            Capability::Video => (
+                Protocol::from_wire_name("geminiVideo"),
+                ":predictLongRunning",
+            ),
+            _ => (Protocol::from_wire_name("gemini"), ":generateContent"),
         };
         let resolved = ResolvedModel {
             config_id: model_id.to_string(),

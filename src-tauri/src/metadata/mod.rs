@@ -26,7 +26,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use thiserror::Error;
 
-pub use types::protocols_for;
 pub use types::{
     AudioPreferences, Defaults, DocumentInfo, ImagePreferences, MetadataInfo, MetadataStoreKind,
     ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot, Preferences, PromptItem, PromptPage,

@@ -5,5 +5,5 @@
   "script": "openai-videos.lua",
   "order": 10,
   "auth": { "header": "Authorization", "scheme": "Bearer" },
-  "version": 2
+  "version": 3
 }

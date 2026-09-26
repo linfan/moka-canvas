@@ -15,7 +15,7 @@ use moka_canvas::metadata::crypto::{KEY_ENV, MASTER_KEY_FILE};
 use moka_canvas::metadata::docs::{LEGACY_PROVIDERS_DOC, MODELS_DOC, RECENT_DOC, SECRETS_DOC};
 use moka_canvas::metadata::fs::{LOCK_FILE, SECRET_MODE, TMP_DIR};
 use moka_canvas::metadata::{
-    self, MetadataError, MetadataStore, ModelDraft, RecentProject, SecretStorage,
+    self, MetadataError, MetadataStore, ModelDraft, Protocol, RecentProject, SecretStorage,
 };
 
 const PLAINTEXT_KEY: &str = "sk-plaintext-value";
@@ -41,7 +41,7 @@ fn draft(id: &str) -> ModelDraft {
     ModelDraft {
         id: id.to_string(),
         category: moka_canvas::domain::Capability::Text,
-        protocol: Default::default(),
+        protocol: Protocol::new("openaiChat"),
         url: "https://provider.test/v1/chat/completions".to_string(),
         model: format!("model-{id}"),
         display_name: format!("Model {id}"),

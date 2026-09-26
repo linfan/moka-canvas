@@ -6,5 +6,5 @@
   "order": 10,
   "auth": { "header": "Authorization", "scheme": "Bearer" },
   "features": { "mask": true },
-  "version": 2
+  "version": 3
 }

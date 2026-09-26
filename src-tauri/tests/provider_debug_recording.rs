@@ -47,7 +47,7 @@ fn channel(base_url: &str) -> ModelCall {
         model: "gpt-5.5".into(),
         display_name: "GPT-5.5".into(),
         category: Capability::Text,
-        protocol: Protocol::OpenaiResponses,
+        protocol: Protocol::new("openaiResponses"),
         url: format!("{base_url}/v1/responses"),
     };
     ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
@@ -130,6 +130,21 @@ fn read(root: &Path, name: &str, which: &str) -> Value {
     serde_json::from_slice(&bytes).expect("the record is JSON")
 }
 
+/// Deploys the built-in converter scripts, which is also what points the
+/// process-wide converter root at them. Every protocol here is served by a
+/// script, and a script is only found through that root. The root is set once
+/// per process, so the directory is leaked to outlive the test.
+async fn deploy_scripts() {
+    if moka_canvas::converter::converter_root().is_some() {
+        return;
+    }
+    let converter = tempfile::tempdir().expect("a converter directory");
+    let path: &'static std::path::Path = Box::leak(converter.keep().into_boxed_path());
+    moka_canvas::converter::deploy::ensure_deployed(path)
+        .await
+        .expect("the built-in scripts deploy");
+}
+
 /// The one kind a call is named for, found in the index by the address it went
 /// to, which is how a reader would look for it.
 fn find<'a>(lines: &'a [Value], kind: &str) -> &'a Value {
@@ -141,6 +156,7 @@ fn find<'a>(lines: &'a [Value], kind: &str) -> &'a Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_call_that_really_went_out_is_written_down_whole() {
+    deploy_scripts().await;
     let temp = tempfile::tempdir().expect("a directory to record into");
     let root = record_into(temp.path()).await;
 
@@ -180,7 +196,7 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
     .await;
 
     let call = channel(&base_url);
-    let adapter = for_protocol(Protocol::OpenaiResponses);
+    let adapter = for_protocol(Protocol::new("openaiResponses"));
 
     let asked = generation("describe a lantern", json!({}));
     let answered = adapter
@@ -209,7 +225,7 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
             model: "gpt-5.5".into(),
             display_name: "A voice".into(),
             category: Capability::Audio,
-            protocol: Protocol::OpenaiSpeech,
+            protocol: Protocol::new("openaiSpeech"),
             url: format!("{base_url}/v1/audio/speech"),
         },
         API_KEY.to_string(),

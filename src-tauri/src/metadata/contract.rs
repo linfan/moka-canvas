@@ -163,7 +163,7 @@ fn draft(id: &str, category: Capability) -> ModelDraft {
     ModelDraft {
         id: id.to_string(),
         category,
-        protocol: Protocol::OpenaiChat,
+        protocol: Protocol::from_wire_name("openaiChat"),
         url: "https://provider.example/v1/chat/completions".to_string(),
         model: format!("model-{id}"),
         display_name: format!("Model {id}"),
@@ -262,7 +262,7 @@ async fn upsert_replaces_the_whole_model(store: &dyn MetadataStore) -> Result<()
     .await?;
     let mut changed = draft("replaced", Capability::Image);
     changed.url = "https://provider.example/v1/images/generations".to_string();
-    changed.protocol = Protocol::OpenaiImages;
+    changed.protocol = Protocol::from_wire_name("openaiImages");
     changed.display_name = "Renamed".to_string();
     describe("upsert again", store.upsert_model(&changed)).await?;
     let snapshot = describe("snapshot", store.models_snapshot()).await?;
@@ -278,7 +278,7 @@ async fn upsert_replaces_the_whole_model(store: &dyn MetadataStore) -> Result<()
         ));
     }
     if models[0].category != Capability::Image
-        || models[0].protocol != Protocol::OpenaiImages
+        || models[0].protocol != Protocol::from_wire_name("openaiImages")
         || models[0].display_name != "Renamed"
     {
         return Err(format!(

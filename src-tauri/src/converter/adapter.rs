@@ -33,7 +33,6 @@ use crate::generate::media::{MediaInput, MultipartBody};
 use crate::generate::{
     AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
 };
-use crate::metadata::Protocol;
 
 /// How many exchanges one step may take before a script is stopped.
 ///
@@ -164,7 +163,8 @@ impl ProviderAdapter for LuaAdapter {
         let session = Session::open(call)?;
         if !session.has("build_task_request") {
             return Err(ProviderError::invalid(format!(
-                "the '{}' converter does not start jobs",
+                "{} generation has no job to start under the '{}' converter",
+                request.capability.as_str(),
                 call.protocol.wire_name()
             )));
         }
@@ -240,11 +240,30 @@ impl ProviderAdapter for LuaAdapter {
         )
         .await?;
 
+        if ended.gone {
+            return Err(ProviderError::TaskExpired {
+                task: task.id.clone(),
+            });
+        }
+
         if let Some(error) = ended.reply.get("error").and_then(Value::as_str) {
             match ended.reply.get("status").and_then(Value::as_str) {
                 Some("expired") => {
                     return Err(ProviderError::TaskExpired {
                         task: task.id.clone(),
+                    })
+                }
+                // A job that ran and ended badly is not a failed look: it is
+                // what the job did, and a client reading it is owed the
+                // provider's own words and whether waiting would help.
+                Some("failed") => {
+                    return Ok(TaskState::Failed {
+                        message: error.to_string(),
+                        retryable: ended
+                            .reply
+                            .get("retryable")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                     })
                 }
                 _ => return Err(ProviderError::Rejected(error.to_string())),
@@ -288,14 +307,15 @@ impl ProviderAdapter for LuaAdapter {
                     retry_after_ms: interval_ms,
                 })
             }
-            Some("failed") => Err(ProviderError::Rejected(
-                ended
+            Some("failed") => Ok(TaskState::Failed {
+                message: ended
                     .reply
                     .get("error")
                     .and_then(Value::as_str)
-                    .unwrap_or("job failed")
+                    .unwrap_or("the job failed without saying why")
                     .to_string(),
-            )),
+                retryable: false,
+            }),
             Some(other) => Err(ProviderError::Rejected(format!(
                 "unexpected status: {other}"
             ))),
@@ -319,11 +339,7 @@ struct Session {
 impl Session {
     /// Opens the converter the configured protocol names.
     fn open(call: &ModelCall) -> Result<Self, ProviderError> {
-        let Protocol::LuaScript(name) = &call.protocol else {
-            return Err(ProviderError::invalid(
-                "this protocol is not a converter script",
-            ));
-        };
+        let name = call.protocol.wire_name();
         let root = CONVERTER_ROOT
             .get()
             .ok_or_else(|| ProviderError::invalid("converter root not initialised"))?;
@@ -435,10 +451,13 @@ impl Session {
 }
 
 /// What a step ended with: the script's last reply, and the bytes of the answer
-/// it read — which is where an item that says `raw` comes from.
+/// it read — which is where an item that says `raw` comes from. A `gone` step
+/// has no reply to speak of: the provider answered that it no longer knows the
+/// job that was being polled.
 struct Ended {
     reply: Value,
     body: Vec<u8>,
+    gone: bool,
 }
 
 /// Runs the exchanges a build hook asked for, and returns the reply that ended
@@ -492,6 +511,18 @@ async fn follow(
         // status, and a script that read them all as one thing would report a
         // rate limit as a refusal nothing may retry.
         if !reads_failure(&exchange_step.request) && !succeeded(reply.status) {
+            // A poll answered with "no such job" is the end of the looking
+            // rather than a refusal of the request: the provider said it in a
+            // status, and every polling protocol means the same by it. Handed
+            // back untouched, because what that means for a client — start
+            // over rather than wait — is the caller's to say.
+            if step.kind == Kind::TaskPoll && matches!(reply.status, 404 | 410) {
+                return Ok(Ended {
+                    reply: Value::Null,
+                    body: reply.body,
+                    gone: true,
+                });
+            }
             return Err(provider_error(&reply, &step.call.api_key));
         }
         let parsed = session.reply(&exchange_step.handler, &reply, state)?;
@@ -504,6 +535,7 @@ async fn follow(
                 return Ok(Ended {
                     reply: parsed,
                     body: reply.body,
+                    gone: false,
                 })
             }
         }
@@ -829,16 +861,19 @@ fn described_body(request_def: &Value, inputs: &[MediaInput]) -> Result<Body, Pr
 /// is this host's business rather than the script's. One file is written as
 /// `file = {part = ..., input = ...}`; several as `files = {{...}, {...}}`,
 /// which is what an edit that sends a mask beside its picture needs.
+///
+/// Fields are written in the order of their names. A Lua table of them has no
+/// order to keep — its pairs come out in whatever order the hash puts them —
+/// and a body that differs between two runs of the same request is no use to
+/// anybody, least of all a test.
 fn multipart_body(
     shape: &Value,
     inputs: &[MediaInput],
 ) -> Result<(Vec<u8>, String), ProviderError> {
     let mut body = MultipartBody::new();
-    if let Some(fields) = shape.get("fields").and_then(Value::as_object) {
-        for (name, value) in fields {
-            if let Some(text) = field_text(value) {
-                body = body.field(name, &text);
-            }
+    for (name, value) in named_fields(shape) {
+        if let Some(text) = field_text(&value) {
+            body = body.field(&name, &text);
         }
     }
     let files: Vec<&Value> = match shape.get("files") {
@@ -863,6 +898,22 @@ fn multipart_body(
         body = body.file(part, media);
     }
     Ok(body.finish())
+}
+
+/// A script's form fields, by name and in the order their names sort.
+fn named_fields(shape: &Value) -> Vec<(String, Value)> {
+    let mut fields: Vec<(String, Value)> = shape
+        .get("fields")
+        .and_then(Value::as_object)
+        .map(|fields| {
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    fields.sort_by(|(a, _), (b, _)| a.cmp(b));
+    fields
 }
 
 /// A form field as text. A script may write a number or a flag where a field is

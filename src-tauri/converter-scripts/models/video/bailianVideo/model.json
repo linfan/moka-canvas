@@ -5,5 +5,5 @@
   "script": "bailian-video.lua",
   "order": 30,
   "auth": { "header": "Authorization", "scheme": "Bearer" },
-  "version": 3
+  "version": 4
 }

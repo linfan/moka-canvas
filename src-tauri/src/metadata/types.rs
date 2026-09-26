@@ -48,144 +48,32 @@ pub struct RecentProject {
 
 /// The wire protocol a model configuration speaks.
 ///
-/// One variant per endpoint shape rather than one per vendor: the category a
-/// model belongs to decides which of these are on offer, because a text model
-/// and a video model never speak the same endpoint even at the same provider.
-/// `Custom` is reserved; nothing implements it yet. `LuaScript` names a
-/// converter script the user placed in the converter directory (or one of the
-/// built-in scripts that was deployed there).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum Protocol {
-    /// OpenAI-compatible chat completions (`POST .../chat/completions`).
-    #[default]
-    OpenaiChat,
-    /// OpenAI-compatible responses endpoint (`POST .../responses`).
-    OpenaiResponses,
-    /// OpenAI-compatible images API (`POST .../images/generations`).
-    OpenaiImages,
-    /// OpenAI-compatible speech API (`POST .../audio/speech`).
-    OpenaiSpeech,
-    /// OpenAI-compatible videos API (`POST .../videos`, polled).
-    OpenaiVideos,
-    /// Google Gemini content generation (`POST ...:generateContent`).
-    Gemini,
-    /// Google Gemini long-running prediction (`POST ...:predictLongRunning`).
-    GeminiVideo,
-    Custom,
-    /// A protocol backed by a Lua converter script. The string is the name of
-    /// the converter's directory in the models tree (e.g. `"wan3Video"`).
-    LuaScript(String),
-}
+/// A protocol is a name, not a case in this program. The name is the converter
+/// that serves it — a directory under the models tree holding a `model.json`
+/// and the script beside it — and everything about the shape it speaks, from
+/// the address it asks to the way its answer is read, belongs to that
+/// converter. A name this build has never heard of is therefore a protocol a
+/// stored configuration may speak, as long as a converter on this machine
+/// stands behind it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Protocol(String);
 
 impl Protocol {
-    /// The wire name, as it appears on the wire and in a settings form.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::OpenaiChat => "openaiChat",
-            Self::OpenaiResponses => "openaiResponses",
-            Self::OpenaiImages => "openaiImages",
-            Self::OpenaiSpeech => "openaiSpeech",
-            Self::OpenaiVideos => "openaiVideos",
-            Self::Gemini => "gemini",
-            Self::GeminiVideo => "geminiVideo",
-            Self::Custom => "custom",
-            Self::LuaScript(_) => "luaScript",
-        }
+    /// The protocol a name stands for. Whether anything serves that name is
+    /// answered by the models tree rather than here.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
     }
 
-    /// The variant name for display and serde.
-    pub fn wire_name(&self) -> String {
-        match self {
-            Self::LuaScript(name) => name.clone(),
-            other => other.as_str().to_string(),
-        }
-    }
-
-    /// Parse a wire name back into a Protocol.
+    /// The protocol a stored or configured name stands for.
     pub fn from_wire_name(name: &str) -> Self {
-        match name {
-            "openaiChat" => Self::OpenaiChat,
-            "openaiResponses" => Self::OpenaiResponses,
-            "openaiImages" => Self::OpenaiImages,
-            "openaiSpeech" => Self::OpenaiSpeech,
-            "openaiVideos" => Self::OpenaiVideos,
-            "gemini" => Self::Gemini,
-            "geminiVideo" => Self::GeminiVideo,
-            "custom" => Self::Custom,
-            other => Self::LuaScript(other.to_string()),
-        }
+        Self(name.to_string())
     }
 
-    /// True when the protocol speaks the OpenAI wire format: the credential
-    /// travels as a bearer token and bodies use OpenAI field names.
-    pub fn is_openai(&self) -> bool {
-        matches!(
-            self,
-            Self::OpenaiChat
-                | Self::OpenaiResponses
-                | Self::OpenaiImages
-                | Self::OpenaiSpeech
-                | Self::OpenaiVideos
-        )
-    }
-
-    /// True when the protocol speaks the Gemini wire format: the credential
-    /// travels in the `x-goog-api-key` header.
-    pub fn is_gemini(&self) -> bool {
-        matches!(self, Self::Gemini | Self::GeminiVideo)
-    }
-
-    /// True when this protocol is a Lua-backed script.
-    pub fn is_lua(&self) -> bool {
-        matches!(self, Self::LuaScript(_))
-    }
-}
-
-/// Custom serialization: built-in variants use their camelCase name, LuaScript
-/// uses its inner string directly.
-impl Serialize for Protocol {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.wire_name())
-    }
-}
-
-/// Custom deserialization: known string → built-in variant, everything else →
-/// LuaScript.
-impl<'de> Deserialize<'de> for Protocol {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(Self::from_wire_name(&s))
-    }
-}
-
-/// The built-in protocol choices on offer for one category of model.
-///
-/// The list differs per category because each category speaks a different
-/// endpoint shape: a text model posts messages, an image model posts a
-/// prompt to an images endpoint, and a video model starts a job. A Lua
-/// converter script the registry deploys under a category is offered beside
-/// these; validation reads both lists, so what may be chosen and what may
-/// be stored cannot disagree.
-pub fn protocols_for(capability: Capability) -> &'static [Protocol] {
-    match capability {
-        Capability::Text => &[
-            Protocol::OpenaiChat,
-            Protocol::OpenaiResponses,
-            Protocol::Gemini,
-        ],
-        Capability::Image => &[Protocol::OpenaiImages],
-        Capability::Audio => &[Protocol::OpenaiSpeech],
-        Capability::Video => &[Protocol::OpenaiVideos, Protocol::GeminiVideo],
-        // Speech recognition is a Lua script's business: no built-in protocol
-        // speaks a transcription endpoint, so the registry is the whole list
-        // and a deployment with no such script offers nothing to choose.
-        Capability::Asr => &[],
+    /// The name as it travels on the wire and reads in a settings form.
+    pub fn wire_name(&self) -> &str {
+        &self.0
     }
 }
 
@@ -203,8 +91,7 @@ pub struct ModelConfig {
     pub id: String,
     /// What the model generates; also the settings tab it appears under.
     pub category: Capability,
-    /// The wire format the endpoint speaks; must be one of
-    /// [`protocols_for(category)`].
+    /// The wire format the endpoint speaks; a name the models tree serves.
     pub protocol: Protocol,
     /// The complete endpoint address requests are sent to — not a base URL.
     /// For example `https://api.openai.com/v1/chat/completions` or
@@ -548,82 +435,31 @@ mod tests {
     }
 
     #[test]
-    fn protocols_serialize_as_camel_case_names() {
-        assert_eq!(
-            serde_json::to_string(&Protocol::OpenaiChat).unwrap(),
-            "\"openaiChat\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Protocol::OpenaiResponses).unwrap(),
-            "\"openaiResponses\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Protocol::Gemini).unwrap(),
-            "\"gemini\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Protocol::GeminiVideo).unwrap(),
-            "\"geminiVideo\""
-        );
-        // A name is read back as the variant it names, so a configuration
-        // written by one build is understood by the next.
-        for protocol in [Protocol::OpenaiChat, Protocol::GeminiVideo] {
-            let written = serde_json::to_string(&protocol).unwrap();
+    fn protocols_serialize_as_the_names_they_are() {
+        for name in ["openaiChat", "openaiResponses", "gemini", "geminiVideo"] {
+            let protocol = Protocol::new(name);
             assert_eq!(
-                serde_json::from_str::<Protocol>(&written).unwrap(),
+                serde_json::to_string(&protocol).unwrap(),
+                format!("\"{name}\"")
+            );
+            // A name is read back as itself, so a configuration written by one
+            // build is understood by the next.
+            assert_eq!(
+                serde_json::from_str::<Protocol>(&format!("\"{name}\"")).unwrap(),
                 protocol
             );
         }
 
-        // A converter's id is carried as it stands rather than as a variant of
-        // its own, which is what lets a protocol arrive as a directory without
-        // a name for it being written down here first.
+        // A converter's id is carried as it stands rather than as a case of its
+        // own, which is what lets a protocol arrive as a directory without a
+        // name for it being written down in this program first.
         let scripted = Protocol::from_wire_name("wan3Image");
-        assert!(scripted.is_lua());
         assert_eq!(scripted.wire_name(), "wan3Image");
         assert_eq!(serde_json::to_string(&scripted).unwrap(), "\"wan3Image\"");
         assert_eq!(
             serde_json::from_str::<Protocol>("\"wan3Image\"").unwrap(),
             scripted
         );
-    }
-
-    #[test]
-    fn each_category_offers_its_own_protocol_list() {
-        // A video model never speaks a chat endpoint, so the lists cannot be
-        // one shared constant.
-        assert_eq!(
-            protocols_for(Capability::Text),
-            &[
-                Protocol::OpenaiChat,
-                Protocol::OpenaiResponses,
-                Protocol::Gemini
-            ]
-        );
-        assert_eq!(
-            protocols_for(Capability::Video),
-            &[Protocol::OpenaiVideos, Protocol::GeminiVideo]
-        );
-        assert_eq!(protocols_for(Capability::Image), &[Protocol::OpenaiImages]);
-        assert!(!protocols_for(Capability::Image).contains(&Protocol::OpenaiChat));
-        // Recognition is a converter script's business: no built-in protocol
-        // speaks a transcription endpoint.
-        assert!(protocols_for(Capability::Asr).is_empty());
-    }
-
-    #[test]
-    fn protocol_families_split_by_wire_format() {
-        assert!(Protocol::OpenaiChat.is_openai());
-        assert!(Protocol::OpenaiVideos.is_openai());
-        assert!(!Protocol::OpenaiChat.is_gemini());
-        assert!(Protocol::Gemini.is_gemini());
-        assert!(Protocol::GeminiVideo.is_gemini());
-        assert!(!Protocol::Gemini.is_openai());
-        // A converter is neither family: the credential it declares is where
-        // its key rides, whatever shape its bodies are in.
-        assert!(!Protocol::from_wire_name("bailianText").is_openai());
-        assert!(!Protocol::from_wire_name("bailianText").is_gemini());
-        assert!(Protocol::from_wire_name("bailianText").is_lua());
     }
 
     #[test]
@@ -644,7 +480,7 @@ mod tests {
         let config = ModelConfig {
             id: "gpt-4o".to_string(),
             category: Capability::Text,
-            protocol: Protocol::OpenaiChat,
+            protocol: Protocol::new("openaiChat"),
             url: "https://api.openai.com/v1/chat/completions".to_string(),
             model: "gpt-4o".to_string(),
             display_name: "GPT-4o".to_string(),
@@ -655,6 +491,7 @@ mod tests {
         assert!(!json.contains("api_key"), "{json}");
         assert!(json.contains("\"displayName\""), "{json}");
         assert!(json.contains("\"category\":\"text\""), "{json}");
+        assert!(json.contains("\"protocol\":\"openaiChat\""), "{json}");
     }
 
     #[test]

@@ -124,27 +124,60 @@ async fn serve(routes: Router) -> String {
     format!("http://{address}")
 }
 
-/// A model configuration resolved to one call on a throwaway provider. The
-/// category picks the default protocol its endpoint shape speaks.
+/// A model configuration resolved to one call on a throwaway provider, at the
+/// endpoint address a capability speaks under the OpenAI-compatible
+/// converters.
 fn channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
-    let protocol = match capability {
-        Capability::Text => Protocol::OpenaiChat,
-        Capability::Image => Protocol::OpenaiImages,
-        Capability::Audio => Protocol::OpenaiSpeech,
-        Capability::Video => Protocol::OpenaiVideos,
-        // Recognition is a converter script's job; the reserved protocol is
-        // what a call to it stands in as here.
-        Capability::Asr => Protocol::Custom,
+    let (protocol, path) = match capability {
+        Capability::Text => ("openaiChat", "/v1/chat/completions"),
+        Capability::Image => ("openaiImages", "/v1/images/generations"),
+        Capability::Audio => ("openaiSpeech", "/v1/audio/speech"),
+        Capability::Video => ("openaiVideos", "/v1/videos"),
+        // Recognition is served by a converter of its own; what it is asked at
+        // is that converter's business, and no test here asks it anything.
+        Capability::Asr => ("bailianAsr", "/api/v1/services/audio/asr/transcription"),
     };
-    speaking(protocol, base_url, model_id, capability)
+    at(protocol, base_url, model_id, capability, path)
+}
+
+/// A model configuration resolved to one call under a named converter, at an
+/// address on a throwaway provider's base address.
+fn at(
+    protocol: &str,
+    base_url: &str,
+    model_id: &str,
+    capability: Capability,
+    path: &str,
+) -> ModelCall {
+    let resolved = ResolvedModel {
+        config_id: model_id.into(),
+        model: model_id.to_string(),
+        display_name: format!("Model {model_id}"),
+        category: capability,
+        protocol: Protocol::from_wire_name(protocol),
+        url: format!("{base_url}{path}"),
+    };
+    ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
+        .expect("a client builds")
 }
 
 fn gemini_channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
-    let protocol = match capability {
-        Capability::Video => Protocol::GeminiVideo,
-        _ => Protocol::Gemini,
-    };
-    speaking(protocol, base_url, model_id, capability)
+    match capability {
+        Capability::Video => at(
+            "geminiVideo",
+            base_url,
+            model_id,
+            capability,
+            &format!("/v1beta/models/{model_id}:predictLongRunning"),
+        ),
+        _ => at(
+            "gemini",
+            base_url,
+            model_id,
+            capability,
+            &format!("/v1beta/models/{model_id}:generateContent"),
+        ),
+    }
 }
 
 /// A Bailian configuration: the converters of that platform, addressed at the
@@ -160,16 +193,7 @@ fn bailian_channel(base_url: &str, model_id: &str, capability: Capability) -> Mo
             "/api/v1/services/aigc/text-generation/generation",
         ),
     };
-    let resolved = ResolvedModel {
-        config_id: model_id.into(),
-        model: model_id.to_string(),
-        display_name: format!("Model {model_id}"),
-        category: capability,
-        protocol: Protocol::from_wire_name(id),
-        url: format!("{base_url}{path}"),
-    };
-    ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
-        .expect("a client builds")
+    at(id, base_url, model_id, capability, path)
 }
 
 /// The models directory the converters under test are read from.
@@ -195,49 +219,15 @@ async fn converter_root() -> &'static std::path::Path {
     .await
 }
 
-/// A model configuration resolved to one call speaking a named protocol.
-fn speaking(
-    protocol: Protocol,
-    base_url: &str,
-    model_id: &str,
-    capability: Capability,
-) -> ModelCall {
-    let resolved = ResolvedModel {
-        config_id: model_id.into(),
-        model: model_id.to_string(),
-        display_name: format!("Model {model_id}"),
-        category: capability,
-        protocol: protocol.clone(),
-        url: endpoint_of(protocol, base_url, model_id),
-    };
-    ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
-        .expect("a client builds")
-}
-
-/// The complete endpoint address a protocol speaks at, on a throwaway
-/// provider's base address.
-fn endpoint_of(protocol: Protocol, base_url: &str, model_id: &str) -> String {
-    match protocol {
-        Protocol::OpenaiChat => format!("{base_url}/v1/chat/completions"),
-        Protocol::OpenaiResponses => format!("{base_url}/v1/responses"),
-        Protocol::OpenaiImages => format!("{base_url}/v1/images/generations"),
-        Protocol::OpenaiSpeech => format!("{base_url}/v1/audio/speech"),
-        Protocol::OpenaiVideos => format!("{base_url}/v1/videos"),
-        Protocol::Gemini => format!("{base_url}/v1beta/models/{model_id}:generateContent"),
-        Protocol::GeminiVideo => {
-            format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
-        }
-        Protocol::Custom => format!("{base_url}/v1/chat/completions"),
-        Protocol::LuaScript(_) => format!("{base_url}/v1/lua/{model_id}"),
-    }
-}
-
-fn openai_adapter() -> &'static dyn ProviderAdapter {
-    for_protocol(Protocol::OpenaiChat)
+/// The adapter every converter script is spoken by, which is deployed before
+/// it is asked anything.
+async fn scripted() -> &'static dyn ProviderAdapter {
+    converter_root().await;
+    LuaAdapter::get()
 }
 
 fn gemini_adapter() -> &'static dyn ProviderAdapter {
-    for_protocol(Protocol::Gemini)
+    for_protocol(Protocol::new("gemini"))
 }
 
 fn generation(capability: Capability, prompt: &str, params: Value) -> GenerateRequest {
@@ -364,11 +354,12 @@ async fn a_streamed_text_generation_is_aggregated_before_it_is_stored() {
     ))
     .await;
 
-    let call = speaking(
-        Protocol::OpenaiResponses,
+    let call = at(
+        "openaiResponses",
         &base_url,
         "gpt-5.5",
         Capability::Text,
+        "/v1/responses",
     );
     let request = generation(
         Capability::Text,
@@ -377,7 +368,8 @@ async fn a_streamed_text_generation_is_aggregated_before_it_is_stored() {
     );
     let (sink, seen) = watching();
 
-    let result = openai_adapter()
+    let result = scripted()
+        .await
         .generate_stream(&call, &request, &[], &sink, &Cancel::new())
         .await
         .expect("the stream is read to its end");
@@ -428,14 +420,16 @@ async fn a_request_a_provider_refused_is_not_repeated_on_another_endpoint() {
     )
     .await;
 
-    let call = speaking(
-        Protocol::OpenaiResponses,
+    let call = at(
+        "openaiResponses",
         &base_url,
         "gpt-5.5",
         Capability::Text,
+        "/v1/responses",
     );
     let request = generation(Capability::Text, "describe a lantern", json!({}));
-    let error = openai_adapter()
+    let error = scripted()
+        .await
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect_err("the provider understood and refused the request");
@@ -471,7 +465,8 @@ async fn a_chat_protocol_configuration_is_asked_at_the_chat_endpoint() {
     // The address a configuration carries is the whole endpoint: the chat
     // protocol posts to it and nowhere else.
     let call = channel(&base_url, "llama-3.3", Capability::Text);
-    let result = openai_adapter()
+    let result = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Text, "say nothing", json!({})),
@@ -518,7 +513,8 @@ async fn an_image_generation_arrives_inline_with_its_size_read_from_the_bytes() 
         "a cat",
         json!({ "size": "1024x1024", "count": 1 }),
     );
-    let result = openai_adapter()
+    let result = scripted()
+        .await
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect("the image arrives");
@@ -581,7 +577,8 @@ async fn an_image_left_on_the_channels_own_host_is_fetched_with_the_credential()
     .await;
 
     let call = channel(&base_url, "gpt-image-2", Capability::Image);
-    let result = openai_adapter()
+    let result = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -634,7 +631,8 @@ async fn an_image_left_on_another_host_is_fetched_without_the_credential() {
     .await;
 
     let call = channel(&base_url, "gpt-image-2", Capability::Image);
-    let result = openai_adapter()
+    let result = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -698,7 +696,8 @@ async fn references_turn_an_image_generation_into_a_multipart_edit() {
         reference("second", InputRole::Reference),
         reference("mask", InputRole::Mask),
     ];
-    let result = openai_adapter()
+    let result = scripted()
+        .await
         .generate(
             &call,
             &generation(
@@ -754,7 +753,8 @@ async fn an_address_with_no_edit_door_is_refused_rather_than_asked_another_way()
     .await;
 
     let call = channel(&base_url, "qwen-image-3.0", Capability::Image);
-    let error = openai_adapter()
+    let error = scripted()
+        .await
         .generate(
             &call,
             &generation(
@@ -803,7 +803,8 @@ async fn audio_arrives_as_the_bytes_the_provider_answered_with() {
         "read this aloud",
         json!({ "voice": "alloy", "format": "wav" }),
     );
-    let result = openai_adapter()
+    let result = scripted()
+        .await
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect("the audio arrives");
@@ -837,7 +838,8 @@ async fn an_audio_answer_that_is_not_audio_is_refused_rather_than_stored() {
     .await;
 
     let call = channel(&base_url, "a-voice", Capability::Audio);
-    let error = openai_adapter()
+    let error = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Audio, "read this", json!({})),
@@ -922,7 +924,8 @@ async fn a_video_generation_is_started_polled_and_collected() {
         "a slow pan",
         json!({ "seconds": 6, "ratio": "16:9" }),
     );
-    let task = openai_adapter()
+    let task = scripted()
+        .await
         .create_task(&call, &request, &inputs, &cancel)
         .await
         .expect("the job starts");
@@ -932,7 +935,7 @@ async fn a_video_generation_is_started_polled_and_collected() {
     assert!(!task.id.is_empty());
     assert_ne!(task.id, task.reference);
     assert_eq!(task.reference, "job-1");
-    assert_eq!(task.protocol, Protocol::OpenaiVideos);
+    assert_eq!(task.protocol, Protocol::new("openaiVideos"));
     assert_eq!(task.capability, Capability::Video);
     assert_eq!(task.model, "a-video-model");
     assert!(!task.created_at.is_empty());
@@ -946,13 +949,14 @@ async fn a_video_generation_is_started_polled_and_collected() {
     );
     assert!(sent["last_frame"].is_string(), "{sent}");
 
-    match openai_adapter().poll_task(&call, &task, &cancel).await {
+    match scripted().await.poll_task(&call, &task, &cancel).await {
         Ok(TaskState::Pending { retry_after_ms }) => {
             assert!(retry_after_ms > 0, "a poll is worth waiting for")
         }
         other => panic!("expected a job still running, got {other:?}"),
     }
-    match openai_adapter()
+    match scripted()
+        .await
         .poll_task(&call, &task, &cancel)
         .await
         .expect("the job is collected")
@@ -986,13 +990,14 @@ async fn a_job_the_provider_has_forgotten_ends_the_polling() {
     let task = moka_canvas::generate::AsyncTask {
         id: "task-1".into(),
         reference: "job-gone".into(),
-        protocol: Protocol::OpenaiVideos,
+        protocol: Protocol::new("openaiVideos"),
         capability: Capability::Video,
         model: "a-video-model".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
     };
 
-    let error = openai_adapter()
+    let error = scripted()
+        .await
         .poll_task(&call, &task, &Cancel::new())
         .await
         .expect_err("the job is gone");
@@ -1021,13 +1026,14 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
     let task = moka_canvas::generate::AsyncTask {
         id: "task-2".into(),
         reference: "job-2".into(),
-        protocol: Protocol::OpenaiVideos,
+        protocol: Protocol::new("openaiVideos"),
         capability: Capability::Video,
         model: "a-video-model".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
     };
 
-    match openai_adapter()
+    match scripted()
+        .await
         .poll_task(&call, &task, &Cancel::new())
         .await
         .expect("the job answered")
@@ -1043,7 +1049,8 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_capability_with_no_job_is_not_started_as_one() {
     let call = channel("http://127.0.0.1:1", "gpt-image-2", Capability::Image);
-    let error = openai_adapter()
+    let error = scripted()
+        .await
         .create_task(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -1079,7 +1086,8 @@ async fn a_cancelled_generation_is_not_sent() {
     let cancel = Cancel::new();
     cancel.cancel();
     let call = channel(&base_url, "gpt-image-2", Capability::Image);
-    let error = openai_adapter()
+    let error = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Image, "a cat", json!({})),
@@ -1423,7 +1431,7 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
         "the handle a client polls with is ours"
     );
     assert_eq!(task.reference, "models/a-video-model/operations/job-1");
-    assert_eq!(task.protocol, Protocol::GeminiVideo);
+    assert_eq!(task.protocol, Protocol::new("geminiVideo"));
     assert_eq!(task.capability, Capability::Video);
     assert_eq!(task.model, "a-video-model");
 
@@ -1474,10 +1482,6 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
 
 /// The adapter both Bailian shapes run through, which is the converter host:
 /// each of them is a script now.
-fn bailian_adapter() -> &'static dyn ProviderAdapter {
-    LuaAdapter::get()
-}
-
 /// One choice of an answer, as this service spells it: the words of the answer
 /// under `content`, which is sometimes a string and sometimes a document.
 fn bailian_answer(content: Value) -> Value {
@@ -1493,7 +1497,6 @@ fn bailian_answer(content: Value) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_question_of_words_is_asked_at_the_address_it_names() {
-    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1512,7 +1515,8 @@ async fn a_bailian_question_of_words_is_asked_at_the_address_it_names() {
     let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
     let mut request = generation(Capability::Text, "describe a lantern", json!({}));
     request.system = Some("Answer in one sentence.".into());
-    let result = bailian_adapter()
+    let result = scripted()
+        .await
         .generate(&call, &request, &[], &Cancel::new())
         .await
         .expect("the answer arrives");
@@ -1544,7 +1548,6 @@ async fn a_bailian_question_of_words_is_asked_at_the_address_it_names() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_question_with_a_picture_moves_to_the_multimodal_service() {
-    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(
@@ -1570,7 +1573,8 @@ async fn a_bailian_question_with_a_picture_moves_to_the_multimodal_service() {
     let call = bailian_channel(&base_url, "qwen3-vl-plus", Capability::Text);
     let request = generation(Capability::Text, "what is in this picture", json!({}));
     let photo = reference("photo", InputRole::Reference);
-    let result = bailian_adapter()
+    let result = scripted()
+        .await
         .generate(&call, &request, &[photo], &Cancel::new())
         .await
         .expect("the answer arrives");
@@ -1601,7 +1605,6 @@ async fn not_for_a_question_with_a_picture() -> Response {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
-    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1628,7 +1631,8 @@ async fn a_bailian_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
         json!({ "stream": true }),
     );
     let (sink, seen) = watching();
-    let result = bailian_adapter()
+    let result = scripted()
+        .await
         .generate_stream(&call, &request, &[], &sink, &Cancel::new())
         .await
         .expect("the stream is read to its end");
@@ -1647,7 +1651,6 @@ async fn a_bailian_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_stream_that_complains_midway_is_refused_rather_than_truncated() {
-    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1672,7 +1675,8 @@ async fn a_bailian_stream_that_complains_midway_is_refused_rather_than_truncated
         json!({ "stream": true }),
     );
     let (sink, seen) = watching();
-    let error = bailian_adapter()
+    let error = scripted()
+        .await
         .generate_stream(&call, &request, &[], &sink, &Cancel::new())
         .await
         .expect_err("the service failed halfway through the answer");
@@ -1688,7 +1692,6 @@ async fn a_bailian_stream_that_complains_midway_is_refused_rather_than_truncated
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_failure_is_reported_in_the_services_own_words() {
-    converter_root().await;
     let recorded = Recorded::default();
     let refusing = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1712,7 +1715,8 @@ async fn a_bailian_failure_is_reported_in_the_services_own_words() {
     .await;
 
     let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
-    let error = bailian_adapter()
+    let error = scripted()
+        .await
         .generate(
             &call,
             &generation(
@@ -1738,7 +1742,6 @@ async fn a_bailian_failure_is_reported_in_the_services_own_words() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_picture_is_asked_for_and_fetched_from_where_it_was_left() {
-    converter_root().await;
     let picture = png(6, 5);
     let elsewhere = Recorded::default();
     let serving = elsewhere.clone();
@@ -1786,7 +1789,8 @@ async fn a_bailian_picture_is_asked_for_and_fetched_from_where_it_was_left() {
         "make it snow",
         json!({ "size": "1:1", "count": 1 }),
     );
-    let result = bailian_adapter()
+    let result = scripted()
+        .await
         .generate(&call, &request, &[photo], &Cancel::new())
         .await
         .expect("the drawing arrives");
@@ -1819,7 +1823,6 @@ async fn a_bailian_picture_is_asked_for_and_fetched_from_where_it_was_left() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_shape_is_sent_as_the_pixels_that_describe_it() {
-    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1862,7 +1865,8 @@ async fn a_bailian_shape_is_sent_as_the_pixels_that_describe_it() {
     .enumerate()
     {
         let request = generation(Capability::Image, "a lighthouse", json!({ "size": shape }));
-        bailian_adapter()
+        scripted()
+            .await
             .generate(&call, &request, &[], &Cancel::new())
             .await
             .expect("the drawing arrives");
@@ -1879,7 +1883,6 @@ async fn a_bailian_shape_is_sent_as_the_pixels_that_describe_it() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_refusal_that_arrived_as_a_success_is_an_error_rather_than_silence() {
-    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1901,7 +1904,8 @@ async fn a_bailian_refusal_that_arrived_as_a_success_is_an_error_rather_than_sil
     .await;
 
     let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
-    let error = bailian_adapter()
+    let error = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Text, "a lighthouse", json!({})),
@@ -1921,7 +1925,6 @@ async fn a_bailian_refusal_that_arrived_as_a_success_is_an_error_rather_than_sil
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bailian_answer_without_a_message_is_read_from_its_bare_text() {
-    converter_root().await;
     let recorded = Recorded::default();
     let answering = recorded.clone();
     let base_url = serve(Router::new().route(
@@ -1939,7 +1942,8 @@ async fn a_bailian_answer_without_a_message_is_read_from_its_bare_text() {
     .await;
 
     let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
-    let result = bailian_adapter()
+    let result = scripted()
+        .await
         .generate(
             &call,
             &generation(Capability::Text, "a lighthouse", json!({})),

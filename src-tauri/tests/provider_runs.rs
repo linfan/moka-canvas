@@ -81,6 +81,24 @@ struct Harness {
     tmp: TempDir,
 }
 
+/// The converter tree every test in this binary shares, deployed once.
+///
+/// The converter root is process-wide and is what a scripted protocol is found
+/// through, so the tree is deployed into a directory that outlives every test
+/// here: the first deploy wins the global root, and one that went away with the
+/// test that made it would leave the rest of the binary with no scripts at all.
+async fn converters() {
+    static ROOT: tokio::sync::OnceCell<TempDir> = tokio::sync::OnceCell::const_new();
+    ROOT.get_or_init(|| async {
+        let dir = TempDir::new().expect("a temporary converter tree");
+        moka_canvas::converter::deploy::ensure_deployed(dir.path())
+            .await
+            .expect("the built-in converters deploy");
+        dir
+    })
+    .await;
+}
+
 /// Opens the app over a temporary directory that already holds a master key.
 /// Server mode would create one on the first credential stored, but a
 /// generation cannot be placed without a credential to send, so the tier is
@@ -116,16 +134,19 @@ impl Harness {
     /// is what Settings does before a generation can be placed at all. One
     /// configuration per model, addressed at the endpoint its category speaks
     /// on the throwaway provider; text speaks the responses endpoint, which
-    /// is what the providers below serve.
+    /// is what the providers below serve. Every protocol is served by a
+    /// converter script, so the scripts are deployed before the first model is
+    /// configured.
     async fn configure(&self, base_url: &str, models: &[(&str, Capability)]) {
+        converters().await;
         let mut defaults = Defaults::default();
         for (id, capability) in models {
             let (protocol, suffix) = match capability {
-                Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
-                Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
-                Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
-                Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
-                Capability::Asr => (Protocol::Custom, "/v1/transcription"),
+                Capability::Text => (Protocol::new("openaiResponses"), "/v1/responses"),
+                Capability::Image => (Protocol::new("openaiImages"), "/v1/images/generations"),
+                Capability::Audio => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+                Capability::Video => (Protocol::new("openaiVideos"), "/v1/videos"),
+                Capability::Asr => (Protocol::new("bailianAsr"), "/v1/transcription"),
             };
             self.state
                 .models
@@ -910,7 +931,7 @@ async fn left_behind(harness: &Harness, root: &str, canvas_id: &str) -> (String,
     let note = serde_json::to_value(AsyncTask {
         id: task_id.clone(),
         reference: JOB.to_string(),
-        protocol: Protocol::OpenaiVideos,
+        protocol: Protocol::new("openaiVideos"),
         capability: Capability::Video,
         model: reference(SHOOTER),
         created_at: started,

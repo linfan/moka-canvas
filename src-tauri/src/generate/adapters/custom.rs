@@ -77,7 +77,7 @@ mod tests {
             model: "anything".into(),
             display_name: "Anything".into(),
             category: Capability::Text,
-            protocol: Protocol::Custom,
+            protocol: Protocol::from_wire_name("custom"),
             url: "https://example.invalid/v1/chat/completions".into(),
         };
         ModelCall::new(&resolved, "a-key".into(), GenerateConfig::default())
@@ -92,7 +92,7 @@ mod tests {
         let task = AsyncTask {
             id: "task-1".into(),
             reference: "job-1".into(),
-            protocol: Protocol::Custom,
+            protocol: Protocol::from_wire_name("custom"),
             capability: Capability::Video,
             model: call.config_id.clone(),
             created_at: "2026-01-01T00:00:00Z".into(),

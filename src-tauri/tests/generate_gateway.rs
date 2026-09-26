@@ -168,6 +168,7 @@ async fn rig() -> Rig {
 /// streamed answer is silence, and a test watching one cannot wait two minutes
 /// for a silence to be long enough.
 async fn rig_under_text_budget(text_timeout_seconds: u64) -> Rig {
+    deploy_scripts().await;
     let tmp = TempDir::new().expect("a temporary directory");
     let mut config = parse_test_config(tmp.path());
     // A test waits out its own retries, so a backoff that started at a second
@@ -251,34 +252,30 @@ fn model_via(id: &str, capability: Capability, protocol: Protocol) -> TestModel 
 
 fn default_protocol(capability: Capability) -> Protocol {
     match capability {
-        Capability::Text => Protocol::OpenaiChat,
-        Capability::Image => Protocol::OpenaiImages,
-        Capability::Audio => Protocol::OpenaiSpeech,
-        Capability::Video => Protocol::OpenaiVideos,
-        // Nothing built in speaks a recognition endpoint, so a test that wants
-        // one places a converter script by hand; until then the reserved
-        // protocol is what a recognition model is configured with.
-        Capability::Asr => Protocol::Custom,
+        Capability::Text => Protocol::new("openaiChat"),
+        Capability::Image => Protocol::new("openaiImages"),
+        Capability::Audio => Protocol::new("openaiSpeech"),
+        Capability::Video => Protocol::new("openaiVideos"),
+        // A test that wants a recognition model places a converter script of
+        // its own; this is only what such a call stands in as here.
+        Capability::Asr => Protocol::new("bailianAsr"),
     }
 }
 
 /// The complete endpoint address a protocol speaks at, on a throwaway
 /// provider's base address.
 fn endpoint_of(base_url: &str, protocol: Protocol, model_id: &str) -> String {
-    match protocol {
-        Protocol::OpenaiChat => format!("{base_url}/v1/chat/completions"),
-        Protocol::OpenaiResponses => format!("{base_url}/v1/responses"),
-        Protocol::OpenaiImages => format!("{base_url}/v1/images/generations"),
-        Protocol::OpenaiSpeech => format!("{base_url}/v1/audio/speech"),
-        Protocol::OpenaiVideos => format!("{base_url}/v1/videos"),
-        Protocol::Gemini => format!("{base_url}/v1beta/models/{model_id}:generateContent"),
-        Protocol::GeminiVideo => {
-            format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
-        }
-        Protocol::Custom => format!("{base_url}/v1/chat/completions"),
+    match protocol.wire_name() {
+        "openaiChat" => format!("{base_url}/v1/chat/completions"),
+        "openaiResponses" => format!("{base_url}/v1/responses"),
+        "openaiImages" => format!("{base_url}/v1/images/generations"),
+        "openaiSpeech" => format!("{base_url}/v1/audio/speech"),
+        "openaiVideos" => format!("{base_url}/v1/videos"),
+        "gemini" => format!("{base_url}/v1beta/models/{model_id}:generateContent"),
+        "geminiVideo" => format!("{base_url}/v1beta/models/{model_id}:predictLongRunning"),
         // Every converter script's address is the model's own, so the arm for
         // scripts needs no knowledge of any particular platform.
-        Protocol::LuaScript(_) => format!("{base_url}/v1/lua/{model_id}"),
+        _ => format!("{base_url}/v1/lua/{model_id}"),
     }
 }
 
@@ -364,7 +361,7 @@ async fn a_generation_goes_to_the_default_model_when_the_request_names_none() {
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -486,7 +483,7 @@ async fn each_capability_is_asked_at_the_address_that_serves_it() {
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -628,7 +625,7 @@ async fn a_channel_that_asked_to_be_waited_for_is_asked_again_after_that_wait() 
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -678,7 +675,7 @@ async fn a_credential_the_provider_rejected_is_reported_once() {
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -780,7 +777,7 @@ async fn a_model_with_no_stored_key_is_reported_before_anything_is_sent() {
         .upsert(ModelDraft {
             id: "gpt-5.5".into(),
             category: Capability::Text,
-            protocol: Protocol::OpenaiResponses,
+            protocol: Protocol::new("openaiResponses"),
             url: format!("{base_url}/v1/responses"),
             model: "gpt-5.5".into(),
             display_name: "GPT-5.5".into(),
@@ -827,7 +824,7 @@ async fn a_cancelled_generation_never_reaches_the_provider() {
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -951,7 +948,7 @@ async fn a_stream_that_keeps_producing_outlives_the_budget_meant_for_the_whole()
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -1001,7 +998,7 @@ async fn a_stream_that_goes_quiet_is_given_up_on() {
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -1039,7 +1036,7 @@ async fn a_streamed_answer_reaches_the_caller_as_it_arrives_and_comes_back_whole
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -1156,7 +1153,7 @@ async fn a_failure_after_something_was_streamed_is_not_asked_again() {
         vec![model_via(
             "gpt-5.5",
             Capability::Text,
-            Protocol::OpenaiResponses,
+            Protocol::new("openaiResponses"),
         )],
     )
     .await;
@@ -1379,9 +1376,14 @@ fn auth_of(headers: &axum::http::HeaderMap) -> Option<String> {
 }
 
 /// Deploys the built-in converter scripts, which is also what points the
-/// process-wide converter root at them. The root is set once per process, so
-/// the directory is leaked to outlive the test.
+/// process-wide converter root at them. Every protocol is served by a script,
+/// and a script is only found through that root. The root is set once per
+/// process, so the directory is leaked to outlive the test and later calls
+/// find the deploy already done.
 async fn deploy_scripts() {
+    if moka_canvas::converter::converter_root().is_some() {
+        return;
+    }
     let converter = TempDir::new().expect("a converter directory");
     let path: &'static std::path::Path = Box::leak(converter.keep().into_boxed_path());
     moka_canvas::converter::deploy::ensure_deployed(path)

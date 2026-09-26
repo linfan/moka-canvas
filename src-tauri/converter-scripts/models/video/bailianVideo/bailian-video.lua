@@ -89,12 +89,6 @@ function build_poll_request(call, task)
 end
 
 function parse_poll_response(status, headers, body)
-    if status < 200 or status >= 300 then
-        if status == 404 or status == 410 then
-            return {status = "expired", error = "Task not found (expired)"}
-        end
-        return {error = "HTTP " .. tostring(status) .. ": " .. body}
-    end
     local data = json.decode(body)
     local output = data.output or {}
     local task_status = output.task_status or "UNKNOWN"

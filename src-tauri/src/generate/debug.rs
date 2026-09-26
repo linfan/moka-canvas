@@ -92,7 +92,7 @@ impl From<&ModelCall> for Who {
         Self {
             config: call.config_id.clone(),
             model: call.model.clone(),
-            protocol: call.protocol.as_str().to_string(),
+            protocol: call.protocol.wire_name().to_string(),
             api_key: call.api_key.clone(),
         }
     }
@@ -1369,7 +1369,7 @@ mod tests {
                 config_id: "chan".into(),
                 model: "painter".into(),
                 display_name: "Painter".into(),
-                protocol: Protocol::OpenaiChat,
+                protocol: Protocol::from_wire_name("openaiChat"),
                 url: "https://api.example.invalid/v1/chat/completions".into(),
                 category: crate::domain::Capability::Text,
             },

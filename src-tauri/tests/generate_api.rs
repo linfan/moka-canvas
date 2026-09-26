@@ -61,16 +61,17 @@ fn harness() -> Harness {
 /// Points the app at throwaway models and makes them the defaults, which is
 /// what Settings does before a generation can be placed at all. One model
 /// configuration per entry, addressed at the endpoint its category speaks on
-/// the throwaway provider. Recognition is served by the deployed converter
-/// script, so a test that configures it deploys the scripts first.
+/// the throwaway provider. Every category is served by a converter script, so
+/// the scripts are deployed first.
 async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capability)]) {
+    deploy_scripts().await;
     let mut defaults = Defaults::default();
     for (id, capability) in models {
         let (protocol, suffix) = match capability {
-            Capability::Text => (Protocol::OpenaiResponses, "/v1/responses"),
-            Capability::Image => (Protocol::OpenaiImages, "/v1/images/generations"),
-            Capability::Audio => (Protocol::OpenaiSpeech, "/v1/audio/speech"),
-            Capability::Video => (Protocol::OpenaiVideos, "/v1/videos"),
+            Capability::Text => (Protocol::new("openaiResponses"), "/v1/responses"),
+            Capability::Image => (Protocol::new("openaiImages"), "/v1/images/generations"),
+            Capability::Audio => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+            Capability::Video => (Protocol::new("openaiVideos"), "/v1/videos"),
             Capability::Asr => (
                 Protocol::from_wire_name("bailianAsr"),
                 "/v1/services/audio/asr/transcription",
@@ -803,10 +804,14 @@ async fn a_provider_credential_never_appears_in_an_answer() {
 // ------------------------------------------------------------- recognition
 
 /// Deploys the built-in converter scripts, which is also what points the
-/// process-wide converter root at them. Recognition is served by a script, and
-/// a script is only found through that root. The root is set once per process,
-/// so the directory is leaked to outlive the test.
+/// process-wide converter root at them. Every category is served by a script,
+/// and a script is only found through that root. The root is set once per
+/// process, so the directory is leaked to outlive the test and later calls
+/// find the deploy already done.
 async fn deploy_scripts() {
+    if moka_canvas::converter::converter_root().is_some() {
+        return;
+    }
     let converter = TempDir::new().expect("a converter directory");
     let path: &'static std::path::Path = Box::leak(converter.keep().into_boxed_path());
     moka_canvas::converter::deploy::ensure_deployed(path)
