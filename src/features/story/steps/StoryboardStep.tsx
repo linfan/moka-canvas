@@ -19,6 +19,8 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
+import { StoryImportButton } from "../components/StoryImportButton";
+import { StepHeading } from "../components/StepHeading";
 import { ActCard } from "../panels/ActCard";
 import { chapterGuesses } from "../jobs/apply";
 import { jobKey, planKeyframeArt, planStoryboard } from "../jobs/plan";
@@ -215,7 +217,10 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-storyboard-body">
       <div className="story-step-wide">
-        <h2>{t("story:step.storyboard")}</h2>
+        <StepHeading
+          action={<StoryImportButton story={story} target="canvas" />}
+          step="storyboard"
+        />
         <p className="story-step-lead">{t("story:storyboard.lead")}</p>
         <StoryModelPicks
           places={["text", "image", "video", "audio", "music"]}

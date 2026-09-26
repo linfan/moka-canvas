@@ -676,8 +676,8 @@ export function planActMusic(
   ];
 }
 
-/** One line of dialogue as it is read aloud, with the tone in brackets. */
-function spokenLine(line: StoryDialogueLine): string {
+/** One line of dialogue as it reads in an ask, with the tone in brackets. */
+export function spokenLine(line: StoryDialogueLine): string {
   const words = line.text.trim();
   if (words === "") return "";
   const speaker = line.speaker.trim();
