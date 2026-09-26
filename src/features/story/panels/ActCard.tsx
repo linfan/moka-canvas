@@ -221,41 +221,6 @@ export function ActCard({
             {t("story:storyboard.clamped", { seconds })}
           </span>
         )}
-        <span className="story-act-state">
-          {locked ? (
-            <>
-              <span
-                className="story-chip is-on"
-                data-testid={`story-act-keys-on-${index}`}
-              >
-                {t("story:storyboard.keysConfirmed")}
-              </span>
-              <button
-                className="link"
-                data-testid={`story-act-unlock-${index}`}
-                onClick={() => write({ keysConfirmed: false })}
-                type="button"
-              >
-                {t("story:storyboard.changeTable")}
-              </button>
-            </>
-          ) : (
-            <button
-              className="story-chip story-act-confirm"
-              data-testid={`story-act-keys-${index}`}
-              disabled={act.keyframes.length === 0 || boardBusy}
-              onClick={() => write({ keysConfirmed: true })}
-              title={
-                act.keyframes.length === 0
-                  ? t("story:storyboard.noShots")
-                  : undefined
-              }
-              type="button"
-            >
-              {t("story:storyboard.confirmTable")}
-            </button>
-          )}
-        </span>
       </div>
 
       <div className="story-refs-row">
@@ -357,6 +322,45 @@ export function ActCard({
                 : t("story:storyboard.clipWaiting")}
         </span>
 
+        {/*
+          Agreeing to the table, and the way back to it: the one thing every
+          picture and every clip on this card is made from, so it is stated
+          where the work that follows it is asked for.
+        */}
+        {locked ? (
+          <>
+            <span
+              className="story-chip is-on"
+              data-testid={`story-act-keys-on-${index}`}
+            >
+              {t("story:storyboard.keysConfirmed")}
+            </span>
+            <button
+              className="link"
+              data-testid={`story-act-unlock-${index}`}
+              onClick={() => write({ keysConfirmed: false })}
+              type="button"
+            >
+              {t("story:storyboard.unconfirmTable")}
+            </button>
+          </>
+        ) : (
+          <button
+            className="story-act-confirm"
+            data-testid={`story-act-keys-${index}`}
+            disabled={act.keyframes.length === 0 || boardBusy}
+            onClick={() => write({ keysConfirmed: true })}
+            title={
+              act.keyframes.length === 0
+                ? t("story:storyboard.noShots")
+                : undefined
+            }
+            type="button"
+          >
+            {t("story:storyboard.confirmTable")}
+          </button>
+        )}
+
         {undrawn.length > 0 && (
           <span
             className="story-hint"
@@ -395,7 +399,7 @@ export function ActCard({
               onClick={() => write({ imagesConfirmed: false })}
               type="button"
             >
-              {t("story:storyboard.changeImages")}
+              {t("story:storyboard.unconfirmImages")}
             </button>
           </>
         ) : (

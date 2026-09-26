@@ -443,16 +443,20 @@ describe("writing an episode's board", () => {
     expect(item?.prompt).toContain("4. 旧车票");
   });
 
-  it("agrees to the table, and leaves a clear way back to it", async () => {
+  it("agrees to the table under it, and leaves a clear way back to it", async () => {
     openAtBoard(withOpenTable());
     const first = card(0);
     const confirm = () => within(first).getByTestId("story-act-keys-0");
 
-    // The drawer is shut until the table has been agreed to.
+    // The drawer is shut until the table has been agreed to, and the button
+    // that agrees to it stands with the pictures' own asks, under the table.
     expect(
       (within(first).getByTestId("story-act-draw-0") as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+    expect(confirm().parentElement).toBe(
+      within(first).getByTestId("story-act-draw-0").parentElement,
+    );
 
     fireEvent.click(confirm());
     await waitFor(() => expect(acts()[0]?.keysConfirmed).toBe(true));

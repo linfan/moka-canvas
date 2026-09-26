@@ -5284,6 +5284,13 @@ body.is-dragging-split {
   cursor: pointer;
 }
 
+/* Something the reader has said yes to, in the colour the room says it in
+   everywhere else: a description, a chapter's synopsis, a board's table. */
+.story-chip.is-on {
+  border-color: var(--success);
+  color: var(--success);
+}
+
 .story-flow-body {
   display: flex;
   flex: 1;
@@ -6396,15 +6403,12 @@ button > .story-spin {
   opacity: 1;
 }
 
-.story-act-state {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-  margin-left: auto;
-}
-
+/* The one thing a board does not move past: the pictures and the clips are
+   all made from the table, so agreeing to it is said as a button with a ring
+   around it rather than as another pill among the pills. */
 .story-act-confirm {
-  cursor: pointer;
+  border-color: var(--primary);
+  font-weight: 600;
 }
 
 .story-clamp {

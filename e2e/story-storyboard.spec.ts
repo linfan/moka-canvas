@@ -116,8 +116,9 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await expect(page.getByTestId("story-act-1")).toBeVisible();
     await expect(firstAct.getByTestId("story-kf-0")).toBeVisible();
 
-    // Nothing is drawn until the table has been agreed to, and the table is the
-    // reader's again the moment they take that back.
+    // Nothing is drawn until the table has been agreed to, and the button that
+    // agrees to it stands with the pictures' own asks, under the table: a board
+    // nobody agreed to has no way on from it.
     await expect(firstAct.getByTestId("story-act-draw-0")).toBeDisabled();
     await expect(firstAct.getByTestId("story-act-draw-0")).toHaveAttribute(
       "title",
@@ -129,6 +130,12 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
       "Table agreed to ✓",
     );
 
+    // Taking it back is the reader's own step, and taking it back is said in
+    // plain words rather than by a button called "change it": the words of the
+    // table are the reader's again until it is agreed to once more.
+    await expect(firstAct.getByTestId("story-act-unlock-0")).toHaveText(
+      "Unconfirm",
+    );
     await firstAct.getByTestId("story-act-unlock-0").click();
     await expect(firstAct.getByTestId("story-kf-size-0")).toBeEnabled();
     await expect(firstAct.getByTestId("story-act-draw-0")).toBeDisabled();
