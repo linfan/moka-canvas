@@ -1001,21 +1001,36 @@ pub async fn start_story_job(
     Ok((StatusCode::CREATED, Json(job)))
 }
 
+/// The batches a room is shown: the newest few, and every answer still owed one.
+///
+/// The window is what the room watches live — what is running, what just came
+/// home. A settled record whose answer was never read in is not history yet:
+/// it is a piece of writing the story is missing, and it is listed however old
+/// it is, because a room that could not see it would either lose the answer or
+/// write it in years later, over whatever the reader had said since.
 pub async fn list_story_jobs(
     State(state): State<ApiState>,
     Query(query): Query<StoryJobQuery>,
 ) -> Result<Json<Vec<StoryJobRecord>>, Problem> {
     let jobs = state.store.list_story_jobs().await?;
+    let mine = |job: &StoryJobRecord| {
+        query
+            .story_id
+            .as_deref()
+            .map(|story_id| job.story_id == story_id)
+            .unwrap_or(true)
+    };
+    let window = query.limit.unwrap_or(20).min(100);
+    let mut listed = 0;
     let jobs = jobs
         .into_iter()
         .filter(|job| {
-            query
-                .story_id
-                .as_deref()
-                .map(|story_id| job.story_id == story_id)
-                .unwrap_or(true)
+            if !mine(job) {
+                return false;
+            }
+            listed += 1;
+            listed <= window || job.read_at.is_none()
         })
-        .take(query.limit.unwrap_or(20).min(100))
         .collect();
     Ok(Json(jobs))
 }
@@ -1033,6 +1048,26 @@ pub async fn cancel_story_job(
     Path(id): Path<String>,
 ) -> Result<Json<StoryJobRecord>, Problem> {
     let job = state.story_jobs.cancel(&id).await?;
+    Ok(Json(job))
+}
+
+/// Says a batch's answer has been read into its story.
+///
+/// The room is the only thing that reads a document, so it is the only thing
+/// that can say an answer has landed — and it says so once the batch has
+/// settled, which is when no driver will write the record again. A batch still
+/// being driven is answered as it stands and not marked: pieces of it are
+/// still to come, and a mark on it would leave them unread by every room
+/// opened after this one.
+pub async fn read_story_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<StoryJobRecord>, Problem> {
+    let mut job = state.store.get_story_job(&id).await?;
+    if job.status.is_terminal() && job.read_at.is_none() {
+        job.read_at = Some(now_iso());
+        job = state.store.update_story_job(job).await?;
+    }
     Ok(Json(job))
 }
 

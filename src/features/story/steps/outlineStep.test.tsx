@@ -63,6 +63,22 @@ function serving(): void {
           }),
         );
       if (url.includes("/story/jobs")) {
+        // A batch's answer being written down as read: the record as it stands
+        // with the room's note on it, which is what the server answers with.
+        const readIn = /\/story\/jobs\/([^/?]+)\/read$/.exec(url);
+        if (readIn !== null) {
+          const found = held.find((job) => job.id === readIn[1]);
+          const marked =
+            found === undefined
+              ? undefined
+              : { ...found, readAt: "2026-01-02T00:00:00Z" };
+          if (marked !== undefined) {
+            held = held.map((job) => (job.id === marked.id ? marked : job));
+          }
+          return marked === undefined
+            ? json({ code: "NOT_FOUND", message: "no" }, 404)
+            : json(marked);
+        }
         if (method === "POST") {
           const body = JSON.parse(String(init?.body ?? "{}")) as {
             kind: StoryJobKind;

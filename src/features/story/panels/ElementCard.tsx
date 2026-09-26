@@ -32,8 +32,8 @@ const EMPTY_SLOT: StorySlot = { takes: [], confirmed: false };
  * views above the words, and what is written here is the element's own — its
  * name, the chapters it stands in, and the description every drawing of it is
  * made from. A description that has been agreed to is read-only until it is
- * unlocked, since it is the words everything else about this element is
- * judged against.
+ * unsaid, since it is the words everything else about this element is judged
+ * against.
  */
 export function ElementCard({
   story,
@@ -50,13 +50,15 @@ export function ElementCard({
 }) {
   const { t } = useTranslation();
   const [removing, setRemoving] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const run = useStoryRun();
   const main = currentTake(element.main);
   const character = element.kind === "character";
-  // Agreed to, and not being rewritten just now: the words are the document's.
-  const locked = element.descriptionConfirmed && !editing;
+  // Agreed to: the words are the document's until they are unsaid. What is
+  // agreed to is not rewritten in passing — a description is what every
+  // picture of this element is made from, so changing it is a step of its
+  // own, taken on purpose.
+  const locked = element.descriptionConfirmed;
   const description = useField(element.description, (value) => {
     if (value !== element.description)
       write(story, element, { description: value });
@@ -184,17 +186,8 @@ export function ElementCard({
             </span>
             <button
               className="link"
-              data-testid={`story-element-unlock-${element.name}`}
-              onClick={() => setEditing(true)}
-              type="button"
-            >
-              {t("story:elements.change")}
-            </button>
-            <button
-              className="link"
               data-testid={`story-element-unconfirm-${element.name}`}
               onClick={() => {
-                setEditing(false);
                 description.commit();
                 write(story, element, { descriptionConfirmed: false });
               }}

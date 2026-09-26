@@ -216,12 +216,15 @@ impl FsProjectStore {
         }
     }
 
-    /// Keeps the records worth keeping: the recent ones, and every batch that
-    /// has not settled.
+    /// Keeps the records worth keeping: the recent ones, every batch that has
+    /// not settled, and every answer the story has not been given yet.
     ///
-    /// A record that has ended is a note about work already applied, so the
-    /// old ones are clutter; one still in progress is what a client is
-    /// following and is never dropped, however old it looks.
+    /// A record that has ended *and been read in* is a note about work already
+    /// applied, so the old ones are clutter. One still in progress is what a
+    /// client is following; one whose answer no room has read is a piece of
+    /// writing the story is missing. Neither is dropped, however old it looks:
+    /// a record thrown away is that answer lost, or — worse — one that comes
+    /// back later and is written over whatever the reader has said since.
     fn prune_story_jobs(root: &Path, keep: usize) {
         let dir = Self::story_jobs_dir(root);
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -244,7 +247,7 @@ impl FsProjectStore {
         // Newest first, so everything past the ceiling is the oldest.
         jobs.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
         for (index, (path, job)) in jobs.iter().enumerate() {
-            if job.status.is_terminal() && index >= keep {
+            if job.status.is_terminal() && job.read_at.is_some() && index >= keep {
                 let _ = std::fs::remove_file(path);
             }
         }

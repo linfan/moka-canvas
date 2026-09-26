@@ -206,6 +206,13 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/projects/current/story/jobs/{id}/cancel",
             post(routes::cancel_story_job),
         )
+        // A batch's answer is written into the story by the room, so the room
+        // is what says it has been: every room opened later leaves an answer
+        // that says so alone.
+        .route(
+            "/api/v1/projects/current/story/jobs/{id}/read",
+            post(routes::read_story_job),
+        )
         // Beside the run routes rather than under /generate: it answers from the
         // open document, so it belongs where the rest of the document is read.
         .route(

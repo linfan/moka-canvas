@@ -309,6 +309,19 @@ impl Harness {
         (status, body_json(response).await)
     }
 
+    /// Writes a batch's answer down as read, which is what a room does once
+    /// what it answered is really in the story.
+    async fn read_in(&self, id: &str) -> (StatusCode, Value) {
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/projects/current/story/jobs/{id}/read"))
+            .body(Body::empty())
+            .expect("a request is built");
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        (status, body_json(response).await)
+    }
+
     /// Waits a batch out, which the provider here answers fast enough that a
     /// few seconds without a terminal state is a batch that never settles.
     async fn settled(&self, id: &str) -> Value {
@@ -1579,4 +1592,116 @@ async fn a_batch_that_has_finished_cannot_be_cancelled() {
     let (status, body) = harness.cancel(&job_id).await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["code"], "STORY_JOB_NOT_CANCELLABLE");
+}
+
+#[tokio::test]
+async fn a_batch_is_written_down_as_read_once_it_has_settled_and_not_before() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let finished = Arc::new(AtomicBool::new(false));
+    let provider = serve(answering(Recorded::default(), Arc::clone(&finished))).await;
+    harness
+        .configure(&provider, &[(SHOOTER, Capability::Video)])
+        .await;
+    harness.project("Story Read In").await;
+
+    let job = harness
+        .start_ok(batch(
+            "actVideo",
+            vec![piece("act-1", act_video_target("act-1"), "video", "站台")],
+        ))
+        .await;
+    let job_id = job["id"].as_str().unwrap().to_string();
+    harness.until_placed(&job_id).await;
+
+    // A batch still being driven is not written down as read: pieces of it are
+    // still to come, and a note saying its answer is in would leave them unread
+    // by every room opened after this one.
+    let (status, early) = harness.read_in(&job_id).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(early["status"], json!("running"));
+    assert_eq!(early["readAt"], Value::Null);
+
+    finished.store(true, Ordering::SeqCst);
+    let settled = harness.settled(&job_id).await;
+    assert_eq!(
+        settled["readAt"],
+        Value::Null,
+        "the room has not said so yet"
+    );
+
+    let (status, marked) = harness.read_in(&job_id).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        marked["readAt"].is_string(),
+        "the answer is written down as read: {marked}"
+    );
+
+    // The note is kept, and saying it twice says the same thing: the moment is
+    // the one the answer was first read in at.
+    let listed = harness.jobs().await;
+    assert!(listed[0]["readAt"].is_string(), "{listed}");
+    let (_, again) = harness.read_in(&job_id).await;
+    assert_eq!(again["readAt"], marked["readAt"]);
+}
+
+#[tokio::test]
+async fn a_record_from_before_there_was_a_note_reads_as_one_still_owed_the_room() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let project = harness.project("Story Legacy").await;
+
+    // A record written by a build that knew nothing of the note: it reads as a
+    // batch whose answer nobody has read in, which is what it is.
+    leave_record(&project, abandoned_job(None));
+
+    let job = harness.job("job-abandoned").await;
+    assert_eq!(job["readAt"], Value::Null);
+    let listed = harness.jobs().await;
+    assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+}
+
+#[tokio::test]
+async fn only_the_records_whose_answers_were_read_in_are_forgotten() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let project = harness.project("Story Keep").await;
+
+    // A ceiling's worth of settled batches and two more: the oldest two are
+    // past what the project keeps, and one of them has never been read in.
+    let past = 102;
+    for at in 0..past {
+        let mut job = abandoned_job(None);
+        job["id"] = json!(format!("job-{at:03}"));
+        job["status"] = json!("succeeded");
+        job["items"][0]["status"] = json!("succeeded");
+        job["createdAt"] = json!(format!("2026-01-01T{:02}:{:02}:00.000Z", at / 60, at % 60));
+        job["updatedAt"] = job["createdAt"].clone();
+        if at > 0 {
+            job["readAt"] = json!("2026-02-01T00:00:00.000Z");
+        }
+        leave_record(&project, job);
+    }
+
+    // The list is what prunes, so asking for it is asking for the old records
+    // to be looked over.
+    harness.jobs().await;
+
+    let kept = harness
+        .send_json(
+            get_request("/api/v1/projects/current/story/jobs/job-000"),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(
+        kept["readAt"],
+        Value::Null,
+        "an answer nobody has read in is not clutter: {kept}"
+    );
+    harness
+        .send_json(
+            get_request("/api/v1/projects/current/story/jobs/job-001"),
+            StatusCode::NOT_FOUND,
+        )
+        .await;
 }

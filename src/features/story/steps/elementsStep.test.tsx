@@ -67,6 +67,22 @@ function serving(): void {
           }),
         );
       if (url.includes("/story/jobs")) {
+        // A batch's answer being written down as read: the record as it stands
+        // with the room's note on it, which is what the server answers with.
+        const readIn = /\/story\/jobs\/([^/?]+)\/read$/.exec(url);
+        if (readIn !== null) {
+          const found = held.find((job) => job.id === readIn[1]);
+          const marked =
+            found === undefined
+              ? undefined
+              : { ...found, readAt: "2026-01-02T00:00:00Z" };
+          if (marked !== undefined) {
+            held = held.map((job) => (job.id === marked.id ? marked : job));
+          }
+          return marked === undefined
+            ? json({ code: "NOT_FOUND", message: "no" }, 404)
+            : json(marked);
+        }
         if (method === "POST") {
           const body = JSON.parse(String(init?.body ?? "{}")) as {
             kind: StoryJobKind;
@@ -175,6 +191,28 @@ function card(name: string, kind: string): HTMLElement {
 function openAtElements(moka: MokaFile): void {
   openRoom(moka);
   fireEvent.click(screen.getByTestId("story-step-elements"));
+}
+
+/**
+ * The room opened again over the document as it stands, which is a refresh in
+ * so many words: the window forgets the batches it has watched, and what they
+ * answered is the document's — the one the reader has been working in.
+ *
+ * Answered once the room has listed its batches and read in whatever it had
+ * to, so that what the assertions see is a room that has stood up rather than
+ * one still standing up.
+ */
+async function openedAgain(): Promise<void> {
+  cleanup();
+  useStoryJobStore.getState().reset();
+  const moka = useProjectStore.getState().moka;
+  if (moka === null) throw new Error("a project is open");
+  openAtElements(moka);
+  // Listing the room's batches and reading in whatever has to be read in is a
+  // queue of answered promises: one turn of the loop is the room stood up.
+  await act(async () => {
+    await new Promise((settle) => setTimeout(settle, 0));
+  });
 }
 
 function story() {
@@ -343,6 +381,109 @@ describe("finding the cast in the chapters", () => {
       expect(starts).toHaveLength(1);
     });
     expect(starts[0]?.kind).toBe("elements");
+  });
+});
+
+describe("a room opened again over what it has already read", () => {
+  it("keeps the newest reading, the reader's own changes, and the pictures", async () => {
+    openAtElements(buildStoryMokaFile());
+
+    // A first reading of the chapters, which finds the cast it finds.
+    fireEvent.click(screen.getByTestId("story-elements-recognise"));
+    fireEvent.click(screen.getByTestId("recognise-elements-confirm"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+    answers.elements = castAnswer([
+      { name: "林", description: "灰呢大衣，说话很慢。", chapters: [1] },
+    ]);
+    await comesBack();
+    await waitFor(() => {
+      expect(element("林")).toBeTruthy();
+    });
+
+    // Reading again, because the room is not happy with what came back: the
+    // second reading is the newer word on the same cast.
+    fireEvent.click(screen.getByTestId("story-elements-recognise"));
+    fireEvent.click(screen.getByTestId("recognise-elements-confirm"));
+    await waitFor(() => {
+      expect(starts).toHaveLength(2);
+    });
+    answers.elements = castAnswer([
+      { name: "恋人甲", description: "短碎黑发。", chapters: [1] },
+      { name: "恋人乙", description: "齐肩黑发。", chapters: [1] },
+    ]);
+    await comesBack();
+    await waitFor(() => {
+      expect(story().elements.map((each) => each.name)).toEqual([
+        "恋人甲",
+        "恋人乙",
+      ]);
+    });
+
+    // One of them is drawn, and the picture is the reader's from then on.
+    const drawnId = element("恋人甲")?.id ?? "";
+    fireEvent.click(
+      within(card("恋人甲", "character")).getByTestId(
+        "story-slot-main-generate",
+      ),
+    );
+    await waitFor(() => {
+      expect(starts).toHaveLength(3);
+    });
+    pictures[`element:main:${drawnId}`] = ["asset-lover-main"];
+    await comesBack();
+    await waitFor(() => {
+      expect(slotOf("恋人甲", "main")?.takes).toHaveLength(1);
+    });
+
+    // What the reader says to the cast by hand: one added, one taken out, and
+    // a description of their own over the words the reading brought.
+    fireEvent.click(screen.getByTestId("story-elements-add"));
+    fireEvent.change(screen.getByTestId("add-element-kind"), {
+      target: { value: "scene" },
+    });
+    fireEvent.change(screen.getByTestId("add-element-name"), {
+      target: { value: "候车厅" },
+    });
+    fireEvent.change(screen.getByTestId("add-element-description"), {
+      target: { value: "长椅上空无一人。" },
+    });
+    fireEvent.click(screen.getByTestId("add-element-confirm"));
+    fireEvent.click(screen.getByTestId("story-element-remove-恋人乙"));
+    fireEvent.click(screen.getByTestId("remove-element-confirm"));
+    fireEvent.change(screen.getByTestId("story-element-description-恋人甲"), {
+      target: { value: "短碎黑发，秋夜外套。" },
+    });
+    fireEvent.blur(screen.getByTestId("story-element-description-恋人甲"));
+    await waitFor(() => {
+      expect(element("恋人甲")?.description).toBe("短碎黑发，秋夜外套。");
+    });
+
+    // The room opened again reads the batches it already read a second time
+    // over — and every one of them says its answer is in, so none of it is
+    // written into the story again over what the reader has said since.
+    const toasts = useAppStore.getState().toasts.length;
+    await openedAgain();
+
+    expect(
+      story()
+        .elements.map((each) => each.name)
+        .sort(),
+    ).toEqual(["候车厅", "恋人甲"]);
+    expect(element("恋人甲")?.description).toBe("短碎黑发，秋夜外套。");
+    expect(slotOf("恋人甲", "main")?.takes.map((take) => take.assetId)).toEqual(
+      ["asset-lover-main"],
+    );
+    expect(
+      within(card("恋人甲", "character"))
+        .getByTestId("story-slot-main")
+        .querySelector("img")
+        ?.getAttribute("src"),
+    ).toBe("/api/v1/projects/current/assets/asset-lover-main");
+    // Nothing was asked for a second time, and nothing was said again.
+    expect(starts).toHaveLength(3);
+    expect(useAppStore.getState().toasts).toHaveLength(toasts);
   });
 });
 
@@ -578,30 +719,33 @@ describe("agreeing to a description", () => {
     expect(element("旧车票")?.descriptionConfirmed).toBe(false);
   });
 
-  it("unlocks for a change, and writes the new words when the reader looks away", async () => {
+  it("unsays the words for a change, and agrees to them again when it is made", async () => {
     openAtElements(buildStoryMokaFile());
     const before = useHistoryStore.getState().undoStack.length;
-    expect(
-      (
-        screen.getByTestId(
-          "story-element-description-林",
-        ) as HTMLTextAreaElement
-      ).readOnly,
-    ).toBe(true);
-    fireEvent.click(screen.getByTestId("story-element-unlock-林"));
-    const box = screen.getByTestId(
-      "story-element-description-林",
-    ) as HTMLTextAreaElement;
-    expect(box.readOnly).toBe(false);
+    const box = () =>
+      screen.getByTestId("story-element-description-林") as HTMLTextAreaElement;
+    // Agreed to already, so the words are the document's and the box is shut:
+    // there is no rewriting them in passing.
+    expect(box().readOnly).toBe(true);
 
-    fireEvent.change(box, { target: { value: "灰呢大衣，说话很慢。" } });
-    fireEvent.blur(box);
+    fireEvent.click(screen.getByTestId("story-element-unconfirm-林"));
+    expect(element("林")?.descriptionConfirmed).toBe(false);
+    expect(box().readOnly).toBe(false);
 
+    fireEvent.change(box(), { target: { value: "灰呢大衣，说话很慢。" } });
+    fireEvent.blur(box());
     await waitFor(() => {
       expect(element("林")?.description).toBe("灰呢大衣，说话很慢。");
     });
-    // The unlock itself is not a step of the history; the words are.
-    expect(useHistoryStore.getState().undoStack).toHaveLength(before + 1);
+
+    // Made, so it is agreed to again — and shut until it is unsaid once more.
+    fireEvent.click(screen.getByTestId("story-element-confirm-林"));
+    expect(element("林")?.descriptionConfirmed).toBe(true);
+    expect(box().readOnly).toBe(true);
+
+    // Unsaid, rewritten, agreed to: three steps of the history, each one the
+    // reader's to take back on its own.
+    expect(useHistoryStore.getState().undoStack).toHaveLength(before + 3);
   });
 
   it("names the chapters an element stands in", () => {

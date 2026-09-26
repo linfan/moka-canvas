@@ -449,6 +449,24 @@ describe("what applying does not write", () => {
     expect(report.applied).toBe(0);
     expect(report.notes.join(" ")).toContain("outline");
   });
+
+  it("says so when the document refused the whole batch", () => {
+    // A conflict waiting to be resolved is a document that will take nothing:
+    // the answer is not in it, and the room is told apart from a batch that
+    // simply had nothing new to write.
+    useProjectStore.setState({ saveStatus: "conflicted" });
+    const report = applyJobResults(
+      record("keyframeArt", [keyframeItem(ids.frameSecond, "asset-late")]),
+    );
+
+    expect(report.refused).toBe(true);
+    expect(report.applied).toBe(0);
+    expect(
+      story().chapters[0].acts[0].keyframes.find(
+        (each) => each.id === ids.frameSecond,
+      )?.art.takes,
+    ).toEqual([]);
+  });
 });
 
 describe("a manuscript written in parts", () => {

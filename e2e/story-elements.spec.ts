@@ -2,10 +2,12 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
+  backToLauncher,
   configureWordsAndPictures,
   createProject,
   forgetProjects,
   newStory,
+  openRecent,
   openStoryRoom,
   projectHome,
 } from "./helpers";
@@ -134,6 +136,112 @@ test("the chapters are read for their cast, drawn, and agreed to", async ({
         { name: "Traveller", described: true, drawn: true },
         { name: "Last carriage", described: true, drawn: true },
         { name: "Old ticket", described: true, drawn: true },
+      ]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the cast a reading left, and what the reader said since, outlast the room", async ({
+  page,
+}) => {
+  const home = projectHome("story-elements-again");
+  await forgetProjects();
+  await configureWordsAndPictures();
+  try {
+    await page.goto("/");
+    await createProject(page, join(home, "project"), "Story Elements Again");
+    await openStoryRoom(page);
+    await newStory(page, "Rain at Night");
+    await page
+      .getByTestId("story-idea-input")
+      .fill("Eleven at night, and the last train stops where it should not.");
+    await page.getByTestId("story-idea-duration-3").click();
+    await page.getByTestId("story-idea-next").click();
+    await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
+    await page.getByTestId("story-outline-start").click();
+    await expect(page.locator(".story-chapter")).toHaveCount(3, {
+      timeout: 30_000,
+    });
+    await page.getByTestId("story-outline-confirm-all").click();
+
+    // The cast, and a picture drawn for one of them.
+    await page.getByTestId("story-step-elements").click();
+    await page.getByTestId("story-elements-empty-recognise").click();
+    await expect(page.locator(".story-element")).toHaveCount(4, {
+      timeout: 30_000,
+    });
+    await card(page, "character", "Keeper")
+      .getByTestId("story-slot-main-generate")
+      .click();
+    await expect(card(page, "character", "Keeper").locator("img")).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // What the reader says to the cast by hand: one added, one taken out, and
+    // a description of their own over the words the reading brought.
+    await page.getByTestId("story-elements-add").click();
+    await page.getByTestId("add-element-kind").selectOption("scene");
+    await page.getByTestId("add-element-name").fill("Waiting room");
+    await page
+      .getByTestId("add-element-description")
+      .fill("Nobody on the benches.");
+    await page.getByTestId("add-element-confirm").click();
+    await card(page, "prop", "Old ticket")
+      .getByTestId("story-element-remove-Old ticket")
+      .click();
+    await page.getByTestId("remove-element-confirm").click();
+    await card(page, "character", "Keeper")
+      .getByTestId("story-element-description-Keeper")
+      .fill("A woman in a long grey coat, slow to speak.");
+    // The click that leaves the field is the write: what is agreed to after it
+    // is the reader's words and not the reading's.
+    await page.getByTestId("story-elements-group-all").click();
+    await card(page, "character", "Keeper")
+      .getByTestId("story-element-confirm-Keeper")
+      .click();
+    await expect(
+      card(page, "character", "Keeper").getByTestId(
+        "story-element-state-Keeper",
+      ),
+    ).toHaveText("Description agreed to");
+
+    // Home and back in, which reads the same batches into the story a second
+    // time: every one of them says its answer is already in, so none of it is
+    // written over what the reader has said since.
+    await backToLauncher(page);
+    await openRecent(page, "Story Elements Again");
+    await openStoryRoom(page);
+    await page.getByTestId("story-step-elements").click();
+    await expect(page.getByTestId("story-step-body-elements")).toBeVisible();
+
+    await expect(page.locator(".story-element")).toHaveCount(4, {
+      timeout: 30_000,
+    });
+    await expect(
+      card(page, "scene", "Waiting room").getByTestId(
+        "story-element-description-Waiting room",
+      ),
+    ).toHaveValue("Nobody on the benches.");
+    await expect(card(page, "prop", "Old ticket")).toHaveCount(0);
+    await expect(
+      card(page, "character", "Keeper").getByTestId(
+        "story-element-description-Keeper",
+      ),
+    ).toHaveValue("A woman in a long grey coat, slow to speak.");
+    await expect(
+      card(page, "character", "Keeper").locator("img"),
+    ).toBeVisible();
+
+    // And the server holds the same cast: the pictures that were drawn are
+    // still the element's, and the one that was taken out is gone.
+    await expect
+      .poll(async () => persistedElements(page))
+      .toEqual([
+        { name: "Keeper", described: true, drawn: true },
+        { name: "Traveller", described: false, drawn: false },
+        { name: "Last carriage", described: false, drawn: false },
+        { name: "Waiting room", described: false, drawn: false },
       ]);
   } finally {
     rmSync(home, { recursive: true, force: true });

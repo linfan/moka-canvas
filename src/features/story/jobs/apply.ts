@@ -15,8 +15,10 @@
  * drawing is left as it is, a chapter that already has the words is written the
  * same words, and a batch whose answers are all already there plans no command
  * at all: nothing is pushed onto the history, and the reader is not offered an
- * undo of a step that changed nothing. That is what makes reading a job again
- * after a restart — or twice in one afternoon — safe.
+ * undo of a step that changed nothing. That is what makes reading a batch that
+ * landed while nobody was looking safe — beside the record's own note that its
+ * answer has been read in, which is what keeps an answer from being read a
+ * second time at all.
  */
 
 import { nowIso } from "../../../shared/domain/ids";
@@ -64,6 +66,14 @@ export interface ApplyReport {
   skipped: number;
   /** What could not be written, in the reader's language. */
   notes: string[];
+  /**
+   * Whether the document refused the whole lot, so nothing of it was written.
+   *
+   * Read apart from a count of nought: nothing to write is the batch's own
+   * answer being nothing new, and the room has had it; a refusal is an answer
+   * the story asked for and did not get, and is one to ask for again.
+   */
+  refused?: boolean;
 }
 
 /** The label one batch's answers go into the history under. */
@@ -611,6 +621,7 @@ export function applyJobResults(record: StoryJobRecord): ApplyReport {
       applied: 0,
       skipped: record.items.length,
       notes: [...report.notes, i18n.t("story:page.saveConflict")],
+      refused: true,
     };
   }
   return report;

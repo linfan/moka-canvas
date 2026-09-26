@@ -239,7 +239,7 @@ Reference numbers to set expectations (1080p30, two layers, one crossfade, burn-
 
 ## The story room
 
-The story room asks configured models for premises, chapters, elements, boards, and shots, and every ask is a batch: `POST /api/v1/projects/current/story/jobs` carries the kind and the pieces, `GET /api/v1/projects/current/story/jobs?storyId=` lists the project's batches, `GET /api/v1/projects/current/story/jobs/{id}` reads one, and `POST /api/v1/projects/current/story/jobs/{id}/cancel` calls one off (a batch that already ended answers how it ended). Results are filed into the project document by the client, one command per batch, so the document is the only thing that holds a story.
+The story room asks configured models for premises, chapters, elements, boards, and shots, and every ask is a batch: `POST /api/v1/projects/current/story/jobs` carries the kind and the pieces, `GET /api/v1/projects/current/story/jobs?storyId=` lists the project's batches, `GET /api/v1/projects/current/story/jobs/{id}` reads one, `POST /api/v1/projects/current/story/jobs/{id}/cancel` calls one off (a batch that already ended answers how it ended), and `POST /api/v1/projects/current/story/jobs/{id}/read` writes down that a settled batch's answer has been read into its story — an answer carrying that note is never read in again, whatever the reader has changed since, so a batch that answered days ago is not written over this afternoon's work. Results are filed into the project document by the client, one command per batch, so the document is the only thing that holds a story.
 
 Batches are bounded twice over, and a deployment that expects several readers at once raises both:
 

@@ -40,6 +40,21 @@ function serving(answers: Record<string, unknown>) {
     },
     ...answers,
   };
+  /** What the server last said about each batch, so a record is answered for
+   * as it stands rather than as some earlier answer left it. */
+  const said = new Map<string, unknown>();
+  const respond = (payload: unknown, status = 200) => {
+    for (const job of Array.isArray(payload) ? payload : [payload]) {
+      const held = job as Partial<StoryJobRecord> | undefined;
+      if (typeof held?.id === "string") said.set(held.id, held);
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(payload), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -49,25 +64,25 @@ function serving(answers: Record<string, unknown>) {
         method: init?.method ?? "GET",
         ...(typeof init?.body === "string" ? { body: init.body } : {}),
       });
+      // A batch's answer being written down as read is answered with the
+      // record as it stands, carrying the room's own note — which is the
+      // whole of what the server does with it.
+      const readIn = /\/story\/jobs\/([^/?]+)\/read$/.exec(url);
+      if (readIn !== null) {
+        const found = said.get(readIn[1]);
+        return found === undefined
+          ? respond({ code: "NOT_FOUND", message: "no" }, 404)
+          : respond({ ...found, readAt: "2026-01-02T00:00:00Z" });
+      }
       // The longest match wins: a cancel is not the list it hangs under.
       const key = Object.keys(routes)
         .filter((each) => url.startsWith(each))
         .sort((a, b) => b.length - a.length)[0];
       const payload = key === undefined ? undefined : routes[key];
       if (payload === undefined) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ code: "NOT_FOUND", message: "no" }), {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
+        return respond({ code: "NOT_FOUND", message: "no" }, 404);
       }
-      return Promise.resolve(
-        new Response(JSON.stringify(payload), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
+      return respond(payload);
     }),
   );
 }
@@ -524,6 +539,238 @@ describe("a batch coming back", () => {
     const after = calls.length;
     await vi.advanceTimersByTimeAsync(5000);
     expect(calls.length).toBe(after);
+  });
+});
+
+describe("a room opened over the batches it has already read", () => {
+  /** A reading of the chapters, come home with this cast. */
+  function reading(id: string, at: string, names: string[]): StoryJobRecord {
+    return {
+      id,
+      projectId: "project-1",
+      storyId: ids.story,
+      kind: "elements",
+      status: "succeeded",
+      model: "a-storyteller",
+      items: [
+        {
+          id: "elements",
+          target: { kind: "elements" },
+          capability: "text",
+          prompt: "the telling, chapter by chapter",
+          inputs: [],
+          params: {},
+          status: "succeeded",
+          text: JSON.stringify({
+            characters: names.map((name) => ({
+              name,
+              description: `${name} 的样子。`,
+            })),
+            scenes: [],
+            props: [],
+          }),
+        },
+      ],
+      cancelRequested: false,
+      createdAt: at,
+      updatedAt: at,
+    };
+  }
+
+  /** The cast the story holds, by name. */
+  function cast(): string[] {
+    return (useProjectStore.getState().moka?.stories?.[0]?.elements ?? []).map(
+      (element) => element.name,
+    );
+  }
+
+  /** What the room wrote down about the batches, by the urls it asked. */
+  function notes(): string[] {
+    return calls
+      .filter((call) => call.method === "POST" && call.url.endsWith("/read"))
+      .map((call) => call.url.split("/").at(-2) ?? "");
+  }
+
+  /** A save that lands, which a written-in answer has to be followed by. */
+  const saved = {
+    "/api/v1/projects/current/commands": {
+      revision: 2,
+      updatedAt: "2026-01-02T00:00:00Z",
+    },
+  };
+
+  it("leaves an answer the story already has alone", async () => {
+    const held = reading("job-1", "2026-01-02T00:00:00Z", ["甲"]);
+    serving({
+      ...saved,
+      "/api/v1/projects/current/story/jobs": [
+        { ...held, readAt: "2026-01-02T01:00:00Z" },
+      ],
+    });
+    const reload = vi.spyOn(useProjectStore.getState(), "reload");
+    const apply = vi.spyOn(useProjectStore.getState(), "applyLocal");
+
+    await useStoryJobStore.getState().load(ids.story);
+
+    // The cast is the one the reader has, not the one the answer says: an
+    // answer read in days ago is not a word on the story any more.
+    expect(cast()).toEqual(["林", "周", "末班车车厢", "旧车票"]);
+    expect(apply).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toasts).toEqual([]);
+    reload.mockRestore();
+    apply.mockRestore();
+  });
+
+  it("reads the answers in the order they were asked for, so the newest stands", async () => {
+    // The server lists the newest first, and the reading of a telling comes
+    // home after the board of one does not matter: the second reading is the
+    // newer word on the same cast, so it is the one that has to be left.
+    serving({
+      ...saved,
+      "/api/v1/projects/current/story/jobs": [
+        reading("job-2", "2026-01-03T00:00:00Z", ["丙"]),
+        reading("job-1", "2026-01-02T00:00:00Z", ["甲", "乙"]),
+      ],
+    });
+
+    await useStoryJobStore.getState().load(ids.story);
+
+    expect(cast()).toEqual(["丙"]);
+    expect(notes().sort()).toEqual(["job-1", "job-2"]);
+  });
+
+  it("writes an answer down as read once it has settled, and only then", async () => {
+    const held = answered(); // a keyframe's drawing, one piece of it answered
+    const running: StoryJobRecord = { ...held, status: "running" };
+    serving({
+      ...saved,
+      "/api/v1/projects/current/story/jobs": [running],
+    });
+
+    await useStoryJobStore.getState().load(ids.story);
+    expect(notes()).toEqual([]);
+
+    // The batch settles: what has been read in is written down, so a room
+    // opened after this one does not read it in a second time.
+    serving({
+      ...saved,
+      "/api/v1/projects/current/story/jobs": [
+        { ...answered(), status: "succeeded" },
+      ],
+    });
+    await useStoryJobStore.getState().load(ids.story);
+    expect(notes()).toEqual(["job-1"]);
+  });
+
+  it("does not write an answer down before the save carrying it has landed", async () => {
+    const held = reading("job-1", "2026-01-02T00:00:00Z", ["甲"]);
+    /** A server whose commands route answers, or refuses, as the test says. */
+    const stubSaving = (lands: boolean) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          calls.push({ url, method: init?.method ?? "GET" });
+          const json = (payload: unknown, status = 200) =>
+            Promise.resolve(
+              new Response(JSON.stringify(payload), {
+                status,
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+          if (url.endsWith("/projects/current/commands")) {
+            return lands
+              ? json({ revision: 2, updatedAt: "2026-01-02T00:00:00Z" })
+              : json({ code: "INTERNAL", message: "no" }, 500);
+          }
+          if (/\/story\/jobs\/([^/?]+)\/read$/.test(url)) {
+            return json({ ...held, readAt: "2026-01-02T01:00:00Z" });
+          }
+          if (url.includes("/story/jobs")) return json([held]);
+          return json({
+            root: "/tmp/moka-story-jobs-test",
+            moka: buildStoryMokaFile(),
+            selfCheck: { ok: true, issues: [] },
+          });
+        }),
+      );
+    };
+
+    stubSaving(false);
+    await useStoryJobStore.getState().load(ids.story);
+
+    // The answer is in the window and not on the server, which is no place to
+    // leave a note saying it has been read in: no room would read it again.
+    expect(cast()).toEqual(["甲"]);
+    expect(notes()).toEqual([]);
+
+    // Once saving works again, the note is written on the next look.
+    stubSaving(true);
+    await useStoryJobStore.getState().load(ids.story);
+    expect(notes()).toEqual(["job-1"]);
+  });
+
+  it("asks again for an answer the document would not take", async () => {
+    // A cast longer than a story may hold: the document refuses the lot, so
+    // nothing of the answer is in and nothing may be written down about it.
+    const tooMany = Array.from({ length: 201 }, (_, at) => `角色 ${at + 1}`);
+    serving({
+      ...saved,
+      "/api/v1/projects/current/story/jobs": [
+        reading("job-1", "2026-01-02T00:00:00Z", tooMany),
+      ],
+    });
+    const apply = vi.spyOn(useProjectStore.getState(), "applyLocal");
+
+    await useStoryJobStore.getState().load(ids.story);
+    expect(notes()).toEqual([]);
+
+    // The next look asks the document again rather than believing it landed.
+    await useStoryJobStore.getState().load(ids.story);
+    expect(apply.mock.calls.length).toBeGreaterThan(1);
+    expect(notes()).toEqual([]);
+    apply.mockRestore();
+  });
+
+  it("says a batch's ending once, however many rooms are opened after it", async () => {
+    const failed: StoryJobRecord = {
+      ...reading("job-1", "2026-01-02T00:00:00Z", []),
+      status: "failed",
+      items: [
+        {
+          id: "elements",
+          target: { kind: "elements" },
+          capability: "text",
+          prompt: "the telling, chapter by chapter",
+          inputs: [],
+          params: {},
+          status: "failed",
+          error: "the provider refused it",
+        },
+      ],
+    };
+    serving({
+      ...saved,
+      "/api/v1/projects/current/story/jobs": [failed],
+    });
+
+    await useStoryJobStore.getState().load(ids.story);
+    const said = useAppStore.getState().toasts.length;
+    expect(said).toBe(1);
+    expect(notes()).toEqual(["job-1"]);
+
+    // A room opened after it — a restart, in so many words — has nothing to
+    // say about a batch whose answer was already read in: it says nothing.
+    useStoryJobStore.getState().reset();
+    serving({
+      ...saved,
+      "/api/v1/projects/current/story/jobs": [
+        { ...failed, readAt: "2026-01-02T01:00:00Z" },
+      ],
+    });
+    await useStoryJobStore.getState().load(ids.story);
+    expect(useAppStore.getState().toasts).toHaveLength(said);
   });
 });
 

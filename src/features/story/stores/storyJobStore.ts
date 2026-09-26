@@ -8,8 +8,11 @@
  *
  * Nothing is remembered between sessions, and nothing has to be. The server
  * keeps the records, so a room opened tomorrow lists the same batches — and a
- * batch that ended while nobody was looking is read into the story then, by the
- * document's own judgement of whether its answers are already there.
+ * batch that ended while nobody was looking is read into the story then. What
+ * keeps that from being a second reading of everything ever asked for is the
+ * record's own memory: a batch whose answer is in the story says so, and no
+ * room writes such an answer in again, however long ago it landed and whatever
+ * the reader has said to the story since.
  */
 
 import { create } from "zustand";
@@ -150,7 +153,21 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
    * told about it.
    */
   const readAnswers = async (records: StoryJobRecord[]): Promise<void> => {
-    const waiting = records.flatMap((record) => {
+    // Oldest first, though the room lists batches newest first: a batch asked
+    // for later than another is the newer word on the places both of them
+    // answered for, so reading them in the order they were asked for is what
+    // leaves the newest one standing. Turned round before the sort, so that
+    // two batches asked for in the same breath — a retry a moment after the
+    // ask it retries — are read in the order the room listed them.
+    const inOrder = [...records]
+      .reverse()
+      .sort((one, other) => one.createdAt.localeCompare(other.createdAt));
+    const waiting = inOrder.flatMap((record) => {
+      // An answer already read into the story is not read into it a second
+      // time, whatever it says: the reader has had it, and what they have said
+      // to the story since — a description rewritten, an element added or
+      // dropped — is what reading it again would write over.
+      if (record.readAt !== undefined) return [];
       const known = readIn.get(record.id) ?? {
         pieces: new Set<string>(),
         applied: 0,
@@ -162,13 +179,19 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       );
       const ending = !isRunning(record.status);
       // A batch still going with nothing new to write has nothing to say; one
-      // that has ended says its count once, even when every answer of it was
-      // written in as it landed.
-      if (fresh.length === 0 && !(ending && !known.endingSaid)) return [];
+      // that has ended is seen to even with nothing new in it, since the
+      // record itself is still owed the note that its answer is in.
+      if (fresh.length === 0 && !ending) return [];
       return [{ record, known, fresh, ending }];
     });
     if (waiting.length === 0) return;
     if (waiting.some(({ fresh }) => fresh.length > 0)) {
+      // What the answers are written onto has to be the document as it stands,
+      // so anything still waiting to be saved goes first: a reload would read
+      // the server's copy over whatever the reader typed a moment ago. A save
+      // that cannot land leaves the answers on their records for the next look
+      // rather than losing the reader's work to read them in.
+      if (!(await saveEverything())) return;
       try {
         await useProjectStore.getState().reload();
       } catch {
@@ -182,9 +205,16 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       applying: [...get().applying, ...waiting.map(({ record }) => record.id)],
     });
     try {
+      const settled: string[] = [];
       for (const { record, known, fresh, ending } of waiting) {
         if (fresh.length > 0) {
           const report = applyJobResults({ ...record, items: fresh });
+          if (report.refused === true) {
+            // The document would not take it, so it is not in: nothing of the
+            // answer is written down about it and the next look asks again,
+            // and nothing is said about a batch whose answers are not in.
+            continue;
+          }
           for (const item of fresh) known.pieces.add(item.id);
           known.applied += report.applied;
           if (report.notes.length > 0) toast("info", report.notes.join(" "));
@@ -219,6 +249,16 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
             );
           }
         }
+        if (ending) settled.push(record.id);
+      }
+      // A batch is written down as read only once what it answered is really
+      // in the story: nothing of this look's may still be waiting to be saved,
+      // or the note would outlive the change it is about — no room reads that
+      // batch again, and an answer lost that way is lost for good. A save that
+      // cannot land leaves the note for the next look, which sees the batch as
+      // it stands.
+      if (settled.length > 0 && (await saveEverything())) {
+        await markRead(settled);
       }
     } finally {
       const finished = new Set(waiting.map(({ record }) => record.id));
@@ -235,6 +275,23 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
         ? [record, ...held]
         : held.map((job) => (job.id === record.id ? record : job));
     set({ jobs });
+  };
+
+  /**
+   * Writes down that these batches' answers are in their story.
+   *
+   * One ask each, and a shrug at an ask that cannot be made: a note that does
+   * not land leaves the record unread, which the next look sees and tries
+   * again — the one thing worse than saying it twice is not saying it at all.
+   */
+  const markRead = async (ids: string[]): Promise<void> => {
+    for (const id of ids) {
+      try {
+        integrate(await storyApi.readIn(id));
+      } catch {
+        // Said again by the next look, which is where the note is retried.
+      }
+    }
   };
 
   const pollOnce = async (): Promise<void> => {

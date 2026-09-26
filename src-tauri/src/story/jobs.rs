@@ -50,6 +50,16 @@ pub struct StoryJobRecord {
     pub error: Option<String>,
     #[serde(default)]
     pub cancel_requested: bool,
+    /// When the room read this batch's answer into its story, if it has.
+    ///
+    /// The one field of a record the room writes rather than the driver, and
+    /// written only once the batch has settled — the moment both sides know
+    /// there is nothing left to write. Every room opened afterwards reads it
+    /// and leaves the answer alone: written in a second time it would stand
+    /// over whatever the reader has said to the story since, and an answer
+    /// from a batch closed days ago is not a new telling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -445,6 +455,7 @@ impl StoryJobManager {
             items,
             error: None,
             cancel_requested: false,
+            read_at: None,
             created_at: now.clone(),
             updated_at: now,
         };

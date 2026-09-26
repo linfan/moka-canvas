@@ -93,6 +93,14 @@ export interface StoryJobRecord {
   items: StoryJobItem[];
   error?: string;
   cancelRequested: boolean;
+  /**
+   * When the room read this batch's answer into its story, if it has.
+   *
+   * An answer whose record carries this is in the document and is never
+   * written in again: what the reader has said to the story since stands over
+   * what the answer said, which is the whole point of writing it down.
+   */
+  readAt?: IsoTimestamp;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
 }
@@ -156,6 +164,21 @@ export const storyApi = {
   cancel(id: string): Promise<StoryJobRecord> {
     return http.request<StoryJobRecord>(
       `${jobsPath}/${encodeURIComponent(id)}/cancel`,
+      { method: "POST" },
+    );
+  },
+
+  /**
+   * Says a batch's answer has been read into its story.
+   *
+   * The room does this once the batch has settled and what it answered is
+   * really in the document, and every room opened afterwards reads it and
+   * leaves that answer alone. A batch still being driven is answered as it
+   * stands and not written down: its pieces are still to come.
+   */
+  readIn(id: string): Promise<StoryJobRecord> {
+    return http.request<StoryJobRecord>(
+      `${jobsPath}/${encodeURIComponent(id)}/read`,
       { method: "POST" },
     );
   },
