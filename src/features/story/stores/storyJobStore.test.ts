@@ -540,6 +540,46 @@ describe("a batch coming back", () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(calls.length).toBe(after);
   });
+
+  it("lets go of a batch the look no longer carries", async () => {
+    // A failure the room has been told about, standing beside a batch that is
+    // still out.
+    const held = job();
+    const refused: StoryJobRecord = {
+      ...job({ id: "job-refused", status: "failed" }),
+      items: [{ ...held.items[0], status: "failed", error: "no" }],
+    };
+    serving({ "/api/v1/projects/current/story/jobs": [held, refused] });
+    await useStoryJobStore.getState().load(ids.story);
+    expect(
+      stepFailure(useStoryJobStore.getState().jobs, ids.story, "storyboard"),
+    ).toEqual({ failed: 1, jobId: "job-refused" });
+
+    // The failure was read into the story long ago, and enough newer batches
+    // have been asked for that the server stops carrying it. The room lets it
+    // go with the look that dropped it rather than counting it until the next
+    // reload.
+    serving({ "/api/v1/projects/current/story/jobs": [held] });
+    await vi.advanceTimersByTimeAsync(1600);
+
+    expect(
+      stepFailure(useStoryJobStore.getState().jobs, ids.story, "storyboard"),
+    ).toBeNull();
+  });
+
+  it("keeps a batch that is still out when a look races it", async () => {
+    serving({ "/api/v1/projects/current/story/jobs": job() });
+    await useStoryJobStore.getState().start(ids.story, "keyframeArt", []);
+
+    // A look whose list was put together before the ask landed does not carry
+    // the batch; the room keeps it rather than losing the ask.
+    serving({ "/api/v1/projects/current/story/jobs": [] });
+    await vi.advanceTimersByTimeAsync(1600);
+
+    expect(useStoryJobStore.getState().jobs.map((record) => record.id)).toEqual(
+      ["job-1"],
+    );
+  });
 });
 
 describe("a room opened over the batches it has already read", () => {

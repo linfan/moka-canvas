@@ -54,6 +54,35 @@ function isRunning(status: StoryJobRecord["status"]): boolean {
   return status === "queued" || status === "running";
 }
 
+/**
+ * The batches a look leaves in the room's hands.
+ *
+ * A look answers with the newest records and every answer still owed one: a
+ * batch that settled and was read into the story drops out of it once enough
+ * newer ones have been asked for, and the room lets it go with the look that
+ * dropped it. Held on to instead, it goes on saying what no look will say
+ * again — a step's badge counting a failure the story has long had the pieces
+ * of — until a reload starts the list over.
+ *
+ * What the look did not carry is kept while it can still be owed: a batch
+ * still out, or one whose answer no room has read. A look that raced the ask
+ * which made such a batch would not carry it, and dropping it there would
+ * drop the answer the ask is for.
+ */
+function carriedOver(
+  held: StoryJobRecord[],
+  storyId: string,
+  listed: Set<string>,
+): StoryJobRecord[] {
+  return held.filter(
+    (record) =>
+      record.storyId !== storyId ||
+      listed.has(record.id) ||
+      isRunning(record.status) ||
+      record.readAt === undefined,
+  );
+}
+
 function toast(
   kind: "info" | "success" | "error",
   message: string,
@@ -302,6 +331,13 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
     }
     try {
       const read = await storyApi.list(storyId);
+      set({
+        jobs: carriedOver(
+          get().jobs,
+          storyId,
+          new Set(read.map((record) => record.id)),
+        ),
+      });
       for (const record of read) integrate(record);
       await readAnswers(read);
     } catch {
