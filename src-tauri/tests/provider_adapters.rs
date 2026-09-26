@@ -732,12 +732,9 @@ async fn references_turn_an_image_generation_into_a_multipart_edit() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_address_with_no_edit_door_is_asked_for_the_edit_at_its_own_endpoint() {
-    let picture = png(3, 3);
+async fn an_address_with_no_edit_door_is_refused_rather_than_asked_another_way() {
     let recorded = Recorded::default();
     let refusing = recorded.clone();
-    let answering = recorded.clone();
-    let stored = picture.clone();
     let base_url = serve(
         Router::new()
             // The address a standard shape names the edits beside the
@@ -752,23 +749,12 @@ async fn an_address_with_no_edit_door_is_asked_for_the_edit_at_its_own_endpoint(
                     }
                 }),
             )
-            .route(
-                "/v1/images/generations",
-                post(move |headers: HeaderMap, body: Bytes| {
-                    let recorded = answering.clone();
-                    let picture = stored.clone();
-                    async move {
-                        recorded.note("generations", &headers, None);
-                        recorded.note_body(&body);
-                        Json(json!({ "data": [{ "b64_json": base64(&picture) }] }))
-                    }
-                }),
-            ),
+            .route("/v1/images/generations", post(not_for_an_edit)),
     )
     .await;
 
     let call = channel(&base_url, "qwen-image-3.0", Capability::Image);
-    let result = openai_adapter()
+    let error = openai_adapter()
         .generate(
             &call,
             &generation(
@@ -780,19 +766,13 @@ async fn an_address_with_no_edit_door_is_asked_for_the_edit_at_its_own_endpoint(
             &Cancel::new(),
         )
         .await
-        .expect("the picture arrives");
+        .expect_err("the edit address is the only door an edit has");
 
-    // The edit address was tried first and the generation one answered, with
-    // the reference carried in the body itself.
-    assert_eq!(recorded.asked(), ["edits", "generations"]);
-    let sent = recorded.body(0);
-    assert_eq!(
-        sent["image"],
-        json!(format!("data:image/png;base64,{}", base64(&png(4, 3)))),
-        "{sent}"
-    );
-    assert_eq!(sent["size"], "1024x1024");
-    assert_eq!(result.items[0].bytes, picture);
+    // An edit is asked at the edit address and nowhere else. A service that
+    // reads an edit out of a generation body is a shape of its own, and the
+    // converter of that platform is where that shape belongs.
+    assert_eq!(recorded.asked(), ["edits"]);
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
 }
 
 // ------------------------------------------------------------------ audio
