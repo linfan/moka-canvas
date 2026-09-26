@@ -430,6 +430,7 @@ fn chat_event(payload: &Value) -> StreamEvent {
             .and_then(Value::as_str)
             .map(str::to_string),
         usage: tokens(payload, "prompt_tokens", "completion_tokens"),
+        ..StreamEvent::default()
     }
 }
 

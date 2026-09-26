@@ -46,6 +46,8 @@
     "videos": "视频"
   },
   "protocol": {
+    "bailianImage": "阿里云百炼 · 图像生成与编辑（万相）",
+    "bailianText": "阿里云百炼 · 文本生成（通义千问）",
     "custom": "自定义（预留）",
     "gemini": "Google Gemini · generateContent",
     "geminiVideo": "Google Gemini · 长任务（Veo）",

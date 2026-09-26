@@ -453,6 +453,29 @@ pub fn gemini_root(url: &str) -> Option<String> {
     Some(url[..cut].to_string())
 }
 
+/// Whether an address names Bailian's multimodal generation service, which
+/// reads a message as parts rather than as one string.
+pub fn is_bailian_multimodal(url: &str) -> bool {
+    url.contains("/multimodal-generation/")
+}
+
+/// The Bailian address a question carrying a picture belongs at: the
+/// multimodal sibling of the text-generation endpoint a configuration names.
+///
+/// The two are the same service under different names, and only the sibling
+/// reads a message with a picture in it. An address that names neither is used
+/// as it stands, because a gateway that serves everything at one address is
+/// the likelier reading of a URL that names no generation service to rename.
+pub fn bailian_multimodal_url(url: &str) -> String {
+    match url
+        .trim_end_matches('/')
+        .strip_suffix("/text-generation/generation")
+    {
+        Some(prefix) => format!("{prefix}/multimodal-generation/generation"),
+        None => url.to_string(),
+    }
+}
+
 fn defaults_by_capability(defaults: &Defaults) -> [(Capability, Option<&str>); 5] {
     [
         (Capability::Text, defaults.text.as_deref()),
@@ -869,6 +892,29 @@ mod tests {
             Some("https://api.test/v1beta")
         );
         assert_eq!(gemini_root("https://api.test/other"), None);
+    }
+
+    #[test]
+    fn a_question_with_a_picture_is_asked_at_the_multimodal_sibling() {
+        let text = "https://ws.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
+        let multimodal = "https://ws.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+        assert_eq!(bailian_multimodal_url(text), multimodal);
+        // A trailing slash is a spelling of the same address rather than a
+        // different one.
+        assert_eq!(bailian_multimodal_url(&format!("{text}/")), multimodal);
+
+        // An address that names no text generation is used as it stands, and
+        // one that already names the multimodal service is left where it is.
+        let other = "https://gateway.test/generate";
+        assert_eq!(bailian_multimodal_url(other), other);
+        assert_eq!(bailian_multimodal_url(multimodal), multimodal);
+
+        // The predicate the adapter chooses a message's shape with, checked
+        // against an address this code built and one spelled by hand.
+        assert!(is_bailian_multimodal(multimodal));
+        assert!(is_bailian_multimodal(&bailian_multimodal_url(text)));
+        assert!(!is_bailian_multimodal(text));
+        assert!(!is_bailian_multimodal(other));
     }
 
     #[test]

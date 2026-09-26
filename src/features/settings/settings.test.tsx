@@ -518,6 +518,7 @@ describe("model settings", () => {
       "openaiChat",
       "openaiResponses",
       "gemini",
+      "bailianText",
     ]);
   });
 
@@ -546,6 +547,44 @@ describe("model settings", () => {
     expect(url.value).toContain(":predictLongRunning");
     fireEvent.change(protocol, { target: { value: "bailianVideo" } });
     expect(url.value).toContain("video-synthesis");
+  });
+
+  it("offers a built-in protocol whether or not a script stands behind it", async () => {
+    await openSettings();
+    // The registry holds no script for Bailian: these shapes are implemented
+    // by the program itself, so a category offers them all the same, with the
+    // names and addresses this build knows them by.
+    fireEvent.click(await screen.findByRole("tab", { name: "Image" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New image model" }),
+    );
+
+    const protocol = (await screen.findByLabelText(
+      "Protocol",
+    )) as HTMLSelectElement;
+    expect([...protocol.options].map((option) => option.value)).toEqual([
+      "openaiImages",
+      "bailianImage",
+    ]);
+
+    fireEvent.change(protocol, { target: { value: "bailianImage" } });
+    const url = screen.getByLabelText("Endpoint URL") as HTMLInputElement;
+    expect(url.value).toContain(
+      "/api/v1/services/aigc/multimodal-generation/generation",
+    );
+
+    // The text shape keeps its own address, which the multimodal one is
+    // derived from when a question carries a picture.
+    fireEvent.click(await screen.findByRole("tab", { name: "Text" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+    const textProtocol = screen.getByLabelText("Protocol") as HTMLSelectElement;
+    await screen.findByRole("option", { name: /Bailian Text/ });
+    fireEvent.change(textProtocol, { target: { value: "bailianText" } });
+    expect(
+      (screen.getByLabelText("Endpoint URL") as HTMLInputElement).value,
+    ).toContain("/api/v1/services/aigc/text-generation/generation");
   });
 
   it("lists a script the registry holds under its own capability only", async () => {

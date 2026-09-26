@@ -46,6 +46,8 @@
     "videos": "Videos"
   },
   "protocol": {
+    "bailianImage": "Alibaba Cloud · Bailian Image (Wan)",
+    "bailianText": "Alibaba Cloud · Bailian Text (Qwen)",
     "custom": "Custom (reserved)",
     "gemini": "Google Gemini · generateContent",
     "geminiVideo": "Google Gemini · long-running (Veo)",

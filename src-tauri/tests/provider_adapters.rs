@@ -31,6 +31,8 @@ const API_KEY: &str = "sk-test-1234567890abcd";
 struct Recorded {
     authorization: Arc<Mutex<Option<String>>>,
     api_key: Arc<Mutex<Option<String>>>,
+    /// The header that asks Bailian for an answer in pieces.
+    sse: Arc<Mutex<Option<String>>>,
     query: Arc<Mutex<Option<String>>>,
     /// The endpoints asked, in order, each named by the test that routed it.
     asked: Arc<Mutex<Vec<String>>>,
@@ -52,6 +54,10 @@ impl Recorded {
             .map(str::to_string);
         *self.api_key.lock().expect("not poisoned") = headers
             .get("x-goog-api-key")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        *self.sse.lock().expect("not poisoned") = headers
+            .get("x-dashscope-sse")
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
         *self.query.lock().expect("not poisoned") = query;
@@ -85,6 +91,10 @@ impl Recorded {
 
     fn parts(&self) -> Vec<String> {
         self.parts.lock().expect("not poisoned").clone()
+    }
+
+    fn sse(&self) -> Option<String> {
+        self.sse.lock().expect("not poisoned").clone()
     }
 
     fn next_poll(&self) -> usize {
@@ -135,6 +145,16 @@ fn gemini_channel(base_url: &str, model_id: &str, capability: Capability) -> Mod
     speaking(protocol, base_url, model_id, capability)
 }
 
+/// A Bailian configuration. The protocol a call speaks is the shape its
+/// endpoint answers, and the credentials travel the same way for both.
+fn bailian_channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
+    let protocol = match capability {
+        Capability::Image => Protocol::BailianImage,
+        _ => Protocol::BailianText,
+    };
+    speaking(protocol, base_url, model_id, capability)
+}
+
 /// A model configuration resolved to one call speaking a named protocol.
 fn speaking(
     protocol: Protocol,
@@ -166,6 +186,12 @@ fn endpoint_of(protocol: Protocol, base_url: &str, model_id: &str) -> String {
         Protocol::Gemini => format!("{base_url}/v1beta/models/{model_id}:generateContent"),
         Protocol::GeminiVideo => {
             format!("{base_url}/v1beta/models/{model_id}:predictLongRunning")
+        }
+        Protocol::BailianText => {
+            format!("{base_url}/api/v1/services/aigc/text-generation/generation")
+        }
+        Protocol::BailianImage => {
+            format!("{base_url}/api/v1/services/aigc/multimodal-generation/generation")
         }
         Protocol::Custom => format!("{base_url}/v1/chat/completions"),
         Protocol::LuaScript(_) => format!("{base_url}/v1/lua/{model_id}"),
@@ -1428,4 +1454,343 @@ async fn a_gemini_video_job_is_started_polled_and_collected() {
     // The shot was left on the channel's own host, which will only answer a
     // request for it when the credential came along.
     assert_eq!(recorded.headers().api_key.as_deref(), Some(API_KEY));
+}
+
+// ---------------------------------------------------------------- bailian
+
+fn bailian_adapter() -> &'static dyn ProviderAdapter {
+    for_protocol(Protocol::BailianText)
+}
+
+/// One choice of an answer, as this service spells it: the words of the answer
+/// under `content`, which is sometimes a string and sometimes a document.
+fn bailian_answer(content: Value) -> Value {
+    json!({
+        "output": { "choices": [{ "finish_reason": "stop", "message": {
+            "role": "assistant",
+            "content": content,
+        } }] },
+        "usage": { "input_tokens": 5, "output_tokens": 4 },
+        "request_id": "0a1b2c",
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_question_of_words_is_asked_at_the_address_it_names() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/text-generation/generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("text-generation", &headers, None);
+                recorded.note_body(&body);
+                Json(bailian_answer(json!("A lantern drifts.")))
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
+    let mut request = generation(Capability::Text, "describe a lantern", json!({}));
+    request.system = Some("Answer in one sentence.".into());
+    let result = bailian_adapter()
+        .generate(&call, &request, &[], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern drifts."));
+    assert_eq!(result.usage.and_then(|usage| usage.output_tokens), Some(4));
+    assert_eq!(
+        recorded.headers().authorization.as_deref(),
+        Some(&format!("Bearer {API_KEY}")[..]),
+        "the credential travels the way this platform reads it"
+    );
+    assert_eq!(
+        recorded.asked(),
+        ["text-generation"],
+        "a question of words alone is asked nowhere else"
+    );
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "qwen3-max",
+            "input": { "messages": [
+                { "role": "system", "content": "Answer in one sentence." },
+                { "role": "user", "content": "describe a lantern" },
+            ] },
+            "parameters": { "result_format": "message" },
+        })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_question_with_a_picture_moves_to_the_multimodal_service() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(
+        Router::new()
+            .route(
+                "/api/v1/services/aigc/text-generation/generation",
+                post(not_for_a_question_with_a_picture),
+            )
+            .route(
+                "/api/v1/services/aigc/multimodal-generation/generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = answering.clone();
+                    async move {
+                        recorded.note("multimodal-generation", &headers, None);
+                        recorded.note_body(&body);
+                        Json(bailian_answer(json!([{ "text": "A lighthouse at dusk." }])))
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let call = bailian_channel(&base_url, "qwen3-vl-plus", Capability::Text);
+    let request = generation(Capability::Text, "what is in this picture", json!({}));
+    let photo = reference("photo", InputRole::Reference);
+    let result = bailian_adapter()
+        .generate(&call, &request, &[photo], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(result.text.as_deref(), Some("A lighthouse at dusk."));
+    assert_eq!(
+        recorded.asked(),
+        ["multimodal-generation"],
+        "the picture's question belongs at the sibling service"
+    );
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "qwen3-vl-plus",
+            "input": { "messages": [{ "role": "user", "content": [
+                { "text": "what is in this picture" },
+                { "image": format!("data:image/png;base64,{}", base64(&png(4, 3))) },
+            ] }] },
+            "parameters": { "result_format": "message" },
+        })
+    );
+}
+
+/// An endpoint a test routes only to find out whether it was asked.
+async fn not_for_a_question_with_a_picture() -> Response {
+    panic!("a question carrying a picture must not be asked at the text endpoint")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/text-generation/generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("text-generation", &headers, None);
+                recorded.note_body(&body);
+                stream(&[
+                    r#"{"output":{"choices":[{"finish_reason":null,"message":{"content":"A "}}]}}"#,
+                    r#"{"output":{"choices":[{"finish_reason":null,"message":{"content":"lantern."}}]}}"#,
+                    r#"{"output":{"choices":[{"finish_reason":"stop","message":{"content":""}}]},"usage":{"input_tokens":4,"output_tokens":2}}"#,
+                ])
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
+    let request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "stream": true }),
+    );
+    let (sink, seen) = watching();
+    let result = bailian_adapter()
+        .generate_stream(&call, &request, &[], &sink, &Cancel::new())
+        .await
+        .expect("the stream is read to its end");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern."));
+    assert_eq!(shown(&seen), "A lantern.");
+    assert_eq!(result.usage.and_then(|usage| usage.output_tokens), Some(2));
+    // A stream is asked for in a header here rather than in the body, and the
+    // pieces are asked for as pieces rather than as the whole answer again.
+    assert_eq!(recorded.sse(), Some("enable".to_string()));
+    assert_eq!(
+        recorded.body(0).pointer("/parameters/incremental_output"),
+        Some(&json!(true))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_stream_that_complains_midway_is_refused_rather_than_truncated() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/text-generation/generation",
+        post(move |headers: HeaderMap| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("text-generation", &headers, None);
+                stream(&[
+                    r#"{"output":{"choices":[{"finish_reason":null,"message":{"content":"A "}}]}}"#,
+                    r#"{"code":"Throttling","message":"the service is busy","request_id":"0a1b2c"}"#,
+                ])
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
+    let request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "stream": true }),
+    );
+    let (sink, seen) = watching();
+    let error = bailian_adapter()
+        .generate_stream(&call, &request, &[], &sink, &Cancel::new())
+        .await
+        .expect_err("the service failed halfway through the answer");
+
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(error.to_string().contains("the service is busy"), "{error}");
+    assert_eq!(
+        shown(&seen),
+        "A ",
+        "what arrived before the complaint is not taken back"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_failure_is_reported_in_the_services_own_words() {
+    let recorded = Recorded::default();
+    let refusing = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/text-generation/generation",
+        post(move |headers: HeaderMap| {
+            let recorded = refusing.clone();
+            async move {
+                recorded.note("text-generation", &headers, None);
+                refuse(
+                    StatusCode::BAD_REQUEST,
+                    json!({
+                        "code": "InvalidParameter",
+                        "message": "the temperature must be below 2",
+                        "request_id": "0a1b2c",
+                    }),
+                )
+                .await
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "qwen3-max", Capability::Text);
+    let error = bailian_adapter()
+        .generate(
+            &call,
+            &generation(
+                Capability::Text,
+                "describe a lantern",
+                json!({ "temperature": 3 }),
+            ),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the service refused the setting");
+
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(
+        error
+            .to_string()
+            .contains("the temperature must be below 2"),
+        "{error}"
+    );
+    assert!(!error.retryable(), "{error} would be refused again");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_picture_is_asked_for_and_fetched_from_where_it_was_left() {
+    let picture = png(6, 5);
+    let elsewhere = Recorded::default();
+    let serving = elsewhere.clone();
+    let stored = picture.clone();
+    let elsewhere_url = serve(Router::new().route(
+        "/made/lantern.png",
+        get(move |headers: HeaderMap| {
+            let recorded = serving.clone();
+            let stored = stored.clone();
+            async move {
+                recorded.note("drawing", &headers, None);
+                ([(axum::http::header::CONTENT_TYPE, "image/png")], stored)
+            }
+        }),
+    ))
+    .await;
+
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v1/services/aigc/multimodal-generation/generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            let address = format!("{elsewhere_url}/made/lantern.png");
+            async move {
+                recorded.note("draw", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "output": { "choices": [{ "finish_reason": "stop", "message": {
+                        "role": "assistant",
+                        "content": [{ "image": address, "type": "image" }],
+                    } }] },
+                    "usage": { "image_count": 1, "input_tokens": 12, "output_tokens": 2 },
+                    "request_id": "0a1b2c",
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = bailian_channel(&base_url, "wan2.7-image-pro", Capability::Image);
+    let photo = reference("photo", InputRole::Reference);
+    let request = generation(
+        Capability::Image,
+        "make it snow",
+        json!({ "size": "1:1", "count": 1 }),
+    );
+    let result = bailian_adapter()
+        .generate(&call, &request, &[photo], &Cancel::new())
+        .await
+        .expect("the drawing arrives");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].bytes, picture);
+    assert_eq!(result.items[0].mime, "image/png", "sniffed, not assumed");
+    assert_eq!(
+        (result.items[0].width, result.items[0].height),
+        (Some(6), Some(5))
+    );
+    assert_eq!(result.usage.and_then(|usage| usage.images), Some(1));
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "wan2.7-image-pro",
+            "input": { "messages": [{ "role": "user", "content": [
+                { "image": format!("data:image/png;base64,{}", base64(&png(4, 3))) },
+                { "text": "make it snow" },
+            ] }] },
+            "parameters": { "size": "1024*1024", "n": 1 },
+        })
+    );
+    assert!(
+        elsewhere.headers().authorization.is_none(),
+        "a credential never follows an answer to a host that did not produce it"
+    );
+    assert_eq!(recorded.asked(), ["draw"]);
 }
