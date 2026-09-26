@@ -8,6 +8,11 @@
 //! script is added by dropping a directory in and removed by taking one out.
 //! A directory without a readable `model.json` is skipped rather than failing
 //! the read: the rest of the directory is still worth showing.
+//!
+//! Everything a converter declares is data. The names it goes by in each
+//! language, where it sits in a list, where its credential travels, and which
+//! features it has all live in its own document, so the program holds no table
+//! of protocols to keep in step with them.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -17,18 +22,88 @@ use serde::{Deserialize, Serialize};
 /// The capability directories a models root holds, in the order a list reads.
 pub const CAPABILITY_DIRS: [&str; 5] = ["text", "image", "audio", "video", "asr"];
 
+/// Where a converter's credential travels, as its `model.json` declares it.
+///
+/// A converter that says nothing gets the usual arrangement: a bearer token in
+/// `Authorization`. The key itself never reaches a script; this only says which
+/// header the host puts it in, and only for addresses inside the configured
+/// origin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthSpec {
+    /// The header the credential rides in. Empty means the endpoint takes no
+    /// credential at all.
+    pub header: String,
+    /// What precedes the key in that header, `Bearer` by convention. Empty
+    /// means the header carries the key itself.
+    pub scheme: String,
+}
+
+impl Default for AuthSpec {
+    fn default() -> Self {
+        Self {
+            header: "Authorization".to_string(),
+            scheme: "Bearer".to_string(),
+        }
+    }
+}
+
+impl AuthSpec {
+    /// Whether this arrangement is one a request can be sent with: a header
+    /// name is a token, and an empty header is how a converter declines one.
+    fn is_sendable(&self) -> bool {
+        if self.header.is_empty() {
+            return true;
+        }
+        !self.header.is_empty()
+            && self
+                .header
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            && self.scheme.chars().all(|c| !c.is_control())
+    }
+}
+
+/// The order a converter without one is listed in: after every converter that
+/// states its own, so a reader's addition does not displace a shipped one.
+fn default_order() -> u32 {
+    1000
+}
+
 /// One converter's `model.json`.
 ///
 /// The identifier is the name of the directory the document sits in, so the
 /// document does not repeat it. `script` locates the protocol adapter Lua file
 /// relative to that same directory — usually a bare filename beside the
 /// document, which is what this module joins it onto.
+///
+/// Everything a converter declares beyond the script — the names it goes by in
+/// each language, where it sits in a list, where its credential travels, which
+/// features it has — is data rather than a table in the program, because these
+/// are the facts that differ between converters and change when one is added.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelConfig {
+    /// The name it goes by where no label for the reader's language is given,
+    /// and in the program's own messages.
     pub display_name: String,
+    /// The name it goes by per language, keyed by locale: `{"zh": "..."}`.
+    /// A language without an entry falls back to `displayName`.
+    #[serde(default)]
+    pub labels: HashMap<String, String>,
     pub url_example: String,
     pub script: String,
+    /// Where it sits among the converters of its capability, ascending, ties
+    /// broken by name.
+    #[serde(default = "default_order")]
+    pub order: u32,
+    /// Where its credential travels. Absent means `Authorization: Bearer`.
+    #[serde(default)]
+    pub auth: AuthSpec,
+    /// What a converter declares about itself beyond speaking its protocol,
+    /// read by whichever part of the program knows that feature.
+    #[serde(default)]
+    pub features: HashMap<String, bool>,
     /// The version of the built-in converter this document was deployed
     /// from, written for a built-in and absent for a directory a reader
     /// wrote by hand. Zero when absent, so any built-in version may take the
@@ -45,7 +120,11 @@ pub struct ModelConfig {
 pub struct ProtocolEntry {
     pub script: String,
     pub display_name: String,
+    pub labels: HashMap<String, String>,
     pub url_example: String,
+    pub order: u32,
+    pub auth: AuthSpec,
+    pub features: HashMap<String, bool>,
 }
 
 /// Protocols grouped by capability: `text`, `image`, `audio`, `video`, `asr`.
@@ -56,6 +135,17 @@ pub type ProtocolGroups = HashMap<String, HashMap<String, ProtocolEntry>>;
 pub fn script_name_beside(script: &str) -> bool {
     let file_name = Path::new(script).file_name();
     file_name == Some(std::ffi::OsStr::new(script)) && !script.is_empty() && script != "model.json"
+}
+
+/// Whether a document says anything unusable about itself: a label with
+/// nothing in it would render as a blank choice, and a credential header a
+/// request cannot carry would fail only once a call was made.
+fn declared_well(config: &ModelConfig) -> bool {
+    let labelled = config
+        .labels
+        .iter()
+        .all(|(locale, label)| !locale.trim().is_empty() && !label.trim().is_empty());
+    labelled && config.auth.is_sendable()
 }
 
 /// Holds the loaded registry state.
@@ -106,11 +196,14 @@ impl ConverterRegistry {
     ///
     /// The script is a bare filename beside the document — one that climbs
     /// out of the converter's own directory, or names the document itself,
-    /// is refused rather than followed.
+    /// is refused rather than followed. A document that says something
+    /// unusable about itself — a blank label, a header a request cannot be
+    /// sent with — is refused the same way, because a form offering half of
+    /// what it declared is worse than a converter that is plainly absent.
     fn load_converter(dir: &Path, capability_dir: &Path) -> Option<ProtocolEntry> {
         let text = std::fs::read_to_string(dir.join("model.json")).ok()?;
         let config: ModelConfig = serde_json::from_str(&text).ok()?;
-        if !script_name_beside(&config.script) {
+        if !script_name_beside(&config.script) || !declared_well(&config) {
             return None;
         }
         let capability = capability_dir.file_name()?.to_str()?;
@@ -118,7 +211,11 @@ impl ConverterRegistry {
         Some(ProtocolEntry {
             script: format!("{capability}/{id}/{}", config.script),
             display_name: config.display_name,
+            labels: config.labels,
             url_example: config.url_example,
+            order: config.order,
+            auth: config.auth,
+            features: config.features,
         })
     }
 
@@ -251,5 +348,95 @@ mod tests {
         assert!(!script_name_beside("/etc/passwd"));
         assert!(!script_name_beside("model.json"));
         assert!(!script_name_beside(""));
+    }
+
+    #[test]
+    fn what_a_document_declares_about_itself_is_what_the_entry_carries() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("image"),
+            "wanImage",
+            r#"{
+              "displayName": "Alibaba Cloud · Bailian Image (Wan)",
+              "labels": {"zh": "阿里云百炼 · 图像生成与编辑（万相）"},
+              "urlExample": "https://{WorkspaceId}.example.com/images",
+              "script": "wan-image.lua",
+              "order": 20,
+              "auth": {"header": "x-api-key", "scheme": ""},
+              "features": {"mask": true},
+              "version": 1
+            }"#,
+            Some("wan-image.lua"),
+        );
+
+        let registry = ConverterRegistry::load(dir.path());
+        let entry = registry.find("wanImage").unwrap();
+        assert_eq!(entry.order, 20);
+        assert_eq!(
+            entry.labels.get("zh").map(String::as_str),
+            Some("阿里云百炼 · 图像生成与编辑（万相）")
+        );
+        assert_eq!(
+            entry.auth,
+            AuthSpec {
+                header: "x-api-key".into(),
+                scheme: String::new()
+            }
+        );
+        assert_eq!(entry.features.get("mask"), Some(&true));
+    }
+
+    #[test]
+    fn a_document_that_says_nothing_gets_the_usual_arrangement() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("text"),
+            "plain",
+            r#"{"displayName": "Plain", "urlExample": "https://example.com", "script": "plain.lua"}"#,
+            Some("plain.lua"),
+        );
+
+        let entry = ConverterRegistry::load(dir.path())
+            .find("plain")
+            .unwrap()
+            .clone();
+        // Listed after every converter that states an order of its own, and
+        // credentialed the way most endpoints ask for it.
+        assert_eq!(entry.order, 1000);
+        assert_eq!(entry.auth, AuthSpec::default());
+        assert!(entry.labels.is_empty());
+        assert!(entry.features.is_empty());
+    }
+
+    #[test]
+    fn a_document_that_declares_something_unusable_is_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let models = dir.path().join("text");
+        write(
+            &models,
+            "blank-label",
+            r#"{"displayName": "Blank", "labels": {"zh": "  "}, "urlExample": "https://example.com", "script": "a.lua"}"#,
+            Some("a.lua"),
+        );
+        write(
+            &models,
+            "unsendable-auth",
+            r#"{"displayName": "Unsendable", "urlExample": "https://example.com", "script": "b.lua", "auth": {"header": "not a header", "scheme": "Bearer"}}"#,
+            Some("b.lua"),
+        );
+
+        let registry = ConverterRegistry::load(dir.path());
+        assert!(registry.find("blank-label").is_none());
+        assert!(registry.find("unsendable-auth").is_none());
+        // An empty header is how a converter declines a credential, which is
+        // a declaration rather than a defect.
+        write(
+            &models,
+            "keyless",
+            r#"{"displayName": "Keyless", "urlExample": "https://example.com", "script": "c.lua", "auth": {"header": "", "scheme": ""}}"#,
+            Some("c.lua"),
+        );
+        let registry = ConverterRegistry::load(dir.path());
+        assert!(registry.find("keyless").is_some());
     }
 }

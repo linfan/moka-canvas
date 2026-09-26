@@ -1,6 +1,9 @@
 {
   "displayName": "OpenAI-compatible · Chat Completions",
+  "labels": { "zh": "OpenAI 兼容 · Chat Completions" },
   "urlExample": "https://api.openai.com/v1/chat/completions",
   "script": "openai-chat.lua",
-  "version": 1
+  "order": 10,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "version": 2
 }

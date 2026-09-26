@@ -1,0 +1,10 @@
+{
+  "displayName": "OpenAI-compatible · Images API",
+  "labels": { "zh": "OpenAI 兼容 · Images API" },
+  "urlExample": "https://api.openai.com/v1/images/generations",
+  "script": "openai-images.lua",
+  "order": 10,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "features": { "mask": true },
+  "version": 2
+}

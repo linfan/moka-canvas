@@ -1,6 +1,9 @@
 {
   "displayName": "Google Gemini · generateContent",
+  "labels": { "zh": "Google Gemini · generateContent" },
   "urlExample": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
   "script": "gemini.lua",
-  "version": 1
+  "order": 30,
+  "auth": { "header": "x-goog-api-key", "scheme": "" },
+  "version": 2
 }

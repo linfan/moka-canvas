@@ -1,6 +1,9 @@
 {
   "displayName": "OpenAI-compatible · Responses API",
+  "labels": { "zh": "OpenAI 兼容 · Responses" },
   "urlExample": "https://api.openai.com/v1/responses",
   "script": "openai-responses.lua",
-  "version": 1
+  "order": 20,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "version": 2
 }

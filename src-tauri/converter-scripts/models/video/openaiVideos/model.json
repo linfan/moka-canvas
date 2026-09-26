@@ -1,0 +1,9 @@
+{
+  "displayName": "OpenAI-compatible · Videos API",
+  "labels": { "zh": "OpenAI 兼容 · Videos API" },
+  "urlExample": "https://api.openai.com/v1/videos",
+  "script": "openai-videos.lua",
+  "order": 10,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "version": 2
+}

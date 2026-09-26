@@ -320,7 +320,7 @@ mod tests {
 
         // Audio: the non-streaming CosyVoice TTS shape.
         let speech = rt
-            .load(&scripts.join("models/audio/bailian-speech/bailian-speech.lua"))
+            .load(&scripts.join("models/audio/bailianSpeech/bailian-speech.lua"))
             .unwrap();
         let out = rt
             .call_json_value(
@@ -342,7 +342,7 @@ mod tests {
 
         // Video: the async DashScope task shape.
         let video = rt
-            .load(&scripts.join("models/video/bailian-video/bailian-video.lua"))
+            .load(&scripts.join("models/video/bailianVideo/bailian-video.lua"))
             .unwrap();
         let out = rt
             .call_json_value(
@@ -368,7 +368,7 @@ mod tests {
 
         // Music: the one-shot composition shape, whose answer names the song.
         let music = rt
-            .load(&scripts.join("models/audio/bailian-music/bailian-music.lua"))
+            .load(&scripts.join("models/audio/bailianMusic/bailian-music.lua"))
             .unwrap();
         let out = rt
             .call_json_value(
@@ -501,7 +501,7 @@ mod tests {
         let rt = test_runtime();
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
         let asr = rt
-            .load(&scripts.join("models/asr/bailian-asr/bailian-asr.lua"))
+            .load(&scripts.join("models/asr/bailianAsr/bailian-asr.lua"))
             .unwrap();
         let endpoint = "https://ws.test/api/v1/services/audio/asr/transcription";
 
@@ -645,7 +645,7 @@ mod tests {
         let rt = test_runtime();
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
         let asr = rt
-            .load(&scripts.join("models/asr/bailian-asr/bailian-asr.lua"))
+            .load(&scripts.join("models/asr/bailianAsr/bailian-asr.lua"))
             .unwrap();
 
         let asked = rt
@@ -691,7 +691,7 @@ mod tests {
         let rt = test_runtime();
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
         let asr = rt
-            .load(&scripts.join("models/asr/bailian-asr/bailian-asr.lua"))
+            .load(&scripts.join("models/asr/bailianAsr/bailian-asr.lua"))
             .unwrap();
         let done = rt
             .call_json_value(

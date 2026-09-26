@@ -1,6 +1,9 @@
 {
   "displayName": "Google Gemini · long-running (Veo)",
+  "labels": { "zh": "Google Gemini · 长任务（Veo）" },
   "urlExample": "https://generativelanguage.googleapis.com/v1beta/models/veo-3:predictLongRunning",
   "script": "gemini-video.lua",
-  "version": 1
+  "order": 20,
+  "auth": { "header": "x-goog-api-key", "scheme": "" },
+  "version": 2
 }

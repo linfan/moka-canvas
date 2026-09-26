@@ -1,6 +1,9 @@
 {
   "displayName": "Alibaba Cloud · Bailian Video",
+  "labels": { "zh": "阿里云百炼 · 视频生成" },
   "urlExample": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
   "script": "bailian-video.lua",
-  "version": 2
+  "order": 30,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "version": 3
 }

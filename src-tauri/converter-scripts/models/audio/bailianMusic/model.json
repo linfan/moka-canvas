@@ -1,6 +1,9 @@
 {
   "displayName": "Alibaba Cloud · Music Generation (fun-music)",
+  "labels": { "zh": "阿里云百炼 · 音乐生成（fun-music）" },
   "urlExample": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/music/generation",
   "script": "bailian-music.lua",
-  "version": 1
+  "order": 30,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "version": 2
 }

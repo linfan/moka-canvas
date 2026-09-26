@@ -1,6 +1,9 @@
 {
   "displayName": "Alibaba Cloud · Bailian Speech Recognition (recording file)",
+  "labels": { "zh": "阿里云百炼 · 语音识别（录音文件）" },
   "urlExample": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription",
   "script": "bailian-asr.lua",
-  "version": 3
+  "order": 10,
+  "auth": { "header": "Authorization", "scheme": "Bearer" },
+  "version": 4
 }
