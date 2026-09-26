@@ -89,12 +89,14 @@ const REGISTRY = {
       displayName: "OpenAI-compatible · Speech API",
       urlExample: "https://api.openai.com/v1/audio/speech",
       order: 10,
+      features: { needsVoice: true },
     },
     bailianSpeech: {
       script: "audio/bailian-speech.lua",
       displayName: "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
       urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/tts",
       order: 20,
+      features: { needsVoice: true },
     },
     bailianMusic: {
       script: "audio/bailian-music.lua",
@@ -804,6 +806,50 @@ describe("model settings", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("audio-music-gap")).toBeNull(),
     );
+  });
+
+  it("says when a speech model would read the lines without a voice", async () => {
+    view.models.push(
+      model("speaker", "audio", "openaiSpeech", "Speaker", true),
+    );
+    view.preferences.audio.voice = "";
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    // The model the lines would be read by is asked for a voice, and this
+    // machine has set none: the tab says what such an ask comes back as.
+    expect(await screen.findByText("Speaker")).toBeTruthy();
+    expect(screen.getByTestId("audio-voice-gap")).toBeTruthy();
+
+    // The voice is filled in next door, and the gap closes.
+    fireEvent.click(screen.getByRole("tab", { name: "Preferences" }));
+    fireEvent.change(await screen.findByLabelText("Voice"), {
+      target: { value: "longxiaochun" },
+    });
+    const save = screen.getByRole("button", { name: "Save preferences" });
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect((save as HTMLButtonElement).disabled).toBe(true),
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Audio" }));
+    await waitFor(() =>
+      expect(screen.queryByTestId("audio-voice-gap")).toBeNull(),
+    );
+  });
+
+  it("asks no voice of a model that composes rather than speaks", async () => {
+    view.models.push(
+      model("musician", "audio", "bailianMusic", "Musician", true),
+    );
+    view.preferences.audio.voice = "";
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    // Which converters need a voice is the converter's own declaration, so a
+    // score's model is not asked for one just because the field is empty.
+    expect(await screen.findByText("Musician")).toBeTruthy();
+    expect(screen.queryByTestId("audio-voice-gap")).toBeNull();
   });
 
   it("shows the next model as the default when the stored one is gone", async () => {

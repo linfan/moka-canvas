@@ -5,6 +5,7 @@ import { ModelEditor } from "./ModelEditor";
 import {
   effectiveDefaultId,
   musicDefaultId,
+  protocolFeatures,
   protocolLabel,
   useModelStore,
 } from "./modelStore";
@@ -143,6 +144,7 @@ export function ModelsTab({ category }: { category: Capability }) {
   const saving = useModelStore((state) => state.saving);
   const editing = useModelStore((state) => state.editing);
   const copyOf = useModelStore((state) => state.copyOf);
+  const protocols = useModelStore((state) => state.protocols);
   const lower = t(CAPABILITY_LABELS[category]).toLowerCase();
 
   if (editing !== null) {
@@ -175,6 +177,16 @@ export function ModelsTab({ category }: { category: Capability }) {
   // resolves a generation through.
   const defaultId = effectiveDefaultId(view, category);
   const musicId = category === "audio" ? musicDefaultId(view) : null;
+  // The model an ask falls back to, and the one gap only it can have: a speech
+  // model is asked for a voice, so a machine that has set none is a machine
+  // whose read-aloud asks come back refused. Which converters need one is the
+  // converter's own declaration, not a list this program keeps.
+  const fallback = models.find((model) => model.id === defaultId);
+  const voiceGap =
+    category === "audio" &&
+    fallback !== undefined &&
+    protocolFeatures(protocols, fallback.protocol).needsVoice === true &&
+    (view?.preferences.audio.voice ?? "").trim() === "";
 
   return (
     <div className="settings-section">
@@ -214,6 +226,11 @@ export function ModelsTab({ category }: { category: Capability }) {
           {category === "audio" && musicId === null && (
             <p className="settings-hint" data-testid="audio-music-gap">
               {t("settings:models.musicGap")}
+            </p>
+          )}
+          {voiceGap && (
+            <p className="settings-hint" data-testid="audio-voice-gap">
+              {t("settings:models.voiceGap")}
             </p>
           )}
         </>

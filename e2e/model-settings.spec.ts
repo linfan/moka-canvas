@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-import { CHANNEL_KEY } from "./helpers";
-import { PROVIDER_ORIGIN } from "./mock-provider";
+import { CHANNEL_KEY, configureModels } from "./helpers";
+import { PROVIDER_ORIGIN, SPEAKER } from "./mock-provider";
 
 const CHAT_URL = `${PROVIDER_ORIGIN}/v1/chat/completions`;
 
@@ -250,4 +250,50 @@ test("speech recognition offers the script that serves it", async ({
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
     "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription",
   );
+});
+
+/**
+ * What a model needs from the preferences is said where the model is chosen.
+ *
+ * The speech converters deployed by this build declare that they are asked for
+ * a voice, so with none set the audio tab names the gap beside the default
+ * rather than waiting for a read-aloud ask to come back refused.
+ */
+test("a speech model with no voice set is said out loud", async ({ page }) => {
+  await configureModels([
+    { id: SPEAKER, capability: "audio", alias: "Speaker" },
+  ]);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+
+  // The suite shares one metadata store, so what the voice was is kept to be
+  // put back: the other specs are not left reading a choice made here.
+  await dialog.getByRole("tab", { name: "Preferences" }).click();
+  // Exact, because the field beside it is "Voice instructions".
+  const voice = dialog.getByRole("textbox", { name: "Voice", exact: true });
+  const save = dialog.getByRole("button", { name: "Save preferences" });
+  // Only a change enables the save, so an already-empty voice is left alone.
+  const was = await voice.inputValue();
+  if (was !== "") {
+    await voice.fill("");
+    await save.click();
+    await expect(save).toBeDisabled();
+  }
+
+  await dialog.getByRole("tab", { name: "Audio" }).click();
+  await expect(dialog.getByTestId("audio-voice-gap")).toBeVisible();
+
+  await dialog.getByRole("tab", { name: "Preferences" }).click();
+  await voice.fill("alloy");
+  await save.click();
+  await expect(save).toBeDisabled();
+
+  await dialog.getByRole("tab", { name: "Audio" }).click();
+  await expect(dialog.getByTestId("audio-voice-gap")).toHaveCount(0);
+
+  await dialog.getByRole("tab", { name: "Preferences" }).click();
+  await voice.fill(was);
+  await save.click();
+  await expect(save).toBeDisabled();
 });
