@@ -295,6 +295,20 @@ function withoutTheClip(): MokaFile {
   return moka;
 }
 
+/** The same telling cut shot by shot, with its first shot already filmed. */
+function withFilmedShot(): MokaFile {
+  const moka = withEveryFrame();
+  const story = moka.stories![0];
+  const act = story.chapters[0]!.acts[0]!;
+  story.shotGranularity = "keyframe";
+  act.imagesConfirmed = true;
+  act.keyframes[0]!.video = {
+    takes: [{ assetId: "asset-first-shot-clip", createdAt: T0 }],
+    confirmed: true,
+  };
+  return moka;
+}
+
 /**
  * The room as a reader reaches step four with this episode open.
  *
@@ -632,6 +646,29 @@ describe("writing an episode's board", () => {
     ]);
   });
 
+  it("asks for the act's clip again from the row that plays it", async () => {
+    openAtBoard(withoutTheClip());
+    fireEvent.click(screen.getByTestId("story-act-images-confirm-0"));
+    await waitFor(() => expect(acts()[0]?.imagesConfirmed).toBe(true));
+
+    // While no clip is there the first ask is the only one.
+    expect(screen.queryByTestId("story-act-video-again-0")).toBeNull();
+    fireEvent.click(screen.getByTestId("story-act-video-go-0"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    await comesBack();
+
+    // The clip is home, and the same ask stands beside it: a reader who does
+    // not like what came back is not left holding it.
+    const again = screen.getByTestId(
+      "story-act-video-again-0",
+    ) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    fireEvent.click(again);
+    await waitFor(() => expect(starts).toHaveLength(2));
+    expect(starts[1]!.kind).toBe("actVideo");
+    expect(starts[1]!.items[0]?.id).toBe(starts[0]!.items[0]?.id);
+  });
+
   it("says out loud when the clip will be cut to the ceiling", async () => {
     const moka = withoutTheClip();
     const act = moka.stories![0].chapters[0]!.acts[0]!;
@@ -686,6 +723,28 @@ describe("writing an episode's board", () => {
     await waitFor(() => expect(starts).toHaveLength(2));
     item = starts[1]!.items[0];
     expect(item?.inputs?.map((input) => input.role)).toEqual(["firstFrame"]);
+  });
+
+  it("asks for a shot's clip again from the row that holds it", async () => {
+    openAtBoard(withFilmedShot());
+    const first = card(0);
+
+    // The shot holds a clip, and its row says what may be done about it: the
+    // take asked over beside the take settled on — while the shot next to it,
+    // holding nothing, still asks for its first.
+    expect(within(first).queryByTestId("story-kf-video-0")).toBeNull();
+    const again = within(first).getByTestId(
+      "story-kf-video-again-0",
+    ) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    expect(within(first).getByTestId("story-kf-video-1")).toBeDefined();
+
+    fireEvent.click(again);
+    await waitFor(() => expect(starts).toHaveLength(1));
+    expect(starts[0]!.kind).toBe("keyframeVideo");
+    expect(starts[0]!.items[0]?.id).toBe(
+      `keyframeVideo:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
+    );
   });
 
   it("asks before writing an episode's board again, and lists what it costs", async () => {

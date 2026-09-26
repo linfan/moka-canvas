@@ -365,6 +365,26 @@ function KeyframeRow({
                   preload="metadata"
                   src={`/api/v1/projects/current/assets/${clip.assetId}`}
                 />
+                {/*
+                  The shot is filmed once, but not only once: a take the reader
+                  does not like is asked over from the row that holds it.
+                */}
+                <button
+                  className="link"
+                  data-testid={`story-kf-video-again-${index}`}
+                  disabled={!act.imagesConfirmed || clipBusy}
+                  onClick={film}
+                  title={
+                    act.imagesConfirmed
+                      ? undefined
+                      : t("story:storyboard.confirmImagesFirst")
+                  }
+                  type="button"
+                >
+                  {clipBusy
+                    ? t("story:panels.drawing")
+                    : t("story:voice.again")}
+                </button>
                 <button
                   aria-pressed={keyframe.video.confirmed}
                   className="link"
