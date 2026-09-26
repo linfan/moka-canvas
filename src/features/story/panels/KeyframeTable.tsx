@@ -14,6 +14,7 @@ import {
   type StoryGuess,
 } from "../../../shared/domain";
 import type {
+  DocumentCommand,
   StoryAct,
   StoryDialogueLine,
   StoryDocument,
@@ -327,12 +328,7 @@ function KeyframeRow({
             onChoose={(assetId) =>
               keepFrame(story, chapterId, act, keyframe, assetId)
             }
-            onConfirm={() =>
-              writeFrame(story, chapterId, act, keyframe, {
-                ...keyframe.art,
-                confirmed: !keyframe.art.confirmed,
-              })
-            }
+            onConfirm={() => agreeToFrame(story, chapterId, act, keyframe)}
             onGenerate={draw}
             ratio={frameRatio(story)}
             slot={keyframe.art}
@@ -616,6 +612,58 @@ function writeActs(
       ),
     },
   ]);
+}
+
+/**
+ * One frame agreed to, or the agreement taken back.
+ *
+ * An act's frames are agreed to as a set, and the act itself goes with them:
+ * the frame that completes the set agrees to the act, and a frame taken back
+ * takes the act's agreement away. Confirming the frames one by one therefore
+ * reaches the same place as the act's own button reaches in one press.
+ */
+function agreeToFrame(
+  story: StoryDocument,
+  chapterId: string,
+  act: StoryAct,
+  keyframe: StoryKeyframe,
+): void {
+  const confirmed = !keyframe.art.confirmed;
+  const commands: DocumentCommand[] = [
+    {
+      type: "setStorySlot",
+      storyId: story.id,
+      target: {
+        kind: "keyframe",
+        chapterId,
+        actId: act.id,
+        keyframeId: keyframe.id,
+      },
+      slot: { ...keyframe.art, confirmed },
+    },
+  ];
+  const everyOtherFrameConfirmed = act.keyframes.every(
+    (held) => held.id === keyframe.id || held.art.confirmed,
+  );
+  if (confirmed && everyOtherFrameConfirmed && !act.imagesConfirmed) {
+    commands.push({
+      type: "updateStoryAct",
+      storyId: story.id,
+      chapterId,
+      actId: act.id,
+      patch: { imagesConfirmed: true },
+    });
+  }
+  if (!confirmed && act.imagesConfirmed) {
+    commands.push({
+      type: "updateStoryAct",
+      storyId: story.id,
+      chapterId,
+      actId: act.id,
+      patch: { imagesConfirmed: false },
+    });
+  }
+  execute(i18n.t("story:history.storyboard"), commands);
 }
 
 /** One shot's frame, whole, as the reader leaves it. */

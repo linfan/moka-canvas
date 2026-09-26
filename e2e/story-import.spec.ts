@@ -161,7 +161,11 @@ test("a telling is imported into a board, and into a cut of its own", async ({
       timeout: 60_000,
     });
     await firstAct.getByTestId("story-kf-slot-1-confirm").click();
-    await firstAct.getByTestId("story-act-images-confirm-0").click();
+    // The last frame agreed to by hand is the act agreed to: the row says the
+    // pictures are settled without the act's own button being pressed.
+    await expect(
+      firstAct.getByTestId("story-act-images-unconfirm-0"),
+    ).toBeVisible();
     await firstAct.getByTestId("story-act-video-go-0").click();
     await expect(firstAct.getByTestId("story-act-video-0")).toBeVisible({
       timeout: 60_000,

@@ -11,6 +11,7 @@ import {
 } from "../../../shared/domain";
 import { MAX_VIDEO_SECONDS } from "../../../shared/domain/constants";
 import type {
+  DocumentCommand,
   MokaFile,
   StoryAct,
   StoryActPatch,
@@ -132,9 +133,10 @@ export function ActCard({
     (keyframe) => !busyKeyframes.has(keyframe.id),
   );
   const drawn = act.keyframes.length - missing.length;
-  const everyFrameConfirmed =
-    act.keyframes.length > 0 &&
-    act.keyframes.every((keyframe) => keyframe.art.confirmed);
+  // The frames of an act are agreed to in one press, so what that press waits
+  // on is every picture being there — not every picture having been agreed to
+  // one by one first.
+  const everyFrameDrawn = act.keyframes.length > 0 && missing.length === 0;
   const filmed = act.keyframes.filter(
     (keyframe) => keyframe.video.takes.length > 0,
   ).length;
@@ -407,12 +409,14 @@ export function ActCard({
         ) : (
           <button
             data-testid={`story-act-images-confirm-${index}`}
-            disabled={!everyFrameConfirmed}
-            onClick={() => write({ imagesConfirmed: true })}
+            disabled={!everyFrameDrawn}
+            onClick={() => confirmFrames(story, chapterId, act)}
             title={
-              everyFrameConfirmed
-                ? undefined
-                : t("story:storyboard.confirmEveryFrame")
+              act.keyframes.length === 0
+                ? t("story:storyboard.noShots")
+                : everyFrameDrawn
+                  ? undefined
+                  : t("story:storyboard.drawEveryFrame")
             }
             type="button"
           >
@@ -627,6 +631,42 @@ function secondsOf(moka: MokaFile | null, assetId: string): string {
   const entry = moka === null ? undefined : findResource(moka, assetId);
   const durationMs = entry?.probe?.durationMs;
   return durationMs === undefined ? "—" : formatDuration(durationMs);
+}
+
+/**
+ * Agrees to every picture of the act at once, and to the act with them.
+ *
+ * One press rather than one per shot, as one step of the history: agreeing to
+ * the frames by hand, one confirmation after another, lands at the same place.
+ */
+function confirmFrames(
+  story: StoryDocument,
+  chapterId: string,
+  act: StoryAct,
+): void {
+  const commands: DocumentCommand[] = [];
+  for (const keyframe of act.keyframes) {
+    if (keyframe.art.confirmed) continue;
+    commands.push({
+      type: "setStorySlot",
+      storyId: story.id,
+      target: {
+        kind: "keyframe",
+        chapterId,
+        actId: act.id,
+        keyframeId: keyframe.id,
+      },
+      slot: { ...keyframe.art, confirmed: true },
+    });
+  }
+  commands.push({
+    type: "updateStoryAct",
+    storyId: story.id,
+    chapterId,
+    actId: act.id,
+    patch: { imagesConfirmed: true },
+  });
+  execute(i18n.t("story:history.storyboard"), commands);
 }
 
 /** One act's field, as the reader leaves it. */

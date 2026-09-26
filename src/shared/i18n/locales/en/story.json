@@ -374,7 +374,7 @@
     "film": "Film it",
     "confirmTableFirst": "Agree to the table first",
     "confirmImagesFirst": "Agree to this act's frames first",
-    "confirmEveryFrame": "Every shot has to be agreed to before the act can be",
+    "drawEveryFrame": "Every shot needs a picture before the act's frames can be agreed to",
     "frames": "Frames {{drawn}}/{{total}}",
     "noClip": "no clip",
     "clipWaiting": "clip waiting",

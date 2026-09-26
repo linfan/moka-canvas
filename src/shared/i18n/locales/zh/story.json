@@ -374,7 +374,7 @@
     "film": "出片",
     "confirmTableFirst": "先确认这张表",
     "confirmImagesFirst": "先确认本幕的图",
-    "confirmEveryFrame": "每一格都确认之后才能确认整幕",
+    "drawEveryFrame": "每一格都画出图之后才能确认整幕",
     "frames": "图片 {{drawn}}/{{total}}",
     "noClip": "视频 未生成",
     "clipWaiting": "视频 待确认",

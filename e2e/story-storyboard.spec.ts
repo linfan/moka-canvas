@@ -153,16 +153,20 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     ).toBeEnabled();
     await firstAct.getByTestId("story-kf-slot-0-confirm").click();
 
-    // The rest of the act at once, and then every frame has been agreed to.
+    // The rest of the act at once, and then the act's own button: one press
+    // agrees to every frame of the act, with the second frame never agreed to
+    // by hand — the pictures have to be there, not their agreements.
     await firstAct.getByTestId("story-act-draw-0").click();
     await expect(firstAct.getByTestId("story-kf-slot-1-confirm")).toBeVisible({
       timeout: 60_000,
     });
-    await firstAct.getByTestId("story-kf-slot-1-confirm").click();
     await expect(
       firstAct.getByTestId("story-act-images-confirm-0"),
     ).toBeEnabled();
     await firstAct.getByTestId("story-act-images-confirm-0").click();
+    await expect(
+      firstAct.getByTestId("story-act-images-unconfirm-0"),
+    ).toBeVisible();
 
     // And the clip itself, which the stand-in's job hands back at once.
     await expect(firstAct.getByTestId("story-act-video-go-0")).toBeEnabled();

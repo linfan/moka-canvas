@@ -234,6 +234,16 @@ function withEveryFrame(): MokaFile {
   return moka;
 }
 
+/** The same telling with every frame of its first act drawn, none agreed to. */
+function withDrawnFrames(): MokaFile {
+  const moka = withEveryFrame();
+  const act = moka.stories![0].chapters[0]!.acts[0]!;
+  for (const keyframe of act.keyframes) {
+    keyframe.art = { ...keyframe.art, confirmed: false };
+  }
+  return moka;
+}
+
 /** The same telling with the place it happens in not yet drawn. */
 function withoutThePlace(): MokaFile {
   const moka = withOpenTable();
@@ -675,6 +685,49 @@ describe("writing an episode's board", () => {
     expect(
       starts[0]!.items[0]?.inputs?.map((input) => input.assetId),
     ).not.toContain(ids.sceneMain);
+  });
+
+  it("agrees to every frame of an act in one press", async () => {
+    openAtBoard(withDrawnFrames());
+    const confirm = screen.getByTestId(
+      "story-act-images-confirm-0",
+    ) as HTMLButtonElement;
+    // Not one frame has been agreed to by hand, and the press is ready all the
+    // same: it is the pictures that have to be there, not their agreements.
+    expect(confirm.disabled).toBe(false);
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(acts()[0]?.imagesConfirmed).toBe(true));
+    expect(
+      acts()[0]?.keyframes.every((keyframe) => keyframe.art.confirmed),
+    ).toBe(true);
+  });
+
+  it("waits for every frame to be drawn before the act can be agreed to", () => {
+    openAtBoard(withUndrawnFrames());
+    const confirm = screen.getByTestId(
+      "story-act-images-confirm-0",
+    ) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    expect(confirm.title).toContain("needs a picture");
+  });
+
+  it("agrees to the act itself once the last frame is agreed to by hand", async () => {
+    openAtBoard(withDrawnFrames());
+    const first = screen.getByTestId("story-act-0");
+    fireEvent.click(within(first).getByTestId("story-kf-slot-0-confirm"));
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[0]?.art.confirmed).toBe(true),
+    );
+    // The second frame is still open, so the act is not agreed to yet.
+    expect(acts()[0]?.imagesConfirmed).toBe(false);
+
+    fireEvent.click(within(first).getByTestId("story-kf-slot-1-confirm"));
+    await waitFor(() => expect(acts()[0]?.imagesConfirmed).toBe(true));
+
+    // Taking one frame back takes the act's agreement with it.
+    fireEvent.click(within(first).getByTestId("story-kf-slot-0-confirm"));
+    await waitFor(() => expect(acts()[0]?.imagesConfirmed).toBe(false));
   });
 
   it("films an act only once its frames are agreed to, for as long as it plans", async () => {
