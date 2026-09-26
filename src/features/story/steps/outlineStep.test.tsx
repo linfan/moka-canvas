@@ -555,6 +555,90 @@ describe("splitting again", () => {
   });
 });
 
+describe("what the table waits on", () => {
+  /** A telling split into two chapters, whose parts have come home. */
+  async function twoChaptersWritten(): Promise<void> {
+    openAtOutline(withManuscript(2));
+    answers["outline:1"] = JSON.stringify({
+      title: "第一章 站台",
+      synopsis: "他在站台上等车。",
+    });
+    answers["outline:2"] = JSON.stringify({
+      title: "第二章 车厢",
+      synopsis: "车厢里只有两个人。",
+    });
+    fireEvent.click(screen.getByTestId("story-outline-mode-split"));
+    await waitFor(() =>
+      expect(field("story-outline-chapters").value).toBe("2"),
+    );
+    fireEvent.click(screen.getByTestId("story-outline-start"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    await comesBack();
+    await waitFor(() => expect(chapters()).toHaveLength(2));
+  }
+
+  /** A batch of drawings out for the story, which step two knows nothing of. */
+  async function drawingElsewhere(): Promise<void> {
+    await act(async () => {
+      await useStoryJobStore.getState().start(story().id, "keyframeArt", [
+        {
+          id: `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
+          target: {
+            kind: "keyframeArt",
+            chapterId: ids.chapterFirst,
+            actId: ids.act,
+            keyframeId: ids.frameFirst,
+          },
+          capability: "image",
+          prompt: "雨中的站台。",
+        },
+      ]);
+    });
+  }
+
+  it("is not held back by a batch of drawings", async () => {
+    await twoChaptersWritten();
+    await drawingElsewhere();
+
+    // The buttons belong to the table: pictures being painted for a board are
+    // not a chapter being written, and do not shut the step.
+    expect(
+      (screen.getByTestId("story-outline-start") as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(screen.getByTestId("story-outline-confirm-all")).toBeTruthy();
+    expect(
+      (screen.getByTestId("story-chapter-redo-0") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByTestId("story-chapter-redo-1") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    // And the button the step is asked through still says what it would do
+    // rather than counting a batch that has nothing to do with the table.
+    expect(screen.getByTestId("story-outline-start").textContent).toBe(
+      "Split it again",
+    );
+  });
+
+  it("waits on one chapter at a time, and not on the chapter beside it", async () => {
+    await twoChaptersWritten();
+    fireEvent.click(screen.getByTestId("story-chapter-redo-0"));
+    await waitFor(() => expect(starts).toHaveLength(2));
+
+    // The chapter being written again waits on its own ask...
+    expect(
+      (screen.getByTestId("story-chapter-redo-0") as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    // ...while the chapter beside it is still one the reader can ask for.
+    expect(
+      (screen.getByTestId("story-chapter-redo-1") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+});
+
 describe("an answer nobody could read", () => {
   it("says so, and takes a repaired answer by hand", async () => {
     openAtOutline(atTheOutline());

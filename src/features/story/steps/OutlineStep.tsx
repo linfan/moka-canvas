@@ -23,11 +23,15 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
 import { StoryModelPicks } from "../components/StoryModelPicks";
+import { StoryImportButton } from "../components/StoryImportButton";
+import { StepHeading } from "../components/StepHeading";
 import { applyFixedOutline, readOutlineAnswer } from "../jobs/apply";
 import { planOutline, storySplitChars } from "../jobs/plan";
 import { readTextAsset } from "../readText";
 import {
   jobProgress,
+  kindJob,
+  pieceRunning,
   redoChapterPart,
   retryFailed,
   useRunningJob,
@@ -78,6 +82,10 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
   const sourceId = brief.sourceAssetId;
   const jobs = useStoryJobs(story.id);
   const running = useRunningJob(story.id);
+  // The step's own ask, which is what its buttons wait on: a batch drawing
+  // pictures for the boards is not a chapter being written, and it does not
+  // hold the table back.
+  const writing = kindJob(jobs, "outline");
   const failure = useStoryJobStore((state) => state.error);
   const elapsed = useElapsed(running?.createdAt);
   const [mode, setMode] = useState<"expand" | "split">(
@@ -142,12 +150,13 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
 
   // A telling longer than one batch is taken in waves, the next one beginning
   // when the one before it is over rather than when the reader presses again —
-  // and not while a batch is still being handed over.
+  // and not while a batch is still being handed over, nor while the table it
+  // writes into is still being written.
   useEffect(() => {
     if (
       starting.current ||
       startingBatch ||
-      running !== null ||
+      writing !== null ||
       waves.length === 0
     )
       return;
@@ -163,7 +172,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
       .finally(() => {
         starting.current = false;
       });
-  }, [running, waves, story.id, startingBatch]);
+  }, [writing, waves, story.id, startingBatch]);
 
   const begin = async (count: number) => {
     setAsking(false);
@@ -227,12 +236,15 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
     story.chapters.length === 0 &&
     answers !== undefined &&
     answers.reads.every((read) => read.draft === undefined) &&
-    running === null;
+    writing === null;
 
   return (
     <div className="story-step-scroll" data-testid="story-step-outline-body">
       <div className="story-step-narrow">
-        <h2>{t("story:step.outline")}</h2>
+        <StepHeading
+          action={<StoryImportButton story={story} target="canvas" />}
+          step="outline"
+        />
         <p className="story-step-lead">{t("story:outline.lead")}</p>
         <StoryModelPicks places={["text"]} />
 
@@ -329,7 +341,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
               })}
             </span>
           )}
-          {!running &&
+          {!writing &&
             story.chapters.some((chapter) => !chapter.synopsisConfirmed) && (
               <button
                 className="link"
@@ -343,12 +355,12 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
           <button
             className="primary"
             data-testid="story-outline-start"
-            disabled={running !== null || reading}
+            disabled={writing !== null || reading}
             onClick={start}
             type="button"
           >
-            {running !== null
-              ? t("story:jobs.busy", jobProgress(running))
+            {writing !== null
+              ? t("story:jobs.busy", jobProgress(writing))
               : reading
                 ? t("story:outline.reading")
                 : story.chapters.length > 0
@@ -370,7 +382,12 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
             role="status"
           >
             <span>
-              {t("story:outline.writing")} · {formatDuration(elapsed)}
+              {t(
+                running.kind === "outline"
+                  ? "story:outline.writing"
+                  : "story:jobs.generating",
+              )}{" "}
+              · {formatDuration(elapsed)}
             </span>
             {elapsed >= STORY_SLOW_MS && (
               <span className="story-hint">{t("story:outline.slow")}</span>
@@ -413,7 +430,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
                 index={index}
                 key={chapter.id}
                 offerRedo={mode === "split" && sourceId !== undefined}
-                running={running !== null}
+                redoBusy={pieceRunning(jobs, `outline:${index + 1}`)}
                 story={story}
               />
             ))}
@@ -459,13 +476,14 @@ function ChapterCard({
   chapter,
   index,
   offerRedo,
-  running,
+  redoBusy,
 }: {
   story: StoryDocument;
   chapter: StoryChapter;
   index: number;
   offerRedo: boolean;
-  running: boolean;
+  /** Whether this chapter's own ask for a new telling of it is out just now. */
+  redoBusy: boolean;
 }) {
   const { t } = useTranslation();
   const write = (patch: Partial<StoryChapter>) => {
@@ -608,7 +626,7 @@ function ChapterCard({
             <button
               className="link"
               data-testid={`story-chapter-redo-${index}`}
-              disabled={running}
+              disabled={redoBusy}
               onClick={() => void redoChapterPart(story, index)}
               type="button"
             >

@@ -19,11 +19,14 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
+import { StoryImportButton } from "../components/StoryImportButton";
+import { StepHeading } from "../components/StepHeading";
 import { ActCard } from "../panels/ActCard";
 import { chapterGuesses } from "../jobs/apply";
 import { jobKey, planKeyframeArt, planStoryboard } from "../jobs/plan";
 import {
   jobProgress,
+  kindRunning,
   useRunningJob,
   useStoryJobs,
   useStoryJobStore,
@@ -47,6 +50,12 @@ const STORY_SLOW_MS = 90_000;
  * table is agreed to before anything is drawn from it and the frames are agreed
  * to before anything is filmed, since each is made from the one before it — and
  * nothing is asked for in bulk without saying how many pieces it is.
+ *
+ * Every picture and every clip is an ask of its own: a shot whose painter is
+ * working says so and is not asked for twice, while the shots beside it go on
+ * being drawable — and what a batch is making elsewhere in the story does not
+ * hold the rest of the board back. The one thing that waits on the whole
+ * episode is the board itself, which rewrites the acts every drawing stands in.
  */
 export function StoryboardStep({ story }: { story: StoryDocument }) {
   const { t } = useTranslation();
@@ -68,25 +77,50 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
     story.chapters.findIndex((held) => held.id === openChapterId),
   );
   const chapter: StoryChapter | undefined = story.chapters[index];
+  // Every place this page asks about is read off one set: what a batch out for
+  // this story is making right now, by the name the place is known by.
   const keys = busyKeys(jobs);
+  /** Whether an episode's own board is being written just now. */
+  const boarding = (chapterId: string): boolean =>
+    keys.has(jobKey({ kind: "storyboard", chapterId }));
+  /** Whether one of a shot's own pictures is being made just now. */
+  const drawing = (target: {
+    chapterId: string;
+    actId: string;
+    keyframeId: string;
+  }): boolean => keys.has(targetKey({ kind: "keyframe", ...target }));
   const marks =
     chapter === undefined
       ? new Map<string, StoryGuess[]>()
       : chapterGuesses(story, chapter.id, jobs);
 
   const unboarded = story.chapters.filter((held) => held.acts.length === 0);
+  // What "board every episode" hands over: the episodes with no board of their
+  // own that are not already being written. It is also what the button counts,
+  // so its number is the work it would ask for.
+  const boardable = unboarded.filter((held) => !boarding(held.id));
   const actsTotal = story.chapters.reduce(
     (sum, held) => sum + held.acts.length,
     0,
   );
   // Frames are only made from a table the reader has agreed to, so the count
-  // of what is missing counts only the acts whose tables are settled.
+  // of what is missing counts only the acts whose tables are settled — and
+  // leaves out the frames already on their way, since asking for a place twice
+  // pays for it twice.
   const missingFrames = story.chapters.flatMap((held) =>
     held.acts
       .filter((act) => act.keysConfirmed)
       .flatMap((act) =>
         act.keyframes
-          .filter((keyframe) => keyframe.art.takes.length === 0)
+          .filter(
+            (keyframe) =>
+              keyframe.art.takes.length === 0 &&
+              !drawing({
+                chapterId: held.id,
+                actId: act.id,
+                keyframeId: keyframe.id,
+              }),
+          )
           .map((keyframe) => ({
             chapterId: held.id,
             actId: act.id,
@@ -98,9 +132,11 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
 
   // A telling longer than one batch is boarded in waves, the next one
   // beginning when the one before it is over rather than when the reader
-  // presses again.
+  // presses again — and only a board holds a board back: what a batch of
+  // drawings is making is its own work on its own shots.
+  const boardingSomewhere = kindRunning(jobs, "storyboard");
   useEffect(() => {
-    if (starting.current || running !== null || waves.length === 0) return;
+    if (starting.current || boardingSomewhere || waves.length === 0) return;
     const next = waves[0];
     if (next === undefined) return;
     starting.current = true;
@@ -113,7 +149,7 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
       .finally(() => {
         starting.current = false;
       });
-  }, [running, waves, story]);
+  }, [boardingSomewhere, waves, story]);
 
   const writeGranularity = (granularity: StoryShotGranularity) => {
     execute(i18n.t("story:history.storyboard"), [
@@ -136,7 +172,7 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
 
   const boardAll = async () => {
     const cut = chunkWaves(
-      unboarded.map((held) => held.id),
+      boardable.map((held) => held.id),
       BOARDS_PER_ASK,
     );
     setTotalWaves(Math.max(1, cut.length));
@@ -172,11 +208,19 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
   }
 
   const cost = actsRegenerationCost(chapter);
+  // One ask for the board stands in the header whichever state the episode is
+  // in: with no board it writes one straight away, and with one standing it
+  // takes the name of writing it again and asks first, since that replaces
+  // what is there.
+  const boarded = chapter.acts.length > 0;
 
   return (
     <div className="story-step-scroll" data-testid="story-step-storyboard-body">
       <div className="story-step-wide">
-        <h2>{t("story:step.storyboard")}</h2>
+        <StepHeading
+          action={<StoryImportButton story={story} target="canvas" />}
+          step="storyboard"
+        />
         <p className="story-step-lead">{t("story:storyboard.lead")}</p>
         <StoryModelPicks
           places={["text", "image", "video", "audio", "music"]}
@@ -254,37 +298,36 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
             )}
             <button
               className="primary"
-              data-testid="story-board-generate"
-              disabled={running !== null}
-              onClick={() =>
+              data-testid={
+                boarded ? "story-board-regenerate" : "story-board-generate"
+              }
+              disabled={boarding(chapter.id)}
+              onClick={() => {
+                if (boarded) {
+                  setAsking(true);
+                  return;
+                }
                 void run(
                   story.id,
                   "storyboard",
                   planStoryboard(story, [chapter.id]),
-                )
-              }
+                );
+              }}
               type="button"
             >
-              {t("story:storyboard.generate")}
+              {t(
+                boarded
+                  ? "story:storyboard.regenerate"
+                  : "story:storyboard.generate",
+              )}
             </button>
-            {chapter.acts.length > 0 && (
-              <button
-                data-testid="story-board-regenerate"
-                disabled={running !== null}
-                onClick={() => setAsking(true)}
-                type="button"
-              >
-                {t("story:storyboard.regenerate")}
-              </button>
-            )}
-            {unboarded.length >= 2 && (
+            {boardable.length >= 2 && (
               <button
                 data-testid="story-board-all"
-                disabled={running !== null}
                 onClick={() => void boardAll()}
                 type="button"
               >
-                {t("story:storyboard.generateAll", { count: unboarded.length })}
+                {t("story:storyboard.generateAll", { count: boardable.length })}
               </button>
             )}
           </div>
@@ -294,7 +337,6 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           {missingFrames.length > 0 && (
             <button
               data-testid="story-board-draw-missing"
-              disabled={running !== null}
               onClick={() =>
                 void run(
                   story.id,
@@ -337,7 +379,12 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
             role="status"
           >
             <span>
-              {t("story:storyboard.writing")} · {formatDuration(elapsed)}
+              {t(
+                running.kind === "storyboard"
+                  ? "story:storyboard.writing"
+                  : "story:jobs.generating",
+              )}{" "}
+              · {formatDuration(elapsed)}
             </span>
             {elapsed >= STORY_SLOW_MS && (
               <span className="story-hint">{t("story:outline.slow")}</span>
@@ -358,23 +405,6 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
         {chapter.acts.length === 0 ? (
           <div className="clip-empty" data-testid="story-board-empty">
             <p>{t("story:storyboard.empty")}</p>
-            <div className="story-step-actions">
-              <button
-                className="primary"
-                data-testid="story-board-empty-generate"
-                disabled={running !== null}
-                onClick={() =>
-                  void run(
-                    story.id,
-                    "storyboard",
-                    planStoryboard(story, [chapter.id]),
-                  )
-                }
-                type="button"
-              >
-                {t("story:storyboard.generate")}
-              </button>
-            </div>
           </div>
         ) : (
           <ol className="story-acts">
@@ -383,13 +413,14 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
               return (
                 <ActCard
                   act={act}
+                  boardBusy={boarding(chapter.id)}
                   busyKeyframes={busy.frames}
+                  busyClips={busy.clips}
                   chapterId={chapter.id}
                   guesses={marks.get(act.id) ?? []}
                   index={at}
                   key={act.id}
                   musicBusy={busy.music}
-                  running={running !== null}
                   story={story}
                   videoBusy={busy.video}
                   voiceBusy={busy.voice}
@@ -501,14 +532,25 @@ function busyKeys(jobs: StoryJobRecord[]): Set<string> {
   return keys;
 }
 
-/** Which of an act's shots are being drawn, and whether its clip is. */
+/**
+ * Which of an act's shots are being drawn or filmed, and whether its own clip,
+ * its lines or its score are being made — one place at a time, since one batch
+ * making one of them says nothing about the others.
+ */
 function busyIn(
   keys: Set<string>,
   chapterId: string,
   act: StoryAct,
-): { frames: Set<string>; video: boolean; voice: boolean; music: boolean } {
+): {
+  frames: Set<string>;
+  clips: Set<string>;
+  video: boolean;
+  voice: boolean;
+  music: boolean;
+} {
   const frames = new Set<string>();
-  let video = keys.has(
+  const clips = new Set<string>();
+  const video = keys.has(
     targetKey({ kind: "actVideo", chapterId, actId: act.id }),
   );
   const voice = keys.has(
@@ -540,8 +582,8 @@ function busyIn(
         }),
       )
     ) {
-      video = true;
+      clips.add(keyframe.id);
     }
   }
-  return { frames, video, voice, music };
+  return { frames, clips, video, voice, music };
 }

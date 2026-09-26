@@ -674,8 +674,8 @@ mod tests {
         );
     }
 
-    /// A video node's frame ports are what `video_images` sorts on, so the
-    /// labels have to survive the trip from the graph.
+    /// A video node's frame ports are what the converter reads the shot's ends
+    /// from, so the labels have to survive the trip from the graph.
     #[test]
     fn a_video_node_keeps_its_frames_apart_from_its_references() {
         let asked = node(

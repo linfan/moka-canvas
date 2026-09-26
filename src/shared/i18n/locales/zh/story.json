@@ -77,14 +77,14 @@
     "outline": "大纲",
     "elements": "剧情元素",
     "storyboard": "分镜脚本",
-    "edit": "剪辑"
+    "edit": "合成视频"
   },
   "stepHint": {
     "idea": "说清这个故事讲什么，以及它有多长。",
     "outline": "把创意拆成它要讲的一集集。",
     "elements": "找出故事需要的角色、场景与物品，并把它们画出来。",
     "storyboard": "写下每一集的幕与关键帧，然后出图、出片。",
-    "edit": "把各幕按顺序铺到时间线上，渲染出成片。"
+    "edit": "把各幕按顺序铺到时间线上、渲染出成片，再把剪辑版本交给剪辑室。"
   },
   "state": {
     "empty": "尚未开始",
@@ -113,7 +113,9 @@
     "chapters": "改写章节",
     "storyboard": "写分镜",
     "sound": "选定这一幕的声音",
-    "assemble": "装配成片"
+    "assemble": "装配成片",
+    "importCanvas": "把故事导入画布",
+    "importClips": "把故事导入剪辑室"
   },
   "parse": {
     "failed": "这个答案读不成一张章节表"
@@ -129,6 +131,7 @@
     "retryFailed": "再问一次",
     "openSettings": "打开设置",
     "busy": "{{done}}/{{total}}…",
+    "generating": "生成中",
     "targetGone": "{{label}} 已经不在这个故事里了。",
     "storyGone": "这批作业要讲的故事已经不在了。",
     "unreadableAnswer": "{{at}} 的回答读不出来；原话已留给你手动修正。",
@@ -312,7 +315,7 @@
     "settled": "已确认 {{done}}/{{total}} 幕",
     "generate": "生成分镜",
     "generateAll": "生成本轮全部集的表（{{count}} 集）",
-    "regenerate": "重新生成这一集",
+    "regenerate": "重新生成分镜",
     "regenerateTitle": "重新生成第 {{number}} 集的表？",
     "regenerateBody": "这一集现在的 {{acts}} 幕会被新的替换。已经画好的 {{drawn}} 格图与 {{filmed}} 段视频仍留在素材库里，但这一集不再引用它们。",
     "regenerateNote": "同一集里，编号相同的幕会保住自己的画面与片段，只换掉文字。",
@@ -323,11 +326,11 @@
     "actIndex": "幕 {{index}}",
     "actTitle": "这一幕的名字",
     "plan": "计划 {{seconds}} 秒",
-    "clamped": "将生成 {{seconds}} 秒（上限）",
-    "clampHint": "上限来自 设置 → 模型 → 视频 → 时长",
-    "confirmTable": "表确认",
+    "clamped": "将按 {{seconds}} 秒生成",
+    "clampHint": "一段视频以整秒计，单段最长 {{max}} 秒。",
+    "confirmTable": "确认这张表",
     "keysConfirmed": "表已确认 ✓",
-    "changeTable": "改一改",
+    "unconfirmTable": "取消确认",
     "noShots": "先给这一幕写几格",
     "characters": "人物",
     "scene": "场景",
@@ -380,7 +383,7 @@
     "drawMissing": "生成缺的图（{{count}} 格）",
     "confirmImages": "确认本幕的图",
     "imagesConfirmed": "图已确认 ✓",
-    "changeImages": "改一改",
+    "unconfirmImages": "取消确认",
     "filmAct": "生成这一段视频",
     "playClip": "播放这一段",
     "missingRef": "{{names}} 还没有图，这一格不会带上",
@@ -435,6 +438,33 @@
     "line": "{{speaker}}：{{text}}",
     "unconfirmedShort": "待确认",
     "ownSoundNote": "片段本身也带声音，两处会同时响；到剪辑室里把其中一处的音量调低即可。"
+  },
+  "import": {
+    "name": "名字",
+    "cancel": "取消",
+    "premise": "创意",
+    "main": "主图",
+    "turnaround": "四视图",
+    "frame": "画面",
+    "clip": "片段",
+    "voice": "配音",
+    "score": "配乐",
+    "tooManyClips": "这个故事生成的片段超过了单条时间线的上限（{{max}} 个），请减少幕数或每幕的镜头数后再导入。",
+    "canvas": {
+      "button": "导入到画布…",
+      "title": "导入到画布",
+      "hint": "把故事已经生成的内容做成一张画布：文字、画面、片段与声音各成卡片，卡片带着当时发出的提示词，并按实际关系连线。",
+      "empty": "故事还没有生成任何内容，暂无可导入。",
+      "done": "已把 {{count}} 张卡片导入「{{name}}」。"
+    },
+    "timeline": {
+      "button": "导入到剪辑…",
+      "title": "导入到剪辑",
+      "hint": "用这个故事已生成的片段与声音新建一条时间线，按讲述顺序排好。故事自己装配的那条不受影响，这条剪辑随你调整。",
+      "empty": "还没有生成任何片段，暂无可导入。",
+      "done": "已把 {{count}} 个片段导入「{{name}}」。",
+      "name": "{{name}} · 剪辑"
+    }
   },
   "voice": {
     "rowLabel": "声音",

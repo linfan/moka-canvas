@@ -527,6 +527,137 @@ mod tests {
         );
     }
 
+    /// The video scripts whose names the built-in protocols also answer to, so
+    /// a copy taken as the basis of a model of one's own keeps the ends of a
+    /// shot where they were put rather than turning them into references.
+    #[test]
+    fn the_video_scripts_name_the_frames_a_shot_lands_on() {
+        let rt = test_runtime();
+        let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
+        let picture = |role: &str, url: &str| serde_json::json!({"role": role, "mime": "image/png", "data_url": url});
+        // An act filmed whole: its first board, its last, and a shot between.
+        let inputs = serde_json::json!([
+            picture("firstFrame", "https://img.test/first.png"),
+            picture("lastFrame", "https://img.test/last.png"),
+            picture("reference", "https://img.test/middle.png"),
+        ]);
+        let request = serde_json::json!({"prompt": "a slow pan", "params": {"seconds": "6"}});
+
+        let openai = rt
+            .load(&scripts.join("models/video/openaiVideos/openai-videos.lua"))
+            .unwrap();
+        let built = rt
+            .call_json_value(
+                &openai,
+                "build_task_request",
+                vec![
+                    serde_json::json!({"url": "https://provider.test/v1/videos", "model": "a-video-model"}),
+                    request.clone(),
+                    inputs.clone(),
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(built["body"].as_str().unwrap()).expect("a JSON body");
+        assert_eq!(body["first_frame"], "https://img.test/first.png");
+        assert_eq!(body["last_frame"], "https://img.test/last.png");
+        assert_eq!(
+            body["reference_images"],
+            serde_json::json!(["https://img.test/middle.png"])
+        );
+
+        // With no pair of ends labelled there is only the count to go on: one
+        // picture opens the shot, two open and close it, and three or more are
+        // references — no provider takes three frames.
+        let ask = |params: serde_json::Value, pictures: serde_json::Value| {
+            let built = rt
+                .call_json_value(
+                    &openai,
+                    "build_task_request",
+                    vec![
+                        serde_json::json!({"url": "https://provider.test/v1/videos", "model": "a-video-model"}),
+                        serde_json::json!({"prompt": "a slow pan", "params": params}),
+                        pictures,
+                    ],
+                )
+                .unwrap();
+            serde_json::from_str::<serde_json::Value>(built["body"].as_str().unwrap())
+                .expect("a JSON body")
+        };
+
+        let one = ask(
+            serde_json::json!({}),
+            serde_json::json!([picture("reference", "https://img.test/one.png")]),
+        );
+        assert_eq!(one["first_frame"], "https://img.test/one.png");
+        assert!(one.get("last_frame").is_none(), "{one}");
+
+        let two = ask(
+            serde_json::json!({}),
+            serde_json::json!([
+                picture("reference", "https://img.test/one.png"),
+                picture("reference", "https://img.test/two.png"),
+            ]),
+        );
+        assert_eq!(two["first_frame"], "https://img.test/one.png");
+        assert_eq!(two["last_frame"], "https://img.test/two.png");
+
+        let three = ask(
+            serde_json::json!({}),
+            serde_json::json!([
+                picture("reference", "https://img.test/one.png"),
+                picture("reference", "https://img.test/two.png"),
+                picture("reference", "https://img.test/three.png"),
+            ]),
+        );
+        assert!(three.get("first_frame").is_none(), "{three}");
+        assert_eq!(
+            three["reference_images"],
+            serde_json::json!([
+                "https://img.test/one.png",
+                "https://img.test/two.png",
+                "https://img.test/three.png",
+            ])
+        );
+
+        // A request that asked for references is given references and nothing
+        // else, whatever the pictures were labelled.
+        let wanted_references = ask(serde_json::json!({"mode": "reference"}), inputs.clone());
+        assert!(wanted_references.get("first_frame").is_none());
+        assert_eq!(
+            wanted_references["reference_images"]
+                .as_array()
+                .map(Vec::len),
+            Some(3),
+            "{wanted_references}"
+        );
+
+        let gemini = rt
+            .load(&scripts.join("models/video/geminiVideo/gemini-video.lua"))
+            .unwrap();
+        let built = rt
+            .call_json_value(
+                &gemini,
+                "build_task_request",
+                vec![
+                    serde_json::json!({"url": "https://provider.test/v1beta/models/veo:predictLongRunning", "model": ""}),
+                    request,
+                    inputs,
+                ],
+            )
+            .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(built["body"].as_str().unwrap()).expect("a JSON body");
+        let shot = &body["instances"][0];
+        assert!(shot["image"].is_object(), "{shot}");
+        assert!(shot["lastFrame"].is_object(), "{shot}");
+        assert_eq!(
+            shot["referenceImages"].as_array().map(Vec::len),
+            Some(1),
+            "{shot}"
+        );
+    }
+
     /// A policy answer as the provider writes one, and the state step one left.
     fn policy() -> serde_json::Value {
         serde_json::json!({

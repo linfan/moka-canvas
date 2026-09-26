@@ -184,15 +184,40 @@ h2 {
 }
 
 /* The three ways into the project, floated under the row that asked for them:
-   the row stays where it stood, and the ways read as belonging to it. */
+   the row stays where it stood, and the ways read as belonging to it — a line
+   down their left is the app's own mark of one level in, the one the trees
+   wear as well. */
 .launcher-recent-rooms {
   animation: launcher-rooms-drop 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  border-left: 1px solid var(--stroke);
   display: flex;
   gap: 8px;
+  margin-left: 9px;
+  padding-left: 5px;
 }
 
+/* One step under the row they hang from: laid on the page rather than raised
+   off it, wearing mark and name a size down, so the three read as the row's
+   own ways in rather than as three more rows standing beside it. */
 .launcher-recent-rooms button {
+  align-items: center;
+  background: transparent;
+  color: var(--muted);
+  display: flex;
   flex: 1;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: center;
+  padding: 6px 10px;
+}
+
+.launcher-recent-rooms button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--ink);
+}
+
+.launcher-recent-rooms button svg {
+  flex: none;
 }
 
 @keyframes launcher-rooms-drop {
@@ -5284,6 +5309,13 @@ body.is-dragging-split {
   cursor: pointer;
 }
 
+/* Something the reader has said yes to, in the colour the room says it in
+   everywhere else: a description, a chapter's synopsis, a board's table. */
+.story-chip.is-on {
+  border-color: var(--success);
+  color: var(--success);
+}
+
 .story-flow-body {
   display: flex;
   flex: 1;
@@ -5313,8 +5345,12 @@ body.is-dragging-split {
 }
 
 .story-step.is-active {
+  /* The colour is said again at this weight because the pressed-button rule
+     matches here too: its dark on-primary colour would be left standing on
+     this step's own dark fill, which is no reading at all. */
   background: var(--surface-raised);
   border-color: var(--stroke);
+  color: var(--ink);
 }
 
 .story-step:disabled {
@@ -5387,6 +5423,33 @@ body.is-dragging-split {
 .story-step-lead {
   color: var(--muted);
   margin: -12px 0 0;
+}
+
+/* A step's name, and the things that act on the whole step beside it: a step
+   is read top to bottom, so what belongs to all of it stands on its own line
+   rather than among the controls of one of its parts. */
+.story-step-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+/* Taking the telling into another room: a way out of the step rather than a
+   move within it, so it is drawn the way the head's own small buttons are. */
+.story-import {
+  background: none;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  flex: none;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+.story-import:hover:enabled {
+  border-color: var(--primary);
+  color: var(--ink);
 }
 
 /* The models a step's buttons will ask, under the words that say what the step
@@ -6396,15 +6459,12 @@ button > .story-spin {
   opacity: 1;
 }
 
-.story-act-state {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-  margin-left: auto;
-}
-
+/* The one thing a board does not move past: the pictures and the clips are
+   all made from the table, so agreeing to it is said as a button with a ring
+   around it rather than as another pill among the pills. */
 .story-act-confirm {
-  cursor: pointer;
+  border-color: var(--primary);
+  font-weight: 600;
 }
 
 .story-clamp {

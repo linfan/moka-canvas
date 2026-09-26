@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import type { ModelsView } from "../../../api/models";
 import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
 import type { StoryDocument } from "../../../shared/domain/types";
 import { useModelStore } from "../../settings/modelStore";
@@ -25,6 +26,70 @@ function story(): StoryDocument {
   const held = buildStoryMokaFile().stories?.[0];
   if (held === undefined) throw new Error("the fixture holds a story");
   return held;
+}
+
+/**
+ * The settings as the room reads them, with the machine's own video length —
+ * the number a canvas node asks with when nobody says, and the one the story
+ * room must not mistake for a length its board is cut to.
+ */
+function settingsWithVideoSeconds(seconds: number): ModelsView {
+  return {
+    version: 1,
+    revision: 1,
+    models: [],
+    defaults: {
+      text: null,
+      image: null,
+      audio: null,
+      music: null,
+      video: null,
+      asr: null,
+    },
+    preferences: {
+      systemPrompt: "",
+      reasoningEffort: "auto",
+      image: { size: "1024x1024", quality: "auto", background: "", count: 1 },
+      video: {
+        seconds,
+        resolution: "",
+        generateAudio: false,
+        watermark: false,
+        mode: "auto",
+        ratio: "",
+      },
+      audio: {
+        voice: "",
+        format: "",
+        speed: 1,
+        instructions: "",
+        sampleRate: 22_050,
+        volume: 50,
+        rate: 1,
+        pitch: 1,
+      },
+      story: { splitChars: 12_000, readChars: 8_000 },
+    },
+    secretStorage: "unset",
+  };
+}
+
+/** The fixture with both shots of its first act set to run this long. */
+function plannedShot(ms: number): StoryDocument {
+  const held = drawnStory();
+  return {
+    ...held,
+    chapters: held.chapters.map((chapter) => ({
+      ...chapter,
+      acts: chapter.acts.map((heldAct) => ({
+        ...heldAct,
+        keyframes: heldAct.keyframes.map((keyframe) => ({
+          ...keyframe,
+          durationMs: ms,
+        })),
+      })),
+    })),
+  };
 }
 
 /** A story whose first act has both of its shots drawn. */
@@ -347,7 +412,8 @@ describe("planning the clips", () => {
     expect(items[0].id).toBe(
       `keyframeVideo:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
     );
-    // The shot is drawn for two seconds; the ceiling is sixty by default.
+    // The shot is drawn for two seconds, which is what it is asked for; the
+    // app's own ceiling is six hundred by default and nowhere near.
     expect(items[0].params).toEqual({
       seconds: 2,
       ratio: "16:9",
@@ -369,55 +435,50 @@ describe("planning the clips", () => {
     ]);
   });
 
-  it("keeps a clip inside the length the video settings allow", () => {
-    useModelStore.setState({
-      view: {
-        version: 1,
-        revision: 1,
-        models: [],
-        defaults: {
-          text: null,
-          image: null,
-          audio: null,
-          music: null,
-          video: null,
-          asr: null,
-        },
-        secretStorage: "unset",
-        preferences: {
-          systemPrompt: "",
-          reasoningEffort: "",
-          image: { size: "", quality: "", background: "", count: 1 },
-          video: {
-            seconds: 3,
-            resolution: "",
-            generateAudio: false,
-            watermark: false,
-            mode: "",
-            ratio: "",
-          },
-          audio: {
-            voice: "",
-            format: "",
-            speed: 1,
-            instructions: "",
-            sampleRate: 0,
-            volume: 1,
-            rate: 1,
-            pitch: 1,
-          },
-          story: { splitChars: 12_000, readChars: 8_000 },
-        },
-      },
-    });
+  it("asks for the length the board planned, not the video settings' own", () => {
+    // The video settings say what a canvas node asks for when nobody says:
+    // six seconds unless the reader changed it. A telling says what each clip
+    // is for, shot by shot, and is not cut to that number — an act of two
+    // five-second shots is ten seconds wherever the setting stands.
+    useModelStore.setState({ view: settingsWithVideoSeconds(6) });
 
-    const items = planActVideos(drawnStory(), ids.chapterFirst, [ids.act]);
+    const items = planActVideos(plannedShot(5_000), ids.chapterFirst, [
+      ids.act,
+    ]);
     expect(items[0].params).toEqual({
-      seconds: 3,
+      seconds: 10,
       ratio: "16:9",
       generateAudio: false,
       watermark: false,
     });
+    expect(items[0].prompt).toContain("about 10 seconds");
+  });
+
+  it("asks a long shot for its own length, and a score for the act it sits under", () => {
+    useModelStore.setState({ view: settingsWithVideoSeconds(6) });
+    const long = plannedShot(9_000);
+
+    const [shot] = planKeyframeVideos(long, ids.chapterFirst, ids.act, [
+      ids.frameFirst,
+    ]);
+    expect(shot.params?.seconds).toBe(9);
+
+    const [score] = planActMusic(long, ids.chapterFirst, ids.act);
+    // An act of two nine-second shots runs eighteen seconds, so the score
+    // asked to sit under it is asked for eighteen rather than for six.
+    expect(score.prompt).toContain("18 seconds");
+  });
+
+  it("still keeps a clip inside the length one may be", () => {
+    // Two shots of four hundred seconds is over thirteen minutes, past the ten
+    // a clip may run: what the app's own ceiling cuts is the board's
+    // arithmetic, and nothing in the settings is.
+    useModelStore.setState({ view: settingsWithVideoSeconds(6) });
+
+    const items = planActVideos(plannedShot(400_000), ids.chapterFirst, [
+      ids.act,
+    ]);
+    expect(items[0].params?.seconds).toBe(600);
   });
 });
 

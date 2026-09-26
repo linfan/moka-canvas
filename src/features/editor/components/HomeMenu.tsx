@@ -61,19 +61,25 @@ function ProjectsIcon() {
   );
 }
 
+/**
+ * The three rooms' marks, exported because they are read in two places: the
+ * corner menu and the ways a recent project is opened onto in the launcher
+ * name the same three rooms, and a room wears one mark wherever it is offered.
+ */
+
 /** Two cards joined by a wire: the board itself. */
-function CanvasIcon() {
+export function CanvasIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
       fill="none"
-      height="16"
+      height={size}
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth="1.6"
       viewBox="0 0 24 24"
-      width="16"
+      width={size}
     >
       <rect height="7" rx="1.5" width="7" x="3" y="4" />
       <rect height="7" rx="1.5" width="7" x="14" y="13" />
@@ -83,7 +89,7 @@ function CanvasIcon() {
 }
 
 /** A book with ruled lines in it: the telling a project is made of. */
-function StoryIcon({ size = 16 }: { size?: number }) {
+export function StoryIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
@@ -104,18 +110,18 @@ function StoryIcon({ size = 16 }: { size?: number }) {
 }
 
 /** A strip of film: the cutting room that is on its way. */
-function ClipIcon() {
+export function ClipIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
       fill="none"
-      height="16"
+      height={size}
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth="1.6"
       viewBox="0 0 24 24"
-      width="16"
+      width={size}
     >
       <rect height="14" rx="1.5" width="18" x="3" y="5" />
       <path d="M7.5 5v14M16.5 5v14" />

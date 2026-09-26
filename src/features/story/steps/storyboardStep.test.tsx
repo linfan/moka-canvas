@@ -21,9 +21,12 @@ import {
   buildStoryMokaFile,
   storyIds,
 } from "../../../shared/domain/fixtures";
+import { createAct, createKeyframe } from "../../../shared/domain/factories";
 import { currentTake } from "../../../shared/domain/story";
 import { clampSeconds } from "../jobs/plan";
+import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { useModelStore } from "../../settings/modelStore";
 import { StoryPage } from "../StoryPage";
 import { useStoryJobStore } from "../stores/storyJobStore";
 import { useStoryStore } from "../stores/storyStore";
@@ -37,6 +40,12 @@ let starts: Array<{ kind: StoryJobKind; items: StoryJobItemDraft[] }> = [];
 let held: StoryJobRecord[] = [];
 /** What each piece of the next batch is answered with, by the piece's id. */
 let answers: Record<string, string> = {};
+/**
+ * The pieces that have come home with a file, by the piece's id, when the test
+ * answers only some of them. Left empty, the whole batch answers at once, which
+ * is what most of these tests want.
+ */
+let landed: Record<string, string[]> = {};
 
 /** The server under the test, as the other steps' tests serve it. */
 function serving(): void {
@@ -132,21 +141,33 @@ function batchOf(
 
 /** The same batch as it comes home, every piece answered as the test said. */
 function answered(record: StoryJobRecord): StoryJobRecord {
-  return {
-    ...record,
-    status: "succeeded",
-    items: record.items.map((item) => ({
+  const partial = Object.keys(landed).length > 0;
+  const items = record.items.map((item) => {
+    const files = partial
+      ? landed[item.id]
+      : [`asset-${item.id.replace(/[^\w-]/g, "-")}`];
+    if (files === undefined) return item;
+    return {
       ...item,
       status: "succeeded" as const,
-      assetIds: [`asset-${item.id.replace(/[^\w-]/g, "-")}`],
+      assetIds: files,
       ...(answers[item.id] !== undefined ? { text: answers[item.id] } : {}),
-    })),
+    };
+  });
+  // A batch still owing a piece is still out, which is what a look at it says
+  // whether or not some of its answers have landed.
+  return {
+    ...record,
+    status: items.every((item) => item.status === "succeeded")
+      ? "succeeded"
+      : "running",
+    items,
   };
 }
 
-/** The batch the room started last, coming home with its answers. */
-async function comesBack(): Promise<void> {
-  const found = held.find((job) => job.id === `job-${starts.length}`);
+/** The batch the room started, coming home with its answers. */
+async function comesBack(which = starts.length): Promise<void> {
+  const found = held.find((job) => job.id === `job-${which}`);
   if (found === undefined) throw new Error("a batch was started first");
   await act(async () => {
     await useStoryJobStore.getState().adopt(found.id);
@@ -222,12 +243,70 @@ function withoutThePlace(): MokaFile {
   return moka;
 }
 
+/**
+ * The same telling with its first act's table agreed to and both of its shots
+ * still waiting for a picture: the state a board is in just after the reader
+ * has read it and said yes to it.
+ */
+function withUndrawnFrames(): MokaFile {
+  const moka = boarded();
+  const act = moka.stories![0].chapters[0]!.acts[0]!;
+  act.keysConfirmed = true;
+  act.imagesConfirmed = false;
+  for (const keyframe of act.keyframes) {
+    keyframe.art = { takes: [], confirmed: false };
+  }
+  return moka;
+}
+
+/**
+ * The same act with one more shot, none of them drawn — room for a batch to be
+ * out on one shot while the shots beside it go on being askable.
+ */
+function withThreeUndrawnShots(): MokaFile {
+  const moka = withUndrawnFrames();
+  const act = moka.stories![0].chapters[0]!.acts[0]!;
+  act.keyframes = [
+    ...act.keyframes,
+    createKeyframe(act.keyframes.length, "medium", "static", "eyeLevel"),
+  ];
+  return moka;
+}
+
+/**
+ * The same episode with a second act whose table nobody has agreed to yet: the
+ * act a batch drawing the first one must leave alone.
+ */
+function withASecondOpenAct(): MokaFile {
+  const moka = withThreeUndrawnShots();
+  const chapter = moka.stories![0].chapters[0]!;
+  chapter.acts.push({
+    ...createAct("第 2 幕 空车厢", "灯管忽明忽暗。"),
+    keyframes: [createKeyframe(0)],
+  });
+  return moka;
+}
+
 /** The same telling with its first act's clip not yet made. */
 function withoutTheClip(): MokaFile {
   const moka = withEveryFrame();
   const act = moka.stories![0].chapters[0]!.acts[0]!;
   act.video = { takes: [], confirmed: false };
   act.videoConfirmed = false;
+  return moka;
+}
+
+/** The same telling cut shot by shot, with its first shot already filmed. */
+function withFilmedShot(): MokaFile {
+  const moka = withEveryFrame();
+  const story = moka.stories![0];
+  const act = story.chapters[0]!.acts[0]!;
+  story.shotGranularity = "keyframe";
+  act.imagesConfirmed = true;
+  act.keyframes[0]!.video = {
+    takes: [{ assetId: "asset-first-shot-clip", createdAt: T0 }],
+    confirmed: true,
+  };
   return moka;
 }
 
@@ -298,12 +377,66 @@ function boardAnswer(...shotSizes: string[]): string {
   });
 }
 
+/**
+ * A deployment whose video settings name a length.
+ *
+ * The number is what a canvas node asks for when nobody says — six seconds by
+ * default — and what a test sets here is what the room reads while planning a
+ * batch, which is where a telling's own lengths must survive it.
+ */
+function filmingAt(seconds: number): void {
+  useModelStore.setState({
+    view: {
+      version: 1,
+      revision: 1,
+      models: [],
+      defaults: {
+        text: null,
+        image: null,
+        audio: null,
+        music: null,
+        video: null,
+        asr: null,
+      },
+      preferences: {
+        systemPrompt: "",
+        reasoningEffort: "auto",
+        image: { size: "1:1", quality: "auto", background: "", count: 1 },
+        video: {
+          seconds,
+          resolution: "720",
+          generateAudio: true,
+          watermark: false,
+          mode: "auto",
+          ratio: "",
+        },
+        audio: {
+          voice: "",
+          format: "mp3",
+          speed: 1,
+          instructions: "",
+          sampleRate: 22050,
+          volume: 50,
+          rate: 1,
+          pitch: 1,
+        },
+        story: { splitChars: 12_000, readChars: 8_000 },
+      },
+      secretStorage: "unset",
+    },
+  });
+}
+
 beforeEach(() => {
   starts = [];
   held = [];
   answers = {};
+  landed = {};
   serving();
   localStorage.clear();
+  // Every test starts on a machine whose settings say nothing, which is the
+  // state a room is read in unless a test sets a deployment of its own.
+  useModelStore.setState({ view: null });
   useProjectStore.getState().close();
   useStoryStore.getState().forget();
   useStoryJobStore.getState().reset();
@@ -332,6 +465,10 @@ describe("writing an episode's board", () => {
       "medium",
     );
 
+    // With no board yet the header's ask writes one straight away, and says so.
+    expect(screen.getByTestId("story-board-generate").textContent).toBe(
+      "Write the board",
+    );
     fireEvent.click(screen.getByTestId("story-board-generate"));
     await waitFor(() => expect(starts).toHaveLength(1));
     const [item] = starts[0]!.items;
@@ -378,6 +515,153 @@ describe("writing an episode's board", () => {
     expect(item?.prompt).toContain("4. 旧车票");
   });
 
+  it("agrees to the table under it, and leaves a clear way back to it", async () => {
+    openAtBoard(withOpenTable());
+    const first = card(0);
+    const confirm = () => within(first).getByTestId("story-act-keys-0");
+
+    // The drawer is shut until the table has been agreed to, and the button
+    // that agrees to it stands with the pictures' own asks, under the table.
+    expect(
+      (within(first).getByTestId("story-act-draw-0") as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(confirm().parentElement).toBe(
+      within(first).getByTestId("story-act-draw-0").parentElement,
+    );
+
+    fireEvent.click(confirm());
+    await waitFor(() => expect(acts()[0]?.keysConfirmed).toBe(true));
+    expect(within(first).getByTestId("story-act-keys-on-0").textContent).toBe(
+      "Table agreed to ✓",
+    );
+    expect(
+      (within(first).getByTestId("story-act-draw-0") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+
+    // Unsaid, the framing is the reader's to change again, and agreeing to it
+    // once more is a step of the history like the ones before it.
+    const before = useHistoryStore.getState().undoStack.length;
+    fireEvent.click(within(first).getByTestId("story-act-unlock-0"));
+    expect(acts()[0]?.keysConfirmed).toBe(false);
+    fireEvent.change(within(first).getByTestId("story-kf-size-1"), {
+      target: { value: "medium" },
+    });
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[1]?.shotSize).toBe("medium"),
+    );
+    fireEvent.click(confirm());
+    expect(acts()[0]?.keysConfirmed).toBe(true);
+    expect(useHistoryStore.getState().undoStack).toHaveLength(before + 3);
+  });
+
+  it("waits on the shot being drawn while the rest of the act stays askable", async () => {
+    openAtBoard(withASecondOpenAct());
+    const first = card(0);
+
+    // Two shots of the one act are asked for on their own, one after the other:
+    // two batches out for one act, which is what nothing about them needs.
+    fireEvent.click(within(first).getByTestId("story-kf-slot-0-generate"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    fireEvent.click(within(first).getByTestId("story-kf-slot-1-generate"));
+    await waitFor(() => expect(starts).toHaveLength(2));
+
+    // The shots being drawn say so, offer no second ask of themselves — and the
+    // shot nobody is drawing is still one a reader can ask for on its own.
+    for (const at of [0, 1]) {
+      const slot = within(first).getByTestId(`story-kf-slot-${at}`);
+      expect(slot.textContent).toContain("Drawing…");
+      expect(
+        within(slot).queryByTestId(`story-kf-slot-${at}-generate`),
+      ).toBeNull();
+    }
+    const own = within(first).getByTestId(
+      "story-kf-slot-2-generate",
+    ) as HTMLButtonElement;
+    expect(own.disabled).toBe(false);
+    // Which is also what the act's own button and the board's count: the work
+    // still to ask for, not the work already handed over.
+    expect(within(first).getByTestId("story-act-draw-0").textContent).toBe(
+      "Draw the missing frames (1)",
+    );
+    expect(screen.getByTestId("story-board-draw-missing").textContent).toBe(
+      "Draw every missing frame (1)",
+    );
+
+    // One of the two answers while the other is still being painted: the place
+    // it landed in shows it, the place still being drawn still says so, and the
+    // rest of the episode is the reader's throughout — a batch drawing one shot
+    // is not the whole board waiting.
+    landed[`keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`] = [
+      "asset-frame-first",
+    ];
+    await comesBack(1);
+    await waitFor(() =>
+      expect(
+        within(first).getByTestId("story-kf-slot-0").querySelector("img"),
+      ).not.toBeNull(),
+    );
+    expect(within(first).getByTestId("story-kf-slot-1").textContent).toContain(
+      "Drawing…",
+    );
+    const second = card(1);
+    expect(
+      (within(second).getByTestId("story-kf-size-0") as HTMLSelectElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (within(second).getByTestId("story-act-keys-1") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByTestId("story-board-regenerate") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("shows a shot's picture as it lands while the rest are still being drawn", async () => {
+    openAtBoard(withUndrawnFrames());
+    const first = card(0);
+    fireEvent.click(within(first).getByTestId("story-act-draw-0"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+
+    // The first of the two answers while the batch is still out: its own place
+    // shows the picture rather than waiting for the whole batch to be over.
+    landed[`keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`] = [
+      "asset-frame-first",
+    ];
+    await comesBack();
+    await waitFor(() =>
+      expect(
+        within(first)
+          .getByTestId("story-kf-slot-0")
+          .querySelector("img")
+          ?.getAttribute("src"),
+      ).toBe("/api/v1/projects/current/assets/asset-frame-first"),
+    );
+
+    // The one still on its way shows a place being painted, not one drawn.
+    expect(within(first).getByTestId("story-kf-slot-1").textContent).toContain(
+      "Drawing…",
+    );
+    expect(
+      within(first).getByTestId("story-kf-slot-1").querySelector("img"),
+    ).toBeNull();
+
+    // The second lands and the batch is over: the act holds both pictures.
+    landed[`keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameSecond}`] = [
+      "asset-frame-second",
+    ];
+    await comesBack();
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[1]?.art.takes).toHaveLength(1),
+    );
+    expect(
+      within(first).getByTestId("story-kf-slot-1").querySelector("img"),
+    ).not.toBeNull();
+  });
+
   it("says which references are missing rather than refusing to draw", async () => {
     openAtBoard(withoutThePlace());
     fireEvent.click(screen.getByTestId("story-act-keys-0"));
@@ -394,6 +678,10 @@ describe("writing an episode's board", () => {
   });
 
   it("films an act only once its frames are agreed to, for as long as it plans", async () => {
+    // The video settings say what a canvas node asks for when nobody says:
+    // three seconds here. What a board plans is its own, and the act is asked
+    // for the five seconds its shots add up to rather than for the default.
+    filmingAt(3);
     openAtBoard(withoutTheClip());
     expect(
       (screen.getByTestId("story-act-video-go-0") as HTMLButtonElement)
@@ -408,12 +696,36 @@ describe("writing an episode's board", () => {
     expect(starts[0]!.kind).toBe("actVideo");
     expect(item?.capability).toBe("video");
     expect(item?.params?.seconds).toBe(clampSeconds(5_000));
+    expect(item?.prompt).toContain("about 5 seconds");
     expect(item?.params?.ratio).toBe(story().brief.aspect);
     // First frame, last frame, and nothing in between: two shots, two pictures.
     expect(item?.inputs?.map((input) => input.role)).toEqual([
       "firstFrame",
       "lastFrame",
     ]);
+  });
+
+  it("asks for the act's clip again from the row that plays it", async () => {
+    openAtBoard(withoutTheClip());
+    fireEvent.click(screen.getByTestId("story-act-images-confirm-0"));
+    await waitFor(() => expect(acts()[0]?.imagesConfirmed).toBe(true));
+
+    // While no clip is there the first ask is the only one.
+    expect(screen.queryByTestId("story-act-video-again-0")).toBeNull();
+    fireEvent.click(screen.getByTestId("story-act-video-go-0"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    await comesBack();
+
+    // The clip is home, and the same ask stands beside it: a reader who does
+    // not like what came back is not left holding it.
+    const again = screen.getByTestId(
+      "story-act-video-again-0",
+    ) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    fireEvent.click(again);
+    await waitFor(() => expect(starts).toHaveLength(2));
+    expect(starts[1]!.kind).toBe("actVideo");
+    expect(starts[1]!.items[0]?.id).toBe(starts[0]!.items[0]?.id);
   });
 
   it("says out loud when the clip will be cut to the ceiling", async () => {
@@ -472,8 +784,35 @@ describe("writing an episode's board", () => {
     expect(item?.inputs?.map((input) => input.role)).toEqual(["firstFrame"]);
   });
 
+  it("asks for a shot's clip again from the row that holds it", async () => {
+    openAtBoard(withFilmedShot());
+    const first = card(0);
+
+    // The shot holds a clip, and its row says what may be done about it: the
+    // take asked over beside the take settled on — while the shot next to it,
+    // holding nothing, still asks for its first.
+    expect(within(first).queryByTestId("story-kf-video-0")).toBeNull();
+    const again = within(first).getByTestId(
+      "story-kf-video-again-0",
+    ) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    expect(within(first).getByTestId("story-kf-video-1")).toBeDefined();
+
+    fireEvent.click(again);
+    await waitFor(() => expect(starts).toHaveLength(1));
+    expect(starts[0]!.kind).toBe("keyframeVideo");
+    expect(starts[0]!.items[0]?.id).toBe(
+      `keyframeVideo:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
+    );
+  });
+
   it("asks before writing an episode's board again, and lists what it costs", async () => {
     openAtBoard(boarded());
+    // An episode that already has a board is asked for by its second name, and
+    // the ask stands behind a question rather than writing over it at once.
+    expect(screen.getByTestId("story-board-regenerate").textContent).toBe(
+      "Write the board again",
+    );
     fireEvent.click(screen.getByTestId("story-board-regenerate"));
     const dialog = screen.getByTestId("regenerate-board");
     expect(dialog.textContent).toContain("1 act");
