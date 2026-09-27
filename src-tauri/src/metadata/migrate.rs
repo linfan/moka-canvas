@@ -117,8 +117,10 @@ struct LegacyProviders {
 /// it: whether it was the music default. The defaults are then placed the same
 /// way, each falling back to the other's model when that one serves the place.
 ///
-/// Answers whether anything moved, so a document already in the new shape is
-/// left untouched and an upgrade run twice writes nothing the second time.
+/// Answers whether anything moved. That is not the same question as whether
+/// the document wants writing: an older document stores its models and its
+/// defaults under the one old capability's name, so a model that keeps serving
+/// the same place still has to be written as the capability it now reads as.
 pub fn split_sound_capability(models: &mut ModelsDoc) -> bool {
     let music_default = models
         .defaults
