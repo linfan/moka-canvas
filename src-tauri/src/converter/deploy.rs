@@ -167,8 +167,13 @@ mod tests {
         let registry = ConverterRegistry::load(dir.path());
         assert!(registry.find("openaiChat").is_some());
         assert!(registry.find("bailianAsr").is_some());
+        assert!(registry.find("minimaxAsr").is_some());
         assert!(registry.find("bailianMusic").is_some());
-        assert_eq!(registry.protocols_for("asr").unwrap().len(), 1);
+        assert_eq!(
+            registry.protocols_for("asr").unwrap().len(),
+            2,
+            "the recognitions this build ships"
+        );
         // What the registry reports is what is on the disk: the document and
         // the script it names both sit in the converter's own directory.
         let entry = registry.find("bailianVideo").unwrap();

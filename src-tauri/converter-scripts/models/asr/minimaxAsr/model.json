@@ -1,0 +1,8 @@
+{
+  "displayName": "MiniMax · Speech Recognition",
+  "labels": { "zh": "MiniMax · 语音识别" },
+  "urlExample": "https://api.minimaxi.com/v1/speech_to_text",
+  "script": "minimax-asr.lua",
+  "order": 20,
+  "version": 1
+}

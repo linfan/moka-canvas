@@ -1,0 +1,8 @@
+{
+  "displayName": "MiniMax · Image Generation",
+  "labels": { "zh": "MiniMax · 图像生成与参考" },
+  "urlExample": "https://api.minimaxi.com/v1/image_generation",
+  "script": "minimax-image.lua",
+  "order": 40,
+  "version": 1
+}

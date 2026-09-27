@@ -1,0 +1,8 @@
+{
+  "displayName": "MiniMax · Music Generation",
+  "labels": { "zh": "MiniMax · 音乐生成" },
+  "urlExample": "https://api.minimaxi.com/v1/music_generation",
+  "script": "minimax-music.lua",
+  "order": 40,
+  "version": 1
+}

@@ -1042,6 +1042,7 @@ async fn a_job_the_provider_has_forgotten_ends_the_polling() {
         capability: Capability::Video,
         model: "a-video-model".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
+        answer: None,
     };
 
     let error = scripted()
@@ -1078,6 +1079,7 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
         capability: Capability::Video,
         model: "a-video-model".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
+        answer: None,
     };
 
     match scripted()
@@ -1095,9 +1097,29 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_capability_with_no_job_is_not_started_as_one() {
-    let call = channel("http://127.0.0.1:1", "gpt-image-2", Capability::Image);
-    let error = scripted()
+async fn a_converter_with_no_job_answers_where_the_job_would_have_started() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/images/generations",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("generations", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "data": [{ "b64_json": base64(&png(4, 3)) }],
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    // A capability the program runs as a job, served by a protocol that has
+    // none: the conversation happens where the job would have started, and
+    // what it answered rides with the handle.
+    let call = channel(&base_url, "gpt-image-2", Capability::Image);
+    let task = scripted()
         .await
         .create_task(
             &call,
@@ -1106,13 +1128,50 @@ async fn a_capability_with_no_job_is_not_started_as_one() {
             &Cancel::new(),
         )
         .await
-        .expect_err("an image answers at once");
+        .expect("the answer arrives with the handle");
 
-    assert_eq!(error.code(), "VALIDATION_FAILED");
-    assert!(
-        error.to_string().contains("image"),
-        "the capability is named: {error}"
+    match scripted()
+        .await
+        .poll_task(&call, &task, &Cancel::new())
+        .await
+        .expect("the answer is collected")
+    {
+        TaskState::Succeeded(result) => {
+            assert_eq!(result.items.len(), 1);
+            assert_eq!(result.items[0].bytes, png(4, 3));
+        }
+        other => panic!("expected the finished answer, got {other:?}"),
+    }
+    assert_eq!(
+        recorded.asked(),
+        ["generations"],
+        "the answer came with the handle, so looking for it asks nothing"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_handle_whose_answer_was_dropped_will_not_answer_again() {
+    let call = channel("http://127.0.0.1:1", "gpt-image-2", Capability::Image);
+    let task = moka_canvas::generate::AsyncTask {
+        id: "task-3".into(),
+        reference: String::new(),
+        protocol: Protocol::new("openaiImages"),
+        capability: Capability::Image,
+        model: "gpt-image-2".into(),
+        created_at: "2026-01-01T00:00:00Z".into(),
+        answer: None,
+    };
+
+    let error = scripted()
+        .await
+        .poll_task(&call, &task, &Cancel::new())
+        .await
+        .expect_err("nothing is left to answer with");
+
+    // Not a failure to look: another poll cannot help, and the client is told
+    // to start over rather than to wait.
+    assert_eq!(error.code(), "TASK_EXPIRED");
+    assert!(!error.retryable());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2970,6 +3029,7 @@ async fn a_volcengine_job_that_failed_reports_the_platforms_explanation() {
         capability: Capability::Video,
         model: "doubao-seedance-1-0-pro".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
+        answer: None,
     };
 
     match scripted()
@@ -3002,6 +3062,7 @@ async fn a_volcengine_job_that_was_cancelled_ends_as_a_failure() {
         capability: Capability::Video,
         model: "doubao-seedance-1-0-pro".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
+        answer: None,
     };
 
     match scripted()
@@ -3016,4 +3077,982 @@ async fn a_volcengine_job_that_was_cancelled_ends_as_a_failure() {
         }
         other => panic!("expected an ended job, got {other:?}"),
     }
+}
+
+// ----------------------------------------------------------------- minimax
+
+/// The paths this platform's converters are spoken at, each under the endpoint
+/// its own document names.
+fn minimax_channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
+    let (id, path) = match capability {
+        Capability::Text => ("minimaxText", "/v1/chat/completions"),
+        Capability::Image => ("minimaxImage", "/v1/image_generation"),
+        Capability::Speech => ("minimaxSpeech", "/v1/t2a_v2"),
+        Capability::Music => ("minimaxMusic", "/v1/music_generation"),
+        Capability::Video => ("minimaxVideo", "/v1/video_generation"),
+        Capability::Asr => ("minimaxAsr", "/v1/speech_to_text"),
+    };
+    at(id, base_url, model_id, capability, path)
+}
+
+/// A recording travelling to a recognizer.
+fn recording(name: &str) -> MediaInput {
+    MediaInput {
+        role: InputRole::ControlAudio,
+        asset_id: name.into(),
+        name: format!("{name}.wav"),
+        bytes: b"RIFF....WAVEfmt ".to_vec(),
+        mime: "audio/wav".into(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_question_is_asked_with_its_depth_and_read_in_its_answer() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("chat", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "id": "07b1",
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": { "role": "assistant", "content": "A lantern drifts." },
+                    }],
+                    "usage": { "prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9 },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "MiniMax-M2.1", Capability::Text);
+    let mut request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "temperature": 0.7, "maxTokens": 64, "reasoningEffort": "high" }),
+    );
+    request.system = Some("Answer in one sentence.".into());
+    let result = scripted()
+        .await
+        .generate(&call, &request, &[], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern drifts."));
+    assert_eq!(result.usage.and_then(|usage| usage.input_tokens), Some(5));
+    assert_eq!(result.usage.and_then(|usage| usage.output_tokens), Some(4));
+    assert_eq!(
+        recorded.headers().authorization.as_deref(),
+        Some(&format!("Bearer {API_KEY}")[..]),
+        "the credential travels the way this platform reads it"
+    );
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "MiniMax-M2.1",
+            "messages": [
+                { "role": "system", "content": "Answer in one sentence." },
+                { "role": "user", "content": "describe a lantern" },
+            ],
+            "temperature": 0.7,
+            "max_completion_tokens": 64,
+            "reasoning_effort": "high",
+        })
+    );
+
+    // The switch off is the service's own word, the lighter word of the two it
+    // knows stands in for the depth it does not name, and the middle the room
+    // leaves to the model travels as nothing at all.
+    let mut ask = generation(
+        Capability::Text,
+        "hello",
+        json!({ "reasoningEffort": "none" }),
+    );
+    scripted()
+        .await
+        .generate(&call, &ask, &[], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+    assert_eq!(
+        recorded.body(1).get("thinking"),
+        Some(&json!({ "type": "disabled" })),
+        "the switch is how this service stops thinking"
+    );
+
+    ask.params
+        .insert("reasoningEffort".into(), json!("minimal"));
+    scripted()
+        .await
+        .generate(&call, &ask, &[], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+    assert_eq!(
+        recorded.body(2).get("reasoning_effort"),
+        Some(&json!("low"))
+    );
+
+    ask.params.insert("reasoningEffort".into(), json!("auto"));
+    scripted()
+        .await
+        .generate(&call, &ask, &[], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+    let body = recorded.body(3);
+    assert!(
+        body.get("reasoning_effort").is_none() && body.get("thinking").is_none(),
+        "the middle is what saying nothing is: {body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_question_with_a_picture_carries_it_inside_the_message() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("chat", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "choices": [{ "message": { "role": "assistant", "content": "A lighthouse." } }],
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "MiniMax-M2.1", Capability::Text);
+    let photo = reference("photo", InputRole::Reference);
+    let request = generation(Capability::Text, "what is in this picture", json!({}));
+    scripted()
+        .await
+        .generate(&call, &request, &[photo], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "MiniMax-M2.1",
+            "messages": [{ "role": "user", "content": [
+                { "type": "text", "text": "what is in this picture" },
+                { "type": "image_url", "image_url": {
+                    "url": format!("data:image/png;base64,{}", base64(&png(4, 3))),
+                } },
+            ] }],
+        })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("chat", &headers, None);
+                recorded.note_body(&body);
+                stream(&[
+                    r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":"A "}}]}"#,
+                    r#"{"choices":[{"index":0,"delta":{"content":"lantern."}}]}"#,
+                    r#"{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}"#,
+                ])
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "MiniMax-M2.1", Capability::Text);
+    let request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "stream": true }),
+    );
+    let (sink, seen) = watching();
+    let result = scripted()
+        .await
+        .generate_stream(&call, &request, &[], &sink, &Cancel::new())
+        .await
+        .expect("the stream is read to its end");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern."));
+    assert_eq!(shown(&seen), "A lantern.");
+    assert_eq!(
+        result.usage.and_then(|usage| usage.output_tokens),
+        Some(2),
+        "the totals the closing event carried are kept"
+    );
+    let body = recorded.body(0);
+    assert_eq!(body["stream"], json!(true));
+    // The totals of a streamed answer travel only where they were asked for.
+    assert_eq!(body["stream_options"], json!({ "include_usage": true }));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_shape_and_its_copies_are_sent_as_the_platform_reads_them() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/image_generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("draw", &headers, None);
+                recorded.note_body(&body);
+                // A drawing carried in the answer itself, so a case that only
+                // cares about what was asked has nothing to fetch.
+                Json(json!({
+                    "id": "draw-1",
+                    "data": { "image_base64": [base64(&png(4, 3))] },
+                    "metadata": { "success_count": 1, "failed_count": 0 },
+                    "base_resp": { "status_code": 0, "status_msg": "success" },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "image-01", Capability::Image);
+    for (asked, (shape, expects)) in [
+        // A proportion travels as the proportion this service names.
+        ("16:9", Some(("aspect_ratio", json!("16:9")))),
+        ("1:1", Some(("aspect_ratio", json!("1:1")))),
+        // A size stated in pixels travels as the two sides it means, brought to
+        // the steps this service draws in.
+        ("1024x1024", Some(("width", json!(1024)))),
+        ("1025*513", Some(("width", json!(1024)))),
+        // Its own way of leaving the shape to the service.
+        ("auto", None),
+        ("", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request = generation(Capability::Image, "a lighthouse", json!({ "size": shape }));
+        scripted()
+            .await
+            .generate(&call, &request, &[], &Cancel::new())
+            .await
+            .expect("the drawing arrives");
+        let body = recorded.body(asked);
+        match expects {
+            Some((key, value)) => assert_eq!(body.get(key), Some(&value), "asked for {shape}"),
+            None => {
+                assert!(
+                    body.get("aspect_ratio").is_none(),
+                    "asked for {shape}: {body}"
+                );
+                assert!(body.get("width").is_none(), "asked for {shape}: {body}");
+            }
+        }
+        assert_eq!(body["response_format"], json!("url"), "{body}");
+    }
+
+    // The two sides of a pixel shape are both sent, and both brought to the
+    // steps this service draws in: a 1025 side steps down, a 513 side with it.
+    assert_eq!(
+        recorded.body(3)["width"],
+        json!(1024),
+        "a 1025 side steps down"
+    );
+    assert_eq!(recorded.body(3)["height"], json!(512));
+
+    // Several copies are one ask here, and the ceiling is the service's own.
+    let request = generation(Capability::Image, "a lighthouse", json!({ "count": 12 }));
+    scripted()
+        .await
+        .generate(&call, &request, &[], &Cancel::new())
+        .await
+        .expect("the drawings arrive");
+    assert_eq!(
+        recorded.body(6)["n"],
+        json!(9),
+        "nine is the most one ask draws"
+    );
+
+    // The pictures beside the words are what the drawing is built on: this
+    // service keeps the character it is shown.
+    let photo = reference("photo", InputRole::Reference);
+    let request = generation(
+        Capability::Image,
+        "draw her at the window",
+        json!({ "count": 2 }),
+    );
+    scripted()
+        .await
+        .generate(&call, &request, &[photo], &Cancel::new())
+        .await
+        .expect("the drawings arrive");
+    let body = recorded.body(7);
+    assert_eq!(body["n"], json!(2), "{body}");
+    assert_eq!(
+        body["subject_reference"],
+        json!([{
+            "type": "character",
+            "image_file": format!("data:image/png;base64,{}", base64(&png(4, 3))),
+        }]),
+        "{body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_drawing_is_fetched_from_where_it_was_left() {
+    let picture = png(6, 5);
+    let elsewhere = Recorded::default();
+    let serving = elsewhere.clone();
+    let stored = picture.clone();
+    let elsewhere_url = serve(Router::new().route(
+        "/made/lantern.png",
+        get(move |headers: HeaderMap| {
+            let recorded = serving.clone();
+            let stored = stored.clone();
+            async move {
+                recorded.note("drawing", &headers, None);
+                ([(axum::http::header::CONTENT_TYPE, "image/png")], stored)
+            }
+        }),
+    ))
+    .await;
+
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/image_generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            let address = format!("{elsewhere_url}/made/lantern.png");
+            async move {
+                recorded.note("draw", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "id": "draw-2",
+                    "data": { "image_urls": [address] },
+                    "metadata": { "success_count": 1, "failed_count": 0 },
+                    "base_resp": { "status_code": 0, "status_msg": "success" },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "image-01", Capability::Image);
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Image, "a lighthouse", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the drawing arrives");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].bytes, picture);
+    assert_eq!(result.items[0].mime, "image/png", "sniffed, not assumed");
+    assert_eq!(
+        (result.items[0].width, result.items[0].height),
+        (Some(6), Some(5))
+    );
+    assert!(
+        elsewhere.headers().authorization.is_none(),
+        "a credential never follows an answer to a host that did not produce it"
+    );
+    assert_eq!(recorded.asked(), ["draw"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_refusal_wearing_a_success_is_read_for_its_status() {
+    let base_url = serve(Router::new().route(
+        "/v1/image_generation",
+        post(|| async {
+            Json(json!({
+                "id": "draw-3",
+                "data": {},
+                "base_resp": { "status_code": 1008, "status_msg": "insufficient balance" },
+            }))
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "image-01", Capability::Image);
+    let error = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Image, "a lighthouse", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the platform refused the ask in its own body");
+
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(
+        error.to_string().contains("insufficient balance"),
+        "the platform's own words are kept: {error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_shot_is_started_looked_at_and_collected() {
+    let recorded = Recorded::default();
+    let started = recorded.clone();
+    let polled = recorded.clone();
+    let retrieved = recorded.clone();
+    let collected = recorded.clone();
+    let looked_at = Arc::new(Mutex::new(Vec::new()));
+    let polls_seen = Arc::clone(&looked_at);
+    let asked_about = Arc::new(Mutex::new(Vec::new()));
+    let files_seen = Arc::clone(&asked_about);
+    let base_url = serve(
+        Router::new()
+            .route(
+                "/v1/video_generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = started.clone();
+                    async move {
+                        recorded.note("start", &headers, None);
+                        recorded.note_body(&body);
+                        // A handle this service numbers rather than spells.
+                        Json(json!({
+                            "task_id": 176843862716480_i64,
+                            "base_resp": { "status_code": 0, "status_msg": "success" },
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/v1/query/video_generation",
+                get(move |RawQuery(query): RawQuery, headers: HeaderMap| {
+                    let recorded = polled.clone();
+                    let looked_at = Arc::clone(&polls_seen);
+                    async move {
+                        recorded.note("poll", &headers, None);
+                        looked_at
+                            .lock()
+                            .expect("not poisoned")
+                            .push(query.unwrap_or_default());
+                        // The first look finds work in progress; the second
+                        // finds the job finished and naming its file.
+                        if recorded.next_poll() == 0 {
+                            return Json(json!({
+                                "task_id": "176843862716480",
+                                "status": "Processing",
+                                "base_resp": { "status_code": 0, "status_msg": "success" },
+                            }));
+                        }
+                        Json(json!({
+                            "task_id": "176843862716480",
+                            "status": "Success",
+                            "file_id": 987654321_i64,
+                            "video_width": 1280,
+                            "video_height": 720,
+                            "base_resp": { "status_code": 0, "status_msg": "success" },
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/v1/files/retrieve",
+                get(move |RawQuery(query): RawQuery, headers: HeaderMap| {
+                    let recorded = retrieved.clone();
+                    let asked_about = Arc::clone(&files_seen);
+                    async move {
+                        recorded.note("retrieve", &headers, None);
+                        asked_about
+                            .lock()
+                            .expect("not poisoned")
+                            .push(query.unwrap_or_default());
+                        let address = format!("http://{}/download/film.mp4", reached_on(&headers));
+                        Json(json!({
+                            "file": { "file_id": 987654321_i64, "download_url": address },
+                            "base_resp": { "status_code": 0, "status_msg": "success" },
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/download/film.mp4",
+                get(move |headers: HeaderMap| {
+                    let recorded = collected.clone();
+                    async move {
+                        recorded.note("film", &headers, None);
+                        Response::builder()
+                            .header(axum::http::header::CONTENT_TYPE, "video/mp4")
+                            .body(Body::from(b"mp4-bytes".to_vec()))
+                            .expect("a response builds")
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let call = minimax_channel(&base_url, "MiniMax-Hailuo-2.3", Capability::Video);
+    let cancel = Cancel::new();
+    let inputs = [
+        reference("opening", InputRole::FirstFrame),
+        reference("closing", InputRole::LastFrame),
+    ];
+    let request = generation(
+        Capability::Video,
+        "a lantern drifts",
+        json!({ "seconds": 6, "resolution": "720", "ratio": "16:9" }),
+    );
+    let task = scripted()
+        .await
+        .create_task(&call, &request, &inputs, &cancel)
+        .await
+        .expect("the job starts");
+
+    // A handle this service numbers is read as the text of it, and the ends
+    // the ports labelled are the frames the shot lands on.
+    assert_eq!(task.reference, "176843862716480");
+    assert_eq!(task.protocol, Protocol::new("minimaxVideo"));
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "MiniMax-Hailuo-2.3",
+            "prompt": "a lantern drifts",
+            "first_frame_image": inputs[0].data_url(),
+            "last_frame_image": inputs[1].data_url(),
+            "duration": 6,
+            "resolution": "720P",
+        })
+    );
+
+    match scripted().await.poll_task(&call, &task, &cancel).await {
+        Ok(TaskState::Pending { retry_after_ms }) => {
+            assert!(retry_after_ms > 0, "a poll is worth waiting for")
+        }
+        other => panic!("expected a job still running, got {other:?}"),
+    }
+    match scripted()
+        .await
+        .poll_task(&call, &task, &cancel)
+        .await
+        .expect("the job is collected")
+    {
+        TaskState::Succeeded(result) => {
+            assert_eq!(result.items.len(), 1);
+            assert_eq!(result.items[0].mime, "video/mp4");
+            assert_eq!(result.items[0].kind, Capability::Video);
+            assert_eq!(result.items[0].bytes, b"mp4-bytes");
+        }
+        other => panic!("expected the finished shot, got {other:?}"),
+    }
+    assert_eq!(
+        recorded.asked(),
+        ["start", "poll", "poll", "retrieve", "film"]
+    );
+    // Looking at a job asks the query by the handle it was started with, and
+    // the film is asked for by the file the finished job named.
+    assert_eq!(
+        looked_at.lock().expect("not poisoned").as_slice(),
+        ["task_id=176843862716480", "task_id=176843862716480"]
+    );
+    assert_eq!(
+        asked_about.lock().expect("not poisoned").as_slice(),
+        ["file_id=987654321"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_shot_built_on_a_subject_asks_for_its_pictures_as_references() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/video_generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("start", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({ "task_id": "s2v-1", "base_resp": { "status_code": 0 } }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "S2V-01", Capability::Video);
+    let inputs = [
+        reference("hero", InputRole::Reference),
+        reference("half", InputRole::Reference),
+    ];
+    scripted()
+        .await
+        .create_task(
+            &call,
+            &generation(
+                Capability::Video,
+                "she turns to the camera",
+                json!({ "mode": "reference" }),
+            ),
+            &inputs,
+            &Cancel::new(),
+        )
+        .await
+        .expect("the job starts");
+
+    // A shot built on a subject reads its pictures as one character this
+    // service keeps, and asks for no frames beside them: it reads one or the
+    // other, never both.
+    let body = recorded.body(0);
+    assert_eq!(
+        body["subject_reference"],
+        json!([{
+            "type": "character",
+            "image": [inputs[0].data_url(), inputs[1].data_url()],
+        }]),
+        "{body}"
+    );
+    assert!(body.get("first_frame_image").is_none(), "{body}");
+    assert!(body.get("last_frame_image").is_none(), "{body}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_job_that_failed_reports_the_platforms_explanation() {
+    let base_url = serve(Router::new().route(
+        "/v1/query/video_generation",
+        get(|| async {
+            Json(json!({
+                "task_id": "job-2",
+                "status": "Fail",
+                "base_resp": { "status_code": 1026, "status_msg": "the prompt was refused" },
+            }))
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "MiniMax-Hailuo-2.3", Capability::Video);
+    let task = moka_canvas::generate::AsyncTask {
+        id: "task-4".into(),
+        reference: "job-2".into(),
+        protocol: Protocol::new("minimaxVideo"),
+        capability: Capability::Video,
+        model: "MiniMax-Hailuo-2.3".into(),
+        created_at: "2026-01-01T00:00:00Z".into(),
+        answer: None,
+    };
+
+    match scripted()
+        .await
+        .poll_task(&call, &task, &Cancel::new())
+        .await
+        .expect("the job answered")
+    {
+        TaskState::Failed { message, retryable } => {
+            assert_eq!(message, "the prompt was refused");
+            assert!(!retryable, "the same job would fail the same way");
+        }
+        other => panic!("expected a failed job, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_line_is_spoken_with_the_rooms_voice_and_pace() {
+    let recording = b"ID3-a-spoken-line".to_vec();
+    let elsewhere = Recorded::default();
+    let serving = elsewhere.clone();
+    let stored = recording.clone();
+    let elsewhere_url = serve(Router::new().route(
+        "/made/line.mp3",
+        get(move |headers: HeaderMap| {
+            let recorded = serving.clone();
+            let stored = stored.clone();
+            async move {
+                recorded.note("recording", &headers, None);
+                ([(axum::http::header::CONTENT_TYPE, "audio/mpeg")], stored)
+            }
+        }),
+    ))
+    .await;
+
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/t2a_v2",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            let address = format!("{elsewhere_url}/made/line.mp3");
+            async move {
+                recorded.note("speak", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "data": { "status": 2, "audio": address },
+                    "extra_info": { "audio_length": 3200, "audio_format": "mp3" },
+                    "base_resp": { "status_code": 0, "status_msg": "success" },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "speech-2.8-hd", Capability::Speech);
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(
+                Capability::Speech,
+                "A lantern drifts.",
+                json!({
+                    "voice": "English_Graceful_Lady",
+                    "format": "mp3",
+                    "speed": 3,
+                    "volume": 50,
+                    "pitch": 2,
+                    "sampleRate": 22050,
+                    "instructions": "read it softly",
+                }),
+            ),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the recording arrives");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].bytes, recording);
+    assert_eq!(result.items[0].mime, "audio/mpeg");
+    assert_eq!(result.usage.and_then(|usage| usage.seconds), Some(3.2));
+    // The pace is brought to the service's own ends rather than sent to be
+    // refused, the room's loudness is the tenths this service counts in, and
+    // the room's pitch is a multiplier written as the semitones it means.
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "speech-2.8-hd",
+            "text": "A lantern drifts.",
+            "voice_setting": {
+                "voice_id": "English_Graceful_Lady",
+                "speed": 2.0,
+                "vol": 5.0,
+                "pitch": 12,
+            },
+            "audio_setting": { "format": "mp3", "sample_rate": 22050 },
+            "output_format": "url",
+            "stream": false,
+        })
+    );
+    assert!(
+        elsewhere.headers().authorization.is_none(),
+        "a credential never follows an answer to a host that did not produce it"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_recording_that_did_not_come_back_as_a_link_is_refused() {
+    let base_url = serve(Router::new().route(
+        "/v1/t2a_v2",
+        post(|| async {
+            Json(json!({
+                "data": { "status": 2, "audio": "4944332d" },
+                "base_resp": { "status_code": 0, "status_msg": "success" },
+            }))
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "speech-2.8-hd", Capability::Speech);
+    let error = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Speech, "A lantern drifts.", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the recording came back written out rather than named");
+
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(
+        error.to_string().contains("rather than an address"),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_score_is_asked_for_as_an_instrumental() {
+    // Bytes no sniffer knows, so what the recording is stored as is what the
+    // script claimed it would be.
+    let song = b"a-score-under-a-night-scene".to_vec();
+    let elsewhere = Recorded::default();
+    let serving = elsewhere.clone();
+    let stored = song.clone();
+    let elsewhere_url = serve(Router::new().route(
+        "/made/score.mp3",
+        get(move |headers: HeaderMap| {
+            let recorded = serving.clone();
+            let stored = stored.clone();
+            async move {
+                recorded.note("song", &headers, None);
+                ([(axum::http::header::CONTENT_TYPE, "audio/mpeg")], stored)
+            }
+        }),
+    ))
+    .await;
+
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/v1/music_generation",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            let address = format!("{elsewhere_url}/made/score.mp3");
+            async move {
+                recorded.note("compose", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "data": { "status": 2, "audio": address },
+                    "extra_info": { "music_duration": 42000, "music_sample_rate": 44100 },
+                    "base_resp": { "status_code": 0, "status_msg": "success" },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "music-2.6", Capability::Music);
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(
+                Capability::Music,
+                "a quiet theme under a night scene",
+                json!({ "format": "wav", "instrumental": true }),
+            ),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the score arrives");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].bytes, song);
+    assert_eq!(result.items[0].mime, "audio/wav");
+    assert_eq!(
+        result.usage.and_then(|usage| usage.seconds),
+        Some(42.0),
+        "the service counts the score's own length"
+    );
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "music-2.6",
+            "prompt": "a quiet theme under a night scene",
+            "is_instrumental": true,
+            "audio_setting": { "format": "wav" },
+            "output_format": "url",
+        })
+    );
+}
+
+/// A recognition is served by a script that has no job: the words come back in
+/// the one call that was sent, and the handle carries them for the first poll.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_minimax_recognition_answers_where_its_job_would_have_started() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let language = Arc::new(Mutex::new(None));
+    let heard_language = Arc::clone(&language);
+    let base_url = serve(Router::new().route(
+        "/v1/speech_to_text",
+        post(move |headers: HeaderMap, mut parts: Multipart| {
+            let recorded = answering.clone();
+            let language = Arc::clone(&heard_language);
+            async move {
+                recorded.note("transcribe", &headers, None);
+                *language.lock().expect("not poisoned") = headers
+                    .get("language")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string);
+                while let Ok(Some(part)) = parts.next_field().await {
+                    let name = part.name().unwrap_or_default().to_string();
+                    let noted = match part.file_name().map(str::to_string) {
+                        Some(filename) => format!("{name} ({filename})"),
+                        None => format!("{name}={}", part.text().await.unwrap_or_default()),
+                    };
+                    recorded.parts.lock().expect("not poisoned").push(noted);
+                }
+                Json(json!({
+                    "text": "Hello there. Second line.",
+                    "duration": 26.325,
+                    "segments": [
+                        { "id": 0, "start": 0.1, "end": 1.66, "text": "Hello there." },
+                        { "id": 1, "start": 2.0, "end": 3.5, "speaker": "S1", "text": "Second line." },
+                    ],
+                    "trace_id": "trace-1",
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = minimax_channel(&base_url, "asr-1.0", Capability::Asr);
+    let audio = recording("take-one");
+    let request = generation(
+        Capability::Asr,
+        "",
+        json!({ "language": "en", "speakerLabel": "Speaker {id}: " }),
+    );
+    let task = scripted()
+        .await
+        .create_task(&call, &request, &[audio], &Cancel::new())
+        .await
+        .expect("the recognition happens where the job would have started");
+
+    let answer = scripted()
+        .await
+        .poll_task(&call, &task, &Cancel::new())
+        .await
+        .expect("the words are collected");
+
+    match answer {
+        TaskState::Succeeded(result) => {
+            // The sentences are the recognizer's own, times and all, with the
+            // speaker written in where the room asked for it.
+            assert_eq!(
+                result.text.as_deref(),
+                Some(
+                    "1\n00:00:00,100 --> 00:00:01,660\nHello there.\n\n\
+                     2\n00:00:02,000 --> 00:00:03,500\nSpeaker S1: Second line.\n"
+                )
+            );
+            assert_eq!(result.usage.and_then(|usage| usage.seconds), Some(26.325));
+        }
+        other => panic!("expected the transcript, got {other:?}"),
+    }
+
+    // One call made the transcript, and looking at the handle made none: the
+    // recording travels as a file part of a form, and the language as the
+    // header this service reads it from.
+    assert_eq!(recorded.asked(), ["transcribe"]);
+    assert_eq!(
+        recorded.parts(),
+        [
+            "model=asr-1.0",
+            "response_format=verbose_json",
+            "timestamp_level=sentence",
+            "file (take-one.wav)",
+        ]
+    );
+    assert_eq!(
+        language.lock().expect("not poisoned").as_deref(),
+        Some("en"),
+        "the language rides as a header"
+    );
 }

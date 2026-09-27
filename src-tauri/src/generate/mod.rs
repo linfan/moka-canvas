@@ -229,7 +229,7 @@ pub struct GeneratedItem {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
     pub input_tokens: Option<u64>,
@@ -258,6 +258,101 @@ pub struct AsyncTask {
     /// at a different model than the one that created the job.
     pub model: String,
     pub created_at: IsoTimestamp,
+    /// The answer, where the converter had one in the same call that would
+    /// have started a job. Written down with the handle, so the first poll
+    /// finds it where a provider's own job would have left one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<Box<SettledAnswer>>,
+}
+
+/// An answer that arrived with its job rather than after it.
+///
+/// A capability the program runs as a job can be served by a protocol that has
+/// no job — a service that recognizes a recording in the same call it was sent
+/// in. There is then nothing to poll, so the answer travels with the handle:
+/// a capability is served by the service that offers it, and whether that
+/// service takes one call or many is the converter's business rather than the
+/// caller's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettledAnswer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<SettledItem>,
+}
+
+impl SettledAnswer {
+    /// An answer as it is carried: media written out, because what holds this
+    /// is a document.
+    pub fn of(result: &GenerateResult) -> Self {
+        use base64::Engine as _;
+        Self {
+            text: result.text.clone(),
+            usage: result.usage,
+            items: result
+                .items
+                .iter()
+                .map(|item| SettledItem {
+                    mime: item.mime.clone(),
+                    kind: item.kind,
+                    width: item.width,
+                    height: item.height,
+                    duration_ms: item.duration_ms,
+                    data: base64::engine::general_purpose::STANDARD.encode(&item.bytes),
+                })
+                .collect(),
+        }
+    }
+
+    /// The answer as the rest of the program reads it: the media back as the
+    /// bytes they were carried as.
+    pub fn result(&self) -> Result<GenerateResult, ProviderError> {
+        use base64::Engine as _;
+        let mut items = Vec::with_capacity(self.items.len());
+        for item in &self.items {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(item.data.trim())
+                .map_err(|error| {
+                    ProviderError::invalid(format!(
+                        "a job's answer carried media that cannot be read: {error}"
+                    ))
+                })?;
+            items.push(GeneratedItem {
+                bytes,
+                mime: item.mime.clone(),
+                kind: item.kind,
+                width: item.width,
+                height: item.height,
+                duration_ms: item.duration_ms,
+            });
+        }
+        Ok(GenerateResult {
+            text: self.text.clone(),
+            items,
+            usage: self.usage,
+        })
+    }
+}
+
+/// One piece of media an answer that arrived with its job carries: the bytes
+/// themselves, because a record that pointed at a file the process no longer
+/// has would be an answer nothing could read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettledItem {
+    pub mime: String,
+    pub kind: Capability,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// The bytes, base64, which is how they travel in a document.
+    pub data: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -558,6 +653,53 @@ mod tests {
         assert_eq!(
             TaskState::pending(Duration::ZERO),
             TaskState::Pending { retry_after_ms: 0 }
+        );
+    }
+
+    #[test]
+    fn an_answer_carried_with_a_job_survives_the_document_it_is_written_in() {
+        let result = GenerateResult {
+            text: Some("1\n00:00:00,000 --> 00:00:01,000\nHello.\n".into()),
+            items: vec![GeneratedItem {
+                bytes: vec![7, 8, 9],
+                mime: "image/png".into(),
+                kind: Capability::Image,
+                width: Some(4),
+                height: Some(3),
+                duration_ms: None,
+            }],
+            usage: Some(Usage {
+                input_tokens: None,
+                output_tokens: None,
+                images: Some(1),
+                seconds: Some(1.5),
+            }),
+        };
+        let carried = SettledAnswer::of(&result);
+        // Written down and read back the way a job note travels.
+        let written = serde_json::to_string(&carried).expect("a settled answer is a document");
+        let read: SettledAnswer = serde_json::from_str(&written).expect("it reads back");
+        assert_eq!(read.result().expect("the media decode"), result);
+    }
+
+    #[test]
+    fn media_carried_with_a_job_that_cannot_be_read_is_refused() {
+        let answer = SettledAnswer {
+            text: None,
+            usage: None,
+            items: vec![SettledItem {
+                mime: "image/png".into(),
+                kind: Capability::Image,
+                width: None,
+                height: None,
+                duration_ms: None,
+                data: "not base64 at all".into(),
+            }],
+        };
+        assert_eq!(
+            answer.result().unwrap_err().code(),
+            "VALIDATION_FAILED",
+            "a record that cannot be read is a refusal rather than a panic"
         );
     }
 

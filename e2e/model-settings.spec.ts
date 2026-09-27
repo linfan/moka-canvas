@@ -194,6 +194,7 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
     "Google Gemini · long-running (Veo)",
     "Alibaba Cloud · Bailian Video",
     "Volcengine · Ark Video (Seedance)",
+    "MiniMax · Video Generation (Hailuo)",
   ]);
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
     "https://api.openai.com/v1/videos",
@@ -216,6 +217,7 @@ test("each sound capability offers the shapes deployed under it", async ({
   await expect(protocol.locator("option")).toHaveText([
     "OpenAI-compatible · Speech API",
     "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
+    "MiniMax · Speech (T2A)",
   ]);
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
     "https://api.openai.com/v1/audio/speech",
@@ -227,6 +229,7 @@ test("each sound capability offers the shapes deployed under it", async ({
   await expect(protocol).toHaveValue("bailianMusic");
   await expect(protocol.locator("option")).toHaveText([
     "Alibaba Cloud · Music Generation (fun-music)",
+    "MiniMax · Music Generation",
   ]);
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
     "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/music/generation",
@@ -286,6 +289,7 @@ test("every shape a category offers comes from its converter's model.json", asyn
     "OpenAI-compatible · Images API",
     "Alibaba Cloud · Bailian Image (Wan)",
     "Volcengine · Ark Image (Seedream)",
+    "MiniMax · Image Generation",
   ]);
   await protocol.selectOption("bailianImage");
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
@@ -320,6 +324,7 @@ test("speech recognition offers the script that serves it", async ({
   await expect(protocol).toHaveValue("bailianAsr");
   await expect(protocol.locator("option")).toHaveText([
     "Alibaba Cloud · Bailian Speech Recognition (recording file)",
+    "MiniMax · Speech Recognition",
   ]);
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
     "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription",

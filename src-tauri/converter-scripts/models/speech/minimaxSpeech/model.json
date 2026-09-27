@@ -1,0 +1,9 @@
+{
+  "displayName": "MiniMax · Speech (T2A)",
+  "labels": { "zh": "MiniMax · 语音合成（T2A）" },
+  "urlExample": "https://api.minimaxi.com/v1/t2a_v2",
+  "script": "minimax-speech.lua",
+  "order": 30,
+  "features": { "needsVoice": true },
+  "version": 1
+}

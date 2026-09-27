@@ -941,6 +941,7 @@ async fn left_behind(harness: &Harness, root: &str, canvas_id: &str) -> (String,
         capability: Capability::Video,
         model: reference(SHOOTER),
         created_at: started,
+        answer: None,
     })
     .expect("a job note is written as it is kept");
     std::fs::create_dir_all(jobs_dir(root)).expect("the job notes have a directory");

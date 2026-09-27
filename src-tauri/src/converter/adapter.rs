@@ -31,7 +31,8 @@ use crate::generate::debug::Kind;
 use crate::generate::error::ProviderError;
 use crate::generate::media::{MediaInput, MultipartBody};
 use crate::generate::{
-    AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, TaskState, Usage,
+    AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, GeneratedItem, SettledAnswer,
+    TaskState, Usage,
 };
 
 /// How many exchanges one step may take before a script is stopped.
@@ -199,11 +200,30 @@ impl ProviderAdapter for LuaAdapter {
     ) -> Result<AsyncTask, ProviderError> {
         let session = Session::open(call)?;
         if !session.has("build_task_request") {
-            return Err(ProviderError::invalid(format!(
-                "{} generation has no job to start under the '{}' converter",
-                request.capability.as_str(),
-                call.protocol.wire_name()
-            )));
+            // A converter whose protocol has no job for this capability
+            // answers whole where the job would have started — a service that
+            // recognizes a recording in the one call it was sent — and the
+            // answer travels with the handle for the first poll to find. A
+            // script that can neither start a job nor answer one is a
+            // converter that cannot serve the capability at all, and saying so
+            // beats a handle nothing could ever answer.
+            if !session.has("build_request") {
+                return Err(ProviderError::invalid(format!(
+                    "{} generation has no job to start under the '{}' converter, and nothing to answer with either",
+                    request.capability.as_str(),
+                    call.protocol.wire_name()
+                )));
+            }
+            let result = self.generate(call, request, inputs, cancel).await?;
+            return Ok(AsyncTask {
+                id: crate::domain::new_id(),
+                reference: String::new(),
+                protocol: call.protocol.clone(),
+                capability: request.capability,
+                model: call.config_id.clone(),
+                created_at: crate::domain::now_iso(),
+                answer: Some(Box::new(SettledAnswer::of(&result))),
+            });
         }
         let asked = session.call(
             "build_task_request",
@@ -245,6 +265,7 @@ impl ProviderAdapter for LuaAdapter {
             capability: request.capability,
             model: call.config_id.clone(),
             created_at: crate::domain::now_iso(),
+            answer: None,
         })
     }
 
@@ -255,6 +276,19 @@ impl ProviderAdapter for LuaAdapter {
         cancel: &Cancel,
     ) -> Result<TaskState, ProviderError> {
         let session = Session::open(call)?;
+        if !session.has("build_poll_request") {
+            // A converter that answered whole has no job to look at: what it
+            // answered travelled with the handle. One that carries no answer —
+            // a handle written down by a process that is gone, whose answer
+            // was dropped with it — will not answer again, which is what a
+            // caller is told: start over rather than wait.
+            let Some(answer) = task.answer.as_deref() else {
+                return Err(ProviderError::TaskExpired {
+                    task: task.id.clone(),
+                });
+            };
+            return answer.result().map(TaskState::Succeeded);
+        }
         let task_json = serde_json::json!({
             "id": task.id,
             "reference": task.reference,

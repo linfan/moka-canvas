@@ -1,0 +1,8 @@
+{
+  "displayName": "MiniMax · Chat Completions",
+  "labels": { "zh": "MiniMax · 文本生成" },
+  "urlExample": "https://api.minimaxi.com/v1/chat/completions",
+  "script": "minimax-chat.lua",
+  "order": 60,
+  "version": 1
+}
