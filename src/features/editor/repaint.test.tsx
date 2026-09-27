@@ -333,8 +333,11 @@ async function openRepaint(width = 64, height = 64) {
       .getState()
       .setSelection({ nodeIds: [ids.image], edgeIds: [] });
   });
+  // The bar arrives with the board, which is a chunk that may still be on its
+  // way in even though the tab strip is up, so it is waited for rather than
+  // read the instant it is asked about.
   fireEvent.click(
-    within(screen.getByTestId("node-action-bar")).getByRole("button", {
+    within(await screen.findByTestId("node-action-bar")).getByRole("button", {
       name: "Repaint",
     }),
   );
@@ -913,7 +916,7 @@ async function openRepaintAgain() {
       .setSelection({ nodeIds: [ids.image], edgeIds: [] });
   });
   fireEvent.click(
-    within(screen.getByTestId("node-action-bar")).getByRole("button", {
+    within(await screen.findByTestId("node-action-bar")).getByRole("button", {
       name: "Repaint",
     }),
   );

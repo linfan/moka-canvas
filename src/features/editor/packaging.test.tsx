@@ -262,8 +262,15 @@ describe("missing-asset recovery", () => {
     );
     expect(useAppStore.getState().phase).toBe("editing");
     // The restored asset is no longer flagged broken on the shelf, which is
-    // behind the assets face of the left column.
-    fireEvent.click(await screen.findByTestId("left-tab-assets"));
+    // behind the assets face of the left column. The board is a chunk that has
+    // only just arrived and the column turns over with it, so turning it over
+    // is waited for rather than done and read the same instant: under a loaded
+    // machine the commit that shows the face can land after the next line, and
+    // a click can land on a node React is replacing on the way.
+    await vi.waitFor(() => {
+      fireEvent.click(screen.getByTestId("left-tab-assets"));
+      expect(screen.queryByText("lake.png")).not.toBeNull();
+    });
     const row = screen.getByText("lake.png").closest(".resource-row");
     expect(row?.textContent).not.toContain("broken");
   });
