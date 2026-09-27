@@ -81,10 +81,17 @@ function route(url: string, init?: RequestInit): Response {
 }
 
 /** The editor with a project open and the shelf turned towards the reader. */
-async function openShelf() {
-  fetchMock.mockImplementation((input, init) =>
-    Promise.resolve(route(String(input), init as RequestInit)),
-  );
+async function openShelf(overrides: { asset?: () => Response } = {}) {
+  fetchMock.mockImplementation((input, init) => {
+    const url = String(input);
+    if (
+      overrides.asset !== undefined &&
+      url.startsWith("/api/v1/projects/current/assets/")
+    ) {
+      return Promise.resolve(overrides.asset());
+    }
+    return Promise.resolve(route(url, init as RequestInit));
+  });
   render(<App />);
   fireEvent.click(await screen.findByText("Shelf Fixture"));
   fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
@@ -274,5 +281,24 @@ describe("the file the shelf was asked about", () => {
     expect(asked).toBeTruthy();
     expect(inspector().textContent).toContain("opening-lines.md");
     expect(inspector().textContent).toContain("text/markdown");
+  });
+
+  it("says what the file's read answered when the words cannot be read", async () => {
+    await openShelf({
+      asset: () =>
+        new Response("nope", {
+          status: 503,
+          statusText: "Service Unavailable",
+        }),
+    });
+    fireEvent.click(screen.getByTestId("asset-kind-text"));
+
+    const row = document.querySelector<HTMLElement>(".resource-row");
+    fireEvent.click(within(row!).getByTestId("resource-main"));
+
+    // "Could not be read" says what happened; the answer the read gave is the
+    // half a reader can act on.
+    const failed = await screen.findByTestId("asset-text-failed");
+    expect(failed.textContent).toContain("503 Service Unavailable");
   });
 });

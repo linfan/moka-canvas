@@ -500,12 +500,12 @@ async function revealAsset(assetId: AssetId) {
 function TextExcerpt({ entry }: { entry: ResourceEntry }) {
   const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     let wanted = true;
     setText(null);
-    setFailed(false);
+    setFailure(null);
     fetch(assetUrl(entry.id))
       .then((response) =>
         response.ok
@@ -517,18 +517,26 @@ function TextExcerpt({ entry }: { entry: ResourceEntry }) {
       .then((body) => {
         if (wanted) setText(body.slice(0, 600));
       })
-      .catch(() => {
-        if (wanted) setFailed(true);
+      .catch((problem: unknown) => {
+        // What the read answered, kept: "could not be read" says what happened
+        // and not why, and the status is the half a reader can act on.
+        if (wanted) {
+          setFailure(
+            problem instanceof Error ? problem.message : String(problem),
+          );
+        }
       });
     return () => {
       wanted = false;
     };
   }, [entry.id]);
 
-  if (failed) {
+  if (failure !== null) {
     return (
       <p className="inspector-empty" data-testid="asset-text-failed">
         {t("editor:inspector.textUnreadable")}
+        <br />
+        <span className="error-state-reason">{failure}</span>
       </p>
     );
   }
