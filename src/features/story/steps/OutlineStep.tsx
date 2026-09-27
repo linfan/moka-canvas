@@ -19,6 +19,7 @@ import {
   splitSource,
   sourceHeadings,
 } from "../../../shared/domain/storySource";
+import { errorText } from "../../../api/client";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
@@ -811,9 +812,18 @@ function AnswersPanel({
               className="link"
               data-testid="story-outline-answer-copy"
               onClick={() => {
+                // A copy that was refused says so: "nothing happened" is what
+                // a reader would otherwise be left with.
                 void navigator.clipboard
                   ?.writeText(chosen.item.text ?? "")
-                  .catch(() => undefined);
+                  .catch((problem: unknown) => {
+                    toast(
+                      "error",
+                      t("story:outline.copyFailed", {
+                        reason: errorText(problem).message,
+                      }),
+                    );
+                  });
               }}
               type="button"
             >

@@ -94,6 +94,31 @@ describe("generation client", () => {
     expect(sent[0].body?.params).toEqual({ temperature: 0.4, stream: true });
   });
 
+  it("raises the problem a refused stream was answered with", async () => {
+    // A stream that never opened is refused as any other request is, and the
+    // body it was refused with is the whole of what this client ever heard.
+    stub(
+      () =>
+        new Response(
+          JSON.stringify({
+            code: "PROVIDER_KEY_MISSING",
+            message: "model gpt-4o-mini has no stored API key",
+            details: { model: "gpt-4o-mini" },
+            status: 422,
+          }),
+          { status: 422, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    const failure = await generateApi
+      .textStream({ capability: "text", prompt: "say something" }, () => {})
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).code).toBe("PROVIDER_KEY_MISSING");
+    expect((failure as ApiError).details).toEqual({ model: "gpt-4o-mini" });
+  });
+
   it("raises the failure a stream reports in its closing frame", async () => {
     // A stream has already sent its status line, so there is no second one to
     // carry a problem body; the closing frame is where the failure arrives.

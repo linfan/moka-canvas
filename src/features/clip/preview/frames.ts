@@ -6,6 +6,7 @@ import { i18n } from "../../../shared/i18n";
 import { useClipStore } from "../stores/clipStore";
 import {
   decodeFrameAt,
+  elementOnlyReason,
   isElementOnly,
   mp4IndexFor,
   streamFrom,
@@ -105,7 +106,12 @@ export function createFrameSources(): PreviewFrameSources {
       entryFor(assetId)?.name ?? i18n.t("clip:preview.filePlaceholder");
     useAppStore
       .getState()
-      .pushToast("error", i18n.t("clip:preview.cannotBeRead", { name }));
+      .pushToast(
+        "error",
+        i18n.t("clip:preview.cannotBeRead", { name }),
+        undefined,
+        elementOnlyReason(assetId),
+      );
   };
 
   // A file the browser could not play is one to say so about, exactly once.

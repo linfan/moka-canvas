@@ -9,6 +9,7 @@ import type {
   TimelineDocument,
 } from "../../../shared/domain/types";
 import { i18n } from "../../../shared/i18n";
+import { errorText } from "../../../api/client";
 import { formatDuration } from "../../../shared/domain/story";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
@@ -111,10 +112,15 @@ export function FilmCard({
             go: () => openInCuttingRoom(story),
           });
       })
-      .catch(() => {
-        // The project could not be read again, so the film is not written down
-        // here; the render's handle still says what it made, and the next
-        // opening of the room reads the shelf.
+      .catch((problem: unknown) => {
+        // The film is made and filed, but this room could not read the shelf
+        // back, so it is not written down here yet. Said rather than passed
+        // over: a reader who does not see the notice and finds no film will
+        // look for it in the wrong place.
+        const trouble = errorText(problem);
+        useAppStore
+          .getState()
+          .pushToast("error", trouble.message, undefined, trouble.detail);
       });
     return () => {
       alive = false;

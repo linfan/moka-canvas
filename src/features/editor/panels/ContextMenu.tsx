@@ -23,6 +23,7 @@ import {
   ungroupSelection,
 } from "../interactions/actions";
 import { useAppStore } from "../stores/appStore";
+import { errorText } from "../../../api/client";
 import { useEditorStore } from "../stores/editorStore";
 import { i18n } from "../../../shared/i18n";
 import { isActive, nodeRun, retryRun, useRunStore } from "../stores/runStore";
@@ -47,10 +48,15 @@ async function copyPrompt(prompt: string) {
   try {
     await navigator.clipboard.writeText(prompt);
     useEditorStore.getState().announce(i18n.t("editor:menu.promptCopied"));
-  } catch {
+  } catch (problem) {
     useAppStore
       .getState()
-      .pushToast("error", i18n.t("editor:menu.clipboardUnavailable"));
+      .pushToast(
+        "error",
+        i18n.t("editor:menu.clipboardUnavailable"),
+        undefined,
+        errorText(problem).message,
+      );
   }
 }
 

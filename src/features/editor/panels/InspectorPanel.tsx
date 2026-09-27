@@ -24,6 +24,7 @@ import {
   generationSpecFromSnapshot,
 } from "../../../shared/domain";
 import { assetsApi, assetUrl } from "../../../api";
+import { errorText } from "../../../api/client";
 import { i18n } from "../../../shared/i18n";
 import {
   generationUnavailable,
@@ -509,7 +510,9 @@ function TextExcerpt({ entry }: { entry: ResourceEntry }) {
       .then((response) =>
         response.ok
           ? response.text()
-          : Promise.reject(new Error(response.statusText)),
+          : Promise.reject(
+              new Error(`${response.status} ${response.statusText}`.trim()),
+            ),
       )
       .then((body) => {
         if (wanted) setText(body.slice(0, 600));
@@ -700,8 +703,14 @@ function RunSection({
   const start = async () => {
     try {
       await useRunStore.getState().start(canvas.id, [node.id]);
-    } catch {
-      // Issues surface below via lastIssues; transport errors toast globally.
+    } catch (problem) {
+      // Issues surface below via lastIssues; anything else — a provider with
+      // nothing behind it, a process that is not there — is said out loud,
+      // since nothing else would.
+      const trouble = errorText(problem);
+      useAppStore
+        .getState()
+        .pushToast("error", trouble.message, undefined, trouble.detail);
     }
   };
 
@@ -902,10 +911,15 @@ function JsonSection({ node }: { node: WorkflowNode }) {
     try {
       await navigator.clipboard.writeText(json);
       useEditorStore.getState().announce(t("editor:inspector.nodeJsonCopied"));
-    } catch {
+    } catch (problem) {
       useAppStore
         .getState()
-        .pushToast("error", t("editor:inspector.clipboardUnavailable"));
+        .pushToast(
+          "error",
+          t("editor:inspector.clipboardUnavailable"),
+          undefined,
+          errorText(problem).message,
+        );
     }
   };
   return (

@@ -55,7 +55,14 @@ interface Slot {
 const slots: Slot[] = [];
 const cache = new Map<string, { frame: VideoFrame; bytes: number }>();
 let cachedBytes = 0;
-const elementOnly = new Set<AssetId>();
+/**
+ * The assets this preview has given up decoding, and why where it knows.
+ *
+ * The why is the parser's own complaint, or nothing: a browser that has no
+ * video decoder at all has no sentence to hand over, and a shrug written here
+ * would be a reason-shaped hole.
+ */
+const elementOnly = new Map<AssetId, string | null>();
 
 /** How big a frame is taken to be for the cache's ceiling. */
 function frameBytes(frame: VideoFrame): number {
@@ -173,13 +180,24 @@ function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
 }
 
 /** Where the reader is told the frames of an asset are out of reach. */
-function elementOnlyNow(assetId: AssetId): void {
-  elementOnly.add(assetId);
+function elementOnlyNow(assetId: AssetId, reason: string | null = null): void {
+  elementOnly.set(assetId, reason);
 }
 
 /** Whether decode has been ruled out for an asset this session. */
 export function isElementOnly(assetId: AssetId): boolean {
   return elementOnly.has(assetId);
+}
+
+/**
+ * Why decode was ruled out for an asset, where the parser said why.
+ *
+ * Read by the report a reader sees: "「clip.mp4」读不出来" says what
+ * happened and not why, and the parser's own words are the half that can be
+ * acted on — or handed to somebody who can.
+ */
+export function elementOnlyReason(assetId: AssetId): string | undefined {
+  return elementOnly.get(assetId) ?? undefined;
 }
 
 /**
@@ -194,8 +212,11 @@ export async function mp4IndexFor(assetId: AssetId): Promise<Mp4Index | null> {
   if (elementOnly.has(assetId)) return null;
   try {
     return await openMp4(assetUrl(assetId), { assetId });
-  } catch {
-    elementOnlyNow(assetId);
+  } catch (problem) {
+    elementOnlyNow(
+      assetId,
+      problem instanceof Error ? problem.message : String(problem),
+    );
     return null;
   }
 }

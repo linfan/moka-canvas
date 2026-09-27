@@ -1,5 +1,5 @@
 import type { AssetId, Capability, IsoTimestamp } from "../shared/domain";
-import { ApiError, http } from "./client";
+import { ApiError, http, readProblem } from "./client";
 
 /**
  * Why a piece of media travels with a request. The role, not the mime type,
@@ -158,7 +158,10 @@ async function streamText(
   }
 
   if (!response.ok || !response.body) {
-    throw ApiError.parse(response.status);
+    // The body is a problem like any other, and the reason in it is the whole
+    // of what this stream ever got to hear.
+    const refused = await readProblem(response);
+    throw refused ?? ApiError.parse(response.status);
   }
 
   const reader = response.body.getReader();

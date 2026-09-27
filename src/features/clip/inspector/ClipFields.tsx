@@ -4,6 +4,7 @@ import {
   CLIP_LABEL_MAX,
   MAX_CLIP_SPEED,
   MAX_CLIP_VOLUME,
+  MIN_CLIP_DURATION_MS,
   MIN_CLIP_SPEED,
   defaultTextStyle,
   type ClipPatch,
@@ -66,8 +67,12 @@ import { TextFields } from "./TextFields";
 
 const SPEED_PRESETS = [0.5, 1, 1.5, 2] as const;
 
-function toast(kind: "info" | "success" | "error", message: string): void {
-  useAppStore.getState().pushToast(kind, message);
+function toast(
+  kind: "info" | "success" | "error",
+  message: string,
+  detail?: string,
+): void {
+  useAppStore.getState().pushToast(kind, message, undefined, detail);
 }
 
 /** Text held locally while a field is being typed in, synced when it is not. */
@@ -255,7 +260,13 @@ export function ClipFields({ timeline, clips }: ClipFieldsProps) {
       patch: speedPatch(clip, next, materials[index].ownClock),
     }));
     if (built.some((entry) => entry.patch === null)) {
-      toast("error", t("clip:clipFields.tooFastToast"));
+      // Why it will not run that fast: the shortest a clip is allowed to be,
+      // which is the number the reader has to stay under.
+      toast(
+        "error",
+        t("clip:clipFields.tooFastToast"),
+        t("errors:timeline.clipTooShort", { count: MIN_CLIP_DURATION_MS }),
+      );
       return;
     }
     commit(
