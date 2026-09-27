@@ -319,6 +319,10 @@ pub enum DataType {
 /// The generation modality a provider model serves. Narrower than
 /// [`DataType`], which also covers port payloads that are never generated.
 ///
+/// Sound is two capabilities rather than one: [`Capability::Speech`] reads
+/// words aloud and [`Capability::Music`] composes under them. A model is
+/// configured for one of them, and a sound node's spec says which it asks for.
+///
 /// [`Capability::Asr`] reads the other way round from the rest: it takes audio
 /// in and answers with words, so no node generates in it and it is configured
 /// for callers that transcribe rather than for the canvas.
@@ -328,7 +332,12 @@ pub enum Capability {
     #[default]
     Text,
     Image,
-    Audio,
+    /// What the capability was called before sound was split in two. A stored
+    /// document from that time reads as speech here; the codec's own migration
+    /// moves the asks that were scores onto [`Capability::Music`].
+    #[serde(alias = "audio")]
+    Speech,
+    Music,
     Video,
     Asr,
 }
@@ -338,20 +347,39 @@ impl Capability {
         match self {
             Capability::Text => "text",
             Capability::Image => "image",
-            Capability::Audio => "audio",
+            Capability::Speech => "speech",
+            Capability::Music => "music",
             Capability::Video => "video",
             Capability::Asr => "asr",
         }
+    }
+
+    /// Whether a node of that kind may ask for this capability.
+    ///
+    /// Sound is the one kind two capabilities serve, which is why the check is
+    /// this way round: the node says how it is drawn, its spec says what it is
+    /// asking for.
+    pub fn serves(&self, kind: NodeKind) -> bool {
+        matches!(
+            (kind, self),
+            (NodeKind::Text, Capability::Text)
+                | (NodeKind::Image, Capability::Image)
+                | (NodeKind::Video, Capability::Video)
+                | (NodeKind::Audio, Capability::Speech | Capability::Music)
+        )
     }
 }
 
 /// The modality a node generates in, or `None` for the kinds that never
 /// carry a generation spec.
+///
+/// A sound node generates in two capabilities; this answers with the one a
+/// spec that names none would read as, which is speech.
 pub fn generation_capability_for(kind: NodeKind) -> Option<Capability> {
     match kind {
         NodeKind::Text => Some(Capability::Text),
         NodeKind::Image => Some(Capability::Image),
-        NodeKind::Audio => Some(Capability::Audio),
+        NodeKind::Audio => Some(Capability::Speech),
         NodeKind::Video => Some(Capability::Video),
         NodeKind::Operation | NodeKind::Group | NodeKind::Export => None,
     }
@@ -533,6 +561,33 @@ pub fn reconcile_ports(kind: NodeKind, stored: &[PortDefinition]) -> Vec<PortDef
         .collect();
     derived.extend(extras);
     derived
+}
+
+/// A generation spec is put where the sound split leaves it: an ask stored
+/// under the one audio capability was a score only if it said so in its
+/// `music` parameter, and the parameters it carries are cut to what the
+/// capability it lands in takes — a voice field on a score is nothing the
+/// services a score can reach would read.
+pub fn reconcile_generation_spec(spec: &mut Option<GenerationSpec>) {
+    let Some(spec) = spec.as_mut() else {
+        return;
+    };
+    if spec.capability != Capability::Speech {
+        return;
+    }
+    let Some(params) = spec.params.as_mut().and_then(|value| value.as_object_mut()) else {
+        return;
+    };
+    let score = params
+        .get("music")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    params.remove("music");
+    if score {
+        spec.capability = Capability::Music;
+    }
+    let allowed = validate::generation_param_keys(spec.capability);
+    params.retain(|key, _| allowed.contains(&key.as_str()));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1017,7 +1072,9 @@ pub struct MokaFile {
 }
 
 pub const MOKA_FILE_VERSION: &str = "v1";
-pub const CANVAS_SCHEMA_VERSION: i32 = 2;
+/// Version 3 split the audio capability into speech and music; the codec
+/// rewrites a v2 canvas's generation specs on decode.
+pub const CANVAS_SCHEMA_VERSION: i32 = 3;
 pub const PACKAGE_MANIFEST_VERSION: u32 = 2;
 
 impl MokaFile {

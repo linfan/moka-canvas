@@ -374,17 +374,6 @@ impl ModelRepo {
         resolve_within(&snapshot, "", capability)
     }
 
-    /// Resolves the model a score is composed with.
-    ///
-    /// A deployment that keeps a music model answers from it; one that keeps a
-    /// single audio model answers from that, since a voice model asked for a
-    /// tune is at worst a refusal and at best a tune. The two are the same
-    /// capability, so the music default is resolved as an audio model.
-    pub async fn resolve_music(&self) -> Result<ResolvedModel, ProviderError> {
-        let snapshot = self.metadata.models_snapshot().await?;
-        resolve_music_within(&snapshot)
-    }
-
     /// The plaintext credential, fetched as late as possible. A caller must
     /// not put this in anything that outlives the request.
     pub async fn credential(&self, config_id: &str) -> Result<String, ProviderError> {
@@ -421,11 +410,12 @@ impl ModelRepo {
     }
 }
 
-fn defaults_by_capability(defaults: &Defaults) -> [(Capability, Option<&str>); 5] {
+fn defaults_by_capability(defaults: &Defaults) -> [(Capability, Option<&str>); 6] {
     [
         (Capability::Text, defaults.text.as_deref()),
         (Capability::Image, defaults.image.as_deref()),
-        (Capability::Audio, defaults.audio.as_deref()),
+        (Capability::Speech, defaults.speech.as_deref()),
+        (Capability::Music, defaults.music.as_deref()),
         (Capability::Video, defaults.video.as_deref()),
         (Capability::Asr, defaults.asr.as_deref()),
     ]
@@ -447,7 +437,7 @@ fn clear_references(defaults: &mut Defaults, model_id: &str) -> bool {
     for slot in [
         &mut defaults.text,
         &mut defaults.image,
-        &mut defaults.audio,
+        &mut defaults.speech,
         &mut defaults.music,
         &mut defaults.video,
         &mut defaults.asr,
@@ -498,29 +488,6 @@ pub fn resolve_within(
             "no default model is set",
         )),
     }
-}
-
-/// The model a score is composed with, from a snapshot already in hand.
-///
-/// The stored music default is used while it still names a model that can sing
-/// or play; a deployment that chose none — or whose choice has since gone —
-/// answers with the audio default, which is the one model a telling with no
-/// music model of its own has for both its voice and its score.
-pub fn resolve_music_within(snapshot: &ModelsSnapshot) -> Result<ResolvedModel, ProviderError> {
-    let stored = snapshot
-        .defaults
-        .music
-        .as_deref()
-        .map(str::trim)
-        .filter(|music| !music.is_empty());
-    if let Some(music) = stored {
-        // The same courtesy a stale default gets anywhere else: a choice that
-        // no longer serves is passed over rather than refused.
-        if let Ok(resolved) = resolve_in(snapshot, music, Capability::Audio) {
-            return Ok(resolved);
-        }
-    }
-    resolve_within(snapshot, "", Capability::Audio)
 }
 
 fn resolve_in(
@@ -663,9 +630,9 @@ fn validate_preferences(preferences: &Preferences) -> Result<(), ProviderError> 
             "video length must be between 1 and {MAX_VIDEO_SECONDS} seconds"
         )));
     }
-    if !(0.25..=4.0).contains(&preferences.audio.speed) {
+    if !(0.25..=4.0).contains(&preferences.speech.speed) {
         return Err(ProviderError::invalid(
-            "audio speed must be between 0.25 and 4".to_string(),
+            "speech speed must be between 0.25 and 4".to_string(),
         ));
     }
     for (name, chars) in [
@@ -805,30 +772,30 @@ mod tests {
     }
 
     #[test]
-    fn a_score_is_asked_of_the_music_model_and_a_voice_of_the_audio_one() {
+    fn a_score_asks_a_music_model_and_a_voice_asks_a_speech_one() {
         let mut snapshot = configured();
-        snapshot.models.push(model("musician", Capability::Audio));
-        snapshot.models.push(model("speaker", Capability::Audio));
-        snapshot.defaults.audio = Some("speaker".to_string());
-
-        // No music model chosen: the audio default composes, because one audio
-        // model is a deployment that answers both.
-        snapshot.defaults.music = None;
-        let music = resolve_music_within(&snapshot).unwrap();
-        assert_eq!(music.config_id, "speaker");
-
-        // One chosen: the score goes there and the voice stays where it was.
+        snapshot.models.push(model("musician", Capability::Music));
+        snapshot.models.push(model("speaker", Capability::Speech));
+        snapshot.defaults.speech = Some("speaker".to_string());
         snapshot.defaults.music = Some("musician".to_string());
-        let music = resolve_music_within(&snapshot).unwrap();
+
+        // Each default answers for its own capability.
+        let music = resolve_within(&snapshot, "", Capability::Music).unwrap();
         assert_eq!(music.config_id, "musician");
-        let voice = resolve_within(&snapshot, "", Capability::Audio).unwrap();
+        let voice = resolve_within(&snapshot, "", Capability::Speech).unwrap();
         assert_eq!(voice.config_id, "speaker");
 
-        // A music model deleted since it was chosen falls back to the audio
-        // default rather than refusing the score.
-        snapshot.defaults.music = Some("gone".to_string());
-        let music = resolve_music_within(&snapshot).unwrap();
-        assert_eq!(music.config_id, "speaker");
+        // A voice model is no longer a score's model: a deployment with none
+        // answers with the gap's own name rather than a speech model asked for
+        // a tune.
+        let mut speech_only = configured();
+        speech_only
+            .models
+            .push(model("speaker", Capability::Speech));
+        speech_only.defaults.speech = Some("speaker".to_string());
+        let error = resolve_within(&speech_only, "", Capability::Music).unwrap_err();
+        assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
+        assert!(error.to_string().contains("music"), "{error}");
     }
 
     #[test]

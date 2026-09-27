@@ -144,7 +144,11 @@ impl Harness {
             let (protocol, suffix) = match capability {
                 Capability::Text => (Protocol::new("openaiResponses"), "/v1/responses"),
                 Capability::Image => (Protocol::new("openaiImages"), "/v1/images/generations"),
-                Capability::Audio => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+                Capability::Speech => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+                Capability::Music => (
+                    Protocol::new("bailianMusic"),
+                    "/api/v1/services/audio/music/generation",
+                ),
                 Capability::Video => (Protocol::new("openaiVideos"), "/v1/videos"),
                 Capability::Asr => (Protocol::new("bailianAsr"), "/v1/transcription"),
             };
@@ -171,7 +175,8 @@ impl Harness {
             match capability {
                 Capability::Text => defaults.text = Some((*id).to_string()),
                 Capability::Image => defaults.image = Some((*id).to_string()),
-                Capability::Audio => defaults.audio = Some((*id).to_string()),
+                Capability::Speech => defaults.speech = Some((*id).to_string()),
+                Capability::Music => defaults.music = Some((*id).to_string()),
                 Capability::Video => defaults.video = Some((*id).to_string()),
                 Capability::Asr => defaults.asr = Some((*id).to_string()),
             }

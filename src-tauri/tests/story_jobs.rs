@@ -139,7 +139,11 @@ impl Harness {
         let (protocol, suffix) = match capability {
             Capability::Text => (Protocol::new("openaiResponses"), "/v1/responses"),
             Capability::Image => (Protocol::new("openaiImages"), "/v1/images/generations"),
-            Capability::Audio => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+            Capability::Speech => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+            Capability::Music => (
+                Protocol::new("bailianMusic"),
+                "/api/v1/services/audio/music/generation",
+            ),
             Capability::Video => (Protocol::new("openaiVideos"), "/v1/videos"),
             Capability::Asr => (Protocol::new("bailianAsr"), "/v1/transcription"),
         };
@@ -173,7 +177,8 @@ impl Harness {
             match capability {
                 Capability::Text => defaults.text = Some((*id).to_string()),
                 Capability::Image => defaults.image = Some((*id).to_string()),
-                Capability::Audio => defaults.audio = Some((*id).to_string()),
+                Capability::Speech => defaults.speech = Some((*id).to_string()),
+                Capability::Music => defaults.music = Some((*id).to_string()),
                 Capability::Video => defaults.video = Some((*id).to_string()),
                 Capability::Asr => defaults.asr = Some((*id).to_string()),
             }
@@ -193,7 +198,7 @@ impl Harness {
             .models
             .upsert(ModelDraft {
                 id: id.into(),
-                category: Capability::Audio,
+                category: Capability::Music,
                 // A converter script's protocol: the model names it, and what
                 // it speaks is the script's business.
                 protocol: Protocol::new("bailianMusic"),
@@ -905,8 +910,11 @@ async fn a_batch_of_sound_is_filed_as_voice_on_the_shelf_and_as_music_beside_it(
     let recorded = Recorded::default();
     let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
     harness
-        .configure(&provider, &[(SPEAKER, Capability::Audio)])
+        .configure(&provider, &[(SPEAKER, Capability::Speech)])
         .await;
+    // A score needs a music model of its own: with none kept, the ask is a
+    // said-out-loud gap rather than a speech model asked for a tune.
+    harness.compose_with(&provider, COMPOSER).await;
     harness.project("Story Sound").await;
 
     // A line of an act read aloud: audio like any other answer, filed under the
@@ -917,7 +925,7 @@ async fn a_batch_of_sound_is_filed_as_voice_on_the_shelf_and_as_music_beside_it(
             vec![piece(
                 "voice:1",
                 act_voice_target("act-1"),
-                "audio",
+                "speech",
                 "「我们到站了。」他轻声说。",
             )],
         ))
@@ -949,15 +957,14 @@ async fn a_batch_of_sound_is_filed_as_voice_on_the_shelf_and_as_music_beside_it(
     );
     assert_eq!(voice["provenance"]["storyJobId"], json!(spoken_id));
 
-    // The music and sound under the act arrives under the same parameter a
-    // node's music does, which is what tells the two audio categories apart.
-    let mut scored = piece(
+    // The music and sound under the act is a music ask of its own, which is
+    // what tells the two sound categories apart.
+    let scored = piece(
         "music:1",
         act_music_target("act-1"),
-        "audio",
+        "music",
         "站台的风声，远处一列停运的列车。",
     );
-    scored["params"] = json!({ "music": true });
     let score = harness.start_ok(batch("music", vec![scored])).await;
     let score_id = score["id"].as_str().unwrap().to_string();
     let settled = harness.settled(&score_id).await;
@@ -993,20 +1000,20 @@ async fn a_score_is_composed_by_the_model_kept_for_music() {
     let recorded = Recorded::default();
     let provider = serve(answering(recorded.clone(), Arc::new(AtomicBool::new(true)))).await;
     harness
-        .configure(&provider, &[(SPEAKER, Capability::Audio)])
+        .configure(&provider, &[(SPEAKER, Capability::Speech)])
         .await;
     harness.compose_with(&provider, COMPOSER).await;
     harness.project("Story Score").await;
 
-    // A telling's music, asked for the way the fourth step asks for it: audio,
-    // under the music flag, with no vocals — the lines are read by a voice.
+    // A telling's music, asked for the way the fourth step asks for it: a
+    // music ask with no vocals — the lines are read by a voice.
     let mut scored = piece(
         "music:1",
         act_music_target("act-1"),
-        "audio",
+        "music",
         "雨夜站台，低音提琴，缓慢",
     );
-    scored["params"] = json!({ "music": true, "instrumental": true, "format": "mp3" });
+    scored["params"] = json!({ "instrumental": true, "format": "mp3" });
     let job = harness.start_ok(batch("music", vec![scored])).await;
     let job_id = job["id"].as_str().unwrap().to_string();
     let settled = harness.settled(&job_id).await;

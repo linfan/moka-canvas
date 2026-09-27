@@ -685,7 +685,7 @@ export function planActVoice(
     {
       id: jobKey(target),
       target,
-      capability: "audio",
+      capability: "speech",
       prompt: storyActVoicePrompt({
         ...lookOf(story),
         genre: story.brief.genre,
@@ -723,7 +723,7 @@ export function planActMusic(
     {
       id: jobKey(target),
       target,
-      capability: "audio",
+      capability: "music",
       prompt: storyActMusicPrompt({
         ...lookOf(story),
         genre: story.brief.genre,
@@ -736,9 +736,10 @@ export function planActMusic(
       }),
       inputs: [],
       // The score plays under the lines rather than being sung over them, so a
-      // service that can write words for a song is told not to; a voice model
-      // asked for music ignores the flag.
-      params: { music: true, instrumental: true, ...audioParams() },
+      // service that can write words for a song is told not to. Shape and
+      // watermark are not sent from here: the music preferences speak for the
+      // machine, and the gateway fills them in.
+      params: { instrumental: true },
     },
   ];
 }
@@ -771,13 +772,13 @@ function voiceParams(story: StoryDocument): Record<string, unknown> {
   };
 }
 
-/** The format and pace this machine's audio settings ask for. */
+/** The format and pace this machine's speech settings ask for. */
 function audioParams(): Record<string, unknown> {
-  const audio = useModelStore.getState().view?.preferences.audio;
+  const speech = useModelStore.getState().view?.preferences.speech;
   return {
-    ...(audio?.voice ? { voice: audio.voice } : {}),
-    ...(audio?.format ? { format: audio.format } : {}),
-    ...(audio?.speed ? { speed: audio.speed } : {}),
+    ...(speech?.voice ? { voice: speech.voice } : {}),
+    ...(speech?.format ? { format: speech.format } : {}),
+    ...(speech?.speed ? { speed: speech.speed } : {}),
   };
 }
 

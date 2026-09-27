@@ -1,6 +1,8 @@
 use crate::domain::story::STORY_SCHEMA_VERSION;
 use crate::domain::validate::resource_path_valid;
-use crate::domain::{reconcile_ports, MokaFile, CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION};
+use crate::domain::{
+    reconcile_generation_spec, reconcile_ports, MokaFile, CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION,
+};
 use thiserror::Error;
 
 pub const MOKA_MAGIC: [u8; 4] = [0x4d, 0x4f, 0x4b, 0x41];
@@ -84,10 +86,14 @@ pub fn decode_moka_file(bytes: &[u8]) -> Result<MokaFile, CodecError> {
         if canvas.schema_version > CANVAS_SCHEMA_VERSION {
             return Err(CodecError::SchemaUnsupported(canvas.schema_version));
         }
+        let before_the_split = canvas.schema_version < CANVAS_SCHEMA_VERSION;
         canvas.schema_version = CANVAS_SCHEMA_VERSION;
         for node in canvas.nodes.iter_mut() {
             let stored = std::mem::take(&mut node.ports);
             node.ports = reconcile_ports(node.kind, &stored);
+            if before_the_split {
+                reconcile_generation_spec(&mut node.data.generation);
+            }
         }
     }
     // A story written by a newer build is refused rather than read as though

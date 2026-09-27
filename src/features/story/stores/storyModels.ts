@@ -9,9 +9,10 @@
  * telling, so it is kept beside the project rather than inside it, and a
  * package handed to somebody else carries none of it.
  *
- * A place is not a capability: a score and a voice are both asked of an audio
- * model, and a deployment that keeps a composer of its own says so in the
- * settings rather than here.
+ * A place is not a capability: the room reads a telling in places — the one
+ * its lines are read aloud in, the one its score is composed in — and each
+ * place asks the capability that serves it, so a machine that keeps a
+ * composer of its own says so by configuring a music model rather than here.
  */
 
 import { create } from "zustand";

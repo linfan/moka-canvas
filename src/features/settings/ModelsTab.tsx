@@ -4,7 +4,6 @@ import { CAPABILITY_LABELS, type Capability } from "../../shared/domain";
 import { ModelEditor } from "./ModelEditor";
 import {
   effectiveDefaultId,
-  musicDefaultId,
   protocolFeatures,
   protocolLabel,
   useModelStore,
@@ -15,13 +14,10 @@ function ModelCard({
   model,
   category,
   isDefault,
-  isMusic,
 }: {
   model: ModelView;
   category: Capability;
   isDefault: boolean;
-  /** Whether this audio model is the one that composes the scores. */
-  isMusic: boolean;
 }) {
   const { t } = useTranslation();
   const saving = useModelStore((state) => state.saving);
@@ -67,28 +63,6 @@ function ModelCard({
           />
           <span>{t("settings:card.default")}</span>
         </label>
-        {category === "audio" && (
-          // A second question about an audio model, because a telling asks two
-          // of them: which one reads its lines aloud, and which one plays
-          // under them. Unchosen, a score is asked of the audio default.
-          <label className="settings-check">
-            <input
-              aria-label={t("settings:card.useAsMusic", {
-                name: model.displayName,
-              })}
-              checked={isMusic}
-              disabled={saving}
-              onChange={() =>
-                void useModelStore
-                  .getState()
-                  .setDefault("music", isMusic ? null : model.id)
-              }
-              type="radio"
-              name="default-music"
-            />
-            <span>{t("settings:card.music")}</span>
-          </label>
-        )}
       </div>
       <p className="model-card-detail">
         {model.model} · <code>{model.url}</code>
@@ -176,17 +150,16 @@ export function ModelsTab({ category }: { category: Capability }) {
   // and the first enabled model otherwise — the same fallback the server
   // resolves a generation through.
   const defaultId = effectiveDefaultId(view, category);
-  const musicId = category === "audio" ? musicDefaultId(view) : null;
   // The model an ask falls back to, and the one gap only it can have: a speech
   // model is asked for a voice, so a machine that has set none is a machine
   // whose read-aloud asks come back refused. Which converters need one is the
   // converter's own declaration, not a list this program keeps.
   const fallback = models.find((model) => model.id === defaultId);
   const voiceGap =
-    category === "audio" &&
+    category === "speech" &&
     fallback !== undefined &&
     protocolFeatures(protocols, fallback.protocol).needsVoice === true &&
-    (view?.preferences.audio.voice ?? "").trim() === "";
+    (view?.preferences.speech.voice ?? "").trim() === "";
 
   return (
     <div className="settings-section">
@@ -212,7 +185,6 @@ export function ModelsTab({ category }: { category: Capability }) {
               <ModelCard
                 category={category}
                 isDefault={model.id === defaultId}
-                isMusic={model.id === musicId}
                 key={model.id}
                 model={model}
               />
@@ -223,13 +195,8 @@ export function ModelsTab({ category }: { category: Capability }) {
               {t("settings:models.gap", { category: lower })}
             </p>
           )}
-          {category === "audio" && musicId === null && (
-            <p className="settings-hint" data-testid="audio-music-gap">
-              {t("settings:models.musicGap")}
-            </p>
-          )}
           {voiceGap && (
-            <p className="settings-hint" data-testid="audio-voice-gap">
+            <p className="settings-hint" data-testid="speech-voice-gap">
               {t("settings:models.voiceGap")}
             </p>
           )}

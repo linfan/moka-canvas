@@ -27,10 +27,10 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 pub use types::{
-    AudioPreferences, Defaults, DocumentInfo, ImagePreferences, MetadataInfo, MetadataStoreKind,
-    ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot, Preferences, PromptItem, PromptPage,
+    Defaults, DocumentInfo, ImagePreferences, MetadataInfo, MetadataStoreKind, ModelConfig,
+    ModelDraft, ModelRecord, ModelsSnapshot, MusicPreferences, Preferences, PromptItem, PromptPage,
     PromptQuery, PromptSource, Protocol, RecentProject, SecretInfo, SecretStorage,
-    StoryPreferences, VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT,
+    SpeechPreferences, StoryPreferences, VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT,
     MAX_SEARCH_PAGE_SIZE,
 };
 
@@ -42,8 +42,9 @@ pub const FILE_STORE: &str = "file";
 /// Current document format version, recorded in `meta.json`.
 ///
 /// Version 2 replaced provider channels with standalone model configurations;
-/// see [`migrate`] for what the upgrade keeps and what it drops.
-pub const SCHEMA_VERSION: u32 = 2;
+/// version 3 split the audio capability into speech and music. See [`migrate`]
+/// for what each upgrade keeps and what it drops.
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Error)]
 pub enum MetadataError {

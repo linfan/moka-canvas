@@ -9,6 +9,7 @@ import {
   TRANSITION_KINDS,
 } from "./constants";
 import type {
+  Capability,
   ProblemCode,
   ClipFilterPreset,
   TransitionKind,
@@ -21,7 +22,7 @@ import {
   STORY_SHOT_GRANULARITIES,
   STORY_SHOT_SIZES,
 } from "./types";
-import { reconcilePorts } from "./factories";
+import { paramsForCapability, reconcilePorts } from "./factories";
 import type {
   AssistantFailure,
   AssistantMessage,
@@ -897,6 +898,28 @@ function decodeSessions(value: unknown): AssistantSession[] | undefined {
   return asArray(value, "sessions").map(decodeSession);
 }
 
+/**
+ * A sound ask written before speech and music were separated: it named the one
+ * audio capability and kept a `music` flag to pick between the two. Read as
+ * the capability it meant, with the flag retired and the params cut to that
+ * capability's vocabulary.
+ */
+function reconcileSoundAsk(data: Record<string, unknown>): void {
+  const spec = data.generation;
+  if (typeof spec !== "object" || spec === null) return;
+  const record = spec as Record<string, unknown>;
+  if (record.capability !== "audio") return;
+  const params =
+    typeof record.params === "object" && record.params !== null
+      ? (record.params as Record<string, unknown>)
+      : {};
+  const score = params.music === true;
+  delete params.music;
+  const capability: Capability = score ? "music" : "speech";
+  record.capability = capability;
+  record.params = paramsForCapability(capability, params);
+}
+
 function migrateCanvas(canvas: CanvasDocument): CanvasDocument {
   if (canvas.schemaVersion > CANVAS_SCHEMA_VERSION) {
     throw new MokaCodecError(
@@ -904,8 +927,12 @@ function migrateCanvas(canvas: CanvasDocument): CanvasDocument {
       `canvas.moka schema version ${canvas.schemaVersion} is not supported (expected ${CANVAS_SCHEMA_VERSION} or earlier)`,
     );
   }
+  const beforeTheSplit = canvas.schemaVersion < CANVAS_SCHEMA_VERSION;
   for (const node of canvas.nodes) {
     node.ports = reconcilePorts(node.kind, node.ports);
+    if (beforeTheSplit) {
+      reconcileSoundAsk(node.data as Record<string, unknown>);
+    }
   }
   canvas.schemaVersion = CANVAS_SCHEMA_VERSION;
   return canvas;

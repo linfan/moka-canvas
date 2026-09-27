@@ -13,7 +13,7 @@ import type {
   ResourceEntry,
 } from "../../../shared/domain";
 import {
-  CAPABILITY_LABELS,
+  ASSET_KIND_LABELS,
   MAX_CANVAS_NAME_LENGTH,
   MAX_FOLDER_NAME_LENGTH,
   childFolders,
@@ -435,7 +435,7 @@ function BoardBranch({
               caret
               count={entries.length}
               drag={null}
-              label={t(CAPABILITY_LABELS[capability])}
+              label={t(ASSET_KIND_LABELS[capability])}
               maxLength={MAX_CANVAS_NAME_LENGTH}
               onClick={() => api.toggle(key)}
               open={open}
@@ -459,7 +459,7 @@ function BoardBranch({
                 {entries.length === 0 && (
                   <li className="tree-empty" role="presentation">
                     {t("editor:tree.noKindOnBoard", {
-                      kind: t(CAPABILITY_LABELS[capability]).toLowerCase(),
+                      kind: t(ASSET_KIND_LABELS[capability]).toLowerCase(),
                     })}
                   </li>
                 )}
@@ -891,7 +891,7 @@ export function ProjectTree() {
       items.push(
         {
           title: t("editor:tree.usesKind", {
-            kind: t(CAPABILITY_LABELS[capability]).toLowerCase(),
+            kind: t(ASSET_KIND_LABELS[capability]).toLowerCase(),
           }),
           label: t("editor:action.showInAssets"),
           action: () => useEditorStore.getState().setAssetKind(capability),

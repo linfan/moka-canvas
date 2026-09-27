@@ -383,9 +383,9 @@ mod tests {
         let rt = test_runtime();
         let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("converter-scripts");
 
-        // Audio: the non-streaming CosyVoice TTS shape.
+        // Speech: the non-streaming CosyVoice TTS shape.
         let speech = rt
-            .load(&scripts.join("models/audio/bailianSpeech/bailian-speech.lua"))
+            .load(&scripts.join("models/speech/bailianSpeech/bailian-speech.lua"))
             .unwrap();
         let out = rt
             .call_json_value(
@@ -504,7 +504,7 @@ mod tests {
 
         // Music: the one-shot composition shape, whose answer names the song.
         let music = rt
-            .load(&scripts.join("models/audio/bailianMusic/bailian-music.lua"))
+            .load(&scripts.join("models/music/bailianMusic/bailian-music.lua"))
             .unwrap();
         let out = rt
             .call_json_value(

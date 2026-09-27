@@ -441,6 +441,75 @@ export function buildGenerationMokaFile(): MokaFile {
   };
 }
 
+/**
+ * A canvas from before speech and music were separated: its sound asks name
+ * the one audio capability, and the score among them carries the `music` flag
+ * that used to be what told the two apart.
+ *
+ * Everything else is what that version wrote — the schema version above all,
+ * which is what makes the codec read the asks as the ones they meant.
+ */
+export function buildBeforeTheSplitMokaFile(): MokaFile {
+  const moka = buildGenerationMokaFile();
+  const canvas = moka.canvas[0];
+
+  const spoken: WorkflowNode = {
+    id: fixtureId(120),
+    kind: "audio",
+    title: "Narration",
+    bounds: { x: 640, y: 0, width: 280, height: 200 },
+    zIndex: 2,
+    ports: derivePorts("audio"),
+    data: {
+      audioCategory: "voice",
+      generation: {
+        capability: "audio",
+        mode: "generate",
+        model: "speaker",
+        prompt: "Read the logline aloud.",
+        inputMode: "manual",
+        // A voice asks in a voice's words; the size is a picture's, and the
+        // flag says it is no score.
+        params: { voice: "alloy", speed: 1.2, size: "1:1", music: false },
+        referenceNodeIds: [],
+        updatedAt: T0,
+      },
+    } as never,
+    createdAt: T0,
+    updatedAt: T0,
+  };
+
+  const scored: WorkflowNode = {
+    id: fixtureId(121),
+    kind: "audio",
+    title: "Score",
+    bounds: { x: 960, y: 0, width: 280, height: 200 },
+    zIndex: 3,
+    ports: derivePorts("audio"),
+    data: {
+      audioCategory: "music",
+      generation: {
+        capability: "audio",
+        mode: "generate",
+        model: "composer",
+        prompt: "A slow theme under a lantern.",
+        inputMode: "manual",
+        // The flag is the score's whole identity; the voice and the tempo are
+        // what a hand had typed into a vocabulary this version reads.
+        params: { music: true, instrumental: true, voice: "alloy", tempo: 90 },
+        referenceNodeIds: [],
+        updatedAt: T0,
+      },
+    } as never,
+    createdAt: T0,
+    updatedAt: T0,
+  };
+
+  canvas.nodes.push(spoken, scored);
+  canvas.schemaVersion = 2;
+  return moka;
+}
+
 export function conversationIds() {
   return {
     session: fixtureId(40),

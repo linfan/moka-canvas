@@ -2,8 +2,8 @@ use crate::config::LimitsConfig;
 use crate::domain::{Capability, DocumentCommand, MokaFile, ResourceEntry, SelfCheckReport};
 use crate::generate::{AsyncTask, GenerateResult, GeneratedItem, InputRole, Usage};
 use crate::metadata::{
-    AudioPreferences, ImagePreferences, ModelDraft, SecretStorage, StoryPreferences,
-    VideoPreferences,
+    ImagePreferences, ModelDraft, MusicPreferences, SecretStorage, SpeechPreferences,
+    StoryPreferences, VideoPreferences,
 };
 use crate::story::{StoryJobItem, StoryJobKind, StoryTarget};
 use base64::Engine;
@@ -353,7 +353,7 @@ pub struct DefaultsPatch {
     #[serde(default, deserialize_with = "present_value")]
     pub image: Option<Option<String>>,
     #[serde(default, deserialize_with = "present_value")]
-    pub audio: Option<Option<String>>,
+    pub speech: Option<Option<String>>,
     #[serde(default, deserialize_with = "present_value")]
     pub music: Option<Option<String>>,
     #[serde(default, deserialize_with = "present_value")]
@@ -382,7 +382,9 @@ pub struct PreferencesPatch {
     #[serde(default)]
     pub video: Option<VideoPreferences>,
     #[serde(default)]
-    pub audio: Option<AudioPreferences>,
+    pub speech: Option<SpeechPreferences>,
+    #[serde(default)]
+    pub music: Option<MusicPreferences>,
     #[serde(default)]
     pub story: Option<StoryPreferences>,
     #[serde(default)]

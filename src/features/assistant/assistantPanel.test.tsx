@@ -116,7 +116,7 @@ function bare(): ModelsView {
     defaults: {
       text: null,
       image: null,
-      audio: null,
+      speech: null,
       music: null,
       video: null,
       asr: null,
@@ -133,7 +133,7 @@ function bare(): ModelsView {
         mode: "auto",
         ratio: "16:9",
       },
-      audio: {
+      speech: {
         voice: "alloy",
         format: "mp3",
         speed: 1,
@@ -143,6 +143,7 @@ function bare(): ModelsView {
         rate: 1,
         pitch: 1,
       },
+      music: { format: "mp3", watermark: false },
       story: { splitChars: 12_000, readChars: 8_000 },
     },
     secretStorage: "unset",

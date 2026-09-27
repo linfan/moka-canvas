@@ -94,10 +94,16 @@ fn image(bytes: Vec<u8>) -> GeneratedItem {
 }
 
 fn speech(bytes: Vec<u8>) -> GeneratedItem {
+    sound(bytes, Capability::Speech)
+}
+
+/// An answer of either sound capability: the kind a provider's answer carries
+/// is the ask's own, which is what tells a line from a score apart.
+fn sound(bytes: Vec<u8>, kind: Capability) -> GeneratedItem {
     GeneratedItem {
         bytes,
         mime: "audio/wav".into(),
-        kind: Capability::Audio,
+        kind,
         width: None,
         height: None,
         duration_ms: Some(1000),
@@ -384,15 +390,16 @@ async fn speech_and_music_land_where_their_kind_implies() {
     let run = run(&canvas_id);
     let inputs = ResolvedInputs::default();
 
-    // A sniffer cannot tell speech from music, so the spec's own `music`
-    // parameter is what decides.
-    let score = asking(NodeKind::Audio, "Score", Some(json!({ "music": true })));
+    // A sniffer cannot tell speech from music, so the capability the ask was
+    // made in is what decides.
+    let mut score = asking(NodeKind::Audio, "Score", None);
+    score.data.generation.as_mut().unwrap().capability = Capability::Music;
     ingest_generated(
         &store,
         &run,
         &score,
         &inputs,
-        &answer(vec![speech(make_test_wav())]),
+        &answer(vec![sound(make_test_wav(), Capability::Music)]),
     )
     .await
     .unwrap();

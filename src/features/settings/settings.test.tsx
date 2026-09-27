@@ -83,23 +83,25 @@ const REGISTRY = {
       order: 20,
     },
   },
-  audio: {
+  speech: {
     openaiSpeech: {
-      script: "audio/openai-speech.lua",
+      script: "speech/openaiSpeech/openai-speech.lua",
       displayName: "OpenAI-compatible · Speech API",
       urlExample: "https://api.openai.com/v1/audio/speech",
       order: 10,
       features: { needsVoice: true },
     },
     bailianSpeech: {
-      script: "audio/bailian-speech.lua",
+      script: "speech/bailianSpeech/bailian-speech.lua",
       displayName: "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
       urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/tts",
       order: 20,
       features: { needsVoice: true },
     },
+  },
+  music: {
     bailianMusic: {
-      script: "audio/bailian-music.lua",
+      script: "music/bailianMusic/bailian-music.lua",
       displayName: "Alibaba Cloud · Music Generation (fun-music)",
       urlExample: "https://ws.cn-beijing.maas.aliyuncs.com/music",
       order: 30,
@@ -176,7 +178,7 @@ function fixture(): ModelsView {
     defaults: {
       text: null,
       image: null,
-      audio: null,
+      speech: null,
       music: null,
       video: null,
       asr: null,
@@ -193,7 +195,7 @@ function fixture(): ModelsView {
         mode: "auto",
         ratio: "16:9",
       },
-      audio: {
+      speech: {
         voice: "alloy",
         format: "mp3",
         speed: 1,
@@ -203,6 +205,7 @@ function fixture(): ModelsView {
         rate: 1,
         pitch: 1,
       },
+      music: { format: "mp3", watermark: false },
       story: { splitChars: 12_000, readChars: 8_000 },
     },
     secretStorage: "file",
@@ -660,19 +663,28 @@ describe("model settings", () => {
 
   it("lists a script the registry holds under its own capability only", async () => {
     await openSettings();
-    // Gemini speaks generateContent, which the registry deploys under text
-    // alone: the audio tab must not offer it, and must offer the script the
-    // registry does hold there.
-    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
+    // A speech script is on offer where the registry deploys it, and nowhere
+    // else: the other sound capability has a list of its own.
+    fireEvent.click(await screen.findByRole("tab", { name: "Speech" }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "New audio model" }),
+      await screen.findByRole("button", { name: "New speech model" }),
     );
 
     await screen.findByRole("option", { name: /Bailian Speech/ });
-    const protocol = screen.getByLabelText("Protocol") as HTMLSelectElement;
-    expect([...protocol.options].map((option) => option.value)).toEqual([
+    const speech = screen.getByLabelText("Protocol") as HTMLSelectElement;
+    expect([...speech.options].map((option) => option.value)).toEqual([
       "openaiSpeech",
       "bailianSpeech",
+    ]);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Music" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New music model" }),
+    );
+
+    await screen.findByRole("option", { name: /Music Generation/ });
+    const music = screen.getByLabelText("Protocol") as HTMLSelectElement;
+    expect([...music.options].map((option) => option.value)).toEqual([
       "bailianMusic",
     ]);
   });
@@ -817,21 +829,37 @@ describe("model settings", () => {
     );
   });
 
-  it("keeps a model for the score beside the one that reads the lines", async () => {
+  it("keeps the score's own model on the music tab, apart from the voice's", async () => {
     view.models.push(
-      model("speaker", "audio", "openaiSpeech", "Speaker", true),
-      model("musician", "audio", "bailianMusic", "Musician", true),
+      model("speaker", "speech", "openaiSpeech", "Speaker", true),
+      model("musician", "music", "bailianMusic", "Musician", true),
+      model("composer", "music", "bailianMusic", "Composer", true),
     );
     await openSettings();
-    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
 
-    // Nothing composes yet, and the tab says what a score falls back to.
+    // What reads the lines is on the speech tab, and what composes is not.
+    fireEvent.click(await screen.findByRole("tab", { name: "Speech" }));
     expect(await screen.findByText("Speaker")).toBeTruthy();
-    expect(screen.getByTestId("audio-music-gap")).toBeTruthy();
+    expect(screen.queryByText("Musician")).toBeNull();
+
+    // The score is asked of a music model of its own: the first enabled one
+    // is what a score falls back to, and the hand-picked one is recorded.
+    fireEvent.click(screen.getByRole("tab", { name: "Music" }));
+    expect(await screen.findByText("Musician")).toBeTruthy();
+    expect(screen.queryByText("Speaker")).toBeNull();
+    // Nothing here is asked for a voice, so an empty voice is no gap here.
+    expect(screen.queryByTestId("speech-voice-gap")).toBeNull();
+    expect(
+      (
+        screen.getByRole("radio", {
+          name: "Use Musician as the default music model",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
 
     fireEvent.click(
       screen.getByRole("radio", {
-        name: "Use Musician to compose scores and the music under a telling's acts",
+        name: "Use Composer as the default music model",
       }),
     );
 
@@ -839,27 +867,23 @@ describe("model settings", () => {
       expect(writesTo("/api/v1/models/defaults")).toHaveLength(1),
     );
     expect(writesTo("/api/v1/models/defaults")[0].body).toEqual({
-      music: "musician",
+      music: "composer",
       expectedRevision: 1,
     });
-    // Chosen: the hint about the fallback goes away.
-    await waitFor(() =>
-      expect(screen.queryByTestId("audio-music-gap")).toBeNull(),
-    );
   });
 
   it("says when a speech model would read the lines without a voice", async () => {
     view.models.push(
-      model("speaker", "audio", "openaiSpeech", "Speaker", true),
+      model("speaker", "speech", "openaiSpeech", "Speaker", true),
     );
-    view.preferences.audio.voice = "";
+    view.preferences.speech.voice = "";
     await openSettings();
-    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Speech" }));
 
     // The model the lines would be read by is asked for a voice, and this
     // machine has set none: the tab says what such an ask comes back as.
     expect(await screen.findByText("Speaker")).toBeTruthy();
-    expect(screen.getByTestId("audio-voice-gap")).toBeTruthy();
+    expect(screen.getByTestId("speech-voice-gap")).toBeTruthy();
 
     // The voice is filled in next door, and the gap closes.
     fireEvent.click(screen.getByRole("tab", { name: "Preferences" }));
@@ -872,24 +896,10 @@ describe("model settings", () => {
       expect((save as HTMLButtonElement).disabled).toBe(true),
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "Audio" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
     await waitFor(() =>
-      expect(screen.queryByTestId("audio-voice-gap")).toBeNull(),
+      expect(screen.queryByTestId("speech-voice-gap")).toBeNull(),
     );
-  });
-
-  it("asks no voice of a model that composes rather than speaks", async () => {
-    view.models.push(
-      model("musician", "audio", "bailianMusic", "Musician", true),
-    );
-    view.preferences.audio.voice = "";
-    await openSettings();
-    fireEvent.click(await screen.findByRole("tab", { name: "Audio" }));
-
-    // Which converters need a voice is the converter's own declaration, so a
-    // score's model is not asked for one just because the field is empty.
-    expect(await screen.findByText("Musician")).toBeTruthy();
-    expect(screen.queryByTestId("audio-voice-gap")).toBeNull();
   });
 
   it("shows the next model as the default when the stored one is gone", async () => {

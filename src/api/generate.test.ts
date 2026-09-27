@@ -131,12 +131,17 @@ describe("generation client", () => {
     stub(() => json(answer));
 
     await generateApi.image({ capability: "image", prompt: "a red cube" });
-    await generateApi.audio({ capability: "audio", prompt: "read this aloud" });
+    await generateApi.speech({
+      capability: "speech",
+      prompt: "read this aloud",
+    });
+    await generateApi.music({ capability: "music", prompt: "a slow theme" });
     await generateApi.video({ capability: "video", prompt: "a slow pan" });
 
     expect(sent.map((call) => call.url)).toEqual([
       "/api/v1/generate/image",
-      "/api/v1/generate/audio",
+      "/api/v1/generate/speech",
+      "/api/v1/generate/music",
       "/api/v1/generate/video",
     ]);
     expect(sent.every((call) => call.method === "POST")).toBe(true);

@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-import { CHANNEL_KEY, configureModels } from "./helpers";
+import {
+  CHANNEL_KEY,
+  configureModels,
+  configureTheWholeStudio,
+} from "./helpers";
 import { PROVIDER_ORIGIN, SPEAKER } from "./mock-provider";
 
 const CHAT_URL = `${PROVIDER_ORIGIN}/v1/chat/completions`;
@@ -195,6 +199,74 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
   );
 });
 
+test("each sound capability offers the shapes deployed under it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+
+  // A voice is asked of the speech converters this build deploys, and of no
+  // other: the composer's shape is not on offer here.
+  await dialog.getByRole("tab", { name: "Speech", exact: true }).click();
+  await dialog.getByRole("button", { name: "New speech model" }).click();
+  const protocol = dialog.getByLabel("Protocol");
+  await expect(protocol).toHaveValue("openaiSpeech");
+  await expect(protocol.locator("option")).toHaveText([
+    "OpenAI-compatible · Speech API",
+    "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
+  ]);
+  await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
+    "https://api.openai.com/v1/audio/speech",
+  );
+
+  // A score is asked of a music model, which is a list of its own.
+  await dialog.getByRole("tab", { name: "Music" }).click();
+  await dialog.getByRole("button", { name: "New music model" }).click();
+  await expect(protocol).toHaveValue("bailianMusic");
+  await expect(protocol.locator("option")).toHaveText([
+    "Alibaba Cloud · Music Generation (fun-music)",
+  ]);
+  await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
+    "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/music/generation",
+  );
+});
+
+test("a score is kept beside the voice rather than inside it", async ({
+  page,
+}) => {
+  await configureTheWholeStudio();
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+
+  const cardFor = (name: string) =>
+    dialog.locator("li.model-card").filter({
+      has: page.locator("strong", { hasText: new RegExp(`^${name}$`) }),
+    });
+
+  // What reads the lines is a speech model, and it is that capability's own
+  // default rather than an audio tab's first entry.
+  await dialog.getByRole("tab", { name: "Speech", exact: true }).click();
+  await expect(cardFor("Speaker")).toBeVisible();
+  await expect(
+    cardFor("Speaker").getByRole("radio", {
+      name: "Use Speaker as the default speech model",
+    }),
+  ).toBeChecked();
+
+  // What composes is a music model on a list of its own, and the speaker is
+  // not on it: a score can no longer be asked of whatever reads the lines.
+  await dialog.getByRole("tab", { name: "Music" }).click();
+  await expect(cardFor("Musician")).toBeVisible();
+  await expect(cardFor("Speaker")).toHaveCount(0);
+  await expect(
+    cardFor("Musician").getByRole("radio", {
+      name: "Use Musician as the default music model",
+    }),
+  ).toBeChecked();
+});
+
 test("every shape a category offers comes from its converter's model.json", async ({
   page,
 }) => {
@@ -256,12 +328,12 @@ test("speech recognition offers the script that serves it", async ({
  * What a model needs from the preferences is said where the model is chosen.
  *
  * The speech converters deployed by this build declare that they are asked for
- * a voice, so with none set the audio tab names the gap beside the default
+ * a voice, so with none set the speech tab names the gap beside the default
  * rather than waiting for a read-aloud ask to come back refused.
  */
 test("a speech model with no voice set is said out loud", async ({ page }) => {
   await configureModels([
-    { id: SPEAKER, capability: "audio", alias: "Speaker" },
+    { id: SPEAKER, capability: "speech", alias: "Speaker" },
   ]);
   await page.goto("/");
   await page.getByRole("button", { name: "Settings" }).click();
@@ -281,16 +353,16 @@ test("a speech model with no voice set is said out loud", async ({ page }) => {
     await expect(save).toBeDisabled();
   }
 
-  await dialog.getByRole("tab", { name: "Audio" }).click();
-  await expect(dialog.getByTestId("audio-voice-gap")).toBeVisible();
+  await dialog.getByRole("tab", { name: "Speech", exact: true }).click();
+  await expect(dialog.getByTestId("speech-voice-gap")).toBeVisible();
 
   await dialog.getByRole("tab", { name: "Preferences" }).click();
   await voice.fill("alloy");
   await save.click();
   await expect(save).toBeDisabled();
 
-  await dialog.getByRole("tab", { name: "Audio" }).click();
-  await expect(dialog.getByTestId("audio-voice-gap")).toHaveCount(0);
+  await dialog.getByRole("tab", { name: "Speech", exact: true }).click();
+  await expect(dialog.getByTestId("speech-voice-gap")).toHaveCount(0);
 
   await dialog.getByRole("tab", { name: "Preferences" }).click();
   await voice.fill(was);

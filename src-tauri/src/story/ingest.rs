@@ -145,19 +145,12 @@ fn kind_word(kind: StoryJobKind) -> &'static str {
     }
 }
 
-/// Audio is the one category a sniffer cannot settle, so the store is told
-/// which of the two it is. Everything else follows its mime.
-///
-/// A story's music arrives under the same parameter a node's does, so the two
-/// are classified by the same rule even though nothing else about them matches.
+/// Sound is the one family a sniffer cannot settle, and the capability is
+/// what tells the two kinds apart. Everything else follows its mime.
 fn category_hint(item: &StoryJobItem) -> Option<String> {
-    if item.capability != crate::domain::Capability::Audio {
-        return None;
+    match item.capability {
+        crate::domain::Capability::Speech => Some("voice".to_string()),
+        crate::domain::Capability::Music => Some("music".to_string()),
+        _ => None,
     }
-    let music = item
-        .params
-        .get("music")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    (!music).then(|| "voice".to_string())
 }

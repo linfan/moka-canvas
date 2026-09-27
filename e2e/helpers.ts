@@ -307,7 +307,13 @@ export async function backToLauncher(page: Page) {
 /** The credential the stand-in is sent. */
 export const CHANNEL_KEY = "e2e-stand-in-credential";
 
-/** The full endpoint address each category speaks at on the stand-in. */
+/**
+ * The full endpoint address each category speaks at on the stand-in.
+ *
+ * Music is not among them: a score is asked of a converter, and its address is
+ * the one that converter's own document gives — a stand-in shape of the
+ * capability's own would be an address no provider actually serves.
+ */
 function endpoint(capability: Capability): string {
   switch (capability) {
     case "text":
@@ -316,9 +322,10 @@ function endpoint(capability: Capability): string {
       return `${PROVIDER_ADDRESS}/images/generations`;
     case "video":
       return `${PROVIDER_ADDRESS}/videos`;
-    case "audio":
+    case "speech":
       return `${PROVIDER_ADDRESS}/audio/speech`;
   }
+  throw new Error(`no stand-in address for a ${capability} model of its own`);
 }
 
 /**
@@ -331,7 +338,11 @@ const CONVERTER_ENDPOINTS: Record<string, string> = {
   bailianMusic: "/api/v1/services/audio/music/generation",
 };
 
-/** How each category is spoken to, which is one protocol per shape. */
+/**
+ * How each category is spoken to, which is one protocol per shape. Music has
+ * no shape of its own here for the reason `endpoint` gives: a score names the
+ * converter it is asked of.
+ */
 function protocolOf(capability: Capability): string {
   switch (capability) {
     case "text":
@@ -340,9 +351,10 @@ function protocolOf(capability: Capability): string {
       return "openaiImages";
     case "video":
       return "openaiVideos";
-    case "audio":
+    case "speech":
       return "openaiSpeech";
   }
+  throw new Error(`no stand-in protocol for a ${capability} model of its own`);
 }
 
 /**
@@ -363,12 +375,6 @@ export async function configureModels(
      * model.json is what says which endpoint it is asked at.
      */
     converter?: keyof typeof CONVERTER_ENDPOINTS;
-    /**
-     * What the model is kept for. `default` is the category's own choice;
-     * `music` is the one place that is not a category — the model a telling's
-     * score is composed with, which leaves the audio default to the voice.
-     */
-    role?: "default" | "music";
   }[],
 ): Promise<void> {
   for (const model of models) {
@@ -397,10 +403,7 @@ export async function configureModels(
     }
   }
   const defaults = Object.fromEntries(
-    models.map((model) => [
-      model.role === "music" ? "music" : model.capability,
-      model.id,
-    ]),
+    models.map((model) => [model.capability, model.id]),
   );
   const patched = await fetch(`${APP}/api/v1/models/defaults`, {
     method: "PATCH",
@@ -431,8 +434,8 @@ export async function configureWordsAndPictures(): Promise<void> {
 
 /**
  * Pictures, words, clips and sound: everything a telling is made of, up to the
- * point where the shots are filmed. Two audio models, because a telling asks
- * two things of sound — a voice reads its lines and a converter composes the
+ * point where the shots are filmed. Two sound capabilities, because a telling
+ * asks two things of sound — a voice reads its lines and a composer writes the
  * music under them.
  */
 export async function configureTheWholeStudio(): Promise<void> {
@@ -440,16 +443,15 @@ export async function configureTheWholeStudio(): Promise<void> {
     { id: PAINTER, capability: "image", alias: "Painter" },
     { id: STORYTELLER, capability: "text", alias: "Storyteller" },
     { id: VIDEOGRAPHER, capability: "video", alias: "Videographer" },
-    { id: SPEAKER, capability: "audio", alias: "Speaker" },
+    { id: SPEAKER, capability: "speech", alias: "Speaker" },
     {
       id: MUSICIAN,
-      capability: "audio",
+      capability: "music",
       alias: "Musician",
       converter: "bailianMusic",
-      role: "music",
     },
   ]);
 }
 
 /** Which of the things a model is asked for. */
-type Capability = "text" | "image" | "video" | "audio";
+type Capability = "text" | "image" | "video" | "speech" | "music";

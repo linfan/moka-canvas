@@ -403,7 +403,7 @@ function filmingAt(seconds: number): void {
       defaults: {
         text: null,
         image: null,
-        audio: null,
+        speech: null,
         music: null,
         video: null,
         asr: null,
@@ -420,7 +420,7 @@ function filmingAt(seconds: number): void {
           mode: "auto",
           ratio: "",
         },
-        audio: {
+        speech: {
           voice: "",
           format: "mp3",
           speed: 1,
@@ -430,6 +430,7 @@ function filmingAt(seconds: number): void {
           rate: 1,
           pitch: 1,
         },
+        music: { format: "mp3", watermark: false },
         story: { splitChars: 12_000, readChars: 8_000 },
       },
       secretStorage: "unset",
@@ -1072,7 +1073,8 @@ describe("writing an episode's board", () => {
     fireEvent.click(screen.getByTestId("story-act-music-go-0"));
     await waitFor(() => expect(starts).toHaveLength(1));
     expect(starts[0]!.kind).toBe("music");
-    expect(starts[0]!.items[0]?.params?.music).toBe(true);
+    expect(starts[0]!.items[0]?.capability).toBe("music");
+    expect(starts[0]!.items[0]?.params).toEqual({ instrumental: true });
   });
 
   it("says when an episode has sound, since assembling carries it", async () => {

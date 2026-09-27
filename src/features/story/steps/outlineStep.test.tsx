@@ -262,7 +262,7 @@ function cuttingAt(splitChars: number): void {
       defaults: {
         text: null,
         image: null,
-        audio: null,
+        speech: null,
         music: null,
         video: null,
         asr: null,
@@ -279,7 +279,7 @@ function cuttingAt(splitChars: number): void {
           mode: "auto",
           ratio: "",
         },
-        audio: {
+        speech: {
           voice: "",
           format: "mp3",
           speed: 1,
@@ -289,6 +289,7 @@ function cuttingAt(splitChars: number): void {
           rate: 1,
           pitch: 1,
         },
+        music: { format: "mp3", watermark: false },
         story: { splitChars, readChars: 8_000 },
       },
       secretStorage: "unset",

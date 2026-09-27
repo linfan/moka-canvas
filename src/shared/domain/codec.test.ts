@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CANVAS_SCHEMA_VERSION } from "./constants";
 import {
+  buildBeforeTheSplitMokaFile,
   buildConversationMokaFile,
   buildCutMokaFile,
   buildGenerationMokaFile,
@@ -15,7 +16,7 @@ import {
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 import { derivePorts } from "./factories";
-import type { MediaNodeData, MokaFile } from "./types";
+import type { GenerationSpec, MediaNodeData, MokaFile } from "./types";
 
 const FIXTURE_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -201,6 +202,41 @@ describe("moka codec", () => {
       decodeMokaFile(encodeMokaFile(single)).stories![0].chapters[0].acts[0]
         .video.takes[0].assetIds,
     ).toEqual([one]);
+  });
+
+  it("reads a sound ask from before the split as the capability it meant", () => {
+    const decoded = decodeMokaFile(
+      encodeMokaFile(buildBeforeTheSplitMokaFile()),
+    );
+    const canvas = decoded.canvas[0];
+    expect(canvas.schemaVersion).toBe(CANVAS_SCHEMA_VERSION);
+
+    const specOf = (title: string) => {
+      const node = canvas.nodes.find((entry) => entry.title === title)!;
+      return (node.data as { generation: GenerationSpec }).generation;
+    };
+
+    // The reading is a speech ask, and only a voice's keys came with it: the
+    // size is a picture's, and the flag that said "not a score" is retired.
+    const spoken = specOf("Narration");
+    expect(spoken.capability).toBe("speech");
+    expect(spoken.params).toEqual({ voice: "alloy", speed: 1.2 });
+
+    // The score is a music ask, cut to the vocabulary a music model reads.
+    const scored = specOf("Score");
+    expect(scored.capability).toBe("music");
+    expect(scored.params).toEqual({ instrumental: true });
+  });
+
+  it("keeps the split migration idempotent and byte-canonical", () => {
+    const once = encodeMokaFile(
+      decodeMokaFile(encodeMokaFile(buildBeforeTheSplitMokaFile())),
+    );
+    const twice = encodeMokaFile(decodeMokaFile(once));
+    expect(Buffer.from(twice).equals(Buffer.from(once))).toBe(true);
+    expect(normalize(decodeMokaFile(twice))).toEqual(
+      normalize(decodeMokaFile(once)),
+    );
   });
 
   /**

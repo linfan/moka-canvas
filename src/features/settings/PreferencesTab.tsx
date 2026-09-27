@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-  AudioPreferences,
   GenerationPreferences,
   ImagePreferences,
+  MusicPreferences,
   PreferencesPatch,
+  SpeechPreferences,
   StoryPreferences,
   VideoPreferences,
 } from "../../api";
@@ -42,7 +43,8 @@ function clone(preferences: GenerationPreferences): GenerationPreferences {
     ...preferences,
     image: { ...preferences.image },
     video: { ...preferences.video },
-    audio: { ...preferences.audio },
+    speech: { ...preferences.speech },
+    music: { ...preferences.music },
     story: { ...preferences.story },
   };
 }
@@ -80,7 +82,8 @@ function GenerationDefaults() {
   }
   if (differs(draft.image, stored.image)) patch.image = draft.image;
   if (differs(draft.video, stored.video)) patch.video = draft.video;
-  if (differs(draft.audio, stored.audio)) patch.audio = draft.audio;
+  if (differs(draft.speech, stored.speech)) patch.speech = draft.speech;
+  if (differs(draft.music, stored.music)) patch.music = draft.music;
   if (differs(draft.story, stored.story)) patch.story = draft.story;
   const changed = Object.keys(patch).length > 0;
 
@@ -94,9 +97,13 @@ function GenerationDefaults() {
     setDraft(
       (state) => state && { ...state, video: { ...state.video, ...next } },
     );
-  const editAudio = (next: Partial<AudioPreferences>) =>
+  const editSpeech = (next: Partial<SpeechPreferences>) =>
     setDraft(
-      (state) => state && { ...state, audio: { ...state.audio, ...next } },
+      (state) => state && { ...state, speech: { ...state.speech, ...next } },
+    );
+  const editMusic = (next: Partial<MusicPreferences>) =>
+    setDraft(
+      (state) => state && { ...state, music: { ...state.music, ...next } },
     );
   const editStory = (next: Partial<StoryPreferences>) =>
     setDraft(
@@ -239,25 +246,25 @@ function GenerationDefaults() {
       </section>
 
       <section
-        aria-label={t("settings:generation.audioDefaults")}
+        aria-label={t("settings:generation.speechDefaults")}
         className="settings-section"
       >
-        <h3 className="settings-heading">{t("settings:generation.audio")}</h3>
+        <h3 className="settings-heading">{t("settings:generation.speech")}</h3>
         <div className="settings-columns">
           <label className="dialog-field">
             <span>{t("settings:generation.voice")}</span>
             <input
-              onChange={(event) => editAudio({ voice: event.target.value })}
+              onChange={(event) => editSpeech({ voice: event.target.value })}
               placeholder={t("settings:generation.voiceTip")}
-              value={draft.audio.voice}
+              value={draft.speech.voice}
             />
           </label>
           <label className="dialog-field">
             <span>{t("settings:generation.format")}</span>
             <input
-              onChange={(event) => editAudio({ format: event.target.value })}
+              onChange={(event) => editSpeech({ format: event.target.value })}
               placeholder="mp3"
-              value={draft.audio.format}
+              value={draft.speech.format}
             />
           </label>
           <label className="dialog-field">
@@ -266,11 +273,11 @@ function GenerationDefaults() {
               max={MAX_AUDIO_SPEED}
               min={MIN_AUDIO_SPEED}
               onChange={(event) =>
-                editAudio({ speed: toNumber(event.target.value, 1) })
+                editSpeech({ speed: toNumber(event.target.value, 1) })
               }
               step={0.05}
               type="number"
-              value={draft.audio.speed}
+              value={draft.speech.speed}
             />
           </label>
           <label className="dialog-field">
@@ -279,11 +286,11 @@ function GenerationDefaults() {
               max={48000}
               min={8000}
               onChange={(event) =>
-                editAudio({ sampleRate: toNumber(event.target.value, 22050) })
+                editSpeech({ sampleRate: toNumber(event.target.value, 22050) })
               }
               step={100}
               type="number"
-              value={draft.audio.sampleRate}
+              value={draft.speech.sampleRate}
             />
           </label>
           <label className="dialog-field">
@@ -292,10 +299,10 @@ function GenerationDefaults() {
               max={100}
               min={0}
               onChange={(event) =>
-                editAudio({ volume: toNumber(event.target.value, 50) })
+                editSpeech({ volume: toNumber(event.target.value, 50) })
               }
               type="number"
-              value={draft.audio.volume}
+              value={draft.speech.volume}
             />
           </label>
           <label className="dialog-field">
@@ -304,11 +311,11 @@ function GenerationDefaults() {
               max={2}
               min={0.5}
               onChange={(event) =>
-                editAudio({ rate: toNumber(event.target.value, 1) })
+                editSpeech({ rate: toNumber(event.target.value, 1) })
               }
               step={0.05}
               type="number"
-              value={draft.audio.rate}
+              value={draft.speech.rate}
             />
           </label>
           <label className="dialog-field">
@@ -317,11 +324,11 @@ function GenerationDefaults() {
               max={2}
               min={0.5}
               onChange={(event) =>
-                editAudio({ pitch: toNumber(event.target.value, 1) })
+                editSpeech({ pitch: toNumber(event.target.value, 1) })
               }
               step={0.05}
               type="number"
-              value={draft.audio.pitch}
+              value={draft.speech.pitch}
             />
           </label>
         </div>
@@ -329,11 +336,36 @@ function GenerationDefaults() {
           <span>{t("settings:generation.voiceInstructions")}</span>
           <input
             onChange={(event) =>
-              editAudio({ instructions: event.target.value })
+              editSpeech({ instructions: event.target.value })
             }
             placeholder={t("settings:generation.voiceInstructionsTip")}
-            value={draft.audio.instructions}
+            value={draft.speech.instructions}
           />
+        </label>
+      </section>
+
+      <section
+        aria-label={t("settings:generation.musicDefaults")}
+        className="settings-section"
+      >
+        <h3 className="settings-heading">{t("settings:generation.music")}</h3>
+        <div className="settings-columns">
+          <label className="dialog-field">
+            <span>{t("settings:generation.format")}</span>
+            <input
+              onChange={(event) => editMusic({ format: event.target.value })}
+              placeholder="mp3"
+              value={draft.music.format}
+            />
+          </label>
+        </div>
+        <label className="settings-check">
+          <input
+            checked={draft.music.watermark}
+            onChange={(event) => editMusic({ watermark: event.target.checked })}
+            type="checkbox"
+          />
+          <span>{t("settings:generation.watermark")}</span>
         </label>
       </section>
 

@@ -300,7 +300,7 @@ mod tests {
         let body = body_json(response).await;
         assert_eq!(body["status"], "ok");
         assert_eq!(body["metadata"]["store"], "file");
-        assert_eq!(body["metadata"]["schemaVersion"], 2);
+        assert_eq!(body["metadata"]["schemaVersion"], 3);
         assert_eq!(body["metadata"]["ok"], true);
         let names: Vec<&str> = body["metadata"]["documents"]
             .as_array()

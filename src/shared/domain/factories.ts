@@ -10,12 +10,14 @@ import {
   DEFAULT_STORY_ASPECT,
   DEFAULT_STORY_DURATION_MS,
   DEFAULT_TEXT_CLIP_MS,
+  GENERATION_PARAM_KEYS,
   MIN_NODE_HEIGHT,
   MOKA_FILE_VERSION,
   NODE_PORTS,
   PROVIDER_EXECUTOR_KEY,
   STORY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
+  isCapability,
 } from "./constants";
 import type { Capability, TransitionKind } from "./constants";
 import type {
@@ -314,10 +316,53 @@ export function defaultDataForKind(kind: NodeKind): WorkflowNode["data"] {
   }
 }
 
+/**
+ * The capability a node of that kind asks in, or null for the kinds that never
+ * carry a generation spec.
+ *
+ * A sound node asks in either sound capability; this answers with the one a
+ * fresh ask is made in, and an ask already made carries its own.
+ */
 export function generationCapabilityFor(kind: NodeKind): Capability | null {
-  return kind === "operation" || kind === "group" || kind === "export"
-    ? null
-    : kind;
+  if (kind === "operation" || kind === "group" || kind === "export") {
+    return null;
+  }
+  return kind === "audio" ? "speech" : kind;
+}
+
+/**
+ * Whether a node of that kind may ask for this capability: the kind says how
+ * the node is drawn, its spec says what it wants, and sound is the one kind
+ * two capabilities serve.
+ */
+export function capabilityServes(
+  capability: Capability,
+  kind: NodeKind,
+): boolean {
+  if (kind === "audio")
+    return capability === "speech" || capability === "music";
+  if (kind === "text" || kind === "image" || kind === "video") {
+    return capability === kind;
+  }
+  return false;
+}
+
+/**
+ * The params an ask of that capability keeps, the rest dropped.
+ *
+ * Each capability reads a vocabulary of its own, so a key carried over from
+ * another one would only travel to a converter that refuses it. Asked when an
+ * ask changes capability, and when a document written before speech and music
+ * were separated is read.
+ */
+export function paramsForCapability(
+  capability: Capability,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const allowed = GENERATION_PARAM_KEYS[capability];
+  return Object.fromEntries(
+    Object.entries(params).filter(([key]) => allowed.includes(key)),
+  );
 }
 
 export function defaultGenerationSpec(kind: NodeKind): GenerationSpec | null {
@@ -451,12 +496,13 @@ export function generationSpecFromSnapshot(
   snapshot: Record<string, unknown> | undefined,
   kind: NodeKind,
 ): GenerationSpec | null {
-  const capability = generationCapabilityFor(kind);
-  if (!capability || !snapshot || snapshot.capability !== capability)
+  const asked = snapshot?.capability;
+  if (!snapshot || !isCapability(asked) || !capabilityServes(asked, kind)) {
     return null;
+  }
   if (typeof snapshot.prompt !== "string") return null;
   return {
-    capability,
+    capability: asked,
     mode: oneOf(snapshot.mode, GENERATION_MODES, "generate"),
     model: typeof snapshot.model === "string" ? snapshot.model : "",
     prompt: snapshot.prompt,

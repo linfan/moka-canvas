@@ -4,6 +4,7 @@ import type { GenerationPreferences } from "../../../api";
 import { i18n } from "../../../shared/i18n";
 import {
   AUDIO_FORMATS,
+  CAPABILITY_LABELS,
   GENERATION_SHAPES,
   IMAGE_BACKGROUNDS,
   IMAGE_QUALITIES,
@@ -26,6 +27,15 @@ const VIDEO_MODE_NAMES: Record<string, string> = {
   reference: "editor:generationParams.modeReferences",
 };
 
+/** The two capabilities a sound node may be asked in, in reading order. */
+const SOUND_CAPABILITIES: readonly Capability[] = ["speech", "music"];
+
+/** What the two answers to an instrumental ask are called. */
+const INSTRUMENTAL_NAMES: Record<string, string> = {
+  true: "editor:generationParams.instrumentalYes",
+  false: "editor:generationParams.instrumentalNo",
+};
+
 interface Props {
   capability: Capability;
   params: Record<string, unknown>;
@@ -33,6 +43,11 @@ interface Props {
   defaults: GenerationPreferences | null;
   /** Writing null takes a parameter back out, so the default speaks again. */
   onChange: (key: string, value: ParamValue | null) => void;
+  /**
+   * Moves a sound ask between the two capabilities that serve it, which is
+   * also what decides the model list and the parameters on offer.
+   */
+  onCapabilityChange?: (capability: Capability) => void;
 }
 
 /**
@@ -52,6 +67,7 @@ export function GenerationParams({
   params,
   defaults,
   onChange,
+  onCapabilityChange,
 }: Props) {
   const { t } = useTranslation();
   if (capability === "image") {
@@ -144,45 +160,101 @@ export function GenerationParams({
     );
   }
 
-  if (capability === "audio") {
+  if (capability === "speech" || capability === "music") {
     return (
       <div className="prompt-panel-params">
-        <Words
-          fallback={defaults?.audio.voice}
-          label={t("editor:field.voice")}
-          onChange={(value) => onChange("voice", value)}
-          placeholder={t("editor:generationParams.voicePlaceholder")}
-          value={word(params, "voice")}
-        />
-        <Choice
-          fallback={defaults?.audio.format}
-          label={t("editor:field.format")}
-          onChange={(value) => onChange("format", value)}
-          options={AUDIO_FORMATS}
-          value={word(params, "format")}
-        />
-        <Amount
-          fallback={defaults?.audio.speed}
-          label={t("editor:field.speed")}
-          max={MAX_AUDIO_SPEED}
-          min={MIN_AUDIO_SPEED}
-          onChange={(value) => onChange("speed", value)}
-          step={0.05}
-          value={figure(params, "speed")}
-        />
-        <Flag
-          label={t("editor:generationParams.fileUnderMusic")}
-          onChange={(value) => onChange("music", value)}
-          value={yesNo(params, "music") ?? false}
-        />
-        <Words
-          className="prompt-panel-wide"
-          fallback={defaults?.audio.instructions}
-          label={t("editor:field.direction")}
-          onChange={(value) => onChange("instructions", value)}
-          placeholder={t("editor:generationParams.directionPlaceholder")}
-          value={word(params, "instructions")}
-        />
+        {onCapabilityChange && (
+          <div
+            aria-label={t("editor:generationParams.sound")}
+            className="prompt-panel-wide prompt-panel-sound"
+            data-testid="sound-capability"
+            role="radiogroup"
+          >
+            {SOUND_CAPABILITIES.map((entry) => (
+              <button
+                aria-checked={entry === capability}
+                className={entry === capability ? "is-active" : ""}
+                key={entry}
+                onClick={() => onCapabilityChange(entry)}
+                role="radio"
+                type="button"
+              >
+                {t(CAPABILITY_LABELS[entry])}
+              </button>
+            ))}
+          </div>
+        )}
+        {capability === "speech" ? (
+          <>
+            <Words
+              fallback={defaults?.speech.voice}
+              label={t("editor:field.voice")}
+              onChange={(value) => onChange("voice", value)}
+              placeholder={t("editor:generationParams.voicePlaceholder")}
+              value={word(params, "voice")}
+            />
+            <Choice
+              fallback={defaults?.speech.format}
+              label={t("editor:field.format")}
+              onChange={(value) => onChange("format", value)}
+              options={AUDIO_FORMATS}
+              value={word(params, "format")}
+            />
+            <Amount
+              fallback={defaults?.speech.speed}
+              label={t("editor:field.speed")}
+              max={MAX_AUDIO_SPEED}
+              min={MIN_AUDIO_SPEED}
+              onChange={(value) => onChange("speed", value)}
+              step={0.05}
+              value={figure(params, "speed")}
+            />
+            <Words
+              className="prompt-panel-wide"
+              fallback={defaults?.speech.instructions}
+              label={t("editor:field.direction")}
+              onChange={(value) => onChange("instructions", value)}
+              placeholder={t("editor:generationParams.directionPlaceholder")}
+              value={word(params, "instructions")}
+            />
+          </>
+        ) : (
+          <>
+            <Choice
+              fallback={defaults?.music.format}
+              label={t("editor:field.format")}
+              onChange={(value) => onChange("format", value)}
+              options={AUDIO_FORMATS}
+              value={word(params, "format")}
+            />
+            <Choice
+              label={t("editor:field.instrumental")}
+              names={INSTRUMENTAL_NAMES}
+              onChange={(value) =>
+                onChange(
+                  "instrumental",
+                  value === null ? null : value === "true",
+                )
+              }
+              options={["true", "false"]}
+              value={flagWord(params, "instrumental")}
+            />
+            <Words
+              className="prompt-panel-wide"
+              label={t("editor:field.lyrics")}
+              onChange={(value) => onChange("lyrics", value)}
+              placeholder={t("editor:generationParams.lyricsPlaceholder")}
+              value={word(params, "lyrics")}
+            />
+            <Flag
+              label={t("editor:field.watermark")}
+              onChange={(value) => onChange("watermark", value)}
+              value={
+                yesNo(params, "watermark") ?? defaults?.music.watermark ?? false
+              }
+            />
+          </>
+        )}
       </div>
     );
   }
@@ -237,6 +309,12 @@ function figure(params: Record<string, unknown>, key: string): number | null {
 function yesNo(params: Record<string, unknown>, key: string): boolean | null {
   const value = params[key];
   return typeof value === "boolean" ? value : null;
+}
+
+/** A yes-and-no parameter read as the word a choice is made in. */
+function flagWord(params: Record<string, unknown>, key: string): string | null {
+  const value = yesNo(params, key);
+  return value === null ? null : `${value}`;
 }
 
 /** What leaving a parameter out is called: the default, and what it is. */

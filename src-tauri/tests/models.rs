@@ -42,9 +42,13 @@ fn draft(id: &str, category: Capability) -> ModelDraft {
             Protocol::new("openaiImages"),
             "https://provider.test/v1/images/generations/",
         ),
-        Capability::Audio => (
+        Capability::Speech => (
             Protocol::new("openaiSpeech"),
             "https://provider.test/v1/audio/speech/",
+        ),
+        Capability::Music => (
+            Protocol::new("bailianMusic"),
+            "https://provider.test/api/v1/services/audio/music/generation/",
         ),
         Capability::Video => (
             Protocol::new("openaiVideos"),

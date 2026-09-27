@@ -238,7 +238,8 @@ async fn answered(
         // nobody is watching costs nothing here.
         Capability::Text => gateway.text(request.clone(), deltas, cancel).await,
         Capability::Image => gateway.image(request.clone(), cancel).await,
-        Capability::Audio => gateway.audio(request.clone(), cancel).await,
+        Capability::Speech => gateway.speech(request.clone(), cancel).await,
+        Capability::Music => gateway.music(request.clone(), cancel).await,
         // A shot is started and then waited out, and starting one here would be
         // starting something nobody in this call is going to collect.
         Capability::Video => Err(ProviderError::invalid(

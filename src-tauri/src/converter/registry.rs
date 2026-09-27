@@ -2,8 +2,8 @@
 //! available converter protocols.
 //!
 //! The models root holds one directory per capability — `text`, `image`,
-//! `audio`, `video`, `asr` — and each of those holds one directory per
-//! converter. A converter directory is self-contained: its `model.json`
+//! `speech`, `music`, `video`, `asr` — and each of those holds one directory
+//! per converter. A converter directory is self-contained: its `model.json`
 //! carries the metadata and names the protocol adapter script beside it, so a
 //! script is added by dropping a directory in and removed by taking one out.
 //! A directory without a readable `model.json` is skipped rather than failing
@@ -20,7 +20,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 /// The capability directories a models root holds, in the order a list reads.
-pub const CAPABILITY_DIRS: [&str; 5] = ["text", "image", "audio", "video", "asr"];
+///
+/// A directory this build does not know — `audio`, from before sound was split
+/// in two — is never read, which leaves a tree deployed by an older build
+/// harmlessly in place.
+pub const CAPABILITY_DIRS: [&str; 6] = ["text", "image", "speech", "music", "video", "asr"];
 
 /// Where a converter's credential travels, as its `model.json` declares it.
 ///

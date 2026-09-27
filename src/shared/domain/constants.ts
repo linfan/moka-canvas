@@ -8,7 +8,9 @@ import type {
 
 export const MOKA_MAGIC = [0x4d, 0x4f, 0x4b, 0x41] as const;
 export const MOKA_FILE_VERSION = "v1" as const;
-export const CANVAS_SCHEMA_VERSION = 2;
+// Version 3 split the audio capability into speech and music; the codec
+// rewrites a v2 canvas's generation specs on decode.
+export const CANVAS_SCHEMA_VERSION = 3;
 export const PACKAGE_FORMAT_VERSION = 2;
 
 export const ZOOM_MIN = 0.05;
@@ -211,11 +213,16 @@ export const MAX_ASSET_KEYWORD_LENGTH = 2_000;
 export const MODEL_CAPABILITIES = [
   "text",
   "image",
-  "audio",
+  "speech",
+  "music",
   "video",
   "asr",
 ] as const;
 export type Capability = (typeof MODEL_CAPABILITIES)[number];
+
+export function isCapability(value: unknown): value is Capability {
+  return MODEL_CAPABILITIES.includes(value as Capability);
+}
 
 /**
  * The kinds of card a project holds.
@@ -228,10 +235,26 @@ export type Capability = (typeof MODEL_CAPABILITIES)[number];
 export const ASSET_KINDS = ["text", "image", "audio", "video"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
+/**
+ * What a card of each kind is called, in the words the matching node already
+ * goes by.
+ *
+ * A kind is not a capability: the sound a card holds may have been made by
+ * either sound capability, and what a reader needs named there is the card,
+ * not the model behind it.
+ */
+export const ASSET_KIND_LABELS: Record<AssetKind, string> = {
+  text: "domain:nodeTitle.text",
+  image: "domain:nodeTitle.image",
+  audio: "domain:nodeTitle.audio",
+  video: "domain:nodeTitle.video",
+};
+
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   text: "domain:capability.text",
   image: "domain:capability.image",
-  audio: "domain:capability.audio",
+  speech: "domain:capability.speech",
+  music: "domain:capability.music",
   video: "domain:capability.video",
   asr: "domain:capability.asr",
 };
@@ -457,23 +480,26 @@ export const MOKA_FRAGMENT_MIME = "application/x-moka-canvas-fragment+json";
 export const FRAGMENT_SCHEMA_VERSION = 1;
 
 /**
- * The node-level parameter keys each capability accepts; same names and
- * meanings as the global provider preferences. Unknown keys are rejected.
+ * The parameter keys an ask of each capability may carry: the ones its
+ * converters read, which the global preferences fill some of. Unknown keys are
+ * rejected. The server keeps the same keys in the same order
+ * (`generation_param_keys` in `src-tauri/src/domain/validate.rs`, which a Rust
+ * test compares against this list).
  */
 export const GENERATION_PARAM_KEYS: Record<Capability, readonly string[]> = {
   text: ["temperature", "maxTokens", "reasoningEffort", "instructions"],
   image: ["size", "quality", "background", "count"],
-  audio: [
+  speech: [
     "voice",
     "format",
     "speed",
     "instructions",
-    "music",
     "sampleRate",
     "volume",
     "rate",
     "pitch",
   ],
+  music: ["format", "instrumental", "lyrics", "gender", "watermark"],
   video: [
     "seconds",
     "resolution",

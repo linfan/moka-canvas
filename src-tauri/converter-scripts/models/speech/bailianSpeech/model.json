@@ -1,10 +1,17 @@
 {
   "displayName": "Alibaba Cloud · Bailian Speech (CosyVoice TTS)",
-  "labels": { "zh": "阿里云百炼 · 语音合成（CosyVoice）" },
+  "labels": {
+    "zh": "阿里云百炼 · 语音合成（CosyVoice）"
+  },
   "urlExample": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer",
   "script": "bailian-speech.lua",
   "order": 20,
-  "auth": { "header": "Authorization", "scheme": "Bearer" },
-  "features": { "needsVoice": true },
-  "version": 4
+  "auth": {
+    "header": "Authorization",
+    "scheme": "Bearer"
+  },
+  "features": {
+    "needsVoice": true
+  },
+  "version": 5
 }

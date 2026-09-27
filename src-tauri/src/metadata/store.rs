@@ -146,7 +146,7 @@ impl FileMetadataStore {
         migrate::check_schema(meta.schema_version)?;
 
         let recent = load_or_reset(root, RECENT_DOC, &mut recovered);
-        let (models, secrets) = load_models_and_secrets(root, &mut recovered)?;
+        let (models, secrets) = load_models_and_secrets(root, meta.schema_version, &mut recovered)?;
         let prompt_sources = load_or_reset(root, PROMPT_SOURCES_DOC, &mut recovered);
 
         let keys = Arc::new(KeyProvider::new(root, mode));
@@ -908,21 +908,39 @@ fn write_meta(root: &Path, meta: &MetaDoc) -> Result<(), MetadataError> {
 }
 
 /// Loads the model document, running the schema-2 upgrade when the directory
-/// still carries the legacy provider document.
+/// still carries the legacy provider document, and the schema-3 one when it
+/// was written before sound was split into two capabilities.
 ///
-/// The upgrade is a clean break: only the generation preferences survive it.
-/// Credentials stored against channel identifiers become orphans that the
-/// collector below drops, because a channel key was never a model key.
+/// The schema-2 upgrade is a clean break: only the generation preferences
+/// survive it. Credentials stored against channel identifiers become orphans
+/// that the collector below drops, because a channel key was never a model
+/// key. The schema-3 upgrade keeps everything, placing each model and default
+/// under the capability it serves.
 fn load_models_and_secrets(
     root: &Path,
+    schema_version: u32,
     recovered: &mut Vec<DocumentCorruption>,
 ) -> Result<(ModelsDoc, SecretsDoc), MetadataError> {
     let mut models: ModelsDoc = load_or_reset(root, MODELS_DOC, recovered);
+    let mut rewritten = false;
     if models.revision == 0 && models.models.is_empty() && migrate::needs_models_upgrade(root) {
         models.preferences = migrate::upgrade_to_models(root)?;
         // Written at once, so the surviving preferences are on the disk before
         // anything can fail: an upgrade that only lived in memory would be
         // lost to the next startup, which finds no legacy document to read.
+        rewritten = true;
+    }
+    // A document from before the split is written back whole rather than only
+    // where the placement moved something: every model and default in it is
+    // stored under the one old capability's name, so a model that keeps
+    // serving the same place still has to be written as the capability it now
+    // reads as — the alias that reads it is this build's, and the file is
+    // what a reader without that alias would find.
+    if schema_version < SCHEMA_VERSION {
+        migrate::split_sound_capability(&mut models);
+        rewritten = true;
+    }
+    if rewritten {
         let bytes = docs::serialize(MODELS_DOC, &models)
             .map_err(|error| MetadataError::write_failed(error.reason))?;
         fs::atomic_write(root, &root.join(MODELS_DOC), &bytes, DOCUMENT_MODE)
@@ -1044,6 +1062,47 @@ mod tests {
             .documents
             .iter()
             .any(|document| document.name == MODELS_DOC && document.corrupt));
+    }
+
+    /// A directory from before the split is written back in the new words even
+    /// where nothing about it moved.
+    ///
+    /// The old capability's name is what its models, its defaults and its
+    /// preferences were stored under, and this build reads those through
+    /// aliases the file itself does not carry: a document left as it was would
+    /// say schema 3 while still naming a capability the schema does not have.
+    #[test]
+    fn a_directory_from_before_the_split_is_rewritten_in_the_new_words() {
+        let root = tempfile::tempdir().unwrap();
+        let config = MetadataConfig::default();
+        std::fs::create_dir_all(root.path()).unwrap();
+        std::fs::write(
+            root.path().join(META_DOC),
+            br#"{"schemaVersion":2,"store":"file","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","appVersion":"0.2.1"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join(MODELS_DOC),
+            br#"{"revision":4,"version":1,"models":[{"id":"speaker","category":"audio","protocol":"bailianSpeech","url":"https://example.test/tts","model":"cosyvoice","displayName":"Speaker","enabled":true}],"defaults":{"text":null,"image":null,"audio":"speaker","video":null,"asr":null},"preferences":{"systemPrompt":"","reasoningEffort":"auto","image":{"size":"1:1","quality":"auto","background":"","count":1},"video":{"seconds":6,"resolution":"720","generateAudio":true,"watermark":false,"mode":"auto","ratio":""},"audio":{"voice":"longxiaochun","format":"mp3","speed":1.0,"instructions":"","sampleRate":22050,"volume":50,"rate":1.0,"pitch":1.0}}}"#,
+        )
+        .unwrap();
+
+        FileMetadataStore::open(root.path(), &config, RuntimeMode::Web).unwrap();
+
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.path().join(MODELS_DOC)).unwrap())
+                .unwrap();
+        assert_eq!(written["models"][0]["category"], "speech");
+        assert_eq!(written["defaults"]["speech"], "speaker");
+        assert!(written["defaults"].get("audio").is_none(), "{written}");
+        assert_eq!(written["preferences"]["speech"]["voice"], "longxiaochun");
+        assert!(written["preferences"].get("audio").is_none(), "{written}");
+        assert!(written["preferences"].get("music").is_some(), "{written}");
+
+        let meta: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.path().join(META_DOC)).unwrap())
+                .unwrap();
+        assert_eq!(meta["schemaVersion"], SCHEMA_VERSION);
     }
 
     #[test]

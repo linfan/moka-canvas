@@ -42,13 +42,12 @@ export interface ModelView {
 }
 
 /**
- * The default model of each category, by model configuration id — plus the one
- * choice that is not a category of its own: the audio model that composes a
- * telling's score rather than reading its lines aloud.
+ * The default model of each capability, by model configuration id.
+ *
+ * One per capability, plainly: a score's model is a music model as a
+ * read-aloud's is a speech one, and neither answers for the other.
  */
-export type ModelDefaults = Record<Capability, string | null> & {
-  music: string | null;
-};
+export type ModelDefaults = Record<Capability, string | null>;
 
 export interface ImagePreferences {
   size: string;
@@ -66,7 +65,8 @@ export interface VideoPreferences {
   ratio: string;
 }
 
-export interface AudioPreferences {
+/** What a read-aloud ask is shaped by. */
+export interface SpeechPreferences {
   voice: string;
   format: string;
   speed: number;
@@ -75,6 +75,15 @@ export interface AudioPreferences {
   volume: number;
   rate: number;
   pitch: number;
+}
+
+/**
+ * What a score's ask is shaped by. Less than a voice's: what a score is about
+ * belongs to the ask itself, and these say only what shape the answer takes.
+ */
+export interface MusicPreferences {
+  format: string;
+  watermark: boolean;
 }
 
 /**
@@ -92,7 +101,8 @@ export interface GenerationPreferences {
   reasoningEffort: string;
   image: ImagePreferences;
   video: VideoPreferences;
-  audio: AudioPreferences;
+  speech: SpeechPreferences;
+  music: MusicPreferences;
   story: StoryPreferences;
 }
 
@@ -145,7 +155,7 @@ export interface ModelDraft {
 export interface DefaultsPatch {
   text?: string | null;
   image?: string | null;
-  audio?: string | null;
+  speech?: string | null;
   music?: string | null;
   video?: string | null;
   asr?: string | null;
@@ -158,7 +168,8 @@ export interface PreferencesPatch {
   reasoningEffort?: string;
   image?: ImagePreferences;
   video?: VideoPreferences;
-  audio?: AudioPreferences;
+  speech?: SpeechPreferences;
+  music?: MusicPreferences;
   story?: StoryPreferences;
   expectedRevision?: number | null;
 }

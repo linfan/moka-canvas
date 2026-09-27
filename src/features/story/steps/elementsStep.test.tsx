@@ -504,7 +504,7 @@ describe("a telling read in parts", () => {
         defaults: {
           text: null,
           image: null,
-          audio: null,
+          speech: null,
           music: null,
           video: null,
           asr: null,
@@ -521,7 +521,7 @@ describe("a telling read in parts", () => {
             mode: "auto",
             ratio: "",
           },
-          audio: {
+          speech: {
             voice: "",
             format: "mp3",
             speed: 1,
@@ -531,6 +531,7 @@ describe("a telling read in parts", () => {
             rate: 1,
             pitch: 1,
           },
+          music: { format: "mp3", watermark: false },
           story: { splitChars: 12_000, readChars },
         },
         secretStorage: "unset",
@@ -631,7 +632,7 @@ describe("the model a reading is asked of", () => {
         defaults: {
           text: "scribe-1",
           image: null,
-          audio: null,
+          speech: null,
           music: null,
           video: null,
           asr: null,
@@ -648,7 +649,7 @@ describe("the model a reading is asked of", () => {
             mode: "auto",
             ratio: "",
           },
-          audio: {
+          speech: {
             voice: "",
             format: "mp3",
             speed: 1,
@@ -658,6 +659,7 @@ describe("the model a reading is asked of", () => {
             rate: 1,
             pitch: 1,
           },
+          music: { format: "mp3", watermark: false },
           story: { splitChars: 12_000, readChars: 8_000 },
         },
         secretStorage: "unset",

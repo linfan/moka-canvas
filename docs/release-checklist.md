@@ -149,8 +149,8 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
    once surfaces a conflict notice in the loser instead of silently
    overwriting.
 9. Generate against a model you really configured. The text route
-   `POST /api/v1/generate/text` returns text; `/image` and `/audio`
-   return the media base64-encoded beside a mime type, kind, and
+   `POST /api/v1/generate/text` returns text; `/image`, `/speech` and
+   `/music` return the media base64-encoded beside a mime type, kind, and
    dimensions, and nothing appears in the project directory as a result.
    Repeat the text call with `params.stream: true` and confirm
    `text/event-stream`, several `delta` frames, and one closing `done`

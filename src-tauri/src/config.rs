@@ -188,11 +188,17 @@ impl Default for GenerateConfig {
 impl GenerateConfig {
     /// How long one request of this capability may take. Video is task-based,
     /// so its budget belongs to the two task calls rather than to `generate`.
+    ///
+    /// Speech and music share the audio budget: both are one HTTP request
+    /// answered somewhere between seconds and a minute, and the stored key is
+    /// the one a reader's own config file has always set.
     pub fn timeout_for(&self, capability: crate::domain::Capability) -> std::time::Duration {
         let secs = match capability {
             crate::domain::Capability::Text => self.text_timeout_seconds,
             crate::domain::Capability::Image => self.image_timeout_seconds,
-            crate::domain::Capability::Audio => self.audio_timeout_seconds,
+            crate::domain::Capability::Speech | crate::domain::Capability::Music => {
+                self.audio_timeout_seconds
+            }
             crate::domain::Capability::Video => self.video_task_timeout_seconds,
             crate::domain::Capability::Asr => self.asr_timeout_seconds,
         };
@@ -211,7 +217,8 @@ impl GenerateConfig {
             crate::domain::Capability::Image | crate::domain::Capability::Text => {
                 self.max_image_input_bytes
             }
-            crate::domain::Capability::Audio
+            crate::domain::Capability::Speech
+            | crate::domain::Capability::Music
             | crate::domain::Capability::Video
             | crate::domain::Capability::Asr => self.max_media_input_bytes,
         }
@@ -988,7 +995,9 @@ generate:
         use crate::domain::Capability;
         assert_eq!(budgets.timeout_for(Capability::Text).as_secs(), 120);
         assert_eq!(budgets.timeout_for(Capability::Image).as_secs(), 300);
-        assert_eq!(budgets.timeout_for(Capability::Audio).as_secs(), 120);
+        // Sound is two capabilities and one budget: both are a single request.
+        assert_eq!(budgets.timeout_for(Capability::Speech).as_secs(), 120);
+        assert_eq!(budgets.timeout_for(Capability::Music).as_secs(), 120);
         // Starting a job answers at once, so it gets the short budget; waiting
         // for the job itself is the caller's polling loop, not one request.
         assert_eq!(budgets.timeout_for(Capability::Video).as_secs(), 60);
@@ -1037,7 +1046,7 @@ generate:
         let config = GenerateConfig::default();
         assert_eq!(config.timeout_for(Capability::Text).as_secs(), 120);
         assert_eq!(config.timeout_for(Capability::Image).as_secs(), 300);
-        assert_eq!(config.timeout_for(Capability::Audio).as_secs(), 120);
+        assert_eq!(config.timeout_for(Capability::Speech).as_secs(), 120);
         assert_eq!(config.timeout_for(Capability::Video).as_secs(), 60);
         assert_eq!(config.input_cap_for(Capability::Image), 20 * 1024 * 1024);
         assert_eq!(config.input_cap_for(Capability::Video), 200 * 1024 * 1024);

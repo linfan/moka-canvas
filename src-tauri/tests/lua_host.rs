@@ -363,7 +363,7 @@ end
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_table_of_headers_and_the_bytes_themselves_come_with_the_answer() {
     place_plain(
-        "audio",
+        "speech",
         "hearable",
         r#"
 function build_request(call, req, inputs)
@@ -397,11 +397,11 @@ end
         ))
         .await;
 
-    let call = scripted("hearable", &base_url, Capability::Audio);
+    let call = scripted("hearable", &base_url, Capability::Speech);
     let result = LuaAdapter::get()
         .generate(
             &call,
-            &generation(Capability::Audio, "Say this."),
+            &generation(Capability::Speech, "Say this."),
             &[],
             &Cancel::new(),
         )

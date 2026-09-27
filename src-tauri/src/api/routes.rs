@@ -26,7 +26,7 @@ use crate::metadata::RecentProject;
 use crate::project::{
     AssetShelfEdit, ByteRange, CreateProject, OpenProject, PackageScope, ProjectStore, StagedAsset,
 };
-use crate::story::{StoryJobItem, StoryJobKind, StoryJobRecord};
+use crate::story::{StoryJobItem, StoryJobRecord};
 use crate::workflow::events::RunEvent;
 use axum::{
     body::Body,
@@ -977,7 +977,8 @@ pub async fn start_story_job(
     // than swapped for a default: a model that has since been disabled is said
     // to be disabled, which is a thing the room can be set right about. With
     // none named, the deployment answers: a telling's score is asked of the
-    // music model rather than of whatever reads its lines aloud.
+    // music default and its lines of the speech default, and a capability with
+    // none configured is said to be missing rather than served by the other.
     let named = request
         .model
         .as_deref()
@@ -985,7 +986,6 @@ pub async fn start_story_job(
         .filter(|model| !model.is_empty());
     let resolved = match named {
         Some(model) => state.models.resolve(model, request.kind.capability()).await,
-        None if request.kind == StoryJobKind::Music => state.models.resolve_music().await,
         None => {
             state
                 .models
@@ -1259,8 +1259,8 @@ pub async fn patch_defaults(
     if let Some(image) = patch.image {
         defaults.image = image;
     }
-    if let Some(audio) = patch.audio {
-        defaults.audio = audio;
+    if let Some(speech) = patch.speech {
+        defaults.speech = speech;
     }
     if let Some(music) = patch.music {
         defaults.music = music;
@@ -1296,8 +1296,11 @@ pub async fn patch_preferences(
     if let Some(video) = patch.video {
         preferences.video = video;
     }
-    if let Some(audio) = patch.audio {
-        preferences.audio = audio;
+    if let Some(speech) = patch.speech {
+        preferences.speech = speech;
+    }
+    if let Some(music) = patch.music {
+        preferences.music = music;
     }
     if let Some(story) = patch.story {
         preferences.story = story;
@@ -1350,12 +1353,21 @@ pub async fn generate_image(
     Ok(Json(GenerateResponse::succeeded(result)))
 }
 
-pub async fn generate_audio(
+pub async fn generate_speech(
     State(state): State<ApiState>,
     json: Result<Json<GenerateRequest>, JsonRejection>,
 ) -> Result<Json<GenerateResponse>, Problem> {
     let Json(request) = json_or_problem(json)?;
-    let result = state.gateway.audio(request, &Cancel::new()).await?;
+    let result = state.gateway.speech(request, &Cancel::new()).await?;
+    Ok(Json(GenerateResponse::succeeded(result)))
+}
+
+pub async fn generate_music(
+    State(state): State<ApiState>,
+    json: Result<Json<GenerateRequest>, JsonRejection>,
+) -> Result<Json<GenerateResponse>, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let result = state.gateway.music(request, &Cancel::new()).await?;
     Ok(Json(GenerateResponse::succeeded(result)))
 }
 
