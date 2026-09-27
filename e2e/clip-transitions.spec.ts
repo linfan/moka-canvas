@@ -104,6 +104,23 @@ function timeline(page: Page) {
   return page.locator(".clip-timeline");
 }
 
+/**
+ * The project's files, let go of once the test is done with them.
+ *
+ * The room's own autosave can still be landing when a test ends, and a
+ * directory removed under a write that is on its way fails with ENOTEMPTY on
+ * macOS — a teardown error over a cut that was made correctly. The retries are
+ * `rmSync`'s own, for exactly that kind of refusal.
+ */
+function forgetHome(home: string) {
+  rmSync(home, {
+    recursive: true,
+    force: true,
+    maxRetries: 8,
+    retryDelay: 150,
+  });
+}
+
 async function canvasBox(page: Page) {
   const box = await page.locator(".clip-tl-canvas").boundingBox();
   if (!box) throw new Error("the timeline canvas is not there");
@@ -326,7 +343,7 @@ test("a click on a butted seam lays the default crossfade, pulled back by the co
   expect(after.b.startMs).toBe(before.a.startMs + before.a.durationMs - 500);
   expect(seam.windowStartMs).toBe(after.b.startMs);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the badge chooses the seam and a kind tile changes it without moving the cut", async ({
@@ -361,7 +378,7 @@ test("the badge chooses the seam and a kind tile changes it without moving the c
     "true",
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the window slider reshapes the pull-back on release", async ({
@@ -379,7 +396,7 @@ test("the window slider reshapes the pull-back on release", async ({
   const after = await pair(page);
   expect(after.b.startMs).toBe(after.a.startMs + after.a.durationMs - 1_000);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a chain edit is one command, and one undo puts the whole chain back", async ({
@@ -411,7 +428,7 @@ test("a chain edit is one command, and one undo puts the whole chain back", asyn
   expect(await timeline(page).getAttribute("data-clip-spans")).toBe(chained);
   expect(await seams(page)).toHaveLength(2);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("removing a transition re-lays the seam that stays behind it", async ({
@@ -446,7 +463,7 @@ test("removing a transition re-lays the seam that stays behind it", async ({
   expect(butted[1].startMs).toBe(6_000);
   expect(butted[2].startMs).toBe(butted[1].startMs + butted[1].durationMs);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("dragging the badge reshapes the window with the pointer", async ({
@@ -468,7 +485,7 @@ test("dragging the badge reshapes the window with the pointer", async ({
   const after = await pair(page);
   expect(after.b.startMs).toBe(after.a.startMs + after.a.durationMs - 2_000);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the frame inside a crossfade is the two pictures mixed", async ({
@@ -534,5 +551,5 @@ test("the frame inside a crossfade is the two pictures mixed", async ({
     })
     .toBe(true);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

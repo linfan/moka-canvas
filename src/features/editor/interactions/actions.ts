@@ -44,7 +44,11 @@ import {
   type PortRef,
   type Selection,
 } from "../stores/editorStore";
-import { saveTrouble, useProjectStore } from "../stores/projectStore";
+import {
+  saveTrouble,
+  settleBeforeFiling,
+  useProjectStore,
+} from "../stores/projectStore";
 import { TOOL_LABELS } from "../stores/toolPrefs";
 import { execute } from "../commands/execute";
 import {
@@ -75,12 +79,14 @@ function toastError(message: string) {
  * A change that cannot be saved is not a change to wait out: the store knows
  * whether the document moved under this window or the write itself failed,
  * and a reader told "still saving" would wait for a save that is not coming.
+ * Answered as well as said, since a caller may have rows of its own to mark.
  */
-function saySaveBlocked(): void {
+function saySaveBlocked(): { message: string; detail?: string } {
   const blocked = saveTrouble();
   useAppStore
     .getState()
     .pushToast("error", blocked.message, undefined, blocked.detail);
+  return blocked;
 }
 
 function announce(message: string) {
@@ -440,6 +446,13 @@ async function pasteImage(blob: Blob, anchor: Point) {
   const canvas = activeCanvas();
   if (!canvas) return;
   try {
+    // Filing the picture moves the stored document on, so anything waiting
+    // goes out first: a paste that raced the reader's own change would strand
+    // the room in a conflict it made itself.
+    if (!(await settleBeforeFiling())) {
+      saySaveBlocked();
+      return;
+    }
     const file = new File([blob], `pasted-${Date.now()}.png`, {
       type: blob.type || "image/png",
     });
@@ -1081,8 +1094,7 @@ export async function fileNodeAsAsset(
   nodeId: NodeId,
 ): Promise<void> {
   try {
-    await useProjectStore.getState().flush();
-    if (useProjectStore.getState().pending.length > 0) {
+    if (!(await settleBeforeFiling())) {
       saySaveBlocked();
       return;
     }
@@ -1124,8 +1136,7 @@ async function removeAssetNow(assetId: string) {
   try {
     // The server rejects deletes while its copy still references the asset;
     // pending edits (like the just-removed nodes) must land first.
-    await useProjectStore.getState().flush();
-    if (useProjectStore.getState().pending.length > 0) {
+    if (!(await settleBeforeFiling())) {
       saySaveBlocked();
       return;
     }
@@ -1525,6 +1536,11 @@ export async function fileRepaint(ask: RepaintAsk): Promise<NodeId | null> {
   if (!sink) return null;
 
   const name = maskName(ask.sourceName);
+  // The mask is filed into the stored document, which moves its revision.
+  if (!(await settleBeforeFiling())) {
+    saySaveBlocked();
+    return null;
+  }
   let saved;
   try {
     saved = await assetsApi.upload(
@@ -1771,7 +1787,8 @@ export const ASSET_DRAG_MIME = "application/x-moka-asset";
  * Uploads files one at a time (server sniffing routes each to its category
  * directory) and folds every accepted entry into the local registry, handing
  * back the entries that were taken. A failed file is reported and skipped; the
- * rest of the batch continues.
+ * rest of the batch continues. A document that will not settle stops the
+ * batch, since every later upload would only deepen the same trouble.
  */
 export async function importFiles(
   files: File[],
@@ -1780,6 +1797,19 @@ export async function importFiles(
   const imported: AssetId[] = [];
   for (const [index, file] of files.entries()) {
     if (options.signal?.aborted) break;
+    // Filing a file writes an entry into the stored document and moves its
+    // revision, so anything still on its way there goes first: a change of the
+    // reader's saved afterwards would be refused for resting on the revision
+    // the upload has replaced, and the room would be left in a conflict its own
+    // import made. An import that cannot settle stops rather than deepening it,
+    // and the rows it did not reach are marked with the same reason.
+    if (!(await settleBeforeFiling())) {
+      const blocked = saySaveBlocked();
+      for (let rest = index; rest < files.length; rest += 1) {
+        options.onFileDone?.(rest, blocked.message);
+      }
+      break;
+    }
     try {
       const change = await assetsApi.upload(file, {
         signal: options.signal,
@@ -1847,6 +1877,12 @@ export async function dropFileOnNode(
   at?: Point,
 ): Promise<void> {
   try {
+    // Filing the file moves the stored document on; what the reader changed a
+    // moment ago goes out first, or the two bump revisions.
+    if (!(await settleBeforeFiling())) {
+      saySaveBlocked();
+      return;
+    }
     const change = await assetsApi.upload(file);
     useProjectStore.getState().integrateAssetEntry(change.entry, {
       revision: change.revision,

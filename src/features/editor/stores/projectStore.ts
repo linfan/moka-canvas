@@ -397,4 +397,21 @@ export function saveTrouble(): { message: string; detail?: string } {
   };
 }
 
+/**
+ * Settles the document before a call that writes it from the server's side.
+ *
+ * Filing a file — an upload, a replace, a node saved to the shelf — writes an
+ * entry into the stored document and moves its revision. A change of the
+ * reader's still on its way would then be refused for resting on the revision
+ * the upload has replaced: a conflict the room made for itself, and one that
+ * stops every later edit until the reader deals with it. Everything waiting
+ * goes out first, and the answer is whether the document settled. What to say
+ * when it did not is the caller's, since only the caller knows what was asked
+ * for.
+ */
+export async function settleBeforeFiling(): Promise<boolean> {
+  await useProjectStore.getState().flush();
+  return useProjectStore.getState().pending.length === 0;
+}
+
 export { nextCanvasName };

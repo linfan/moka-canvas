@@ -36,6 +36,7 @@ import {
   equalizeNodes,
   fileNodeAsAsset,
   groupSelection,
+  importFiles,
   marqueeSelect,
   moveNodes,
   pasteAt,
@@ -971,5 +972,103 @@ describe("filing a node as an asset", () => {
       "Changes are still being saved — try again in a moment",
     );
     expect(fileNode).not.toHaveBeenCalled();
+  });
+});
+
+describe("importing files", () => {
+  /** A server that will not take the reader's changes. */
+  function refusingWrites() {
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const json = (payload: unknown, status = 200) =>
+        new Response(JSON.stringify(payload), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        });
+      if (init?.method === "POST" && url.includes("/commands")) {
+        return json({ code: "INTERNAL", message: "io error: disk full" }, 500);
+      }
+      return json({});
+    });
+  }
+
+  it("lets what is waiting go out before it files, so the import makes no conflict", async () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    // A document that takes the reader's change, as it usually does.
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.includes("/commands")) {
+        return new Response(
+          JSON.stringify({ revision: 9, updatedAt: "2026-01-01T00:00:02Z" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    let waitingAtUpload: number | null = null;
+    const upload = vi
+      .spyOn(assetsApi, "upload")
+      .mockImplementation(async () => {
+        waitingAtUpload = useProjectStore.getState().pending.length;
+        return {
+          entry: {
+            id: "asset-imported",
+            name: "one.png",
+            path: "assets/images/one-00000000.png",
+            mime: "image/png",
+            bytes: 8,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+          revision: 10,
+          updatedAt: "2026-01-01T00:00:03Z",
+        };
+      });
+    // The reader's change is waiting, and the upload would move the document
+    // on under it: it goes up first, so the file lands on a revision the room
+    // is not resting behind.
+    renameNode(ids.text, "站台上的两个人");
+    expect(useProjectStore.getState().pending.length).toBeGreaterThan(0);
+
+    const imported = await importFiles([new File(["x"], "one.png")]);
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(waitingAtUpload).toBe(0);
+    expect(imported).toEqual(["asset-imported"]);
+    expect(useProjectStore.getState().pending).toEqual([]);
+  });
+
+  it("says why it will not file, and marks every row it did not reach", async () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    refusingWrites();
+    renameNode(ids.text, "站台上的两个人");
+    await useProjectStore.getState().flush();
+    expect(useProjectStore.getState().saveStatus).toBe("error");
+
+    const upload = vi.spyOn(assetsApi, "upload");
+    const done: Array<[number, string | undefined]> = [];
+    const imported = await importFiles(
+      [new File(["x"], "one.png"), new File(["x"], "two.png")],
+      { onFileDone: (index, message) => done.push([index, message]) },
+    );
+
+    expect(imported).toEqual([]);
+    expect(upload).not.toHaveBeenCalled();
+    // Both rows are told; a row left spinning would be the shelf waiting for
+    // an upload that is not coming.
+    expect(done).toEqual([
+      [0, "io error: disk full"],
+      [1, "io error: disk full"],
+    ]);
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.message).toBe("io error: disk full");
+    expect(said?.detail).toBe(
+      "Changes are still being saved — try again in a moment",
+    );
   });
 });
