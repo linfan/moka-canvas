@@ -49,6 +49,10 @@ test("the interface follows the language chosen in settings", async ({
     dialog.getByText("目标文件夹非空，将自动创建与项目名称同名的子目录。"),
   ).toBeVisible({ timeout: 10_000 });
   await dialog.getByRole("button", { name: "创建" }).click();
+  // A new project opens onto its story room; the board is where this reader
+  // is headed, so step there before reading the tab it names.
+  await page.getByTestId("home-menu-button").click();
+  await page.getByRole("menuitem", { name: "画布" }).click();
   await expect(page.getByTestId("canvas-tab-画布 1")).toBeVisible({
     timeout: 10_000,
   });

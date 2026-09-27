@@ -62,6 +62,15 @@ export async function createProject(
     await confirm.click();
   }
   await expect(opened).toBeVisible({ timeout: 10_000 });
+  // A new project opens onto its story room, which is the room it was made
+  // for; the board is where a suite that says nothing else starts and is what
+  // this helper has always left the reader on, so step there rather than leave
+  // every canvas spec to find its own way back.
+  await page.getByRole("button", { name: "Projects menu" }).click();
+  await page.getByRole("menuitem", { name: "Canvas" }).click();
+  await expect(page.getByTestId("canvas-surface")).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 /** Double-click empty canvas and add a node of the given kind. */
