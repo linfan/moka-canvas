@@ -58,6 +58,8 @@ fn asked_over(canvas_id: &str, session: Option<String>) -> RunRecord {
         assistant_session_id: session,
         steps: Vec::new(),
         error: None,
+        error_code: None,
+        error_details: None,
         cancel_requested: false,
         created_at: now.clone(),
         updated_at: now,

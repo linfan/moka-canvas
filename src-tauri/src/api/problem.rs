@@ -145,12 +145,16 @@ impl From<crate::generate::ProviderError> for Problem {
             error.code(),
             error.to_string(),
         );
-        // The two branches do not overlap: the variants that carry structure
-        // are exactly the ones a retry cannot fix.
-        if let Some(details) = error.details() {
+        // Merged rather than chosen between: a provider that is busy carries
+        // both what it asked for and the fact that waiting is the fix, and a
+        // client reads the structure to name the trouble and the flag to say
+        // whether asking again is worth anything.
+        let mut details = error.details().unwrap_or_else(|| serde_json::json!({}));
+        if error.retryable() {
+            details["retryable"] = serde_json::json!(true);
+        }
+        if details.as_object().is_some_and(|values| !values.is_empty()) {
             problem = problem.with_details(details);
-        } else if error.retryable() {
-            problem = problem.with_details(serde_json::json!({ "retryable": true }));
         }
         problem
     }

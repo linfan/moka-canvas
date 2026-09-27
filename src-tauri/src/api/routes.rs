@@ -1612,13 +1612,20 @@ fn stream_text(state: &ApiState, request: GenerateRequest) -> Response {
 fn closing(outcome: Result<GenerateResult, ProviderError>) -> serde_json::Value {
     match outcome {
         Ok(result) => serde_json::to_value(GenerateResponse::succeeded(result)).unwrap_or_default(),
-        Err(error) => serde_json::json!({
-            "error": {
+        Err(error) => {
+            // The message and what is behind it travel together, exactly as in
+            // a problem body: the frame is the whole of what a client reads
+            // when the stream it is listening to turns out to be a failure.
+            let mut failure = serde_json::json!({
                 "code": error.code(),
                 "message": error.to_string(),
                 "retryable": error.retryable(),
+            });
+            if let Some(details) = error.details() {
+                failure["details"] = details;
             }
-        }),
+            serde_json::json!({ "error": failure })
+        }
     }
 }
 

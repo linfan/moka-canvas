@@ -167,6 +167,14 @@ pub struct StoryJobItem {
     pub progress: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// What kind of trouble it was, and the values behind it — which model,
+    /// which capability. Written down beside the message so a client can say
+    /// the same trouble in the reader's own language, and can tell a setting
+    /// that has to be repaired from a wait that has to be sat out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_details: Option<serde_json::Value>,
     /// Whether the same request is worth asking again as it stands: a queue or
     /// a network is, a refusal is not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,6 +216,8 @@ impl StoryJobItem {
             task_id: None,
             progress: None,
             error: None,
+            error_code: None,
+            error_details: None,
             retryable: None,
             started_at: None,
             finished_at: None,
@@ -324,6 +334,8 @@ struct ItemOutcome {
     text: Option<String>,
     asset_ids: Vec<String>,
     error: Option<String>,
+    code: Option<String>,
+    details: Option<serde_json::Value>,
     retryable: Option<bool>,
     cancelled: bool,
 }
@@ -335,6 +347,8 @@ impl ItemOutcome {
             text,
             asset_ids,
             error: None,
+            code: None,
+            details: None,
             retryable: None,
             cancelled: false,
         }
@@ -346,15 +360,21 @@ impl ItemOutcome {
             text: None,
             asset_ids: Vec::new(),
             error: Some(error),
+            code: None,
+            details: None,
             retryable: Some(retryable),
             cancelled: false,
         }
     }
 
-    fn stopped(error: String, retryable: bool, cancelled: bool) -> Self {
+    /// A piece that stopped, as its failure was classified: the message the
+    /// reader is shown, and the code and values behind it.
+    fn stopped(error: &ExecutionError) -> Self {
         Self {
-            cancelled,
-            ..Self::failed(error, retryable)
+            code: Some(error.code.to_string()),
+            details: error.details.clone(),
+            cancelled: error.cancelled,
+            ..Self::failed(error.message.clone(), error.retryable)
         }
     }
 
@@ -623,6 +643,8 @@ impl StoryJobManager {
                     } else if let Some(error) = outcome.error {
                         item.status = StoryJobStatus::Failed;
                         item.error = Some(error);
+                        item.error_code = outcome.code;
+                        item.error_details = outcome.details;
                         item.retryable = outcome.retryable;
                     } else {
                         item.status = StoryJobStatus::Succeeded;
@@ -757,7 +779,7 @@ async fn work(
         .await
     {
         Ok(outcome) => outcome,
-        Err(error) => ItemOutcome::stopped(error.message, error.retryable, error.cancelled),
+        Err(error) => ItemOutcome::stopped(&error),
     };
     // A piece that never started says nothing: it is still queued, and an
     // ending written for it would be an ending for work that did not happen.
@@ -885,6 +907,7 @@ impl StoryJobManager {
             return Err(ExecutionError {
                 code: "PROVIDER_NO_OUTPUT",
                 message: "The provider answered with nothing to keep".to_string(),
+                details: None,
                 retryable: true,
                 cancelled: false,
             });
@@ -900,6 +923,7 @@ impl StoryJobManager {
         .map_err(|error| ExecutionError {
             code: error.code(),
             message: error.to_string(),
+            details: None,
             retryable: false,
             cancelled: false,
         })?;

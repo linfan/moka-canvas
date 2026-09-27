@@ -698,7 +698,11 @@ async fn a_capability_with_no_model_behind_it_is_a_configuration_problem() {
     // produce a model.
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(code(&body), "PROVIDER_NOT_CONFIGURED");
-    assert_eq!(body["details"], json!(null), "nothing to retry");
+    // Which capability has nothing behind it, so a client can open Settings on
+    // the tab that would fix it — and nothing to retry, since waiting will not
+    // produce a model.
+    assert_eq!(body["details"]["capability"], json!("text"));
+    assert_eq!(body["details"]["retryable"], json!(null));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

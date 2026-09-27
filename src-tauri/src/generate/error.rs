@@ -114,7 +114,11 @@ impl ProviderError {
             Self::Storage(error) => error.code(),
             Self::Project(error) => error.code(),
             Self::Io(_) => "INTERNAL",
-            Self::NotConfigured { .. } | Self::KeyMissing { .. } => "PROVIDER_NOT_CONFIGURED",
+            // A model that is configured and a capability with nothing behind
+            // it are one repair, `NotConfigured`; a model that is there but
+            // holds no credential is another, and says which model.
+            Self::NotConfigured { .. } => "PROVIDER_NOT_CONFIGURED",
+            Self::KeyMissing { .. } => "PROVIDER_KEY_MISSING",
             Self::CapabilityMismatch { .. } => "MODEL_CAPABILITY_MISMATCH",
             Self::Auth(_) => "PROVIDER_AUTH",
             Self::RateLimited { .. } => "PROVIDER_RATE_LIMIT",
@@ -145,8 +149,19 @@ impl ProviderError {
 
     /// Extra structure for the problem body, when the message alone would
     /// leave the client guessing which part of its state to repair.
+    ///
+    /// The values a sentence in another language interpolates, and what tells
+    /// a client whether the repair is in its settings — which model, which
+    /// capability — rather than in a retry. They travel beside the message,
+    /// never instead of it: a reader of the English is owed the whole of what
+    /// went wrong, and a reader of the Chinese is owed the same facts.
     pub fn details(&self) -> Option<serde_json::Value> {
         match self {
+            Self::NotConfigured { capability, reason } => Some(serde_json::json!({
+                "capability": capability,
+                "reason": reason,
+            })),
+            Self::KeyMissing { model } => Some(serde_json::json!({ "model": model })),
             Self::CapabilityMismatch {
                 reference,
                 capability,
@@ -156,6 +171,26 @@ impl ProviderError {
                 "requested": capability,
                 "actual": found,
             })),
+            Self::Auth(detail) => Some(serde_json::json!({ "detail": detail })),
+            Self::RateLimited {
+                detail,
+                retry_after,
+            } => {
+                let mut values = serde_json::json!({ "detail": detail });
+                if let Some(wait) = retry_after {
+                    values["retryAfterMs"] =
+                        serde_json::json!(u64::try_from(wait.as_millis()).unwrap_or(u64::MAX));
+                }
+                Some(values)
+            }
+            Self::Timeout(detail)
+            | Self::Unreachable(detail)
+            | Self::Rejected(detail)
+            | Self::NoOutput(detail)
+            | Self::TooLarge(detail) => Some(serde_json::json!({ "detail": detail })),
+            Self::TaskMissing { task } | Self::TaskExpired { task } => {
+                Some(serde_json::json!({ "task": task }))
+            }
             _ => None,
         }
     }
@@ -201,7 +236,45 @@ mod tests {
         // unreachable provider is worth a backoff.
         for error in run_outcomes() {
             assert!(!error.retryable(), "{error} must not be retried");
-            assert!(error.details().is_none());
         }
+    }
+
+    #[test]
+    fn a_missing_credential_is_its_own_trouble_and_names_the_model() {
+        // The model is configured and holds nothing; that is a different
+        // repair from a capability with no model at all, and a client showing
+        // the trouble in Chinese cannot say which model without this value.
+        let error = ProviderError::KeyMissing {
+            model: "gpt-4o-mini".into(),
+        };
+        assert_eq!(error.code(), "PROVIDER_KEY_MISSING");
+        assert_eq!(
+            error.details(),
+            Some(serde_json::json!({ "model": "gpt-4o-mini" }))
+        );
+        assert!(ProviderError::not_configured("text", "nothing is set")
+            .code()
+            .eq("PROVIDER_NOT_CONFIGURED"));
+    }
+
+    #[test]
+    fn what_a_message_says_travels_beside_it() {
+        // Every value a sentence in another language would interpolate is
+        // carried, so the translated words are the same facts as the English.
+        let rate_limited = ProviderError::RateLimited {
+            detail: "slow down".into(),
+            retry_after: Some(Duration::from_secs(2)),
+        };
+        assert_eq!(rate_limited.code(), "PROVIDER_RATE_LIMIT");
+        assert_eq!(
+            rate_limited.details(),
+            Some(serde_json::json!({ "detail": "slow down", "retryAfterMs": 2000 }))
+        );
+        assert_eq!(
+            ProviderError::TaskExpired { task: "t-1".into() }.details(),
+            Some(serde_json::json!({ "task": "t-1" }))
+        );
+        // Nothing to add to a trouble whose message is the whole of it.
+        assert_eq!(ProviderError::Cancelled.details(), None);
     }
 }

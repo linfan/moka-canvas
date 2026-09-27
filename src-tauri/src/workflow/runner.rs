@@ -94,6 +94,34 @@ const RESULT_GAP: f64 = 40.0;
 const JOB_OUTLIVES_CANCEL: &str =
     "Cancelled here, but the job the provider is running was not: it may still finish and still be billed.";
 
+/// Why a run stopped walking its steps, as the step that stopped it saw it.
+///
+/// The message and, when a step failed rather than the reader asking it to
+/// stop, the code and values behind it: a client says the trouble again in
+/// another language from those, and a reader of any language is owed them.
+struct Halt {
+    status: RunStatus,
+    message: Option<String>,
+    code: Option<String>,
+    details: Option<serde_json::Value>,
+}
+
+impl Halt {
+    /// A run stopped with something to say that no step classified.
+    fn stopped(status: RunStatus, message: Option<String>) -> Self {
+        Self {
+            status,
+            message,
+            code: None,
+            details: None,
+        }
+    }
+
+    fn succeeded() -> Self {
+        Self::stopped(RunStatus::Succeeded, None)
+    }
+}
+
 /// What a step a previous process already finished still has to hand downstream.
 ///
 /// Read off the record rather than asked of anybody again. A node nothing ran
@@ -568,6 +596,8 @@ impl RunManager {
                     started_at: None,
                     finished_at: None,
                     error: None,
+                    error_code: None,
+                    error_details: None,
                     output_asset_ids: None,
                     output_text: None,
                     task_id: None,
@@ -576,6 +606,8 @@ impl RunManager {
                 })
                 .collect(),
             error: None,
+            error_code: None,
+            error_details: None,
             cancel_requested: false,
             created_at: now.clone(),
             updated_at: now,
@@ -815,11 +847,11 @@ impl RunManager {
         let mut snapshot = snapshot;
         let order = snapshot.order.clone();
         let mut outputs: HashMap<NodeId, WorkflowValue> = HashMap::new();
-        let mut halt: Option<(RunStatus, Option<String>)> = None;
+        let mut halt: Option<Halt> = None;
 
         for (position, node_id) in order.iter().enumerate() {
             if self.cancellation_requested(&run_id) {
-                halt = Some((RunStatus::Cancelled, None));
+                halt = Some(Halt::stopped(RunStatus::Cancelled, None));
                 break;
             }
             // A step a previous process already finished is remembered rather
@@ -887,15 +919,19 @@ impl RunManager {
                             .task_id
                             .is_some()
                             .then(|| JOB_OUTLIVES_CANCEL.to_string());
-                        halt = Some((RunStatus::Cancelled, billing));
+                        halt = Some(Halt::stopped(RunStatus::Cancelled, billing));
                     } else {
                         run.steps[position].status = RunStatus::Failed;
                         run.steps[position].error = Some(error.message.clone());
+                        run.steps[position].error_code = Some(error.code.to_string());
+                        run.steps[position].error_details = error.details.clone();
                         let title = &snapshot.nodes[node_id].title;
-                        halt = Some((
-                            RunStatus::Failed,
-                            Some(format!("\"{title}\": {}", error.message)),
-                        ));
+                        halt = Some(Halt {
+                            status: RunStatus::Failed,
+                            message: Some(format!("\"{title}\": {}", error.message)),
+                            code: Some(error.code.to_string()),
+                            details: error.details.clone(),
+                        });
                         // A cancellation produced no output. Only a step an
                         // executor ran can fail, so there is no kind to check.
                         self.promote_result(
@@ -916,7 +952,7 @@ impl RunManager {
             }
         }
 
-        let (status, error) = halt.unwrap_or((RunStatus::Succeeded, None));
+        let ended = halt.unwrap_or_else(Halt::succeeded);
         // Given up before the run is written as ended, because the note of a job
         // is the only thing that makes a run resumable: a process that stops in
         // between leaves a run that fails the next time somebody asks after the
@@ -935,8 +971,10 @@ impl RunManager {
                     step.status = RunStatus::Cancelled;
                 }
             }
-            run.status = status;
-            run.error = error;
+            run.status = ended.status;
+            run.error = ended.message;
+            run.error_code = ended.code;
+            run.error_details = ended.details;
             if run.status == RunStatus::Cancelled {
                 run.cancel_requested = true;
             }
@@ -1012,6 +1050,7 @@ impl RunManager {
             .ok_or_else(|| ExecutionError {
                 code: "OPERATION_UNSUPPORTED",
                 message: format!("No executor supports \"{operation_type}\""),
+                details: None,
                 retryable: false,
                 cancelled: false,
             })?;
@@ -1182,6 +1221,7 @@ impl RunManager {
             .map_err(|error| ExecutionError {
                 code: error.code(),
                 message: error.to_string(),
+                details: None,
                 // The provider already answered; what failed is filing the
                 // answer. Retrying the step would pay for a second generation
                 // to fix a problem on this disk.

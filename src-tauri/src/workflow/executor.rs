@@ -202,6 +202,7 @@ impl WorkflowExecutor for DeterministicExecutor {
             return Err(ExecutionError {
                 code: "STEP_FAILED",
                 message,
+                details: None,
                 retryable: true,
                 cancelled: false,
             });

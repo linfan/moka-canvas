@@ -1651,6 +1651,13 @@ pub struct RunStepRecord {
     pub finished_at: Option<IsoTimestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// What kind of trouble the step hit, and the values behind it, so a client
+    /// can say it again in the reader's own language. Absent for a step that
+    /// failed before there was anything to classify it by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_details: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_asset_ids: Option<Vec<AssetId>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1696,6 +1703,11 @@ pub struct RunRecord {
     pub steps: Vec<RunStepRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The trouble the run ended on, as the step that hit it classified it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_details: Option<serde_json::Value>,
     pub cancel_requested: bool,
     pub created_at: IsoTimestamp,
     pub updated_at: IsoTimestamp,

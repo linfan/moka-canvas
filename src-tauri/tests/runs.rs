@@ -634,6 +634,15 @@ async fn failed_run_retries_as_a_new_linked_run() {
     let failed = wait_for_terminal(&app, &failed_id).await;
     assert_eq!(failed["status"], "failed");
     assert!(failed["error"].as_str().unwrap().contains("boom"));
+    // The run and the step that stopped it both say what kind of trouble it
+    // was, which is what a client says again in the reader's own language.
+    assert_eq!(failed["errorCode"], json!("STEP_FAILED"));
+    let steps = failed["steps"].as_array().unwrap();
+    let stopped = steps
+        .iter()
+        .find(|step| step["status"] == json!("failed"))
+        .expect("the step that stopped the run");
+    assert_eq!(stopped["errorCode"], json!("STEP_FAILED"));
 
     // The failure also landed on the node's result slot.
     let current = app

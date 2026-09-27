@@ -94,6 +94,7 @@ impl ProviderExecutor {
             return Err(ExecutionError {
                 code: "GENERATION_PROMPT_EMPTY",
                 message: "The prompt resolved to nothing and no reference came with it".to_string(),
+                details: None,
                 retryable: false,
                 cancelled: false,
             });
@@ -121,6 +122,7 @@ impl ProviderExecutor {
             return Err(ExecutionError {
                 code: "VALIDATION_FAILED",
                 message: "Only a shot is placed as a job".to_string(),
+                details: None,
                 retryable: false,
                 cancelled: false,
             });
@@ -129,6 +131,7 @@ impl ProviderExecutor {
             return Err(ExecutionError {
                 code: "GENERATION_PROMPT_EMPTY",
                 message: "The prompt resolved to nothing and no reference came with it".to_string(),
+                details: None,
                 retryable: false,
                 cancelled: false,
             });
@@ -214,6 +217,7 @@ fn asked_for(request: &ExecutionRequest) -> Result<GenerateRequest, ExecutionErr
         return Err(ExecutionError {
             code: "GENERATION_PROMPT_EMPTY",
             message: "The prompt resolved to nothing and no reference came with it".to_string(),
+            details: None,
             retryable: false,
             cancelled: false,
         });
@@ -308,6 +312,7 @@ fn step_error(error: ProviderError) -> ExecutionError {
     ExecutionError {
         code: error.code(),
         message: error.to_string(),
+        details: error.details(),
         retryable: error.retryable(),
         cancelled: matches!(error, ProviderError::Cancelled),
     }

@@ -164,6 +164,10 @@ pub struct ExecutionValidationError {
 pub struct ExecutionError {
     pub code: &'static str,
     pub message: String,
+    /// The structure behind the message, when there is any: which model, which
+    /// capability, what the provider said. Written down beside the message so a
+    /// client can say the same trouble in another language.
+    pub details: Option<serde_json::Value>,
     pub retryable: bool,
     pub cancelled: bool,
 }
@@ -173,6 +177,7 @@ impl ExecutionError {
         Self {
             code: "STEP_FAILED",
             message: message.into(),
+            details: None,
             retryable: false,
             cancelled: false,
         }
@@ -182,6 +187,7 @@ impl ExecutionError {
         Self {
             code: "CANCELLED",
             message: "Cancelled".into(),
+            details: None,
             retryable: false,
             cancelled: true,
         }

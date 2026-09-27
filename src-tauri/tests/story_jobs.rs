@@ -1337,11 +1337,62 @@ async fn one_piece_being_refused_does_not_take_the_others_with_it() {
         json!(false),
         "a refusal is not worth asking again as it stands"
     );
+    // And the kind of trouble travels with it, so a client can say the same
+    // thing in the reader's own language rather than only in the provider's.
+    assert_eq!(
+        settled["items"][1]["errorCode"],
+        json!("PROVIDER_BAD_REQUEST"),
+        "{settled}"
+    );
+    assert!(settled["items"][1]["errorDetails"]["detail"].is_string());
     assert_eq!(settled["items"][2]["status"], "succeeded");
     assert!(!settled["items"][2]["assetIds"]
         .as_array()
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn a_piece_that_found_no_key_says_which_model_and_that_settings_fix_it() {
+    let tmp = TempDir::new().unwrap();
+    let harness = harness_at(&tmp);
+    let provider = serve(refusing_the_second_picture()).await;
+    harness
+        .configure(&provider, &[(PAINTER, Capability::Image)])
+        .await;
+    // The model is configured and holds nothing: the reader is owed the model
+    // that is missing its key, and the news that asking again changes nothing.
+    harness
+        .state
+        .models
+        .set_key(PAINTER, None)
+        .await
+        .expect("the credential is cleared");
+    harness.project("Story No Key").await;
+
+    let job = harness
+        .start_ok(batch(
+            "keyframeArt",
+            vec![piece(
+                "kf:1",
+                keyframe_target("chapter-1", "act-1", "frame-1"),
+                "image",
+                "第一格",
+            )],
+        ))
+        .await;
+
+    let settled = harness.settled(job["id"].as_str().unwrap()).await;
+    assert_eq!(settled["status"], "failed", "{settled}");
+    let item = &settled["items"][0];
+    assert_eq!(item["status"], "failed", "{settled}");
+    assert_eq!(
+        item["errorCode"],
+        json!("PROVIDER_KEY_MISSING"),
+        "{settled}"
+    );
+    assert_eq!(item["errorDetails"]["model"], json!(PAINTER), "{settled}");
+    assert_eq!(item["retryable"], json!(false), "{settled}");
 }
 
 #[tokio::test]

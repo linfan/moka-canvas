@@ -104,9 +104,13 @@ async fn a_stored_key_is_disclosed_only_as_its_masked_form() {
     // An empty value clears, so the client never distinguishes blank from gone.
     let cleared = repo.set_key("painter", Some("   ")).await.unwrap();
     assert!(!cleared.set);
+    // A model that is there and holds nothing is its own trouble rather than
+    // "no model is configured": the repair is one key, not a whole model.
+    let gone = repo.credential("painter").await.unwrap_err();
+    assert_eq!(gone.code(), "PROVIDER_KEY_MISSING");
     assert_eq!(
-        repo.credential("painter").await.unwrap_err().code(),
-        "PROVIDER_NOT_CONFIGURED"
+        gone.details(),
+        Some(serde_json::json!({ "model": "painter" }))
     );
 }
 
@@ -139,7 +143,7 @@ async fn deleting_a_default_model_clears_the_default() {
     assert_eq!(view.defaults.image, None);
     assert_eq!(
         repo.credential("painter").await.unwrap_err().code(),
-        "PROVIDER_NOT_CONFIGURED"
+        "PROVIDER_KEY_MISSING"
     );
 }
 

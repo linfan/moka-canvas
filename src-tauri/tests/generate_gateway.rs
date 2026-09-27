@@ -802,7 +802,11 @@ async fn a_model_with_no_stored_key_is_reported_before_anything_is_sent() {
         .await
         .expect_err("there is no credential to send");
 
-    assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
+    // The model is configured and holds no key: a client says that in the
+    // reader's own language, and names which model from these details.
+    assert_eq!(error.code(), "PROVIDER_KEY_MISSING");
+    let details = error.details().expect("which model, behind the message");
+    assert_eq!(details["model"], json!("gpt-5.5"));
     assert_eq!(watched.times(), 0, "nothing was sent without a key");
 }
 
