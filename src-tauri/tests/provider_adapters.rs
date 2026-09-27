@@ -197,6 +197,22 @@ fn bailian_channel(base_url: &str, model_id: &str, capability: Capability) -> Mo
     at(id, base_url, model_id, capability, path)
 }
 
+/// A Bailian text configuration addressed at one of the two services the
+/// platform serves the same deployment at, which is a setting rather than a
+/// protocol.
+fn bailian_text_at(base_url: &str, model_id: &str, service: &str) -> ModelCall {
+    let resolved = ResolvedModel {
+        config_id: model_id.into(),
+        model: model_id.to_string(),
+        display_name: format!("Model {model_id}"),
+        category: Capability::Text,
+        protocol: Protocol::from_wire_name("bailianText"),
+        url: format!("{base_url}/api/v1/services/aigc/{service}/generation"),
+    };
+    ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
+        .expect("a client builds")
+}
+
 /// The models directory the converters under test are read from.
 ///
 /// The host reads one root per process, so the built-in converters are
@@ -1827,6 +1843,206 @@ async fn a_bailian_question_with_a_picture_moves_to_the_multimodal_service() {
 /// An endpoint a test routes only to find out whether it was asked.
 async fn not_for_a_question_with_a_picture() -> Response {
     panic!("a question carrying a picture must not be asked at the text endpoint")
+}
+
+/// The complaint the platform answers a model asked at the service it does not
+/// answer at, in its own words.
+fn bailian_wrong_address() -> Value {
+    json!({
+        "code": "InvalidParameter",
+        "message": "url error, please check url！ For details, see: https://www.alibabacloud.com/help/en/model-studio/error-code#error-url",
+        "request_id": "0a1b2c",
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_model_that_answers_elsewhere_is_asked_where_it_answers() {
+    // This platform serves its multimodal models — qwen3.8-flash among them —
+    // only at the multimodal service, and answers one asked at the text service
+    // with this complaint. The question is not the problem; the door is.
+    let recorded = Recorded::default();
+    let refusing = recorded.clone();
+    let answering = recorded.clone();
+    let base_url = serve(
+        Router::new()
+            .route(
+                "/api/v1/services/aigc/text-generation/generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = refusing.clone();
+                    async move {
+                        recorded.note("text-generation", &headers, None);
+                        recorded.note_body(&body);
+                        refuse(StatusCode::BAD_REQUEST, bailian_wrong_address()).await
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/services/aigc/multimodal-generation/generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = answering.clone();
+                    async move {
+                        recorded.note("multimodal-generation", &headers, None);
+                        recorded.note_body(&body);
+                        Json(bailian_answer(json!([{ "text": "A lantern drifts." }])))
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let call = bailian_text_at(&base_url, "qwen3.8-flash", "text-generation");
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Text, "describe a lantern", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the answer arrives from the service the model answers at");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern drifts."));
+    assert_eq!(
+        recorded.asked(),
+        ["text-generation", "multimodal-generation"],
+        "the question is moved rather than given up on"
+    );
+    // The service it was moved to reads a message as parts, so the words travel
+    // as one part rather than as a string.
+    assert_eq!(
+        recorded.body(1),
+        json!({
+            "model": "qwen3.8-flash",
+            "input": { "messages": [{ "role": "user", "content": [{ "text": "describe a lantern" }] }] },
+            "parameters": { "result_format": "message" },
+        })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_stream_moves_to_the_service_the_model_answers_at() {
+    let recorded = Recorded::default();
+    let refusing = recorded.clone();
+    let answering = recorded.clone();
+    let base_url = serve(
+        Router::new()
+            .route(
+                "/api/v1/services/aigc/text-generation/generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = refusing.clone();
+                    async move {
+                        recorded.note("text-generation", &headers, None);
+                        recorded.note_body(&body);
+                        refuse(StatusCode::BAD_REQUEST, bailian_wrong_address()).await
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/services/aigc/multimodal-generation/generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = answering.clone();
+                    async move {
+                        recorded.note("multimodal-generation", &headers, None);
+                        recorded.note_body(&body);
+                        stream(&[
+                            r#"{"output":{"choices":[{"finish_reason":null,"message":{"content":[{"text":"A "}]}}]}}"#,
+                            r#"{"output":{"choices":[{"finish_reason":"stop","message":{"content":[{"text":"lantern."}]}}]}}"#,
+                        ])
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let call = bailian_text_at(&base_url, "qwen3.8-flash", "text-generation");
+    let request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "stream": true }),
+    );
+    let (sink, seen) = watching();
+    let result = scripted()
+        .await
+        .generate_stream(&call, &request, &[], &sink, &Cancel::new())
+        .await
+        .expect("the stream the model answers with is read");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern."));
+    assert_eq!(shown(&seen), "A lantern.");
+    assert_eq!(
+        recorded.asked(),
+        ["text-generation", "multimodal-generation"]
+    );
+    // The door the question was moved to is asked for a stream as well, which
+    // this service reads as a header rather than as a body field.
+    assert_eq!(recorded.sse(), Some("enable".to_string()));
+    assert_eq!(
+        recorded.body(1).pointer("/parameters/incremental_output"),
+        Some(&json!(true))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bailian_question_asked_at_the_wrong_service_is_moved_to_the_other_one() {
+    // A configuration pointed at the multimodal service with a model that only
+    // answers at the text service: the complaint names the address, and a
+    // question of words alone moves back.
+    let recorded = Recorded::default();
+    let refusing = recorded.clone();
+    let answering = recorded.clone();
+    let base_url = serve(
+        Router::new()
+            .route(
+                "/api/v1/services/aigc/multimodal-generation/generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = refusing.clone();
+                    async move {
+                        recorded.note("multimodal-generation", &headers, None);
+                        recorded.note_body(&body);
+                        refuse(StatusCode::BAD_REQUEST, bailian_wrong_address()).await
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/services/aigc/text-generation/generation",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = answering.clone();
+                    async move {
+                        recorded.note("text-generation", &headers, None);
+                        recorded.note_body(&body);
+                        Json(bailian_answer(json!("A lantern drifts.")))
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let call = bailian_text_at(&base_url, "qwen3-max", "multimodal-generation");
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Text, "describe a lantern", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the answer arrives from the text service");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern drifts."));
+    assert_eq!(
+        recorded.asked(),
+        ["multimodal-generation", "text-generation"]
+    );
+    assert_eq!(
+        recorded.body(1),
+        json!({
+            "model": "qwen3-max",
+            "input": { "messages": [{ "role": "user", "content": "describe a lantern" }] },
+            "parameters": { "result_format": "message" },
+        })
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -523,7 +523,7 @@ describe("writing an episode's board", () => {
     expect(acts()[0]?.keyframes).toHaveLength(2);
   });
 
-  it("draws no frame until the table is agreed to, then draws its cast in order", async () => {
+  it("draws no frame until the table is agreed to, then draws the cast a frame carries", async () => {
     openAtBoard(withOpenTable());
     expect(
       (screen.getByTestId("story-act-draw-0") as HTMLButtonElement).disabled,
@@ -539,17 +539,23 @@ describe("writing an episode's board", () => {
     const [item] = starts[0]!.items;
     expect(starts[0]!.kind).toBe("keyframeArt");
     // Characters first, then the place, then the things — the order the prompt
-    // numbers its references in, and the order the pictures travel in.
+    // numbers its references in, and the order the pictures travel in, cut to
+    // the few references one image request may carry.
     expect(item?.inputs?.map((input) => input.assetId)).toEqual([
       ids.heroMain,
       ids.partnerMain,
       ids.sceneMain,
-      "asset-prop-main",
     ]);
     expect(item?.prompt).toContain("1. 林");
     expect(item?.prompt).toContain("2. 周");
     expect(item?.prompt).toContain("3. 末班车车厢");
-    expect(item?.prompt).toContain("4. 旧车票");
+    // The prop is a fourth reference, past what a frame carries, so it is not
+    // numbered — and the card says which one it is before the drawing is asked
+    // for.
+    expect(item?.prompt).not.toContain("旧车票");
+    expect(screen.getByTestId("story-act-over-ref-0").textContent).toContain(
+      "旧车票",
+    );
   });
 
   it("agrees to the table under it, and leaves a clear way back to it", async () => {

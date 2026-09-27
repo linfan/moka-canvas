@@ -1097,6 +1097,77 @@ describe("what the room reads off a list of batches", () => {
     expect(stepFailure([withFailure], ids.story, "elements")).toBeNull();
   });
 
+  it("stops counting a failure a later batch answered for", () => {
+    // One drawing of the cast, failed, and a later ask for that same drawing
+    // that answered: the badge counts the pieces a step is short of, and the
+    // step has this one.
+    const failed: StoryJobRecord = {
+      ...answered(),
+      id: "job-failed",
+      kind: "elementArt",
+      createdAt: "2026-01-02T00:00:00Z",
+      items: [
+        {
+          ...answered().items[0],
+          id: `element:main:${ids.hero}`,
+          target: { kind: "elementArt", elementId: ids.hero, view: "main" },
+          status: "failed",
+          error: "no",
+        },
+      ],
+    };
+    const again: StoryJobRecord = {
+      ...failed,
+      id: "job-again",
+      status: "succeeded",
+      createdAt: "2026-01-03T00:00:00Z",
+      items: [{ ...failed.items[0], status: "succeeded" }],
+    };
+    expect(stepFailure([again, failed], ids.story, "elements")).toBeNull();
+    // The newest word on the piece is what stands: the same two batches the
+    // other way round are a failure nothing has answered.
+    expect(stepFailure([failed, again], ids.story, "elements")).toEqual({
+      failed: 1,
+      jobId: "job-failed",
+      reasons: ["no"],
+    });
+
+    // A later batch that answered some other piece leaves the failure
+    // standing.
+    const elsewhere: StoryJobRecord = {
+      ...again,
+      items: [{ ...again.items[0], id: `element:main:${ids.partner}` }],
+    };
+    expect(stepFailure([elsewhere, failed], ids.story, "elements")).toEqual({
+      failed: 1,
+      jobId: "job-failed",
+      reasons: ["no"],
+    });
+
+    // The words are the same story: an outline that failed and an outline
+    // asked for again and answered.
+    const outlineFailed: StoryJobRecord = {
+      ...failed,
+      kind: "outline",
+      items: [
+        {
+          ...failed.items[0],
+          id: "outline",
+          target: { kind: "outline" },
+          capability: "text",
+        },
+      ],
+    };
+    const outlineAgain: StoryJobRecord = {
+      ...outlineFailed,
+      id: "outline-again",
+      items: [{ ...outlineFailed.items[0], status: "succeeded" }],
+    };
+    expect(
+      stepFailure([outlineAgain, outlineFailed], ids.story, "outline"),
+    ).toBeNull();
+  });
+
   it("says which places are being made just now", () => {
     const key = `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameSecond}`;
     const other = `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`;

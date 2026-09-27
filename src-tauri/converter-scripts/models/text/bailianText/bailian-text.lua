@@ -7,6 +7,15 @@
 -- where it is, since a model that only answers there is reachable without a
 -- second setting.
 --
+-- Which of the two services a model answers at is not something an address
+-- says: this platform serves its multimodal models — qwen3.8-flash among them
+-- — only at the multimodal service, and answers one asked at the other service
+-- with a complaint that the url is wrong. So a question of words alone is
+-- asked at the address the configuration names and, when the service refuses
+-- it for that reason, the same question is asked at the sibling service rather
+-- than the complaint being the answer. A question carrying a picture has no
+-- sibling: the text service reads no picture.
+--
 -- The answer arrives in one document, or in a stream when the service was
 -- asked for one. Streaming is asked for in a header here rather than in the
 -- body, and each piece is asked for as a piece rather than as the whole answer
@@ -16,7 +25,8 @@
 -- code rather than in a status, which reading as an empty answer would blame
 -- on the model being quiet.
 
-local MULTIMODAL = {service = "multimodal-generation", reading = "text-generation"}
+local WORDS = "text-generation"
+local MULTIMODAL = "multimodal-generation"
 
 local function trimmed(text)
   return (text:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -26,18 +36,22 @@ local function ends_with(text, suffix)
   return text:sub(-#suffix) == suffix
 end
 
--- The multimodal sibling of the address a configuration names.
-local function multimodal_url(url)
+-- The other service of the same deployment: an address that names either of
+-- the two is rewritten to name the one asked for, and any other address is
+-- left as it is, a sibling being nothing that can be derived from it.
+local function service_url(url, service)
   local trimmed_url = url:gsub("/+$", "")
-  local suffix = "/" .. MULTIMODAL.reading .. "/generation"
-  if ends_with(trimmed_url, suffix) then
-    return trimmed_url:sub(1, #trimmed_url - #suffix) .. "/" .. MULTIMODAL.service .. "/generation"
+  for _, named in ipairs({WORDS, MULTIMODAL}) do
+    local suffix = "/" .. named .. "/generation"
+    if ends_with(trimmed_url, suffix) then
+      return trimmed_url:sub(1, #trimmed_url - #suffix) .. "/" .. service .. "/generation"
+    end
   end
   return url
 end
 
 local function is_multimodal(url)
-  return url:find("/" .. MULTIMODAL.service .. "/", 1, true) ~= nil
+  return url:find("/" .. MULTIMODAL .. "/", 1, true) ~= nil
 end
 
 local function pictures_of(inputs)
@@ -124,11 +138,12 @@ local function parameters(req, streaming)
   return told
 end
 
--- The address one question goes to, and whether that address reads a message
--- as parts rather than as one string.
+-- Where one question is asked first: the address the configuration names,
+-- which reads words alone as one string and a message carrying a picture as
+-- parts at the multimodal service.
 local function address(call, pictures)
   if #pictures > 0 then
-    return multimodal_url(call.url), true
+    return service_url(call.url, MULTIMODAL), true
   end
   if is_multimodal(call.url) then
     return call.url, true
@@ -136,9 +151,24 @@ local function address(call, pictures)
   return call.url, false
 end
 
-local function describe(call, req, inputs, streaming)
-  local pictures = pictures_of(inputs)
-  local url, parts = address(call, pictures)
+-- The sibling service a question of words alone may be asked at instead: a
+-- model that only answers at the multimodal service is asked there, and one
+-- that only answers at the text service is asked here. A question carrying a
+-- picture has nowhere else to go, so it is not moved.
+local function sibling(url, pictures, parts)
+  if #pictures > 0 then
+    return nil
+  end
+  local other = service_url(url, parts and WORDS or MULTIMODAL)
+  if other == url then
+    return nil
+  end
+  return other
+end
+
+-- The question as it is sent to one of the two services: the address, and
+-- whether that service reads a message as parts rather than as one string.
+local function describe(call, req, pictures, url, parts, streaming)
   local messages = {}
   if req.system and trimmed(req.system) ~= "" then
     table.insert(messages, {role = "system", content = said(req.system, parts)})
@@ -156,6 +186,26 @@ local function describe(call, req, inputs, streaming)
   }
 end
 
+-- The question as the two doors it may be asked at: the one the configuration
+-- points at, and the sibling service beside it. The first door is asked to be
+-- read even when refused, because a refusal that names the address is what
+-- moves the question to the second one.
+local function doors(call, req, inputs, streaming)
+  local pictures = pictures_of(inputs)
+  local url, parts = address(call, pictures)
+  local first = describe(call, req, pictures, url, parts, streaming)
+  local other = sibling(url, pictures, parts)
+  if other == nil then
+    return {request = first}
+  end
+  first.read_failure = true
+  return {
+    request = first,
+    handler = "parse_response",
+    state = {sibling = describe(call, req, pictures, other, not parts, streaming)},
+  }
+end
+
 -- The complaint in an answer that carried one instead of a generation: this
 -- service names it in a `code` beside a `message`, where an answer would carry
 -- an `output`.
@@ -169,6 +219,34 @@ local function refusal(payload)
     return "the service refused the request: " .. tostring(code)
   end
   return tostring(code) .. ": " .. explanation
+end
+
+-- The complaint that means "not at this address": this platform serves its
+-- multimodal models — qwen3.8-flash among them — only at the multimodal
+-- service, and answers one asked at the other service with this.
+local function wrong_address(status, payload)
+  if status ~= 400 or type(payload) ~= "table" then
+    return false
+  end
+  if tostring(payload.code or "") ~= "InvalidParameter" then
+    return false
+  end
+  return tostring(payload.message or ""):find("url error", 1, true) ~= nil
+end
+
+-- A refused answer's body as a document, where it is one: the rider of a
+-- refusal is not always this service's json, and a body that does not read is
+-- not a complaint this script can act on.
+local function complaint_of(body)
+  local ok, payload = pcall(json.decode, body)
+  if not ok or type(payload) ~= "table" then
+    return nil
+  end
+  return payload
+end
+
+local function answered(status)
+  return status ~= nil and status >= 200 and status < 300
 end
 
 -- The text of the first choice, which this service spells either as one string
@@ -212,18 +290,37 @@ local function tokens(payload)
 end
 
 function build_request(call, req, inputs)
-  return describe(call, req, inputs, false)
+  return doors(call, req, inputs, false)
 end
 
 -- A stream is asked for in a header here rather than in the body, which is
--- what the raw HTTP shape of the service reads.
-function build_stream_request(call, req, inputs)
-  local request = describe(call, req, inputs, true)
+-- what the raw HTTP shape of the service reads. The sibling door is a stream
+-- too, since it is only ever asked the question the first door refused.
+local function asked_in_pieces(request)
   request.headers["X-Dashscope-Sse"] = "enable"
-  return request
 end
 
-function parse_response(status, headers, body)
+function build_stream_request(call, req, inputs)
+  local both = doors(call, req, inputs, true)
+  asked_in_pieces(both.request)
+  if both.state ~= nil and both.state.sibling ~= nil then
+    asked_in_pieces(both.state.sibling)
+  end
+  return both
+end
+
+function parse_response(status, headers, body, state)
+  if not answered(status) then
+    local complaint = complaint_of(body)
+    if state ~= nil and state.sibling ~= nil and wrong_address(status, complaint) then
+      -- The model answers at the sibling service: ask it there rather than
+      -- hand the caller a complaint about the address.
+      return {next = {request = state.sibling}}
+    end
+    -- Not this script's to say: the host reads the status as what it means,
+    -- and a rate limit among them stays something a caller may retry.
+    return {}
+  end
   local payload = json.decode(body)
   local refused = refusal(payload)
   if refused ~= nil then

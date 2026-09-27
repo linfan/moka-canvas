@@ -286,6 +286,16 @@ export const MAX_ELEMENTS_PER_STORY = 200;
 export const MAX_TAKES_PER_SLOT = 12;
 export const MAX_ACTS_PER_CHAPTER = 30;
 export const MAX_KEYFRAMES_PER_ACT = 12;
+/**
+ * How many reference pictures one frame's ask may carry.
+ *
+ * An image service takes a bounded set of reference pictures — the shape that
+ * draws with references takes three — and a request over the bound is refused
+ * whole rather than drawn with the first of them, so a crowded act's frame
+ * travels with the first of its cast that fit and the rest are left to the
+ * words.
+ */
+export const MAX_REFERENCE_IMAGES = 3;
 export const MIN_KEYFRAME_MS = 400;
 export const MAX_KEYFRAME_MS = 60_000;
 export const MIN_TOTAL_DURATION_MS = 30_000;

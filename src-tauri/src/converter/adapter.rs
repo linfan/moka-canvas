@@ -134,23 +134,60 @@ impl ProviderAdapter for LuaAdapter {
         if let Some(error) = asked.get("error").and_then(Value::as_str) {
             return Err(ProviderError::Rejected(error.to_string()));
         }
-        let request_builder = builder(call, &session.entry, &asked, inputs)?;
-        let deadline = call.budgets.timeout_for(request.capability);
-        match open_stream(Kind::Stream, call, request_builder).await? {
-            Opened::Streaming(response, recording) => {
-                let parse = |payload: &Value| session.event(payload);
-                read_stream(
-                    response,
-                    recording.map(|recording| *recording),
-                    sink,
-                    cancel,
-                    deadline,
-                    parse,
-                )
-                .await
+        // The door the stream is asked at is the one the script named; a
+        // service that refuses it — and a script that asked to read the
+        // refusal — lets the script name another door before the refusal is
+        // the answer, the chain the whole-answer path runs in `follow`.
+        let mut exchange_step = Exchange::asked(&asked, "parse_response")?;
+        let mut state = asked.get("state").cloned().unwrap_or(Value::Null);
+        for _ in 0..MAX_EXCHANGES {
+            cancel.check()?;
+            let request_builder = builder(call, &session.entry, &exchange_step.request, inputs)?;
+            let deadline = call.budgets.timeout_for(request.capability);
+            match open_stream(Kind::Stream, call, request_builder).await? {
+                Opened::Streaming(response, recording) => {
+                    let parse = |payload: &Value| session.event(payload);
+                    return read_stream(
+                        response,
+                        recording.map(|recording| *recording),
+                        sink,
+                        cancel,
+                        deadline,
+                        parse,
+                    )
+                    .await;
+                }
+                Opened::Refused(reply) => {
+                    if !reads_failure(&exchange_step.request) {
+                        return Err(provider_error(&reply, &call.api_key));
+                    }
+                    // Looked up before the script is asked what to make of the
+                    // refusal: a script that named no function to read it with
+                    // is refused rather than handed a body nothing will read.
+                    if !session.has(&exchange_step.handler) {
+                        return Err(ProviderError::invalid(format!(
+                            "script '{}' does not export '{}'",
+                            session.entry.script, exchange_step.handler
+                        )));
+                    }
+                    let parsed = session.reply(&exchange_step.handler, &reply, state)?;
+                    if let Some(next) = exchange_step.asked_by(&parsed) {
+                        exchange_step = next?;
+                        state = parsed.get("state").cloned().unwrap_or(Value::Null);
+                        continue;
+                    }
+                    if let Some(error) = parsed.get("error").and_then(Value::as_str) {
+                        return Err(ProviderError::Rejected(error.to_string()));
+                    }
+                    // Said by the host: a script with nothing of its own to say
+                    // about the refusal has left it where it was found.
+                    return Err(provider_error(&reply, &call.api_key));
+                }
             }
-            Opened::Refused(reply) => Err(provider_error(&reply, &call.api_key)),
         }
+        Err(ProviderError::invalid(format!(
+            "the script asked for more than {MAX_EXCHANGES} exchanges in one step"
+        )))
     }
 
     async fn create_task(
@@ -526,19 +563,23 @@ async fn follow(
             return Err(provider_error(&reply, &step.call.api_key));
         }
         let parsed = session.reply(&exchange_step.handler, &reply, state)?;
-        match exchange_step.asked_by(&parsed) {
-            Some(next) => {
-                exchange_step = next?;
-                state = parsed.get("state").cloned().unwrap_or(Value::Null);
-            }
-            None => {
-                return Ok(Ended {
-                    reply: parsed,
-                    body: reply.body,
-                    gone: false,
-                })
-            }
+        if let Some(next) = exchange_step.asked_by(&parsed) {
+            exchange_step = next?;
+            state = parsed.get("state").cloned().unwrap_or(Value::Null);
+            continue;
         }
+        // A script that asked to read a failure and then said nothing about it
+        // has left the refusal for the host to explain, which is what a
+        // protocol wants when only some refusals are its business: the rest go
+        // on meaning what their status means, a rate limit among them.
+        if !succeeded(reply.status) && nothing_said(&parsed) {
+            return Err(provider_error(&reply, &step.call.api_key));
+        }
+        return Ok(Ended {
+            reply: parsed,
+            body: reply.body,
+            gone: false,
+        });
     }
     Err(ProviderError::invalid(format!(
         "the script asked for more than {MAX_EXCHANGES} exchanges in one step"
@@ -564,6 +605,17 @@ fn reads_failure(request_def: &Value) -> bool {
         .get("read_failure")
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+/// Whether a script's reading of a refusal says nothing about it, which is how
+/// a script handed a failure it asked to read defers one that is not its to
+/// answer back to the host.
+fn nothing_said(reply: &Value) -> bool {
+    !reply.as_object().is_some_and(|said| {
+        ["error", "text", "items"]
+            .iter()
+            .any(|key| said.contains_key(*key))
+    })
 }
 
 /// The answer one step ended with, read as media and words.

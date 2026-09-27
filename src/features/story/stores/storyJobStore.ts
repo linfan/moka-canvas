@@ -713,14 +713,26 @@ function forStep(
  * The reasons travel with the count because the bubble over the badge is the
  * only place a step says why it is red: a reader who has to open the batch to
  * find out what went wrong will not.
+ *
+ * A piece that came back later is not a piece that has not come back: the
+ * batches are read newest first, and a piece an answer names takes the
+ * failures of that piece off the step with it. Asking again for what did not
+ * come back is what the badge is for, and one that outlived the answer it
+ * asked for would go on saying a step is short of pieces it holds.
  */
 export function stepFailure(
   jobs: StoryJobRecord[],
   storyId: string | null,
   step: StoryStep,
 ): { failed: number; jobId: string; reasons: string[] } | null {
+  const answered = new Set<string>();
   for (const job of forStep(jobs, storyId, step)) {
-    const failed = job.items.filter((item) => item.status === "failed");
+    const failed = job.items.filter(
+      (item) => item.status === "failed" && !answered.has(item.id),
+    );
+    for (const item of job.items) {
+      if (item.status === "succeeded") answered.add(item.id);
+    }
     if (failed.length > 0) {
       return {
         failed: failed.length,

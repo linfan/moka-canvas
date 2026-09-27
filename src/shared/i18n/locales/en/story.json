@@ -393,7 +393,9 @@
     "playClip": "Play this clip",
     "missingRef": "{{names}} have no picture yet, so they travel with no reference",
     "noRefs": "No reference pictures at all: the frames are drawn from the words alone",
-    "undrawnHint": "An element with no picture is not among the references: draw it in step three and the frame will hold to it"
+    "undrawnHint": "An element with no picture is not among the references: draw it in step three and the frame will hold to it",
+    "overRefs": "{{names}} are over the {{max}} reference pictures one frame carries, so the words stand in for them",
+    "overRefsHint": "One frame carries at most {{max}} reference pictures; the cast past them is drawn from the words alone"
   },
   "edit": {
     "lead": "Lay the acts end to end as one timeline, render it whole, and hand it to the cutting room.",
