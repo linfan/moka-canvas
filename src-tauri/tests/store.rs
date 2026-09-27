@@ -7,6 +7,7 @@ use moka_canvas::domain::{
     GenerationMode, GenerationSpec, NodeKind, PointValue, TimelineDocument, TimelineSettings,
     TimelineTrack, TrackKind,
 };
+use moka_canvas::project::codec::decode_moka_file;
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{AssetShelfEdit, CreateProject, ProjectStore, StagedAsset};
 use std::collections::BTreeMap;
@@ -130,6 +131,61 @@ async fn canvas_moka_round_trips_through_disk() {
     assert_eq!(reopened.moka.canvas[0].nodes.len(), 1);
     assert_eq!(reopened.moka.canvas[0].nodes[0].id, node.id);
     assert_eq!(reopened.moka.metadata.revision, 1);
+}
+
+/// A write that fails publishes nothing.
+///
+/// The document is replaced only after the durable write succeeded, so a
+/// rejected save leaves the revision a caller is compared against and the
+/// content anyone can read exactly as the file has them — and the retry lands
+/// once, not twice. Before this, the failed save left the in-memory document a
+/// revision ahead of the file, and every later save was refused as a revision
+/// conflict until the process was restarted.
+#[tokio::test]
+async fn a_failed_write_leaves_the_document_as_the_file_has_it() {
+    let tmp = TempDir::new().unwrap();
+    let (store, root) = create_store(&tmp).await;
+    let current = store.current().await.unwrap().unwrap();
+    let revision = current.moka.metadata.revision;
+    let canvas_id = current.moka.canvas[0].id.clone();
+    let node = make_node(NodeKind::Text, "Note".into(), 10.0, 20.0);
+    let commands = || {
+        vec![DocumentCommand::AddNode {
+            canvas_id: canvas_id.clone(),
+            node: node.clone(),
+        }]
+    };
+
+    // The store writes through `<root>/tmp`, so a plain file where that
+    // directory belongs refuses the write with ENOTDIR — the same refusal a
+    // full disk or a permission change would produce, and one that does not
+    // depend on the user the tests run as.
+    let tmp_dir = root.join("tmp");
+    std::fs::remove_dir_all(&tmp_dir).unwrap();
+    std::fs::write(&tmp_dir, b"not a directory").unwrap();
+
+    let error = store
+        .apply_commands(revision, commands())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "INTERNAL");
+
+    let after = store.current().await.unwrap().unwrap();
+    assert_eq!(after.moka.metadata.revision, revision);
+    assert!(after.moka.canvas[0].nodes.is_empty());
+    let on_disk = decode_moka_file(&std::fs::read(root.join("canvas.moka")).unwrap()).unwrap();
+    assert_eq!(on_disk.metadata.revision, revision);
+    assert!(on_disk.canvas[0].nodes.is_empty());
+
+    // With the directory back, the retry from the same revision lands — and
+    // the command it carries is applied exactly once.
+    std::fs::remove_file(&tmp_dir).unwrap();
+    std::fs::create_dir(&tmp_dir).unwrap();
+    let saved = store.apply_commands(revision, commands()).await.unwrap();
+    assert_eq!(saved.revision, revision + 1);
+    let after = store.current().await.unwrap().unwrap();
+    assert_eq!(after.moka.canvas[0].nodes.len(), 1);
+    assert_eq!(after.moka.canvas[0].nodes[0].id, node.id);
 }
 
 /// A timeline born empty but for its three rows, as the cutting room makes one.

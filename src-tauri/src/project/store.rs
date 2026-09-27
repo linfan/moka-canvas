@@ -499,14 +499,23 @@ impl FsProjectStore {
         Ok(())
     }
 
-    fn persist_locked(&self, state: &mut OpenState) -> Result<SaveResult, ProjectError> {
+    /// Writes `next` as the document and publishes it in one step.
+    ///
+    /// The write comes first and the in-memory document is replaced only when
+    /// it succeeded. A failed write therefore leaves the store serving exactly
+    /// what the file holds, revision included, so the caller's next save is
+    /// compared against the document that is really there — and a batch that
+    /// was rejected was never visible to anyone.
+    fn commit(&self, state: &mut OpenState, next: MokaFile) -> Result<SaveResult, ProjectError> {
         Self::detect_external_edit(state)?;
-        if let Some(code) = registry_errors(&state.moka) {
+        if let Some(code) = registry_errors(&next) {
             return Err(ProjectError::domain(code, "Resource registry is invalid"));
         }
-        state.moka.metadata.revision += 1;
-        state.moka.metadata.updated_at = now_iso();
-        self.atomic_write(&state.root, &state.moka)?;
+        let mut next = next;
+        next.metadata.revision = state.revision + 1;
+        next.metadata.updated_at = now_iso();
+        self.atomic_write(&state.root, &next)?;
+        state.moka = next;
         state.revision = state.moka.metadata.revision;
         state.file_stamp = std::fs::metadata(Self::moka_path(&state.root))
             .and_then(|m| m.modified())
@@ -535,7 +544,8 @@ impl FsProjectStore {
             )
         })?;
         let said = opening_for_search(asked, MAX_ASSET_KEYWORD_LENGTH);
-        let entry = state.moka.resources.find_mut(asset_id).ok_or_else(|| {
+        let mut next = state.moka.clone();
+        let entry = next.resources.find_mut(asset_id).ok_or_else(|| {
             ProjectError::domain("NOT_FOUND", "The node's file is not in the project")
         })?;
         entry.favorite = Some(true);
@@ -544,7 +554,7 @@ impl FsProjectStore {
         }
         entry.updated_at = now_iso();
         let updated = entry.clone();
-        let saved = self.persist_locked(state)?;
+        let saved = self.commit(state, next)?;
         Ok(FiledAsset {
             change: AssetChange {
                 entry: updated,
@@ -769,8 +779,7 @@ impl ProjectStore for FsProjectStore {
         }
         let (next, _inverse) = apply_commands(&state.moka, &commands)
             .map_err(|error| ProjectError::domain(error.code, error.to_string()))?;
-        state.moka = next;
-        self.persist_locked(state)
+        self.commit(state, next)
     }
 
     async fn add_asset(&self, staged: StagedAsset) -> Result<AssetChange, ProjectError> {
@@ -845,21 +854,20 @@ impl ProjectStore for FsProjectStore {
         let state = guard
             .as_mut()
             .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?;
-        state
-            .moka
-            .resources
+        let mut next = state.moka.clone();
+        next.resources
             .category_mut(category)
             .expect("category checked above")
             .push(entry.clone());
-        match self.persist_locked(state) {
+        match self.commit(state, next) {
             Ok(saved) => Ok(AssetChange {
                 entry,
                 revision: saved.revision,
                 updated_at: saved.updated_at,
             }),
             Err(error) => {
-                // Roll back: remove the registry entry and the promoted file.
-                state.moka.resources.remove(&id);
+                // The document never took the entry, but the file was already
+                // promoted into the project: it goes back out of it.
                 let _ = std::fs::remove_file(root.join(&entry.path));
                 Err(error)
             }
@@ -878,14 +886,14 @@ impl ProjectStore for FsProjectStore {
                 "The asset is referenced by canvas nodes",
             ));
         }
-        let entry = state
-            .moka
+        let mut next = state.moka.clone();
+        let entry = next
             .resources
             .remove(id)
             .ok_or_else(|| ProjectError::domain("NOT_FOUND", "Asset not found"))?;
         let path = Self::resolve_in_root(&state.root, &entry.path)?;
         let _ = std::fs::remove_file(path);
-        self.persist_locked(state)
+        self.commit(state, next)
     }
 
     async fn replace_asset_bytes(
@@ -912,18 +920,15 @@ impl ProjectStore for FsProjectStore {
         }
         std::fs::rename(&staged.tmp_path, &target)?;
 
-        let entry = state
-            .moka
-            .resources
-            .find_mut(id)
-            .expect("entry checked above");
+        let mut next = state.moka.clone();
+        let entry = next.resources.find_mut(id).expect("entry checked above");
         entry.mime = Some(analysis.mime.clone());
         entry.bytes = Some(analysis.bytes as i64);
         entry.sha256 = Some(analysis.sha256);
         entry.probe = Some(analysis.probe);
         entry.updated_at = now_iso();
         let updated = entry.clone();
-        let saved = self.persist_locked(state)?;
+        let saved = self.commit(state, next)?;
         Ok(AssetChange {
             entry: updated,
             revision: saved.revision,
@@ -953,8 +958,8 @@ impl ProjectStore for FsProjectStore {
         let state = guard
             .as_mut()
             .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?;
-        let entry = state
-            .moka
+        let mut next = state.moka.clone();
+        let entry = next
             .resources
             .find_mut(id)
             .ok_or_else(|| ProjectError::domain("NOT_FOUND", "Asset not found"))?;
@@ -972,7 +977,7 @@ impl ProjectStore for FsProjectStore {
         }
         entry.updated_at = now_iso();
         let updated = entry.clone();
-        let saved = self.persist_locked(state)?;
+        let saved = self.commit(state, next)?;
         Ok(AssetChange {
             entry: updated,
             revision: saved.revision,
@@ -1108,13 +1113,12 @@ impl ProjectStore for FsProjectStore {
             origin: Some("filed".into()),
             keyword: opening_for_search(&content, MAX_ASSET_KEYWORD_LENGTH),
         };
-        state
-            .moka
-            .resources
+        let mut next = state.moka.clone();
+        next.resources
             .category_mut("texts")
             .expect("texts is an asset category")
             .push(entry.clone());
-        match self.persist_locked(state) {
+        match self.commit(state, next) {
             Ok(saved) => Ok(FiledAsset {
                 change: AssetChange {
                     entry,
@@ -1124,7 +1128,8 @@ impl ProjectStore for FsProjectStore {
                 created: true,
             }),
             Err(error) => {
-                state.moka.resources.remove(&entry.id);
+                // The document never took the entry, but the file was already
+                // written into the project: it goes back out of it.
                 let _ = std::fs::remove_file(root.join(&entry.path));
                 Err(error)
             }
