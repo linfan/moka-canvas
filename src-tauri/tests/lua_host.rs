@@ -310,6 +310,148 @@ end
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stream_refused_at_the_door_it_named_is_asked_at_the_next_one() {
+    let seen = Seen::default();
+    let first = seen.clone();
+    let second = seen.clone();
+    let base_url = serve(
+        Router::new()
+            .route(
+                "/generation/first",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let first = first.clone();
+                    async move {
+                        first.note("first", &headers, &body);
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({"message": "not at this door"})),
+                        )
+                            .into_response()
+                    }
+                }),
+            )
+            .route(
+                "/stream/second",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let second = second.clone();
+                    async move {
+                        second.note("second", &headers, &body);
+                        stream(&[r#"{"piece":"An "}"#, r#"{"piece":"answer."}"#])
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    // The second address is derived by the script, which is the whole point of
+    // asking for the failure: the script knows what its provider offers and the
+    // host does not. A stream is the same conversation as a whole answer here —
+    // a refusal arrives whole, and what follows it may be a stream.
+    place_plain(
+        "text",
+        "streaming-anyway",
+        &format!(
+            r#"
+local second = "{base_url}/stream/second"
+
+function build_stream_request(call, req, inputs)
+  return {{
+    request = {{
+      method = "POST",
+      url = call.url .. "/first",
+      read_failure = true,
+      body = json.encode({{stream = true, prompt = req.prompt}}),
+    }},
+    handler = "read_first",
+    state = {{second = second}},
+  }}
+end
+
+function read_first(status, headers, body, state)
+  if status == 400 then
+    return {{next = {{request = {{method = "POST", url = state.second,
+                                   body = json.encode({{stream = true, prompt = "again"}})}}}}}}
+  end
+  return {{}}
+end
+
+function parse_event(event)
+  return {{text = json.decode(event).piece}}
+end
+"#
+        ),
+    )
+    .await;
+
+    let call = scripted("streaming-anyway", &base_url, Capability::Text);
+    let (sink, collected) = watching();
+    let result = LuaAdapter::get()
+        .generate_stream(
+            &call,
+            &generation(Capability::Text, "Ask anyway."),
+            &[],
+            &sink,
+            &Cancel::new(),
+        )
+        .await
+        .expect("the second door streams the answer");
+
+    assert_eq!(result.text.as_deref(), Some("An answer."));
+    assert_eq!(shown(&collected), "An answer.");
+    assert_eq!(seen.paths(), vec!["first", "second"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_script_that_reads_a_failure_and_says_nothing_leaves_it_to_the_host() {
+    // A script asks to read failures because one kind of them is its business;
+    // the rest have to go on meaning what their status means, which is what an
+    // empty reply at the host's door asks for.
+    place_plain(
+        "text",
+        "defers",
+        r#"
+function build_request(call, req, inputs)
+  return {method = "POST", url = call.url, read_failure = true,
+          body = json.encode({prompt = req.prompt})}
+end
+
+function parse_response(status, headers, body)
+  return {}
+end
+"#,
+    )
+    .await;
+
+    let base_url = serve(Router::new().route(
+        "/generation",
+        post(|| async {
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "7")],
+                Json(json!({"error": {"message": "slow down"}})),
+            )
+                .into_response()
+        }),
+    ))
+    .await;
+
+    let call = scripted("defers", &base_url, Capability::Text);
+    let error = LuaAdapter::get()
+        .generate(
+            &call,
+            &generation(Capability::Text, "Ask anyway."),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the refusal is the host's to explain");
+
+    assert_eq!(error.code(), "PROVIDER_RATE_LIMIT");
+    assert!(error.retryable(), "{error}");
+    assert!(error.to_string().contains("slow down"), "{error}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_complaint_that_arrives_mid_stream_is_refused_with_the_providers_words() {
     place_plain(
         "text",

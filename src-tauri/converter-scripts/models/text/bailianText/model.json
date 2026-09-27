@@ -5,5 +5,5 @@
   "script": "bailian-text.lua",
   "order": 40,
   "auth": { "header": "Authorization", "scheme": "Bearer" },
-  "version": 1
+  "version": 2
 }
