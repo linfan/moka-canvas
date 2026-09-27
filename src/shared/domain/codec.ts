@@ -387,12 +387,11 @@ function encodeTimeline(timeline: TimelineDocument): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 function encodeStoryTake(take: StoryTake): Record<string, unknown> {
-  // One file keeps the shape every document has always written; a take made of
-  // pieces — an act filmed in several — says so under a field of its own.
+  // A take names its files in a list whatever their number; a document written
+  // when a take was a single file carries a lone assetId, and decodeStoryTake
+  // reads that as the one-file list it means.
   const doc: Record<string, unknown> = {
-    ...(take.assetIds.length === 1
-      ? { assetId: take.assetIds[0] }
-      : { assetIds: [...take.assetIds] }),
+    assetIds: [...take.assetIds],
     createdAt: take.createdAt,
   };
   if (take.jobId !== undefined) doc.jobId = take.jobId;
@@ -1204,8 +1203,8 @@ function fallbackOneOf<T extends string>(
 
 function decodeStoryTake(value: unknown): StoryTake {
   const doc = asRecord(value, "stories[].takes[]");
-  // A take written before an act could be filmed in pieces carries the one
-  // file it is; one made of pieces carries them in the order they play.
+  // The list is what a take is; a document from when a take was a single file
+  // carries it as a lone assetId, which is the one-file list it means.
   const assetIds =
     doc.assetIds === undefined
       ? [asString(doc.assetId, "takes[].assetId")]

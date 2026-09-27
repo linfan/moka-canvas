@@ -136,7 +136,7 @@ describe("moka codec", () => {
     expect(normalize(decoded)).toEqual(normalize(golden));
   });
 
-  it("keeps an act filmed in pieces whole, and one file as one file", () => {
+  it("keeps an act filmed in pieces whole, and writes every take as the same list", () => {
     const story = buildStoryMokaFile();
     const clip = story.stories![0].chapters[0].acts[0].video.takes[0];
     const one = clip.assetIds[0];
@@ -146,13 +146,11 @@ describe("moka codec", () => {
       pieces.stories![0].chapters[0].acts[0].video.takes[0].assetIds,
     ).toEqual(["asset-piece-1", "asset-piece-2"]);
 
-    // A take of one file is written under the field every document has always
-    // carried and read back as the one-file take it is: what a drawing is does
-    // not change shape because clips learned to travel in pieces.
+    // One file and several are the one shape: the list is what a take is, on
+    // the wire and in the file, so neither half has to guess what the other
+    // meant. A lone assetId an older document carries is still read.
     const single = buildStoryMokaFile();
-    expect(Buffer.from(encodeMokaFile(single)).includes("assetIds")).toBe(
-      false,
-    );
+    expect(Buffer.from(encodeMokaFile(single)).includes("assetIds")).toBe(true);
     expect(
       decodeMokaFile(encodeMokaFile(single)).stories![0].chapters[0].acts[0]
         .video.takes[0].assetIds,

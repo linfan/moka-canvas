@@ -202,17 +202,82 @@ pub struct StoryBriefPatch {
     pub style: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// One filmed piece filed into a place. An act too long for one film is made
+/// of several, so a take carries a list of files — written and read as
+/// `assetIds`, the list the room, the wire and the file all speak. A document
+/// from when a take was a single file carries a lone `assetId`, and is read as
+/// the one-file list it means.
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoryTake {
-    pub asset_id: AssetId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_ids: Vec<AssetId>,
     pub job_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub created_at: IsoTimestamp,
+}
+
+impl Serialize for StoryTake {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("assetIds", &self.asset_ids)?;
+        if let Some(job_id) = &self.job_id {
+            map.serialize_entry("jobId", job_id)?;
+        }
+        if let Some(item_id) = &self.item_id {
+            map.serialize_entry("itemId", item_id)?;
+        }
+        if let Some(note) = &self.note {
+            map.serialize_entry("note", note)?;
+        }
+        map.serialize_entry("createdAt", &self.created_at)?;
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for StoryTake {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wire {
+            #[serde(default)]
+            asset_id: Option<AssetId>,
+            #[serde(default)]
+            asset_ids: Option<Vec<AssetId>>,
+            #[serde(default)]
+            job_id: Option<String>,
+            #[serde(default)]
+            item_id: Option<String>,
+            #[serde(default)]
+            note: Option<String>,
+            created_at: IsoTimestamp,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let asset_ids = match (wire.asset_id, wire.asset_ids) {
+            (_, Some(asset_ids)) if !asset_ids.is_empty() => asset_ids,
+            (Some(asset_id), None) => vec![asset_id],
+            (_, Some(_)) => {
+                return Err(serde::de::Error::invalid_value(
+                    serde::de::Unexpected::Seq,
+                    &"a take with at least one file",
+                ));
+            }
+            (None, None) => return Err(serde::de::Error::missing_field("assetIds")),
+        };
+        Ok(StoryTake {
+            asset_ids,
+            job_id: wire.job_id,
+            item_id: wire.item_id,
+            note: wire.note,
+            created_at: wire.created_at,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -492,10 +557,12 @@ impl StoryDocument {
             }
         };
         add(&self.brief.source_asset_id);
-        add(&self.edit.film.as_ref().map(|take| take.asset_id.clone()));
+        if let Some(film) = &self.edit.film {
+            found.extend(film.asset_ids.iter().cloned());
+        }
         let mut slot = |held: &StorySlot| {
             for take in &held.takes {
-                found.push(take.asset_id.clone());
+                found.extend(take.asset_ids.iter().cloned());
             }
         };
         for element in &self.elements {
@@ -920,13 +987,13 @@ fn check_story(story: &StoryDocument) -> Result<(), CommandError> {
 }
 
 /// A slot a caller may file: the takes trimmed to what one place keeps, with
-/// the oldest let go first, and no drawing kept twice.
+/// the oldest let go first, and no take kept twice.
 fn check_slot(slot: StorySlot) -> StorySlot {
-    let mut seen: BTreeSet<AssetId> = BTreeSet::new();
+    let mut seen: BTreeSet<Vec<AssetId>> = BTreeSet::new();
     let takes: Vec<StoryTake> = slot
         .takes
         .into_iter()
-        .filter(|take| seen.insert(take.asset_id.clone()))
+        .filter(|take| seen.insert(take.asset_ids.clone()))
         .collect();
     let takes = if takes.len() > MAX_TAKES_PER_SLOT {
         takes[takes.len() - MAX_TAKES_PER_SLOT..].to_vec()

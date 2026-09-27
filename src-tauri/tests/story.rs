@@ -66,7 +66,7 @@ fn story_of(moka: &MokaFile) -> &StoryDocument {
 
 fn take(asset_id: &str) -> StoryTake {
     StoryTake {
-        asset_id: asset_id.into(),
+        asset_ids: vec![asset_id.into()],
         job_id: None,
         item_id: None,
         note: None,
@@ -236,7 +236,7 @@ fn story_document() -> MokaFile {
         duration_ms: 2_000,
         art: StorySlot {
             takes: vec![StoryTake {
-                asset_id: FRAME_ART.into(),
+                asset_ids: vec![FRAME_ART.into()],
                 job_id: Some("job-1".into()),
                 item_id: Some(format!("keyframe:{CHAPTER_FIRST}:{ACT}:{FRAME_FIRST}")),
                 note: Some("按关键帧生成".into()),
@@ -297,7 +297,7 @@ fn story_document() -> MokaFile {
                     images_confirmed: false,
                     video: StorySlot {
                         takes: vec![StoryTake {
-                            asset_id: ACT_VIDEO.into(),
+                            asset_ids: vec![ACT_VIDEO.into()],
                             job_id: Some("job-2".into()),
                             item_id: Some(format!("actVideo:{CHAPTER_FIRST}:{ACT}")),
                             note: Some("按幕生成，5.0s".into()),
@@ -888,8 +888,8 @@ fn files_a_voice_and_a_score_where_an_act_keeps_them() {
     );
     let act = &story_of(&next).chapters[0].acts[0];
     assert_eq!(
-        act.voice.as_ref().unwrap().takes[0].asset_id,
-        "asset-act-voice"
+        act.voice.as_ref().unwrap().takes[0].asset_ids,
+        vec!["asset-act-voice"]
     );
     // The score is a place of its own, not the voice written twice.
     assert!(act.music.is_none());
@@ -941,7 +941,7 @@ fn trims_a_slot_to_what_a_place_keeps_oldest_first_and_drops_two_of_one_drawing(
         .find(|element| element.id == PROP)
         .unwrap();
     assert_eq!(prop.main.takes.len(), MAX_TAKES_PER_SLOT);
-    assert_eq!(prop.main.takes[0].asset_id, "asset-3");
+    assert_eq!(prop.main.takes[0].asset_ids, vec!["asset-3"]);
 }
 
 #[test]
@@ -998,7 +998,7 @@ fn remembers_what_a_story_was_assembled_into_and_refuses_a_timeline_nobody_holds
     let edit = &story_of(&next).edit;
     assert_eq!(edit.timeline_id.as_deref(), Some(TIMELINE));
     assert_eq!(edit.clip_by_act.as_ref().unwrap()[0].clip_id, "clip-cut-a");
-    assert_eq!(edit.film.as_ref().unwrap().asset_id, ACT_VIDEO);
+    assert_eq!(edit.film.as_ref().unwrap().asset_ids, vec![ACT_VIDEO]);
 
     assert_eq!(
         code_of(
@@ -1119,8 +1119,8 @@ fn a_voiced_act_survives_the_codec_with_its_sound_and_an_unvoiced_one_without() 
     let read = decode_moka_file(&bytes).unwrap();
     let act = &story_of(&read).chapters[0].acts[0];
     assert_eq!(
-        act.voice.as_ref().unwrap().takes[0].asset_id,
-        "asset-act-voice"
+        act.voice.as_ref().unwrap().takes[0].asset_ids,
+        vec!["asset-act-voice"]
     );
     assert_eq!(act.music.as_ref().unwrap().takes.len(), 0);
 }
@@ -1222,6 +1222,78 @@ fn refuses_a_story_written_by_a_newer_build_rather_than_reading_it_wrongly() {
         decode_moka_file(&bytes).unwrap_err().code(),
         "MOKA_VERSION_UNSUPPORTED"
     );
+}
+
+/// The command the story room posts, as it posts it — a take names its files
+/// in a list, whether it is one file or several.
+///
+/// This is the seam the two halves meet at, so the shape is pinned here rather
+/// than left to whichever half was written last. The lone `assetId` a document
+/// from before the pieces feature carries is still read, and written back out
+/// in the list form.
+#[test]
+fn reads_the_slot_command_the_story_room_posts() {
+    let command: DocumentCommand = serde_json::from_str(
+        r##"{
+            "type": "setStorySlot",
+            "storyId": "story-1",
+            "target": { "kind": "actVideo", "chapterId": "chapter-first", "actId": "act-1" },
+            "slot": {
+                "takes": [
+                    {
+                        "assetIds": ["asset-a", "asset-b"],
+                        "jobId": "job-1",
+                        "itemId": "actVideo:chapter-first:act-1",
+                        "note": "一个长幕分几段拍",
+                        "createdAt": "2026-01-01T00:00:00.000Z"
+                    },
+                    { "assetId": "asset-c", "createdAt": "2026-01-01T00:00:00.000Z" }
+                ],
+                "confirmed": true
+            }
+        }"##,
+    )
+    .expect("the command is read");
+    let DocumentCommand::SetStorySlot { slot, .. } = command else {
+        panic!("the command is a slot");
+    };
+    assert_eq!(slot.takes[0].asset_ids, vec!["asset-a", "asset-b"]);
+    assert_eq!(slot.takes[0].job_id.as_deref(), Some("job-1"));
+    assert_eq!(slot.takes[0].note.as_deref(), Some("一个长幕分几段拍"));
+    assert_eq!(slot.takes[1].asset_ids, vec!["asset-c"]);
+    assert!(slot.confirmed);
+
+    let written = serde_json::to_value(&slot.takes[0]).unwrap();
+    assert_eq!(
+        written["assetIds"],
+        serde_json::json!(["asset-a", "asset-b"])
+    );
+    assert_eq!(written["createdAt"], "2026-01-01T00:00:00.000Z");
+
+    let lone = serde_json::to_value(&slot.takes[1]).unwrap();
+    assert_eq!(lone["assetIds"], serde_json::json!(["asset-c"]));
+    assert!(lone.get("assetId").is_none());
+    // Written and read back as the same take, so what the room files is what
+    // the room sees.
+    assert_eq!(
+        serde_json::from_value::<StoryTake>(lone).unwrap(),
+        slot.takes[1]
+    );
+}
+
+#[test]
+fn refuses_a_take_that_names_no_file_at_all() {
+    let empty = serde_json::from_str::<StoryTake>(
+        r##"{ "assetIds": [], "createdAt": "2026-01-01T00:00:00.000Z" }"##,
+    )
+    .unwrap_err();
+    assert!(empty.to_string().contains("at least one file"), "{empty}");
+
+    let absent = serde_json::from_str::<StoryTake>(
+        r##"{ "jobId": "job-1", "createdAt": "2026-01-01T00:00:00.000Z" }"##,
+    )
+    .unwrap_err();
+    assert!(absent.to_string().contains("assetId"), "{absent}");
 }
 
 /// A story with a premise and nothing made of it yet, the way the room makes
