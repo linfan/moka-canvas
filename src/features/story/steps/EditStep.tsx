@@ -5,7 +5,7 @@ import type { StoryDocument } from "../../../shared/domain/types";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
-import { useProjectStore } from "../../editor/stores/projectStore";
+import { saveTrouble, useProjectStore } from "../../editor/stores/projectStore";
 import { useModelStore } from "../../settings/modelStore";
 import { saveEverything } from "../stores/storyJobStore";
 import {
@@ -85,9 +85,10 @@ export function EditStep({ story }: { story: StoryDocument }) {
       // still in this window goes out first, and only then is the document read
       // back — reading it first would throw the waiting work away.
       if (!(await saveEverything())) {
+        const blocked = saveTrouble();
         useAppStore
           .getState()
-          .pushToast("error", i18n.t("story:common.stillSaving"));
+          .pushToast("error", blocked.message, undefined, blocked.detail);
         return;
       }
       await useProjectStore.getState().reload();

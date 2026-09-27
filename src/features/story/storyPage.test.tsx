@@ -224,6 +224,63 @@ describe("the five steps", () => {
     expect(screen.queryByTestId("story-step-failed-outline")).toBeNull();
   });
 
+  it("says on the step's bubble why its pieces did not come back", async () => {
+    // The bubble over the badge is the only place a step says why it is red,
+    // and a reader who has to open the batch to find out will not.
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes("/story/jobs")
+        ? [
+            {
+              id: "job-1",
+              projectId: "project-1",
+              storyId: storyIds().story,
+              kind: "outline",
+              status: "failed",
+              model: "a-writer",
+              items: [
+                {
+                  id: "outline",
+                  target: { kind: "outline" },
+                  capability: "text",
+                  prompt: "tell this",
+                  inputs: [],
+                  params: {},
+                  status: "failed",
+                  error: "model gpt-4o-mini has no stored API key",
+                  errorCode: "PROVIDER_KEY_MISSING",
+                  errorDetails: { model: "gpt-4o-mini" },
+                },
+              ],
+              cancelRequested: false,
+              createdAt: "2026-01-02T00:00:00Z",
+              updatedAt: "2026-01-02T00:00:00Z",
+            },
+          ]
+        : {
+            root: "/tmp/moka-story-test",
+            moka: buildStoryMokaFile(),
+            selfCheck: { ok: true, issues: [] },
+          };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
+    openRoom(buildStoryMokaFile());
+
+    const badge = await screen.findByTestId("story-step-failed-outline");
+    expect(badge.textContent).toBe("1");
+    // The step it happened on is the one being read, so the bubble says the
+    // reason rather than what comes first.
+    expect(screen.getByTestId("story-step-outline").getAttribute("title")).toBe(
+      "1 pieces did not come back: model gpt-4o-mini has no stored API key",
+    );
+  });
+
   it("walks to a step that has been earned, and stops at the ones that have not", () => {
     openRoom(buildStoryMokaFile());
     fireEvent.click(screen.getByTestId("story-step-idea"));

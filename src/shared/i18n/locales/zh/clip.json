@@ -222,7 +222,8 @@
     "transcribing": "识别中…",
     "transcribingLand": "正在落轨…",
     "transcribingSubmit": "上传并提交…",
-    "windowChanged": "片段在识别期间被修剪过，字幕没有落轨——请重新识别。"
+    "windowChanged": "片段在识别期间被修剪过，字幕没有落轨——请重新识别。",
+    "noAsrModelReason": "还不能转写：{{reason}}"
   },
   "textPresets": {
     "basic": "基础",

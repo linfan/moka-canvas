@@ -15,6 +15,7 @@ import type {
 } from "../../../shared/domain";
 import { ASSET_CATEGORY_LABELS } from "../../../shared/domain";
 import { i18n } from "../../../shared/i18n";
+import { failureText } from "../../../shared/i18n/problems";
 import { useAppStore } from "./appStore";
 import { useEditorStore } from "./editorStore";
 import { useProjectStore } from "./projectStore";
@@ -34,6 +35,19 @@ export function isActive(status: RunStatus): boolean {
 
 function hasActiveRuns(runs: RunRecord[]): boolean {
   return runs.some((run) => isActive(run.status));
+}
+
+/**
+ * Why a run did not finish, in the words of the step that stopped it.
+ *
+ * The step is the one that knows: it carries what its executor was told, and
+ * the run's own line is only a title and a message. A run that ended without
+ * a step to blame — a process that stopped, a document that would not take
+ * the answer — says what it has.
+ */
+function enoughToSay(run: RunRecord): string | null {
+  const stopped = run.steps.find((step) => step.error !== undefined);
+  return failureText(stopped ?? {}) ?? failureText(run);
 }
 
 /** One node's part in one run. */
@@ -216,24 +230,41 @@ export const useRunStore = create<RunState>()((set, get) => {
           : (fresh[0]?.id ?? null),
     }));
     const succeeded: RunRecord[] = [];
-    let failed = 0;
+    const failed: RunRecord[] = [];
     let adopted: Promise<void> | null = null;
     for (const run of fresh) {
       const before = previous.get(run.id);
       if (!before || !isActive(before) || isActive(run.status)) continue;
       if (run.status === "succeeded") succeeded.push(run);
-      else failed += 1;
+      else failed.push(run);
       adopted = adoptServerState() ?? adopted;
     }
-    if (failed > 0) {
-      useAppStore
-        .getState()
-        .pushToast(
-          "error",
-          failed === 1
+    if (failed.length > 0) {
+      // Why they did not finish, in the words of the step that stopped them:
+      // "the run did not finish" is what the reader can already see, and the
+      // reason is the whole of what they cannot.
+      const reasons = [
+        ...new Set(
+          failed
+            .map((run) => enoughToSay(run))
+            .filter((said): said is string => said !== null),
+        ),
+      ];
+      useAppStore.getState().pushToast(
+        "error",
+        reasons.length === 0
+          ? failed.length === 1
             ? i18n.t("editor:run.didNotFinishOne")
-            : i18n.t("editor:run.didNotFinishMany", { count: failed }),
-        );
+            : i18n.t("editor:run.didNotFinishMany", { count: failed.length })
+          : failed.length === 1
+            ? i18n.t("editor:run.didNotFinishOneWith", { reason: reasons[0] })
+            : i18n.t("editor:run.didNotFinishManyWith", {
+                count: failed.length,
+                reason: reasons[0],
+              }),
+        undefined,
+        reasons.length > 1 ? reasons.join("\n") : undefined,
+      );
     }
     for (const run of succeeded) void announceFiling(run, adopted);
     for (const run of fresh) {

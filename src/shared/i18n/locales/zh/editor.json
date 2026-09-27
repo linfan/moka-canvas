@@ -365,7 +365,9 @@
     "thisAskDidNotFinish": "此请求未完成",
     "stopHint": "停止这次运行",
     "stoppingHint": "已请求停止，运行尚未响应",
-    "stopping": "停止中…"
+    "stopping": "停止中…",
+    "didNotFinishOneWith": "运行未完成：{{reason}}",
+    "didNotFinishManyWith": "{{count}} 次运行未完成：{{reason}}"
   },
   "menu": {
     "contextMenu": "右键菜单",
@@ -714,7 +716,6 @@
     "keeperOff": "{{name}} 已取消收藏",
     "shelfWriteFailed": "无法写入素材架",
     "refiled": "已重新归档 {{name}}",
-    "stillSaving": "更改仍在保存中——请稍后重试",
     "savedToShelf": "{{name}} 已存入素材架",
     "alreadyOnShelf": "{{name}} 已在素材架上",
     "shelfSaveFailed": "无法存入素材架",
@@ -851,6 +852,8 @@
     "resizeHint": "拖动以调整栏目宽度——双击可恢复原状",
     "panelColumnName": "项目栏",
     "panelSideColumnName": "画布旁的栏目",
-    "localProcessUnreachable": "无法连接本地进程"
+    "localProcessUnreachable": "无法连接本地进程",
+    "saveConflict": "项目已在别处被修改——请重新加载，或放弃这次更改。",
+    "stillSaving": "更改仍在保存中——请稍后重试"
   }
 }

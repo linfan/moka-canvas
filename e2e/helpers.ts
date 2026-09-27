@@ -433,6 +433,60 @@ export async function configureTextModel(model: string): Promise<void> {
   ]);
 }
 
+/**
+ * A text model that is configured and holds no credential.
+ *
+ * What a reader who named a model and has not filled its key in yet has: the
+ * ask reaches the model and is refused there, which is a failure the room has
+ * to say in the reader's own words.
+ */
+export async function configureTextModelWithoutKey(
+  model: string,
+): Promise<void> {
+  const put = await fetch(`${APP}/api/v1/models`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: model,
+      category: "text",
+      protocol: protocolOf("text"),
+      url: endpoint("text"),
+      model,
+      displayName: "Storyteller",
+      enabled: true,
+    }),
+  });
+  if (!put.ok) {
+    throw new Error(
+      `configuring the model ${model}: ${put.status} ${await put.text()}`,
+    );
+  }
+  // A write leaves a stored credential alone by design, and one server answers
+  // the whole suite: the model this needs is one an earlier spec has already
+  // given a key to, so the key goes by its own call — the only one that
+  // removes one.
+  const cleared = await fetch(`${APP}/api/v1/models/${model}/key`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey: null }),
+  });
+  if (!cleared.ok) {
+    throw new Error(
+      `clearing the key of ${model}: ${cleared.status} ${await cleared.text()}`,
+    );
+  }
+  const patched = await fetch(`${APP}/api/v1/models/defaults`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: model }),
+  });
+  if (!patched.ok) {
+    throw new Error(
+      `defaulting the model ${model}: ${patched.status} ${await patched.text()}`,
+    );
+  }
+}
+
 /** A picture as well, for an ask that wants one put on the canvas. */
 export async function configureWordsAndPictures(): Promise<void> {
   await configureModels([

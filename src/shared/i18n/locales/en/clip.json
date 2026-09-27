@@ -222,7 +222,8 @@
     "transcribing": "Recognizing…",
     "transcribingLand": "Laying them down…",
     "transcribingSubmit": "Uploading…",
-    "windowChanged": "The clip was trimmed while it was being recognized, so nothing landed — recognize it again."
+    "windowChanged": "The clip was trimmed while it was being recognized, so nothing landed — recognize it again.",
+    "noAsrModelReason": "Cannot transcribe yet: {{reason}}"
   },
   "textPresets": {
     "basic": "Basic",

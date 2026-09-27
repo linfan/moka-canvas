@@ -7,6 +7,7 @@ import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { useModelStore } from "../../settings/modelStore";
 import {
   jobProgress,
   redoChapterPart,
@@ -215,9 +216,11 @@ describe("starting a batch", () => {
       .start(ids.story, "outline", []);
 
     expect(started).toBeNull();
-    expect(useAppStore.getState().toasts.at(-1)?.message).toContain(
-      "still saving",
-    );
+    // Why the save would not land, rather than only that one is on its way:
+    // "no" is what the store was told, and waiting would not change it.
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.message).toContain("no");
+    expect(said?.detail).toContain("still being saved");
   });
 
   it("puts the record at the head of the list and starts asking about it", async () => {
@@ -441,6 +444,81 @@ describe("a batch coming back", () => {
     apply.mockRestore();
   });
 
+  it("says which model has no key, and where that is fixed", async () => {
+    const held = filming();
+    const short = filmed(
+      held,
+      [
+        { at: 0, failed: "model gpt-4o-mini has no stored API key" },
+        { at: 1, assetId: "asset-clip-2" },
+      ],
+      "failed",
+    );
+    serving({
+      "/api/v1/projects/current/story/jobs": [
+        {
+          ...short,
+          items: short.items.map((item, index) =>
+            index === 0
+              ? {
+                  ...item,
+                  errorCode: "PROVIDER_KEY_MISSING",
+                  errorDetails: { model: "gpt-4o-mini" },
+                }
+              : item,
+          ),
+        },
+      ],
+    });
+    const apply = vi.spyOn(useProjectStore.getState(), "applyLocal");
+
+    await useStoryJobStore.getState().load(ids.story);
+
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.kind).toBe("error");
+    // The reason, not only the count: what the reader could not see for
+    // themselves is the whole point of saying anything at all.
+    expect(said?.message).toBe(
+      "1 of 2 pieces did not come back: model gpt-4o-mini has no stored API key",
+    );
+    // Asking the same thing again of a model that holds no key would be
+    // answered the same way, so the toast offers the place that fixes it —
+    // opened on the page that holds the model the pieces were asked of.
+    expect(said?.choice?.label).toBe("Open settings");
+    const open = vi.spyOn(useModelStore.getState(), "openSettings");
+    said?.choice?.go();
+    expect(open).toHaveBeenCalledWith("video");
+    open.mockRestore();
+    apply.mockRestore();
+  });
+
+  it("lays the reasons out under the line when pieces fell to different ones", async () => {
+    const held = filming();
+    serving({
+      "/api/v1/projects/current/story/jobs": [
+        filmed(
+          held,
+          [
+            { at: 0, failed: "the provider is busy" },
+            { at: 1, failed: "the prompt resolved to nothing" },
+          ],
+          "failed",
+        ),
+      ],
+    });
+
+    await useStoryJobStore.getState().load(ids.story);
+
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.message).toBe(
+      "2 of 2 pieces did not come back: the provider is busy",
+    );
+    // Everything the batch had to say, kept under the line rather than cut.
+    expect(said?.detail).toBe(
+      "the provider is busy\nthe prompt resolved to nothing",
+    );
+  });
+
   it("tells what did not come back once the batch is over, failed and applied together", async () => {
     const held = filming();
     // One shot came home, the other was refused, and the batch is over.
@@ -465,7 +543,7 @@ describe("a batch coming back", () => {
       .toasts.map((toast) => `${toast.kind}: ${toast.message}`);
     expect(messages).toEqual([
       "success: 1 answers were written into the story.",
-      "error: 1 of 2 pieces did not come back.",
+      "error: 1 of 2 pieces did not come back: the provider refused it",
     ]);
     expect(useAppStore.getState().toasts.at(-1)?.choice?.label).toContain(
       "Ask again",
@@ -524,6 +602,27 @@ describe("a batch coming back", () => {
     apply.mockRestore();
   });
 
+  it("says a look that failed, once for the reason and not once a look", async () => {
+    serving({ "/api/v1/projects/current/story/jobs": [job()] });
+    await useStoryJobStore.getState().load(ids.story);
+
+    // The process goes away under the room while a batch is still out: the
+    // look fails, and a look comes every second and a half.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new Error("offline"))),
+    );
+    await vi.advanceTimersByTimeAsync(1600);
+    const told = () =>
+      useAppStore.getState().toasts.filter((toast) => toast.kind === "error");
+    expect(told()).toHaveLength(1);
+    expect(told()[0]?.message).toContain("Could not read the batches through");
+    expect(told()[0]?.message).toContain("offline");
+
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(told()).toHaveLength(1);
+  });
+
   it("stops asking when nothing is running any more", async () => {
     serving({ "/api/v1/projects/current/story/jobs": [job()] });
     await useStoryJobStore.getState().load(ids.story);
@@ -553,7 +652,7 @@ describe("a batch coming back", () => {
     await useStoryJobStore.getState().load(ids.story);
     expect(
       stepFailure(useStoryJobStore.getState().jobs, ids.story, "storyboard"),
-    ).toEqual({ failed: 1, jobId: "job-refused" });
+    ).toEqual({ failed: 1, jobId: "job-refused", reasons: ["no"] });
 
     // The failure was read into the story long ago, and enough newer batches
     // have been asked for that the server stops carrying it. The room lets it
@@ -992,6 +1091,7 @@ describe("what the room reads off a list of batches", () => {
     expect(stepFailure([withFailure], ids.story, "storyboard")).toEqual({
       failed: 1,
       jobId: "job-1",
+      reasons: ["no"],
     });
     // An element's drawing is the element step's work, not the board's.
     expect(stepFailure([withFailure], ids.story, "elements")).toBeNull();

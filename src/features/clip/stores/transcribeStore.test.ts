@@ -279,7 +279,11 @@ describe("start", () => {
 
     const [spoken] = toasts();
     expect(spoken.kind).toBe("error");
-    expect(spoken.message).toBe("No speech recognition model is set up yet.");
+    // What is wrong, not only that nothing is set up: the server said why, and
+    // a reader sent to Settings is owed the reason before they get there.
+    expect(spoken.message).toBe(
+      "Cannot transcribe yet: no default model is set for asr",
+    );
     expect(spoken.choice?.label).toBe("Set up models");
     spoken.choice?.go();
     expect(useModelStore.getState().open).toBe(true);

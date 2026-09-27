@@ -44,7 +44,7 @@ import {
   type PortRef,
   type Selection,
 } from "../stores/editorStore";
-import { useProjectStore } from "../stores/projectStore";
+import { saveTrouble, useProjectStore } from "../stores/projectStore";
 import { TOOL_LABELS } from "../stores/toolPrefs";
 import { execute } from "../commands/execute";
 import {
@@ -67,6 +67,20 @@ import type { ConnectionCheck } from "../canvas/controller";
 
 function toastError(message: string) {
   useAppStore.getState().pushToast("error", message);
+}
+
+/**
+ * Says why the work is held up, which is the save and not the action.
+ *
+ * A change that cannot be saved is not a change to wait out: the store knows
+ * whether the document moved under this window or the write itself failed,
+ * and a reader told "still saving" would wait for a save that is not coming.
+ */
+function saySaveBlocked(): void {
+  const blocked = saveTrouble();
+  useAppStore
+    .getState()
+    .pushToast("error", blocked.message, undefined, blocked.detail);
 }
 
 function announce(message: string) {
@@ -1069,7 +1083,7 @@ export async function fileNodeAsAsset(
   try {
     await useProjectStore.getState().flush();
     if (useProjectStore.getState().pending.length > 0) {
-      toastError(i18n.t("editor:interactions.stillSaving"));
+      saySaveBlocked();
       return;
     }
     const filed = await assetsApi.fileNode(canvasId, nodeId);
@@ -1112,7 +1126,7 @@ async function removeAssetNow(assetId: string) {
     // pending edits (like the just-removed nodes) must land first.
     await useProjectStore.getState().flush();
     if (useProjectStore.getState().pending.length > 0) {
-      toastError(i18n.t("editor:interactions.stillSaving"));
+      saySaveBlocked();
       return;
     }
     const result = await assetsApi.remove(assetId);

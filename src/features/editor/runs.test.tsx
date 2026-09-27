@@ -841,6 +841,45 @@ describe("run UI", () => {
     });
   });
 
+  it("says why a run did not finish, and not only that it did not", async () => {
+    useProjectStore.getState().hydrate({
+      root: "/tmp/golden",
+      moka: buildGoldenMokaFile(),
+      selfCheck: { ok: true, issues: [] },
+    });
+    api.startResponse = () => ({ body: makeRun(), status: 201 });
+    await useRunStore.getState().start(ids.canvasMain, [ids.operation]);
+
+    api.runs = [
+      makeRun({
+        status: "failed",
+        error: '"Run this node": The provider would not say what it made.',
+        steps: [
+          { nodeId: ids.text, status: "succeeded" },
+          {
+            nodeId: ids.operation,
+            status: "failed",
+            error: "The provider would not say what it made.",
+          },
+        ],
+      }),
+    ];
+    act(() => {
+      useAppStore.setState({ toasts: [] });
+    });
+    await act(async () => {
+      await useRunStore.getState().load();
+    });
+
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.kind).toBe("error");
+    // The step's own words, which is where the trouble was classified: the
+    // run's line is a title glued to the same message.
+    expect(said?.message).toBe(
+      "Run did not finish: The provider would not say what it made.",
+    );
+  });
+
   it("says why an ask did not finish beside the card that shows it", async () => {
     api.runs = [
       makeRun({

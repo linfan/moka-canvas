@@ -365,7 +365,9 @@
     "thisAskDidNotFinish": "This ask did not finish",
     "stopHint": "Stop this run",
     "stoppingHint": "This run has been asked to stop and has not noticed yet",
-    "stopping": "Stopping…"
+    "stopping": "Stopping…",
+    "didNotFinishOneWith": "Run did not finish: {{reason}}",
+    "didNotFinishManyWith": "{{count}} runs did not finish: {{reason}}"
   },
   "menu": {
     "contextMenu": "Context menu",
@@ -714,7 +716,6 @@
     "keeperOff": "{{name}} is no keeper",
     "shelfWriteFailed": "Could not write to the shelf",
     "refiled": "Refiled {{name}}",
-    "stillSaving": "Changes are still saving — try again in a moment",
     "savedToShelf": "{{name}} saved to the shelf",
     "alreadyOnShelf": "{{name}} is already on the shelf",
     "shelfSaveFailed": "Could not save to the shelf",
@@ -851,6 +852,8 @@
     "resizeRightColumn": "Width of the column beside the canvas",
     "resizeHint": "Drag to widen or narrow the column — double-click to put it back",
     "panelColumnName": "the project column",
-    "panelSideColumnName": "the column beside the canvas"
+    "panelSideColumnName": "the column beside the canvas",
+    "saveConflict": "The project changed elsewhere — reload it, or give this change up.",
+    "stillSaving": "Changes are still being saved — try again in a moment"
   }
 }

@@ -120,9 +120,7 @@
   "parse": {
     "failed": "That answer did not read as a chapter table"
   },
-  "common": {
-    "stillSaving": "Changes are still saving — try again in a moment"
-  },
+  "common": {},
   "jobs": {
     "done": "{{count}} answers were written into the story.",
     "failed": "{{failed}} of {{total}} pieces did not come back.",
@@ -135,7 +133,10 @@
     "targetGone": "{{label}} is no longer in the story.",
     "storyGone": "The story this batch was told for is gone.",
     "unreadableAnswer": "The answer to {{at}} could not be read; it is kept for you to fix.",
-    "answerNotes": "{{at}} came back with something left unread: {{notes}}"
+    "answerNotes": "{{at}} came back with something left unread: {{notes}}",
+    "failedWith": "{{failed}} of {{total}} pieces did not come back: {{reason}}",
+    "stepFailedWith": "{{failed}} pieces did not come back: {{reason}}",
+    "lookFailed": "Could not read the batches through: {{reason}}"
   },
   "idea": {
     "lead": "Say what the story is about, and how long it runs. Everything after this is written from here.",
@@ -232,7 +233,8 @@
     "resplitBody": "The words of {{chapters}} chapters are written over, and the boards of {{acts}} acts go with them.",
     "resplitKeeps": "The drawings and the clips stay on the shelf, and the timeline it assembled stays in the cutting room.",
     "resplitConfirm": "Split it again",
-    "resplitCancel": "Cancel"
+    "resplitCancel": "Cancel",
+    "copyFailed": "Could not copy: {{reason}}"
   },
   "panels": {
     "close": "Close",

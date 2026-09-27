@@ -20,7 +20,7 @@ import {
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
-import { useProjectStore } from "../../editor/stores/projectStore";
+import { saveTrouble, useProjectStore } from "../../editor/stores/projectStore";
 import { readTextAsset } from "../readText";
 import { useStoryStore } from "../stores/storyStore";
 
@@ -128,7 +128,10 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
       // would be refused for resting on a revision the upload has replaced.
       await useProjectStore.getState().flush();
       if (useProjectStore.getState().pending.length > 0) {
-        toast("error", t("story:common.stillSaving"));
+        const blocked = saveTrouble();
+        useAppStore
+          .getState()
+          .pushToast("error", blocked.message, undefined, blocked.detail);
         return;
       }
       const filed = await assetsApi.upload(file, { categoryHint: "texts" });

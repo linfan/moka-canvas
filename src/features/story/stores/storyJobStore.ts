@@ -23,12 +23,17 @@ import {
   type StoryJobKind,
   type StoryJobRecord,
 } from "../../../api/story";
-import { isApiError } from "../../../api/client";
+import {
+  errorText,
+  isApiError,
+  isConfigurationCode,
+} from "../../../api/client";
+import { failureText } from "../../../shared/i18n/problems";
 import type { StoryDocument } from "../../../shared/domain/types";
 import type { StoryStep } from "../../../shared/domain/story";
 import { i18n } from "../../../shared/i18n";
 import { useAppStore } from "../../editor/stores/appStore";
-import { useProjectStore } from "../../editor/stores/projectStore";
+import { saveTrouble, useProjectStore } from "../../editor/stores/projectStore";
 import { useModelStore } from "../../settings/modelStore";
 import { applyJobResults } from "../jobs/apply";
 import { itemsForTargets, jobKey } from "../jobs/plan";
@@ -87,8 +92,52 @@ function toast(
   kind: "info" | "success" | "error",
   message: string,
   choice?: { label: string; go: () => void },
+  detail?: string,
 ): void {
-  useAppStore.getState().pushToast(kind, message, choice);
+  useAppStore.getState().pushToast(kind, message, choice, detail);
+}
+
+/**
+ * What a batch that came back short has to say.
+ *
+ * The count, and the reason under it: a reader told only how many pieces did
+ * not come back has been told the one thing they can see for themselves. One
+ * reason is the whole of it — the toast keeps the rest of a long one — and
+ * several are laid out under the line, because a batch can lose one piece to
+ * a busy provider and another to a model that is not configured.
+ *
+ * Said apart from the words: whether every one of the failures is a
+ * configuration the reader has to fix, which is what decides between offering
+ * the place that fixes it and offering the same ask again.
+ */
+function failedTrouble(
+  failed: StoryJobRecord["items"],
+  record: StoryJobRecord,
+): {
+  message: string;
+  detail?: string;
+  blockedByConfiguration?: boolean;
+} {
+  const reasons = [
+    ...new Set(
+      failed
+        .map((item) => failureText(item))
+        .filter((said): said is string => said !== null),
+    ),
+  ];
+  const count = { failed: failed.length, total: record.items.length };
+  const first = reasons[0];
+  const message =
+    first === undefined
+      ? i18n.t("story:jobs.failed", count)
+      : i18n.t("story:jobs.failedWith", { ...count, reason: first });
+  return {
+    message,
+    ...(reasons.length > 1 ? { detail: reasons.join("\n") } : {}),
+    ...(failed.every((item) => isConfigurationCode(item.errorCode))
+      ? { blockedByConfiguration: true }
+      : {}),
+  };
 }
 
 /**
@@ -154,6 +203,14 @@ interface BatchRead {
   applied: number;
   /** Whether the batch's ending — its count, and what did not come back — is said. */
   endingSaid: boolean;
+  /**
+   * Whether the document refusing the batch has been said.
+   *
+   * A refusal is not a moment: the batch stays unread, and every look after it
+   * tries the same answer against the same document until the conflict is
+   * dealt with. Said once, not once a look.
+   */
+  refusalSaid: boolean;
 }
 
 let readIn = new Map<string, BatchRead>();
@@ -167,6 +224,25 @@ let readIn = new Map<string, BatchRead>();
 let handingOver = new Set<string>();
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * The trouble a look last reported, so that a look which keeps failing at the
+ * same thing says it once.
+ *
+ * A look comes every second and a half while a batch is out, and the local
+ * process being unreachable is not fifteen pieces of news a minute. Held by
+ * the reason itself: one that changes is a different trouble and is said, and
+ * a look that gets through clears it.
+ */
+let lookTrouble: string | null = null;
+
+/** Says why a look failed, once per reason, and never twice in a row. */
+function sayLookTrouble(problem: unknown): void {
+  const said = errorText(problem).message;
+  if (said === lookTrouble) return;
+  lookTrouble = said;
+  toast("error", i18n.t("story:jobs.lookFailed", { reason: said }));
+}
 
 export const useStoryJobStore = create<StoryJobState>()((set, get) => {
   /**
@@ -201,6 +277,7 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
         pieces: new Set<string>(),
         applied: 0,
         endingSaid: false,
+        refusalSaid: false,
       };
       readIn.set(record.id, known);
       const fresh = record.items.filter(
@@ -223,10 +300,13 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       if (!(await saveEverything())) return;
       try {
         await useProjectStore.getState().reload();
-      } catch {
+        lookTrouble = null;
+      } catch (problem) {
         // The project could not be read again, so nothing can be written into
         // it just now. The answers are on the records and are read in by the
-        // next look — and by the room the next time it stands up.
+        // next look — and by the room the next time it stands up. Said once,
+        // because the next look is a second and a half away.
+        sayLookTrouble(problem);
         return;
       }
     }
@@ -240,41 +320,57 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
           const report = applyJobResults({ ...record, items: fresh });
           if (report.refused === true) {
             // The document would not take it, so it is not in: nothing of the
-            // answer is written down about it and the next look asks again,
-            // and nothing is said about a batch whose answers are not in.
+            // answer is written down about it and the next look asks again. The
+            // reason is said once — a look comes every second and a half, and a
+            // reader does not need the same refusal fifteen times a minute.
+            if (!known.refusalSaid) {
+              known.refusalSaid = true;
+              toast("error", report.notes.join(" "));
+            }
             continue;
           }
+          if (known.refusalSaid) known.refusalSaid = false;
           for (const item of fresh) known.pieces.add(item.id);
           known.applied += report.applied;
           if (report.notes.length > 0) toast("info", report.notes.join(" "));
         }
         if (ending && !known.endingSaid) {
           known.endingSaid = true;
-          const failed = record.items.filter(
+          const failedItems = record.items.filter(
             (item) => item.status === "failed",
-          ).length;
+          );
           if (known.applied > 0) {
             toast(
               "success",
               i18n.t("story:jobs.done", { count: known.applied }),
             );
           }
-          if (failed > 0) {
+          if (failedItems.length > 0) {
             const story = useProjectStore
               .getState()
               .moka?.stories?.find((held) => held.id === record.storyId);
+            const trouble = failedTrouble(failedItems, record);
             toast(
               "error",
-              i18n.t("story:jobs.failed", {
-                failed,
-                total: record.items.length,
-              }),
-              story === undefined
-                ? undefined
-                : {
-                    label: i18n.t("story:jobs.retryFailed"),
-                    go: () => void retryFailed(story, record),
-                  },
+              trouble.message,
+              trouble.blockedByConfiguration === true
+                ? {
+                    // Every one of them failed at its own model, and a batch
+                    // is one step's worth of one capability, so the first
+                    // failure names the page that holds the fix.
+                    label: i18n.t("story:jobs.openSettings"),
+                    go: () =>
+                      useModelStore
+                        .getState()
+                        .openSettings(failedItems[0].capability),
+                  }
+                : story === undefined
+                  ? undefined
+                  : {
+                      label: i18n.t("story:jobs.retryFailed"),
+                      go: () => void retryFailed(story, record),
+                    },
+              trouble.detail,
             );
           }
         }
@@ -317,8 +413,12 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
     for (const id of ids) {
       try {
         integrate(await storyApi.readIn(id));
-      } catch {
-        // Said again by the next look, which is where the note is retried.
+        lookTrouble = null;
+      } catch (problem) {
+        // Said again by the next look, which is where the note is retried —
+        // and said out loud the first time it fails, since a note that does
+        // not land is a batch the room will read into the story a second time.
+        sayLookTrouble(problem);
       }
     }
   };
@@ -331,6 +431,7 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
     }
     try {
       const read = await storyApi.list(storyId);
+      lookTrouble = null;
       set({
         jobs: carriedOver(
           get().jobs,
@@ -340,9 +441,12 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       });
       for (const record of read) integrate(record);
       await readAnswers(read);
-    } catch {
+    } catch (problem) {
       // A poll that failed is a poll: the next one asks again, and a room that
-      // has been closed has stopped asking anyway.
+      // has been closed has stopped asking anyway. What it is not is silent: a
+      // process that has gone away would otherwise leave the room waiting for
+      // answers that are never coming.
+      sayLookTrouble(problem);
     }
     if (!get().jobs.some((job) => isRunning(job.status))) stopPolling();
   };
@@ -404,7 +508,8 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
         // asked about. So what is still waiting to be saved goes first.
         if (!(await saveEverything())) {
           set({ starting: false });
-          toast("error", i18n.t("story:common.stillSaving"));
+          const blocked = saveTrouble();
+          toast("error", blocked.message, undefined, blocked.detail);
           return null;
         }
         // Read here rather than where a batch is planned: every ask is made
@@ -456,6 +561,7 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       stopPolling();
       readIn = new Map<string, BatchRead>();
       handingOver = new Set<string>();
+      lookTrouble = null;
       set({
         storyId: null,
         jobs: [],
@@ -600,15 +706,34 @@ function forStep(
   );
 }
 
-/** The pieces of a step that failed, which is what its red badge counts. */
+/**
+ * The pieces of a step that failed, which is what its red badge counts, and
+ * what each of them said.
+ *
+ * The reasons travel with the count because the bubble over the badge is the
+ * only place a step says why it is red: a reader who has to open the batch to
+ * find out what went wrong will not.
+ */
 export function stepFailure(
   jobs: StoryJobRecord[],
   storyId: string | null,
   step: StoryStep,
-): { failed: number; jobId: string } | null {
+): { failed: number; jobId: string; reasons: string[] } | null {
   for (const job of forStep(jobs, storyId, step)) {
-    const failed = job.items.filter((item) => item.status === "failed").length;
-    if (failed > 0) return { failed, jobId: job.id };
+    const failed = job.items.filter((item) => item.status === "failed");
+    if (failed.length > 0) {
+      return {
+        failed: failed.length,
+        jobId: job.id,
+        reasons: [
+          ...new Set(
+            failed
+              .map((item) => failureText(item))
+              .filter((said): said is string => said !== null),
+          ),
+        ],
+      };
+    }
   }
   return null;
 }
@@ -655,7 +780,7 @@ export function useStoryJobs(storyId: string | null): StoryJobRecord[] {
 export function useStoryStepFailure(
   storyId: string | null,
   step: StoryStep,
-): { failed: number; jobId: string } | null {
+): { failed: number; jobId: string; reasons: string[] } | null {
   const jobs = useStoryJobs(storyId);
   return stepFailure(jobs, storyId, step);
 }

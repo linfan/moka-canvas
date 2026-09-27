@@ -120,9 +120,7 @@
   "parse": {
     "failed": "这个答案读不成一张章节表"
   },
-  "common": {
-    "stillSaving": "更改仍在保存中——请稍后重试"
-  },
+  "common": {},
   "jobs": {
     "done": "{{count}} 项结果已写进故事。",
     "failed": "{{total}} 项里有 {{failed}} 项没有回来。",
@@ -135,7 +133,10 @@
     "targetGone": "{{label}} 已经不在这个故事里了。",
     "storyGone": "这批作业要讲的故事已经不在了。",
     "unreadableAnswer": "{{at}} 的回答读不出来；原话已留给你手动修正。",
-    "answerNotes": "{{at}} 的回答有几处没有读进来：{{notes}}"
+    "answerNotes": "{{at}} 的回答有几处没有读进来：{{notes}}",
+    "failedWith": "{{total}} 项里有 {{failed}} 项没有回来：{{reason}}",
+    "stepFailedWith": "{{failed}} 项没有回来：{{reason}}",
+    "lookFailed": "这批作业没能读下去：{{reason}}"
   },
   "idea": {
     "lead": "说说这个故事讲的是什么、要讲多久。后面每一步都从这里写起。",
@@ -232,7 +233,8 @@
     "resplitBody": "{{chapters}} 章的梗概会被覆盖，其中 {{acts}} 幕的分镜会一并丢弃。",
     "resplitKeeps": "素材都留在素材架上，已经装配好的时间线也留在剪辑房里。",
     "resplitConfirm": "重新拆解",
-    "resplitCancel": "取消"
+    "resplitCancel": "取消",
+    "copyFailed": "没能复制：{{reason}}"
   },
   "panels": {
     "close": "关闭",

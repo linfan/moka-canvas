@@ -371,4 +371,30 @@ export function useActiveCanvas() {
   );
 }
 
+/**
+ * Why a change is not landing, as a report of it should say it.
+ *
+ * A save held up by a document that moved under this window is not a save to
+ * wait out: a reader told only "it is still saving" waits for something that
+ * is never coming, when the fix is to reload or to give the change up. The
+ * conflict is named as such; anything else is the store's own words for what
+ * went wrong, and only a save that is genuinely still on its way is said that
+ * way.
+ */
+export function saveTrouble(): { message: string; detail?: string } {
+  const { saveStatus, saveError } = useProjectStore.getState();
+  if (saveStatus === "conflicted") {
+    return { message: i18n.t("editor:stores.saveConflict") };
+  }
+  if (saveError !== null) {
+    return { message: saveError, detail: i18n.t("editor:stores.stillSaving") };
+  }
+  return {
+    message:
+      saveStatus === "saving"
+        ? i18n.t("editor:stores.stillSaving")
+        : i18n.t("editor:stores.savingFailed"),
+  };
+}
+
 export { nextCanvasName };

@@ -538,13 +538,13 @@ test("auto subtitles read the sound on the cut, and a missing model is a place t
   await page.getByTestId("clip-face-text").click();
   await expect(go).toBeEnabled();
 
-  // No recognition model is set up, and the refusal is answered with the
-  // place one is set up rather than with a sentence and a dead end.
+  // No recognition model is set up, and the refusal is answered with what is
+  // missing and the place it is set up, rather than with a sentence and a dead
+  // end.
   await go.click();
   const told = page.locator(".toast").last();
-  await expect(told).toContainText(
-    "No speech recognition model is set up yet.",
-  );
+  await expect(told).toContainText("Cannot transcribe yet:");
+  await expect(told).toContainText("no asr model is configured");
   await expect(told).toContainText("Set up models");
   await told.click();
 

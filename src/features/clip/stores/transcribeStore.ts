@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { generateApi, type GenerateResponse } from "../../../api";
-import { isApiError } from "../../../api/client";
+import { errorText, isConfigurationTrouble } from "../../../api/client";
 import type { TextClipStyle } from "../../../shared/domain";
 import { i18n } from "../../../shared/i18n";
 import { useAppStore } from "../../editor/stores/appStore";
@@ -64,8 +64,9 @@ function toast(
   kind: "info" | "success" | "error",
   message: string,
   choice?: { label: string; go: () => void },
+  detail?: string,
 ): void {
-  useAppStore.getState().pushToast(kind, message, choice);
+  useAppStore.getState().pushToast(kind, message, choice, detail);
 }
 
 /** The parameters a recognizer is asked with, absent ones left out. */
@@ -189,11 +190,21 @@ export const useTranscribeStore = create<TranscribeState>()((set, get) => ({
           : i18n.t("clip:textPanel.transcribed", { cues: cues.length }),
       );
     } catch (problem) {
-      if (isApiError(problem, "PROVIDER_NOT_CONFIGURED")) {
-        toast("error", i18n.t("clip:textPanel.noAsrModel"), {
-          label: i18n.t("clip:textPanel.openSettings"),
-          go: () => useModelStore.getState().openSettings("asr"),
-        });
+      if (isConfigurationTrouble(problem)) {
+        // The reason under the setup line: a model that is missing its key
+        // says so, in the reader's language, rather than only that none is set.
+        const trouble = errorText(problem);
+        toast(
+          "error",
+          i18n.t("clip:textPanel.noAsrModelReason", {
+            reason: trouble.message,
+          }),
+          {
+            label: i18n.t("clip:textPanel.openSettings"),
+            go: () => useModelStore.getState().openSettings("asr"),
+          },
+          trouble.detail,
+        );
       } else {
         set({
           error: problem instanceof Error ? problem.message : String(problem),

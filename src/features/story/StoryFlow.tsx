@@ -221,7 +221,12 @@ function StepButton({
           ? t("story:steps.locked", { step: t(`story:step.${previous}`) })
           : failure === null
             ? t(`story:stepHint.${step}`)
-            : t("story:jobs.stepFailed", { failed: failure.failed })
+            : failure.reasons.length === 0
+              ? t("story:jobs.stepFailed", { failed: failure.failed })
+              : t("story:jobs.stepFailedWith", {
+                  failed: failure.failed,
+                  reason: failure.reasons[0],
+                })
       }
       type="button"
     >
