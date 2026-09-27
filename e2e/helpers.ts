@@ -316,7 +316,7 @@ function endpoint(capability: Capability): string {
       return `${PROVIDER_ADDRESS}/images/generations`;
     case "video":
       return `${PROVIDER_ADDRESS}/videos`;
-    case "audio":
+    case "speech":
       return `${PROVIDER_ADDRESS}/audio/speech`;
   }
 }
@@ -340,7 +340,7 @@ function protocolOf(capability: Capability): string {
       return "openaiImages";
     case "video":
       return "openaiVideos";
-    case "audio":
+    case "speech":
       return "openaiSpeech";
   }
 }
@@ -363,12 +363,6 @@ export async function configureModels(
      * model.json is what says which endpoint it is asked at.
      */
     converter?: keyof typeof CONVERTER_ENDPOINTS;
-    /**
-     * What the model is kept for. `default` is the category's own choice;
-     * `music` is the one place that is not a category — the model a telling's
-     * score is composed with, which leaves the audio default to the voice.
-     */
-    role?: "default" | "music";
   }[],
 ): Promise<void> {
   for (const model of models) {
@@ -397,10 +391,7 @@ export async function configureModels(
     }
   }
   const defaults = Object.fromEntries(
-    models.map((model) => [
-      model.role === "music" ? "music" : model.capability,
-      model.id,
-    ]),
+    models.map((model) => [model.capability, model.id]),
   );
   const patched = await fetch(`${APP}/api/v1/models/defaults`, {
     method: "PATCH",
@@ -431,8 +422,8 @@ export async function configureWordsAndPictures(): Promise<void> {
 
 /**
  * Pictures, words, clips and sound: everything a telling is made of, up to the
- * point where the shots are filmed. Two audio models, because a telling asks
- * two things of sound — a voice reads its lines and a converter composes the
+ * point where the shots are filmed. Two sound capabilities, because a telling
+ * asks two things of sound — a voice reads its lines and a composer writes the
  * music under them.
  */
 export async function configureTheWholeStudio(): Promise<void> {
@@ -440,16 +431,15 @@ export async function configureTheWholeStudio(): Promise<void> {
     { id: PAINTER, capability: "image", alias: "Painter" },
     { id: STORYTELLER, capability: "text", alias: "Storyteller" },
     { id: VIDEOGRAPHER, capability: "video", alias: "Videographer" },
-    { id: SPEAKER, capability: "audio", alias: "Speaker" },
+    { id: SPEAKER, capability: "speech", alias: "Speaker" },
     {
       id: MUSICIAN,
-      capability: "audio",
+      capability: "music",
       alias: "Musician",
       converter: "bailianMusic",
-      role: "music",
     },
   ]);
 }
 
 /** Which of the things a model is asked for. */
-type Capability = "text" | "image" | "video" | "audio";
+type Capability = "text" | "image" | "video" | "speech" | "music";
