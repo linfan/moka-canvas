@@ -49,6 +49,7 @@
   "providerAuth": "the provider rejected the stored credential",
   "providerBadRequest": "the provider rejected the request",
   "providerNoOutput": "the provider returned no usable output",
+  "providerKeyMissing": "the model {{model}} has no stored API key",
   "providerNotConfigured": "No model is configured for this capability",
   "providerRateLimit": "the provider is rate limiting requests",
   "providerTimeout": "the provider did not answer in time",

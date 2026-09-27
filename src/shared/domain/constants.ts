@@ -604,6 +604,7 @@ export const PROBLEM_CODES = [
   "METADATA_WRITE_FAILED",
   "METADATA_SCHEMA_UNSUPPORTED",
   "PROVIDER_NOT_CONFIGURED",
+  "PROVIDER_KEY_MISSING",
   "PROVIDER_AUTH",
   "PROVIDER_RATE_LIMIT",
   "PROVIDER_UNAVAILABLE",
@@ -643,3 +644,21 @@ export const PROBLEM_CODES = [
   "INTERNAL",
 ] as const;
 export type ProblemCode = (typeof PROBLEM_CODES)[number];
+
+/**
+ * The troubles a reader repairs in Settings rather than by asking again.
+ *
+ * A model that is not there, one that holds no key, a credential the provider
+ * refused, and a model that cannot do what was asked of it: every one of them
+ * comes back the same way however many times it is asked, so a report of one
+ * offers the place the fix is instead of another try.
+ */
+export const CONFIGURATION_PROBLEM_CODES = [
+  "PROVIDER_NOT_CONFIGURED",
+  "PROVIDER_KEY_MISSING",
+  "PROVIDER_AUTH",
+  "MODEL_CAPABILITY_MISMATCH",
+  "GENERATION_CAPABILITY_MISMATCH",
+  "GENERATION_MODEL_MISSING",
+  "EXECUTOR_DISABLED",
+] as const;

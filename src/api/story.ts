@@ -76,6 +76,12 @@ export interface StoryJobItem {
   taskId?: string;
   progress?: number;
   error?: string;
+  /**
+   * What kind of trouble it was and the values behind it — which model, which
+   * capability — so the same failure can be said in the reader's own language.
+   */
+  errorCode?: string;
+  errorDetails?: Record<string, unknown>;
   /** Whether asking again, as things stand, is worth doing. */
   retryable?: boolean;
   startedAt?: IsoTimestamp;

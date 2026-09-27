@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { ApiError } from "../../api/client";
 import { i18n } from ".";
-import { problemKey, problemMessage } from "./problems";
+import { failureText, problemKey, problemMessage } from "./problems";
 
 // The suite is pinned to English by the shared setup; each case says which
 // language it reads in, and this puts the catalogue back afterwards.
@@ -119,6 +119,48 @@ describe("problemMessage in Chinese", () => {
   });
 });
 
+describe("failureText", () => {
+  // The one renderer for the trouble a record carries: a job's piece, a run's
+  // step, both saying what was said and what kind of thing it was.
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  it("says nothing for a piece with nothing to report", () => {
+    expect(failureText({})).toBeNull();
+    expect(failureText({ error: "" })).toBeNull();
+  });
+
+  it("takes an old record's words as they are", () => {
+    expect(failureText({ error: "the provider refused it" })).toBe(
+      "the provider refused it",
+    );
+  });
+
+  it("says a talked-about code in the reader's language", async () => {
+    const failed = {
+      error: "model gpt-4o-mini has no stored API key",
+      errorCode: "PROVIDER_KEY_MISSING",
+      errorDetails: { model: "gpt-4o-mini" },
+    };
+    expect(failureText(failed)).toBe("model gpt-4o-mini has no stored API key");
+    await i18n.changeLanguage("zh");
+    expect(failureText(failed)).toBe(
+      "模型 gpt-4o-mini 还没有保存 API 密钥，请到设置里填写",
+    );
+  });
+
+  it("falls back to the recorded words for a code with no translation", async () => {
+    await i18n.changeLanguage("zh");
+    expect(
+      failureText({
+        error: "The piece stopped without an answer",
+        errorCode: "STEP_FAILED",
+      }),
+    ).toBe("The piece stopped without an answer");
+  });
+});
+
 describe("ApiError", () => {
   it("shows a Chinese problem body in Chinese and keeps its parts", async () => {
     await i18n.changeLanguage("zh");
@@ -126,13 +168,36 @@ describe("ApiError", () => {
       code: "PROVIDER_RATE_LIMIT",
       message: "the provider is rate limiting requests: come back in 42s",
       status: 429,
-      details: { retryable: true },
+      details: { detail: "come back in 42s", retryable: true },
     });
 
     expect(error.message).toBe("服务商正在限流，请稍后重试");
     expect(error.code).toBe("PROVIDER_RATE_LIMIT");
     expect(error.status).toBe(429);
-    expect(error.details).toEqual({ retryable: true });
+    expect(error.details).toEqual({
+      detail: "come back in 42s",
+      retryable: true,
+    });
+    // What only the provider could say is kept as it said it, for a reader who
+    // wants the whole of it.
+    expect(error.rawMessage).toBe(
+      "the provider is rate limiting requests: come back in 42s",
+    );
+  });
+
+  it("keeps the server's sentence whole and says which model has no key", async () => {
+    await i18n.changeLanguage("zh");
+    const error = new ApiError({
+      code: "PROVIDER_KEY_MISSING",
+      message: "model gpt-4o-mini has no stored API key",
+      status: 422,
+      details: { model: "gpt-4o-mini" },
+    });
+
+    expect(error.message).toBe(
+      "模型 gpt-4o-mini 还没有保存 API 密钥，请到设置里填写",
+    );
+    expect(error.rawMessage).toBe("model gpt-4o-mini has no stored API key");
   });
 
   it("shows the client's own transport words in Chinese", async () => {

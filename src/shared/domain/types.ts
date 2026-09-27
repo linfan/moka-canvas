@@ -1263,6 +1263,9 @@ export interface RunStepRecord {
   startedAt?: IsoTimestamp;
   finishedAt?: IsoTimestamp;
   error?: string;
+  /** What kind of trouble the step hit, and the values behind it. */
+  errorCode?: string;
+  errorDetails?: Record<string, unknown>;
   outputAssetIds?: AssetId[];
   outputText?: string;
   /**
@@ -1294,6 +1297,9 @@ export interface RunRecord {
   assistantSessionId?: SessionId;
   steps: RunStepRecord[];
   error?: string;
+  /** The trouble the run ended on, as the step that hit it classified it. */
+  errorCode?: string;
+  errorDetails?: Record<string, unknown>;
   cancelRequested: boolean;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;

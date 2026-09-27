@@ -65,3 +65,28 @@ export function problemMessage(
   const said = i18n.t(key, { code, message: fallback, ...filledIn(values) });
   return UNFILLED.test(said) ? fallback : said;
 }
+
+/**
+ * What a piece of work that failed has to say for itself, in the reader's
+ * language.
+ *
+ * The same fields a job's piece and a run's step both carry: what was said,
+ * and — when the writer knew — what kind of trouble it was and the values
+ * behind it. A record written before the codes existed says what it says and
+ * is taken as it is; one that names its trouble is said the reader's way, and
+ * falls back to the writer's English when the words are not known yet.
+ *
+ * Null for a piece with nothing to report, which is a piece that was not the
+ * reader's to hear about.
+ */
+export function failureText(failure: {
+  error?: string;
+  errorCode?: string;
+  errorDetails?: Record<string, unknown>;
+}): string | null {
+  const said = failure.error;
+  if (said === undefined || said === "") return null;
+  const code = failure.errorCode;
+  if (code === undefined) return said;
+  return problemMessage(code, said, failure.errorDetails);
+}

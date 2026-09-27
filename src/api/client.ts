@@ -1,3 +1,4 @@
+import { CONFIGURATION_PROBLEM_CODES } from "../shared/domain/constants";
 import type { ProblemCode } from "../shared/domain";
 import { problemMessage, type ProblemValues } from "../shared/i18n/problems";
 
@@ -12,6 +13,15 @@ export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
   readonly details?: Record<string, unknown>;
+  /**
+   * What the server said, as it said it.
+   *
+   * Kept beside the sentence this error shows: a Chinese interface reads the
+   * catalogue's words, and the catalogue is the shorter of the two, so a
+   * reader who wants the model id or the provider's own explanation is owed
+   * the English the client was handed rather than only its translation.
+   */
+  readonly rawMessage: string;
 
   /**
    * `values` are the fields a Chinese message may read that the problem body
@@ -30,6 +40,7 @@ export class ApiError extends Error {
     this.code = problem.code;
     this.status = problem.status;
     this.details = problem.details;
+    this.rawMessage = problem.message;
   }
 
   /**
@@ -57,6 +68,55 @@ export function isApiError(error: unknown, code?: string): error is ApiError {
   return (
     error instanceof ApiError && (code === undefined || error.code === code)
   );
+}
+
+/**
+ * Whether a trouble a record names is one the reader repairs in Settings.
+ *
+ * Read off a code alone, since that is all a record of something that failed
+ * carries: a piece of a story batch and a step of a run say what kind of
+ * trouble they hit without an error object to be handed around.
+ */
+export function isConfigurationCode(code: string | undefined): boolean {
+  return (
+    code !== undefined &&
+    (CONFIGURATION_PROBLEM_CODES as readonly string[]).includes(code)
+  );
+}
+
+/**
+ * Whether the reader can fix this in Settings rather than by asking again.
+ *
+ * The troubles a second ask repeats verbatim: a model that is not there, one
+ * that holds no key, a credential the provider refused, and a model that
+ * cannot do what was asked of it. Everything else — a busy provider, a slow
+ * one, a refusal of one particular request — is either worth another try or
+ * worth reading before it is.
+ */
+export function isConfigurationTrouble(error: unknown): boolean {
+  return isConfigurationCode(
+    error instanceof ApiError ? error.code : undefined,
+  );
+}
+
+/**
+ * What to say about a failure that reached the client as an error.
+ *
+ * The sentence this client shows — the catalogue's words for a known code, the
+ * server's own otherwise — and, when the catalogue said them instead of the
+ * server, the server's words as the detail: a reader who wants the model id or
+ * the provider's explanation can then be given it without being sent to an
+ * interface in another language.
+ */
+export function errorText(error: unknown): {
+  message: string;
+  detail?: string;
+} {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!(error instanceof ApiError)) return { message };
+  return error.rawMessage === message
+    ? { message }
+    : { message, detail: error.rawMessage };
 }
 
 interface RequestOptions {
@@ -112,6 +172,25 @@ async function request<T>(
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
+  const problem = await readProblem(response);
+  if (problem !== null) return problem;
+  return new ApiError({
+    code: "INTERNAL",
+    message: `Request failed with status ${response.status}`,
+    status: response.status,
+  });
+}
+
+/**
+ * The problem a response body names, when it names one.
+ *
+ * Read apart from the shape a request handler wants so a caller with its own
+ * response — a stream whose frames are read by hand — can say the same trouble
+ * the same way, rather than reporting a status code and losing the reason.
+ */
+export async function readProblem(
+  response: Response,
+): Promise<ApiError | null> {
   try {
     const problem = (await response.json()) as Partial<ProblemBody>;
     if (
@@ -126,13 +205,9 @@ async function toApiError(response: Response): Promise<ApiError> {
       });
     }
   } catch {
-    // fall through to the generic status error
+    // No body to read, which leaves the status as the whole of what is known.
   }
-  return new ApiError({
-    code: "INTERNAL",
-    message: `Request failed with status ${response.status}`,
-    status: response.status,
-  });
+  return null;
 }
 
 function requestWithProgress<T>(
