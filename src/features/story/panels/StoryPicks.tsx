@@ -55,27 +55,32 @@ export function StoryPicks({
       >
         <h2>{t("story:panels.picks", { label })}</h2>
         <div className="story-picks-grid">
-          {takes.map((take) => (
-            <button
-              className={`story-pick${take.assetId === current ? " is-current" : ""}`}
-              data-testid={`story-pick-${take.assetId}`}
-              key={take.assetId}
-              onClick={() => onChoose(take.assetId)}
-              type="button"
-            >
-              <img alt={label} src={assetUrl(take.assetId)} />
-              <span className="story-pick-foot">
-                {take.createdAt === undefined
-                  ? t("story:panels.pickUndated")
-                  : relativeTime(take.createdAt)}
-                {take.assetId === current && (
-                  <span className="story-pick-current">
-                    {t("story:panels.pickCurrent")}
-                  </span>
-                )}
-              </span>
-            </button>
-          ))}
+          {takes.map((take) => {
+            // A place with a history of takes is drawn: every take here is one
+            // file, whatever the act clips beside it may be.
+            const file = take.assetIds[0];
+            return (
+              <button
+                className={`story-pick${file === current ? " is-current" : ""}`}
+                data-testid={`story-pick-${file}`}
+                key={file}
+                onClick={() => onChoose(file)}
+                type="button"
+              >
+                <img alt={label} src={assetUrl(file)} />
+                <span className="story-pick-foot">
+                  {take.createdAt === undefined
+                    ? t("story:panels.pickUndated")
+                    : relativeTime(take.createdAt)}
+                  {file === current && (
+                    <span className="story-pick-current">
+                      {t("story:panels.pickCurrent")}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
         <div className="dialog-actions">
           <button onClick={onClose} type="button">

@@ -387,8 +387,12 @@ function encodeTimeline(timeline: TimelineDocument): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 function encodeStoryTake(take: StoryTake): Record<string, unknown> {
+  // One file keeps the shape every document has always written; a take made of
+  // pieces — an act filmed in several — says so under a field of its own.
   const doc: Record<string, unknown> = {
-    assetId: take.assetId,
+    ...(take.assetIds.length === 1
+      ? { assetId: take.assetIds[0] }
+      : { assetIds: [...take.assetIds] }),
     createdAt: take.createdAt,
   };
   if (take.jobId !== undefined) doc.jobId = take.jobId;
@@ -1197,8 +1201,16 @@ function fallbackOneOf<T extends string>(
 
 function decodeStoryTake(value: unknown): StoryTake {
   const doc = asRecord(value, "stories[].takes[]");
+  // A take written before an act could be filmed in pieces carries the one
+  // file it is; one made of pieces carries them in the order they play.
+  const assetIds =
+    doc.assetIds === undefined
+      ? [asString(doc.assetId, "takes[].assetId")]
+      : asArray(doc.assetIds, "takes[].assetIds").map((held) =>
+          asString(held, "takes[].assetIds[]"),
+        );
   const take: StoryTake = {
-    assetId: asString(doc.assetId, "takes[].assetId"),
+    assetIds,
     createdAt: asString(doc.createdAt, "takes[].createdAt"),
   };
   if (doc.jobId !== undefined) take.jobId = optionalString(doc.jobId);

@@ -47,7 +47,7 @@ function route(url: string): Response {
   if (url === "/api/v1/config") return json(CONFIG);
   if (url === "/api/health") return json({ status: "ok" });
   if (url === "/api/v1/recent-projects") return json(RECENTS);
-  if (url === "/api/v1/projects/open") {
+  if (url === "/api/v1/projects" || url === "/api/v1/projects/open") {
     return json({
       root: "/tmp/golden",
       moka: buildGoldenMokaFile(),
@@ -146,6 +146,29 @@ describe("app boot", () => {
     expect(useAppStore.getState().phase).toBe("story");
     expect(useProjectStore.getState().moka).not.toBeNull();
     expect(screen.queryByTestId("canvas-host")).toBeNull();
+  });
+
+  it("lands a new project in the story room", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New project" }));
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(
+      within(dialog).getByPlaceholderText("/Users/you/Movies/My project"),
+      { target: { value: "/tmp/fresh" } },
+    );
+    fireEvent.change(within(dialog).getByPlaceholderText("Launch teaser"), {
+      target: { value: "Launch teaser" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "New project" }),
+    );
+
+    // A project made here starts with a telling rather than a board to fill:
+    // the story room is the room it lands in.
+    expect(await screen.findByTestId("story-page")).toBeTruthy();
+    expect(useAppStore.getState().phase).toBe("story");
+    expect(useProjectStore.getState().moka).not.toBeNull();
   });
 
   it("walks between the board and the cutting room from the corner menu", async () => {

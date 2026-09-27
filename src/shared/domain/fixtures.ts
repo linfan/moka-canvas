@@ -1149,7 +1149,7 @@ export function buildStoryMokaFile(): MokaFile {
                   art: {
                     takes: [
                       {
-                        assetId: ids.frameArt,
+                        assetIds: [ids.frameArt],
                         jobId: "job-1",
                         itemId: `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
                         note: "按关键帧生成",
@@ -1178,7 +1178,7 @@ export function buildStoryMokaFile(): MokaFile {
               video: {
                 takes: [
                   {
-                    assetId: ids.actVideo,
+                    assetIds: [ids.actVideo],
                     jobId: "job-2",
                     itemId: `actVideo:${ids.chapterFirst}:${ids.act}`,
                     note: "按幕生成，5.0s",
@@ -1209,11 +1209,11 @@ export function buildStoryMokaFile(): MokaFile {
           descriptionConfirmed: true,
           chapterIds: [ids.chapterFirst],
           main: {
-            takes: [{ assetId: ids.heroMain, createdAt: T0 }],
+            takes: [{ assetIds: [ids.heroMain], createdAt: T0 }],
             confirmed: true,
           },
           turnaround: {
-            takes: [{ assetId: ids.heroSheet, createdAt: T0 }],
+            takes: [{ assetIds: [ids.heroSheet], createdAt: T0 }],
             confirmed: true,
           },
         },
@@ -1225,7 +1225,7 @@ export function buildStoryMokaFile(): MokaFile {
           descriptionConfirmed: true,
           chapterIds: [ids.chapterFirst],
           main: {
-            takes: [{ assetId: ids.partnerMain, createdAt: T0 }],
+            takes: [{ assetIds: [ids.partnerMain], createdAt: T0 }],
             confirmed: true,
           },
           turnaround: { takes: [], confirmed: false },
@@ -1238,7 +1238,7 @@ export function buildStoryMokaFile(): MokaFile {
           descriptionConfirmed: true,
           chapterIds: [ids.chapterFirst],
           main: {
-            takes: [{ assetId: ids.sceneMain, createdAt: T0 }],
+            takes: [{ assetIds: [ids.sceneMain], createdAt: T0 }],
             confirmed: true,
           },
         },

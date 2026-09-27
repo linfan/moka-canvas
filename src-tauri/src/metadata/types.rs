@@ -102,6 +102,12 @@ pub struct ModelConfig {
     pub model: String,
     /// What the settings list and model pickers show.
     pub display_name: String,
+    /// The longest one clip this model can film, in seconds, when the
+    /// deployment knows it. A provider films what its model takes, and a
+    /// telling longer than that is filmed in pieces the length of this one;
+    /// absent means the app's own ceiling stands in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_video_seconds: Option<u32>,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -117,6 +123,8 @@ pub struct ModelDraft {
     pub url: String,
     pub model: String,
     pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_video_seconds: Option<u32>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
@@ -484,6 +492,7 @@ mod tests {
             url: "https://api.openai.com/v1/chat/completions".to_string(),
             model: "gpt-4o".to_string(),
             display_name: "GPT-4o".to_string(),
+            max_video_seconds: None,
             enabled: true,
         };
         let json = serde_json::to_string(&config).unwrap();

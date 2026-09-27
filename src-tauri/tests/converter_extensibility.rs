@@ -262,6 +262,7 @@ async fn a_converter_dropped_into_the_models_tree_becomes_a_usable_protocol() {
             url: format!("{base_url}/v1/greeting"),
             model: "hello-1".into(),
             display_name: "Greeter".into(),
+            max_video_seconds: None,
             enabled: true,
             expected_revision: None,
         })
@@ -327,6 +328,7 @@ async fn a_protocol_with_no_directory_behind_it_is_refused_where_it_is_configure
             url: "https://provider.test/v1/wand".into(),
             model: "wand".into(),
             display_name: "Wand".into(),
+            max_video_seconds: None,
             enabled: true,
             expected_revision: None,
         })

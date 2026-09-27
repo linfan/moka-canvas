@@ -64,6 +64,7 @@ fn draft(id: &str, category: Capability) -> ModelDraft {
         url: url.to_string(),
         model: format!("model-{id}"),
         display_name: format!("Model {id}"),
+        max_video_seconds: None,
         enabled: true,
         expected_revision: None,
     }

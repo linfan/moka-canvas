@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { assetUrl } from "../../../api/assets";
-import { currentTake } from "../../../shared/domain/story";
+import { currentTake, takeFile } from "../../../shared/domain/story";
 import type { StorySlot } from "../../../shared/domain/types";
 import { StoryLightbox } from "./StoryLightbox";
 import { StoryPicks } from "./StoryPicks";
@@ -96,7 +96,7 @@ export function StorySlotView({
             style={{ aspectRatio: ratio }}
             type="button"
           >
-            <img alt={label} src={assetUrl(take.assetId)} />
+            <img alt={label} src={assetUrl(take.assetIds[0])} />
           </button>
           {busy === true && (
             // A picture being made again over the one it will replace: the
@@ -151,7 +151,7 @@ export function StorySlotView({
 
       {picking && (
         <StoryPicks
-          current={take?.assetId}
+          current={takeFile(take)}
           label={label}
           onChoose={choose}
           onClose={() => setPicking(false)}
@@ -160,7 +160,7 @@ export function StorySlotView({
       )}
       {zoomed && take !== undefined && (
         <StoryLightbox
-          assetId={take.assetId}
+          assetIds={[take.assetIds[0]]}
           label={`${label}${note === undefined ? "" : ` · ${note}`}`}
           onClose={() => setZoomed(false)}
         />

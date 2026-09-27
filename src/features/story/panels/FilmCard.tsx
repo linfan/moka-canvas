@@ -75,7 +75,7 @@ export function FilmCard({
   const done =
     task?.status === "done" && task.assetId !== undefined ? task : undefined;
   useEffect(() => {
-    if (done === undefined || done.assetId === film?.assetId) return;
+    if (done === undefined || done.assetId === film?.assetIds[0]) return;
     let alive = true;
     void useProjectStore
       .getState()
@@ -95,7 +95,7 @@ export function FilmCard({
             storyId: story.id,
             patch: {
               film: {
-                assetId,
+                assetIds: [assetId],
                 jobId: done.id,
                 itemId: "export",
                 note: name,
@@ -119,7 +119,7 @@ export function FilmCard({
     return () => {
       alive = false;
     };
-  }, [done, film?.assetId, story]);
+  }, [done, film?.assetIds, story]);
 
   // Polling while a render is live, and only then.
   useEffect(() => {
@@ -178,7 +178,7 @@ export function FilmCard({
   const resource =
     film === undefined || moka === null
       ? undefined
-      : findResource(moka, film.assetId);
+      : findResource(moka, film.assetIds[0]);
   const problem =
     error ??
     (task !== null && !live && task.status !== "done"
@@ -209,11 +209,11 @@ export function FilmCard({
             controls
             data-testid="story-film-video"
             preload="metadata"
-            src={assetUrl(film.assetId)}
+            src={assetUrl(film.assetIds[0])}
           />
           <p className="story-hint" data-testid="story-film-line">
             {t("story:edit.filmLine", {
-              name: resource?.name ?? film.assetId,
+              name: resource?.name ?? film.assetIds[0],
               duration: formatDuration(resource?.probe?.durationMs ?? 0),
               size:
                 resource?.probe?.width === undefined
@@ -297,7 +297,7 @@ export function FilmCard({
         {film !== undefined && (
           <button
             data-testid="story-film-reveal"
-            onClick={() => void reveal(film.assetId)}
+            onClick={() => void reveal(film.assetIds[0])}
             type="button"
           >
             {t("story:edit.reveal")}

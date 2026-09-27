@@ -94,6 +94,9 @@ pub struct ModelView {
     pub url: String,
     pub model: String,
     pub display_name: String,
+    /// The longest one clip this model films, when the deployment knows it.
+    /// `None` means the app's own ceiling stands in for it.
+    pub max_video_seconds: Option<u32>,
     pub enabled: bool,
     pub api_key: ApiKeyView,
 }
@@ -171,6 +174,7 @@ impl ModelRepo {
                 url: model.url,
                 model: model.model,
                 display_name: model.display_name,
+                max_video_seconds: model.max_video_seconds,
                 enabled: model.enabled,
                 api_key: ApiKeyView::disclosed(secret),
             });
@@ -230,6 +234,10 @@ impl ModelRepo {
                 draft.category.as_str()
             )));
         }
+        // A clip ceiling is a fact about a video model and means nothing for
+        // any other kind: a text model carrying one is dropped rather than
+        // refused, since what it asks for is a form that never had the field.
+        draft.max_video_seconds = check_video_ceiling(draft.category, draft.max_video_seconds)?;
         Ok(self.metadata.upsert_model(&draft).await?)
     }
 
@@ -404,6 +412,7 @@ impl ModelRepo {
             url: SEED_URL.to_string(),
             model: SEED_MODEL_NAME.to_string(),
             display_name: SEED_DISPLAY_NAME.to_string(),
+            max_video_seconds: None,
             enabled: true,
             expected_revision: Some(snapshot.revision),
         };
@@ -619,6 +628,28 @@ fn validate_identifier(value: &str) -> Result<(), ProviderError> {
     Ok(())
 }
 
+/// The clip ceiling a configuration may keep, or the refusal it is.
+///
+/// Only a video model has a window of its own, and a number outside what one
+/// clip may be at all is nothing the app could plan with: it is refused rather
+/// than stored and discovered at the first long act.
+fn check_video_ceiling(
+    category: Capability,
+    seconds: Option<u32>,
+) -> Result<Option<u32>, ProviderError> {
+    if category != Capability::Video {
+        return Ok(None);
+    }
+    match seconds {
+        Some(seconds) if seconds == 0 || seconds > MAX_VIDEO_SECONDS => {
+            Err(ProviderError::invalid(format!(
+                "the longest clip must be between 1 and {MAX_VIDEO_SECONDS} seconds"
+            )))
+        }
+        other => Ok(other),
+    }
+}
+
 /// Bounds the numbers that reach a provider call. The rest of the
 /// preferences are free text the provider gets to reject.
 fn validate_preferences(preferences: &Preferences) -> Result<(), ProviderError> {
@@ -667,6 +698,7 @@ mod tests {
             url: "https://provider.test/v1/chat/completions".to_string(),
             model: id.to_string(),
             display_name: format!("Model {id}"),
+            max_video_seconds: None,
             enabled: true,
         }
     }
@@ -880,5 +912,27 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_preferences(&split_finer_than_a_line).is_err());
+    }
+
+    #[test]
+    fn a_clip_ceiling_belongs_to_a_video_model_and_is_bounded() {
+        assert_eq!(
+            check_video_ceiling(Capability::Video, Some(15)).unwrap(),
+            Some(15)
+        );
+        assert_eq!(check_video_ceiling(Capability::Video, None).unwrap(), None);
+        assert_eq!(
+            check_video_ceiling(Capability::Video, Some(MAX_VIDEO_SECONDS)).unwrap(),
+            Some(MAX_VIDEO_SECONDS)
+        );
+        assert!(check_video_ceiling(Capability::Video, Some(0)).is_err());
+        assert!(check_video_ceiling(Capability::Video, Some(MAX_VIDEO_SECONDS + 1)).is_err());
+
+        // A text model carrying a number is not a video model with a window:
+        // it is dropped, since the form it arrived from never had the field.
+        assert_eq!(
+            check_video_ceiling(Capability::Text, Some(15)).unwrap(),
+            None
+        );
     }
 }

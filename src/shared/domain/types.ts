@@ -599,9 +599,18 @@ export interface StorySlot {
   confirmed: boolean;
 }
 
-/** One drawing of one place: an asset, and where the ask for it is written down. */
+/**
+ * One filming of one place: the files it is made of, and where the ask for
+ * them is written down.
+ *
+ * Usually one file. An act longer than one clip may be is filmed in pieces and
+ * kept as the pieces, in the order they play, because that is what the provider
+ * could make of it: the card plays them one after another and the assembly lays
+ * them down end to end.
+ */
 export interface StoryTake {
-  assetId: AssetId;
+  /** The files, in the order they play; never empty. */
+  assetIds: AssetId[];
   /** The job item that drew it, so a redraw can tell its own work from a reader's. */
   jobId?: string;
   itemId?: string;

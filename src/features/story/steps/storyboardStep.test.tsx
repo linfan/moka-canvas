@@ -183,14 +183,14 @@ function boarded(): MokaFile {
   const story = moka.stories![0];
   settle(story, "周", (element) => {
     element.turnaround = {
-      takes: [{ assetId: "asset-partner-sheet", createdAt: T0 }],
+      takes: [{ assetIds: ["asset-partner-sheet"], createdAt: T0 }],
       confirmed: true,
     };
   });
   settle(story, "旧车票", (element) => {
     element.descriptionConfirmed = true;
     element.main = {
-      takes: [{ assetId: "asset-prop-main", createdAt: T0 }],
+      takes: [{ assetIds: ["asset-prop-main"], createdAt: T0 }],
       confirmed: true,
     };
   });
@@ -226,7 +226,7 @@ function withEveryFrame(): MokaFile {
     keyframe.art = {
       takes:
         keyframe.art.takes.length === 0
-          ? [{ assetId: `asset-${keyframe.id}`, createdAt: T0 }]
+          ? [{ assetIds: [`asset-${keyframe.id}`], createdAt: T0 }]
           : keyframe.art.takes,
       confirmed: true,
     };
@@ -314,7 +314,7 @@ function withFilmedShot(): MokaFile {
   story.shotGranularity = "keyframe";
   act.imagesConfirmed = true;
   act.keyframes[0]!.video = {
-    takes: [{ assetId: "asset-first-shot-clip", createdAt: T0 }],
+    takes: [{ assetIds: ["asset-first-shot-clip"], createdAt: T0 }],
     confirmed: true,
   };
   return moka;
@@ -356,7 +356,7 @@ function acts() {
 /** The voice-over of the act under test, as the take it holds. */
 function voice(): string | undefined {
   return currentTake(acts()[0]?.voice ?? { takes: [], confirmed: false })
-    ?.assetId;
+    ?.assetIds[0];
 }
 
 function card(index: number): HTMLElement {
@@ -433,6 +433,32 @@ function filmingAt(seconds: number): void {
         story: { splitChars: 12_000, readChars: 8_000 },
       },
       secretStorage: "unset",
+    },
+  });
+}
+
+/** The settings with a video model that films at most this long. */
+function filmingWithCeiling(maxSeconds: number): void {
+  filmingAt(6);
+  const view = useModelStore.getState().view;
+  if (view === null) throw new Error("the settings were just set");
+  useModelStore.setState({
+    view: {
+      ...view,
+      models: [
+        {
+          id: "filmer",
+          category: "video",
+          protocol: "bailianVideo",
+          url: "https://provider.test/video-synthesis",
+          model: "filmer",
+          displayName: "Filmer",
+          maxVideoSeconds: maxSeconds,
+          enabled: true,
+          apiKey: { set: false, masked: null },
+        },
+      ],
+      defaults: { ...view.defaults, video: "filmer" },
     },
   });
 }
@@ -781,20 +807,77 @@ describe("writing an episode's board", () => {
     expect(starts[1]!.items[0]?.id).toBe(starts[0]!.items[0]?.id);
   });
 
-  it("says out loud when the clip will be cut to the ceiling", async () => {
+  it("plays a clip filmed in pieces as the pieces, one after another", () => {
+    const moka = boarded();
+    const held = moka.stories![0].chapters[0]!.acts[0]!;
+    held.video = {
+      takes: [
+        {
+          assetIds: ["asset-piece-one", "asset-piece-two"],
+          createdAt: T0,
+        },
+      ],
+      confirmed: true,
+    };
+    openAtBoard(moka);
+    fireEvent.click(screen.getByTestId("story-act-video-0"));
+
+    const lightbox = screen.getByTestId("story-lightbox");
+    const piece = () => screen.getByTestId("story-lightbox-piece").textContent;
+    expect(piece()).toBe("Part 1 of 2");
+    expect(lightbox.querySelector("video")?.getAttribute("src")).toContain(
+      "asset-piece-one",
+    );
+
+    // The first piece ending opens the second, which is the order the card and
+    // the finished cut read them in.
+    fireEvent.ended(lightbox.querySelector("video")!);
+    expect(piece()).toBe("Part 2 of 2");
+    expect(lightbox.querySelector("video")?.getAttribute("src")).toContain(
+      "asset-piece-two",
+    );
+  });
+
+  it("asks a long act in pieces, and says so beside the plan", async () => {
+    // The video model films fifteen seconds at a time and the act runs for
+    // eighteen: it is filmed in two pieces, and the row says so before the ask.
     const moka = withoutTheClip();
-    const act = moka.stories![0].chapters[0]!.acts[0]!;
-    for (const keyframe of act.keyframes) keyframe.durationMs = 400_000;
+    const held = moka.stories![0].chapters[0]!.acts[0]!;
+    for (const keyframe of held.keyframes) keyframe.durationMs = 9_000;
+    filmingWithCeiling(15);
     openAtBoard(moka);
     fireEvent.click(screen.getByTestId("story-act-images-confirm-0"));
     await waitFor(() => expect(acts()[0]?.imagesConfirmed).toBe(true));
 
-    expect(screen.getByTestId("story-act-clamp-0").textContent).toContain(
-      "600",
-    );
+    expect(screen.getByTestId("story-act-split-0").textContent).toContain("2");
     fireEvent.click(screen.getByTestId("story-act-video-go-0"));
     await waitFor(() => expect(starts).toHaveLength(1));
-    expect(starts[0]!.items[0]?.params?.seconds).toBe(600);
+    expect(starts[0]!.items.map((item) => item.params?.seconds)).toEqual([
+      9, 9,
+    ]);
+    expect(starts[0]!.items.map((item) => item.id)).toEqual([
+      `actVideo:${ids.chapterFirst}:${ids.act}:1`,
+      `actVideo:${ids.chapterFirst}:${ids.act}:2`,
+    ]);
+  });
+
+  it("says out loud when a shot cannot be cut and the clip is cut short", async () => {
+    // A shot has no end to be cut at, so a shot longer than the model films is
+    // made as long as it can be, and the row says what the whole ask comes to.
+    const moka = withoutTheClip();
+    const held = moka.stories![0].chapters[0]!.acts[0]!;
+    for (const keyframe of held.keyframes) keyframe.durationMs = 900_000;
+    filmingWithCeiling(15);
+    openAtBoard(moka);
+    fireEvent.click(screen.getByTestId("story-act-images-confirm-0"));
+    await waitFor(() => expect(acts()[0]?.imagesConfirmed).toBe(true));
+
+    expect(screen.getByTestId("story-act-clamp-0").textContent).toContain("30");
+    fireEvent.click(screen.getByTestId("story-act-video-go-0"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    expect(starts[0]!.items.map((item) => item.params?.seconds)).toEqual([
+      15, 15,
+    ]);
   });
 
   it("films shot by shot, each from its own frame to the next", async () => {
@@ -802,7 +885,7 @@ describe("writing an episode's board", () => {
     const act = moka.stories![0].chapters[0]!.acts[0]!;
     act.imagesConfirmed = true;
     act.keyframes[1]!.art = {
-      takes: [{ assetId: "asset-second-frame", createdAt: T0 }],
+      takes: [{ assetIds: ["asset-second-frame"], createdAt: T0 }],
       confirmed: true,
     };
     openAtBoard(moka);
@@ -996,7 +1079,7 @@ describe("writing an episode's board", () => {
     const moka = withOpenTable();
     const act = moka.stories![0].chapters[0]!.acts[0]!;
     act.voice = {
-      takes: [{ assetId: "asset-act-voice", createdAt: T0 }],
+      takes: [{ assetIds: ["asset-act-voice"], createdAt: T0 }],
       confirmed: true,
     };
     openAtBoard(moka);

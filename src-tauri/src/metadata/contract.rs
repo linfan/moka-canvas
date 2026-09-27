@@ -167,6 +167,7 @@ fn draft(id: &str, category: Capability) -> ModelDraft {
         url: "https://provider.example/v1/chat/completions".to_string(),
         model: format!("model-{id}"),
         display_name: format!("Model {id}"),
+        max_video_seconds: None,
         enabled: true,
         expected_revision: None,
     }

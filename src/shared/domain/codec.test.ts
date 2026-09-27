@@ -10,6 +10,7 @@ import {
   buildGoldenMokaFile,
   buildLegacyV1MokaFile,
   buildShelfMokaFile,
+  buildStoryMokaFile,
   buildTreeMokaFile,
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
@@ -177,6 +178,29 @@ describe("moka codec", () => {
     const golden = buildGenerationMokaFile();
     const decoded = decodeMokaFile(encodeMokaFile(golden));
     expect(normalize(decoded)).toEqual(normalize(golden));
+  });
+
+  it("keeps an act filmed in pieces whole, and one file as one file", () => {
+    const story = buildStoryMokaFile();
+    const clip = story.stories![0].chapters[0].acts[0].video.takes[0];
+    const one = clip.assetIds[0];
+    clip.assetIds = ["asset-piece-1", "asset-piece-2"];
+    const pieces = decodeMokaFile(encodeMokaFile(story));
+    expect(
+      pieces.stories![0].chapters[0].acts[0].video.takes[0].assetIds,
+    ).toEqual(["asset-piece-1", "asset-piece-2"]);
+
+    // A take of one file is written under the field every document has always
+    // carried and read back as the one-file take it is: what a drawing is does
+    // not change shape because clips learned to travel in pieces.
+    const single = buildStoryMokaFile();
+    expect(Buffer.from(encodeMokaFile(single)).includes("assetIds")).toBe(
+      false,
+    );
+    expect(
+      decodeMokaFile(encodeMokaFile(single)).stories![0].chapters[0].acts[0]
+        .video.takes[0].assetIds,
+    ).toEqual([one]);
   });
 
   /**

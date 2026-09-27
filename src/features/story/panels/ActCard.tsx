@@ -9,7 +9,6 @@ import {
   formatDuration,
   type StoryGuess,
 } from "../../../shared/domain";
-import { MAX_VIDEO_SECONDS } from "../../../shared/domain/constants";
 import type {
   DocumentCommand,
   MokaFile,
@@ -23,11 +22,12 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import {
-  clampSeconds,
+  actClipPieces,
   planActMusic,
   planActVideos,
   planActVoice,
   planKeyframeArt,
+  videoCeiling,
 } from "../jobs/plan";
 import { useStoryRun } from "../stores/storyJobStore";
 import { KeyframeTable } from "./KeyframeTable";
@@ -96,11 +96,16 @@ export function ActCard({
   const music = act.music === undefined ? undefined : currentTake(act.music);
 
   const plannedMs = actPlannedMs(act);
-  const seconds = clampSeconds(plannedMs);
-  // A clip is asked for in whole seconds and no longer than one may run, so a
-  // plan that is not the length it will be made at is worth saying out loud:
-  // the reader agreed to a shot that runs 6.4 seconds and is getting six.
-  const adjusted = seconds * 1000 !== plannedMs;
+  // How the clip will be asked for: one piece while the act fits in one of
+  // the video model's clips, and otherwise several, cut where its shots end.
+  // What the ask comes to is worth saying out loud when it is not the length
+  // the board planned: a shot that outran one clip is made as long as it can
+  // be, and an act filmed in pieces is made in pieces.
+  const ceiling = videoCeiling();
+  const pieces = actClipPieces(act, ceiling);
+  const askedSeconds = pieces.reduce((sum, piece) => sum + piece.seconds, 0);
+  const split = pieces.length > 1;
+  const adjusted = pieces.length > 0 && askedSeconds * 1000 !== plannedMs;
 
   const write = (patch: StoryActPatch) =>
     writeAct(story, chapterId, act, patch);
@@ -216,13 +221,25 @@ export function ActCard({
             seconds: Math.round((plannedMs / 1000) * 10) / 10,
           })}
         </span>
+        {split && (
+          <span
+            className="story-clamp"
+            data-testid={`story-act-split-${index}`}
+            title={t("story:storyboard.splitHint", { max: ceiling })}
+          >
+            {t("story:storyboard.split", {
+              count: pieces.length,
+              max: ceiling,
+            })}
+          </span>
+        )}
         {adjusted && (
           <span
             className="story-clamp"
             data-testid={`story-act-clamp-${index}`}
-            title={t("story:storyboard.clampHint", { max: MAX_VIDEO_SECONDS })}
+            title={t("story:storyboard.clampHint", { max: ceiling })}
           >
-            {t("story:storyboard.clamped", { seconds })}
+            {t("story:storyboard.clamped", { seconds: askedSeconds })}
           </span>
         )}
       </div>
@@ -454,7 +471,7 @@ export function ActCard({
               <video
                 muted
                 preload="metadata"
-                src={`/api/v1/projects/current/assets/${clip.assetId}`}
+                src={`/api/v1/projects/current/assets/${clip.assetIds[0]}`}
               />
             </button>
             {!perShot && (
@@ -524,11 +541,11 @@ export function ActCard({
                 controls
                 data-testid={`story-act-voice-${index}`}
                 preload="metadata"
-                src={assetUrl(voice.assetId)}
+                src={assetUrl(voice.assetIds[0])}
               />
               <span className="story-hint">
                 {t("story:voice.take", {
-                  seconds: secondsOf(moka, voice.assetId),
+                  seconds: secondsOf(moka, voice.assetIds[0]),
                 })}
               </span>
               <button
@@ -573,11 +590,11 @@ export function ActCard({
                 controls
                 data-testid={`story-act-music-${index}`}
                 preload="metadata"
-                src={assetUrl(music.assetId)}
+                src={assetUrl(music.assetIds[0])}
               />
               <span className="story-hint">
                 {t("story:voice.take", {
-                  seconds: secondsOf(moka, music.assetId),
+                  seconds: secondsOf(moka, music.assetIds[0]),
                 })}
               </span>
               <button
@@ -609,7 +626,7 @@ export function ActCard({
 
       {playing && clip !== undefined && (
         <StoryLightbox
-          assetId={clip.assetId}
+          assetIds={clip.assetIds}
           label={t("story:storyboard.playClip")}
           onClose={() => setPlaying(false)}
           video

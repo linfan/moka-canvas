@@ -483,7 +483,11 @@ export async function retryFailed(
 ): Promise<void> {
   const failed = job.items.filter((item) => item.status === "failed");
   if (failed.length === 0) return;
-  const items = failed.flatMap((item) => againFor(story, item));
+  // A place's ask is one piece per name however many of the old batch's pieces
+  // failed: an act filmed in pieces that lost two of them is asked for again as
+  // the act, and not as the same piece twice.
+  const planned = failed.flatMap((item) => againFor(story, item));
+  const items = [...new Map(planned.map((item) => [item.id, item])).values()];
   if (items.length === 0) return;
   await useStoryJobStore.getState().start(story.id, job.kind, items);
 }

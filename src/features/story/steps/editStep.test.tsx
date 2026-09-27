@@ -289,7 +289,9 @@ describe("the film of a telling", () => {
     await act(async () => {
       await useStoryExportStore.getState().setTask(renders[0]! as never);
     });
-    await waitFor(() => expect(story().edit.film?.assetId).toBe("asset-film"));
+    await waitFor(() =>
+      expect(story().edit.film?.assetIds[0]).toBe("asset-film"),
+    );
     await waitFor(() =>
       expect(screen.getByTestId("story-film-video")).toBeDefined(),
     );
@@ -352,7 +354,7 @@ function withTheFilm(base: MokaFile): MokaFile {
             edit: {
               ...held.edit,
               film: {
-                assetId: "asset-film",
+                assetIds: ["asset-film"],
                 jobId: "render-1",
                 itemId: "export",
                 note: "the film.mp4",

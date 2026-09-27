@@ -302,7 +302,7 @@ describe("finding the cast in the chapters", () => {
       "林",
       "末班车车厢",
     ]);
-    expect(slotOf("林", "main")?.takes[0]?.assetId).toBe(ids.heroMain);
+    expect(slotOf("林", "main")?.takes[0]?.assetIds[0]).toBe(ids.heroMain);
     expect(element("林")?.descriptionConfirmed).toBe(true);
     expect(starts[0]?.kind).toBe("elements");
     expect(starts[0]?.items[0]?.capability).toBe("text");
@@ -472,9 +472,9 @@ describe("a room opened again over what it has already read", () => {
         .sort(),
     ).toEqual(["候车厅", "恋人甲"]);
     expect(element("恋人甲")?.description).toBe("短碎黑发，秋夜外套。");
-    expect(slotOf("恋人甲", "main")?.takes.map((take) => take.assetId)).toEqual(
-      ["asset-lover-main"],
-    );
+    expect(
+      slotOf("恋人甲", "main")?.takes.map((take) => take.assetIds[0]),
+    ).toEqual(["asset-lover-main"]);
     expect(
       within(card("恋人甲", "character"))
         .getByTestId("story-slot-main")
@@ -906,9 +906,9 @@ describe("the pictures of an element", () => {
     const moka = buildStoryMokaFile();
     const hero = moka.stories![0].elements[0]!;
     hero.main.takes = [
-      { assetId: ids.heroMain, createdAt: "2026-01-02T00:00:00Z" },
-      { assetId: "asset-hero-b", createdAt: "2026-01-03T00:00:00Z" },
-      { assetId: "asset-hero-c", createdAt: "2026-01-04T00:00:00Z" },
+      { assetIds: [ids.heroMain], createdAt: "2026-01-02T00:00:00Z" },
+      { assetIds: ["asset-hero-b"], createdAt: "2026-01-03T00:00:00Z" },
+      { assetIds: ["asset-hero-c"], createdAt: "2026-01-04T00:00:00Z" },
     ];
     openAtElements(moka);
 
@@ -921,11 +921,9 @@ describe("the pictures of an element", () => {
     );
     fireEvent.click(screen.getByTestId("story-pick-asset-hero-b"));
 
-    expect(slotOf("林", "main")?.takes.map((take) => take.assetId)).toEqual([
-      ids.heroMain,
-      "asset-hero-c",
-      "asset-hero-b",
-    ]);
+    expect(slotOf("林", "main")?.takes.map((take) => take.assetIds[0])).toEqual(
+      [ids.heroMain, "asset-hero-c", "asset-hero-b"],
+    );
     expect(screen.queryByTestId("story-picks")).toBeNull();
   });
 
@@ -945,9 +943,9 @@ describe("the pictures of an element", () => {
     await waitFor(() => {
       expect(slotOf("林", "main")?.takes).toHaveLength(before + 1);
     });
-    expect(slotOf("林", "main")?.takes.map((take) => take.assetId)).toContain(
-      ids.heroMain,
-    );
+    expect(
+      slotOf("林", "main")?.takes.map((take) => take.assetIds[0]),
+    ).toContain(ids.heroMain);
   });
 
   it("asks for every missing picture at once, and says how many that is", async () => {

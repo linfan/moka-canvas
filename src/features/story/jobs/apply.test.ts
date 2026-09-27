@@ -86,6 +86,21 @@ beforeEach(() => {
   open();
 });
 
+/** One piece of an act's clip, as the room asks for it when an act is long. */
+function actPiece(
+  id: string,
+  assetId: string,
+  extra: Partial<StoryJobItem> = {},
+): StoryJobItem {
+  return item({
+    id,
+    target: { kind: "actVideo", chapterId: ids.chapterFirst, actId: ids.act },
+    capability: "video",
+    assetIds: [assetId],
+    ...extra,
+  });
+}
+
 describe("writing a batch's answers into the story", () => {
   it("files a drawing at the place its piece was for", () => {
     const report = applyJobResults(
@@ -97,7 +112,7 @@ describe("writing a batch's answers into the story", () => {
     const frame = story().chapters[0].acts[0].keyframes.find(
       (each) => each.id === ids.frameSecond,
     );
-    expect(frame?.art.takes.map((take) => take.assetId)).toEqual([
+    expect(frame?.art.takes.map((take) => take.assetIds[0])).toEqual([
       "asset-new-frame",
     ]);
     // The ask that drew it is written on the take, so a redraw can tell its own
@@ -119,10 +134,55 @@ describe("writing a batch's answers into the story", () => {
     const frame = story().chapters[0].acts[0].keyframes.find(
       (each) => each.id === ids.frameFirst,
     );
-    expect(frame?.art.takes.map((take) => take.assetId)).toEqual([
+    expect(frame?.art.takes.map((take) => take.assetIds[0])).toEqual([
       ids.frameArt,
       "asset-another-frame",
     ]);
+  });
+
+  it("keeps an act's pieces as the one clip they make, in the order they play", () => {
+    const base = `actVideo:${ids.chapterFirst}:${ids.act}`;
+    const pieces = [
+      actPiece(`${base}:1`, "asset-act-1"),
+      actPiece(`${base}:2`, "asset-act-2"),
+    ];
+    const report = applyJobResults(record("actVideo", pieces));
+
+    expect(report.applied).toBe(2);
+    expect(report.skipped).toBe(0);
+    const act = story().chapters[0].acts[0];
+    const clip = act.video.takes[act.video.takes.length - 1];
+    expect(clip?.assetIds).toEqual(["asset-act-1", "asset-act-2"]);
+    // The piece that opens the act is the ask written on the clip.
+    expect(clip?.itemId).toBe(`${base}:1`);
+
+    // Read again, the same pieces are not another clip.
+    const again = applyJobResults(record("actVideo", pieces));
+    expect(again.applied).toBe(0);
+    expect(again.skipped).toBe(2);
+    expect(story().chapters[0].acts[0].video.takes).toHaveLength(
+      act.video.takes.length,
+    );
+  });
+
+  it("writes no clip for an act whose pieces did not all come back", () => {
+    // A sequence with a piece missing is not a shorter act but a broken one:
+    // the film would run to something the board never planned.
+    const base = `actVideo:${ids.chapterFirst}:${ids.act}`;
+    const before = story().chapters[0].acts[0].video.takes.length;
+    const report = applyJobResults(
+      record("actVideo", [
+        actPiece(`${base}:1`, "asset-act-1"),
+        actPiece(`${base}:2`, "asset-act-2", {
+          status: "failed",
+          error: "the provider refused it",
+        }),
+      ]),
+    );
+
+    expect(report.applied).toBe(0);
+    expect(report.skipped).toBe(2);
+    expect(story().chapters[0].acts[0].video.takes).toHaveLength(before);
   });
 
   it("writes the chapters an outline answered with, keeping the boards", () => {
@@ -186,7 +246,7 @@ describe("writing a batch's answers into the story", () => {
     expect(report.notes).toEqual([]);
     const hero = story().elements.find((each) => each.id === ids.hero);
     expect(hero?.description).toBe("四十岁上下，灰呢大衣。");
-    expect(hero?.main.takes.map((take) => take.assetId)).toEqual([
+    expect(hero?.main.takes.map((take) => take.assetIds[0])).toEqual([
       ids.heroMain,
     ]);
   });
@@ -289,7 +349,7 @@ describe("writing a batch's answers into the story", () => {
 
     expect(report.applied).toBe(1);
     const act = story().chapters[0].acts[0];
-    expect(act.video.takes.map((take) => take.assetId)).toEqual([
+    expect(act.video.takes.map((take) => take.assetIds[0])).toEqual([
       ids.actVideo,
       "asset-new-act",
     ]);
@@ -331,10 +391,10 @@ describe("writing a batch's answers into the story", () => {
     const act = story().chapters[0].acts[0];
     // Both slots were absent before the answers; an answer makes the place
     // rather than being dropped for want of one.
-    expect(act.voice?.takes.map((take) => take.assetId)).toEqual([
+    expect(act.voice?.takes.map((take) => take.assetIds[0])).toEqual([
       "asset-new-voice",
     ]);
-    expect(act.music?.takes.map((take) => take.assetId)).toEqual([
+    expect(act.music?.takes.map((take) => take.assetIds[0])).toEqual([
       "asset-new-music",
     ]);
     // Nothing is confirmed on the reader's behalf.

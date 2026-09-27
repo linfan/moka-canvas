@@ -74,6 +74,32 @@ function settingsWithVideoSeconds(seconds: number): ModelsView {
   };
 }
 
+/**
+ * The settings with a video model that films at most this long, chosen as the
+ * deployment's default: the window a telling longer than it is filmed in
+ * pieces of.
+ */
+function settingsWithVideoCeiling(maxSeconds: number): ModelsView {
+  const view = settingsWithVideoSeconds(6);
+  return {
+    ...view,
+    models: [
+      {
+        id: "filmer",
+        category: "video",
+        protocol: "bailianVideo",
+        url: "https://provider.test/video-synthesis",
+        model: "filmer",
+        displayName: "Filmer",
+        maxVideoSeconds: maxSeconds,
+        enabled: true,
+        apiKey: { set: false, masked: null },
+      },
+    ],
+    defaults: { ...view.defaults, video: "filmer" },
+  };
+}
+
 /** The fixture with both shots of its first act set to run this long. */
 function plannedShot(ms: number): StoryDocument {
   const held = drawnStory();
@@ -114,7 +140,7 @@ function drawnStory(): StoryDocument {
                       art: {
                         takes: [
                           {
-                            assetId: "asset-frame-second",
+                            assetIds: ["asset-frame-second"],
                             createdAt: "2026-01-01T00:00:00Z",
                           },
                         ],
@@ -469,16 +495,81 @@ describe("planning the clips", () => {
     expect(score.prompt).toContain("18 seconds");
   });
 
-  it("still keeps a clip inside the length one may be", () => {
-    // Two shots of four hundred seconds is over thirteen minutes, past the ten
-    // a clip may run: what the app's own ceiling cuts is the board's
-    // arithmetic, and nothing in the settings is.
+  it("films an act longer than one clip may be in pieces, cut where its shots end", () => {
+    // The video model films fifteen seconds at a time, and this act is two
+    // nine-second shots: one clip would be refused by the provider, so the act
+    // travels as two, the second opening on the frame the first closed on and
+    // ending on the act's last frame. The names are the act's own with the
+    // piece's place, which is how the answers come home to one clip.
+    useModelStore.setState({ view: settingsWithVideoCeiling(15) });
+
+    const items = planActVideos(plannedShot(9_000), ids.chapterFirst, [
+      ids.act,
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      `actVideo:${ids.chapterFirst}:${ids.act}:1`,
+      `actVideo:${ids.chapterFirst}:${ids.act}:2`,
+    ]);
+    expect(items.map((item) => item.params?.seconds)).toEqual([9, 9]);
+    expect(items[0].prompt).toContain("part 1 of 2");
+    expect(items[1].prompt).toContain("part 2 of 2");
+    expect(items[0].prompt).toContain("about 9 seconds");
+    expect(items[0].inputs).toEqual([
+      { role: "firstFrame", assetId: ids.frameArt },
+    ]);
+    expect(items[1].inputs).toEqual([
+      { role: "firstFrame", assetId: "asset-frame-second" },
+    ]);
+    // Both are the act's: the target is the place the clip lands either way.
+    expect(items[0].target).toEqual(items[1].target);
+  });
+
+  it("keeps an act that fits in one clip as the one piece it is", () => {
+    useModelStore.setState({ view: settingsWithVideoCeiling(15) });
+
+    const items = planActVideos(plannedShot(5_000), ids.chapterFirst, [
+      ids.act,
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(`actVideo:${ids.chapterFirst}:${ids.act}`);
+    expect(items[0].params?.seconds).toBe(10);
+  });
+
+  it("asks for the act's own ceiling when the model declares none", () => {
+    // Two shots of four hundred seconds is over thirteen minutes; with no
+    // window of its own to go by, the app's own ceiling is what each piece is
+    // cut to, and the act travels as two pieces of four hundred.
     useModelStore.setState({ view: settingsWithVideoSeconds(6) });
 
     const items = planActVideos(plannedShot(400_000), ids.chapterFirst, [
       ids.act,
     ]);
-    expect(items[0].params?.seconds).toBe(600);
+    expect(items.map((item) => item.params?.seconds)).toEqual([400, 400]);
+
+    // A shot longer than that ceiling has no shot end to be cut at, and is
+    // asked for the longest one clip may be.
+    const [only] = planActVideos(plannedShot(900_000), ids.chapterFirst, [
+      ids.act,
+    ]);
+    expect(only.params?.seconds).toBe(600);
+  });
+
+  it("cuts pieces at shot ends even when one shot outruns the model", () => {
+    // Nine hundred seconds of one shot cannot be cut anywhere: the shot is
+    // asked for the longest the model films, and the piece after it is the
+    // other shot, so the act is still asked for in the order the board wrote.
+    useModelStore.setState({ view: settingsWithVideoCeiling(15) });
+
+    const items = planActVideos(plannedShot(900_000), ids.chapterFirst, [
+      ids.act,
+    ]);
+    expect(items.map((item) => item.params?.seconds)).toEqual([15, 15]);
+    expect(items[0].inputs).toEqual([
+      { role: "firstFrame", assetId: ids.frameArt },
+    ]);
+    expect(items[1].inputs).toEqual([
+      { role: "firstFrame", assetId: "asset-frame-second" },
+    ]);
   });
 });
 

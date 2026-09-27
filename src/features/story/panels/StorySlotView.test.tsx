@@ -10,7 +10,7 @@ import { StorySlotView } from "./StorySlotView";
 function slot(takes: string[], confirmed = false): StorySlot {
   return {
     takes: takes.map((assetId, at) => ({
-      assetId,
+      assetIds: [assetId],
       createdAt: `2026-01-0${at + 1}T00:00:00Z`,
     })),
     confirmed,
@@ -154,7 +154,7 @@ describe("slotWithCurrent", () => {
   it("keeps the chosen take as the newest, the rest in the order they were", () => {
     const held = slot(["asset-a", "asset-b", "asset-c"]);
     expect(
-      slotWithCurrent(held, "asset-b").takes.map((take) => take.assetId),
+      slotWithCurrent(held, "asset-b").takes.map((take) => take.assetIds[0]),
     ).toEqual(["asset-a", "asset-c", "asset-b"]);
     // A take that is not there leaves the place alone.
     expect(slotWithCurrent(held, "asset-gone")).toBe(held);

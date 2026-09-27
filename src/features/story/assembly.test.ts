@@ -60,7 +60,7 @@ function actFor(
     }));
   }
   act.video = {
-    takes: [{ assetId: videoId, createdAt: T0 }],
+    takes: [{ assetIds: [videoId], createdAt: T0 }],
     confirmed: true,
   };
   act.videoConfirmed = true;
@@ -110,13 +110,46 @@ describe("planAssembly", () => {
     expect(plan.warnings).toEqual([]);
   });
 
+  it("lays an act filmed in pieces down as the pieces, in order", () => {
+    // An act longer than one clip may be was filmed in two, the second opening
+    // where the first closed: the track reads them one after another, and the
+    // act is only as long as the material it is made of.
+    const moka = filmed({
+      secondAct: true,
+      videos: [
+        video("asset-piece-one", 5_000),
+        video("asset-piece-two", 4_000),
+        video("asset-video-2", 3_000),
+      ],
+    });
+    const held = story(moka);
+    held.chapters[0]!.acts[0]!.video = {
+      takes: [
+        {
+          assetIds: ["asset-piece-one", "asset-piece-two"],
+          createdAt: T0,
+        },
+      ],
+      confirmed: true,
+    };
+    const plan = planAssembly(held, moka);
+    expect(plan.units.map((unit) => unit.assetId)).toEqual([
+      "asset-piece-one",
+      "asset-piece-two",
+      "asset-video-2",
+    ]);
+    expect(plan.units.map((unit) => unit.startMs)).toEqual([0, 5_000, 9_000]);
+    expect(plan.totalPlannedMs).toBe(12_000);
+    expect(plan.warnings).toEqual([]);
+  });
+
   it("takes one clip per shot when the telling is filmed by shot", () => {
     const moka = filmed();
     const held = story(moka);
     held.shotGranularity = "keyframe";
     const act = held.chapters[0]!.acts[0]!;
     act.keyframes[0]!.video = {
-      takes: [{ assetId: ids.actVideo, createdAt: T0 }],
+      takes: [{ assetIds: [ids.actVideo], createdAt: T0 }],
       confirmed: true,
     };
     const plan = planAssembly(held, moka);
@@ -165,9 +198,7 @@ describe("planAssembly", () => {
   it("leaves out a clip whose material has left the project", () => {
     const moka = filmed({ secondAct: true, videos: [video("asset-video-2")] });
     const plan = planAssembly(story(moka), moka);
-    expect(plan.units.map((unit) => unit.take.assetId)).toEqual([
-      "asset-video-2",
-    ]);
+    expect(plan.units.map((unit) => unit.assetId)).toEqual(["asset-video-2"]);
     expect(plan.units[0]?.startMs).toBe(0);
     expect(plan.warnings.map((warning) => warning.kind)).toEqual([
       "assetMissing",
@@ -364,11 +395,11 @@ function sounded(): MokaFile {
   moka.resources.music = [sound("asset-act-music", 9_000)];
   const act = story(moka).chapters[0]!.acts[0]!;
   act.voice = {
-    takes: [{ assetId: "asset-act-voice", createdAt: T0 }],
+    takes: [{ assetIds: ["asset-act-voice"], createdAt: T0 }],
     confirmed: true,
   };
   act.music = {
-    takes: [{ assetId: "asset-act-music", createdAt: T0 }],
+    takes: [{ assetIds: ["asset-act-music"], createdAt: T0 }],
     confirmed: false,
   };
   return moka;

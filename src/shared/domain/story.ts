@@ -16,6 +16,7 @@ import {
   createKeyframe,
 } from "./factories";
 import type {
+  AssetId,
   StoryAct,
   StoryActSound,
   StoryAspect,
@@ -599,6 +600,15 @@ export function currentTake(slot: StorySlot): StoryTake | undefined {
 }
 
 /**
+ * The one file a take is, for the places that hold a single file: a drawing, a
+ * line read aloud, a shot's own clip. An act filmed in pieces keeps several,
+ * and this is the piece it opens on.
+ */
+export function takeFile(take: StoryTake | undefined): AssetId | undefined {
+  return take?.assetIds[0];
+}
+
+/**
  * A place with this take added.
  *
  * A take already kept is not kept twice, however many times a job's answer is
@@ -612,12 +622,20 @@ export function withTake(
   take: StoryTake,
   max: number = MAX_TAKES_PER_SLOT,
 ): StorySlot {
-  if (slot.takes.some((kept) => kept.assetId === take.assetId)) return slot;
+  if (slot.takes.some((kept) => sameFiles(kept, take))) return slot;
   const takes = [...slot.takes, take];
   return {
     ...slot,
     takes: takes.length > max ? takes.slice(takes.length - max) : takes,
   };
+}
+
+/** Whether two takes are the same files in the same order. */
+function sameFiles(one: StoryTake, other: StoryTake): boolean {
+  return (
+    one.assetIds.length === other.assetIds.length &&
+    one.assetIds.every((assetId, at) => assetId === other.assetIds[at])
+  );
 }
 
 /**
@@ -628,11 +646,11 @@ export function withTake(
  * in the order they were drawn in.
  */
 export function slotWithCurrent(slot: StorySlot, assetId: string): StorySlot {
-  const chosen = slot.takes.find((held) => held.assetId === assetId);
+  const chosen = slot.takes.find((held) => held.assetIds.includes(assetId));
   if (chosen === undefined) return slot;
   return {
     ...slot,
-    takes: [...slot.takes.filter((held) => held.assetId !== assetId), chosen],
+    takes: [...slot.takes.filter((held) => held !== chosen), chosen],
   };
 }
 
