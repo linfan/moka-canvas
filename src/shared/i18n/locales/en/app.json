@@ -6,7 +6,7 @@
   "tagline": "Local-first video workflow boards, direct your own story fluidly.",
   "recentProjects": "Recent projects",
   "loading": "Loading…",
-  "noProjects": "No projects yet. Create one to get started.",
+  "noProjects": "No projects yet, create one to get started",
   "removeRecent": "Remove {{name}} from recent projects",
   "openRecentRooms": "Open {{name}}",
   "newProject": "New project",

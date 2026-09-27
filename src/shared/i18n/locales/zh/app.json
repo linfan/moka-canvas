@@ -6,7 +6,7 @@
   "tagline": "本地优先的视频工作流，让每个人成为自己的导演。",
   "recentProjects": "最近项目",
   "loading": "加载中…",
-  "noProjects": "还没有项目。新建一个开始吧。",
+  "noProjects": "还没有项目，新建一个开始吧",
   "removeRecent": "从最近项目中移除 {{name}}",
   "openRecentRooms": "打开 {{name}}",
   "newProject": "新建项目",
