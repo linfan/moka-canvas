@@ -5,6 +5,7 @@ import {
   CAPABILITY_LABELS,
   MAX_MODEL_ID_LENGTH,
   MAX_MODEL_NAME_LENGTH,
+  MAX_VIDEO_SECONDS,
   type Capability,
 } from "../../shared/domain";
 import {
@@ -34,6 +35,8 @@ interface FormState {
   url: string;
   model: string;
   displayName: string;
+  /** The longest one clip may be, as text so a blank field can mean none. */
+  maxVideoSeconds: string;
   enabled: boolean;
   apiKey: string;
 }
@@ -58,6 +61,7 @@ function initialForm(
         0,
         MAX_MODEL_NAME_LENGTH,
       ),
+      maxVideoSeconds: ceilingText(copySource.maxVideoSeconds),
       enabled: copySource.enabled,
       apiKey: "",
     };
@@ -74,6 +78,7 @@ function initialForm(
       url: choice?.urlExample ?? "",
       model: "",
       displayName: "",
+      maxVideoSeconds: "",
       enabled: true,
       apiKey: "",
     };
@@ -85,9 +90,15 @@ function initialForm(
     url: model.url,
     model: model.model,
     displayName: model.displayName,
+    maxVideoSeconds: ceilingText(model.maxVideoSeconds),
     enabled: model.enabled,
     apiKey: "",
   };
+}
+
+/** A stored clip ceiling as the field shows it: a number, or nothing. */
+function ceilingText(seconds: number | null | undefined): string {
+  return seconds == null ? "" : String(seconds);
 }
 
 /**
@@ -206,6 +217,16 @@ export function ModelEditor({
       ? null
       : t("settings:editor.identifierSpaces");
   const urlShaped = /^https?:\/\/\S+$/.test(form.url.trim());
+  // A clip ceiling is a video model's alone, and a number outside what one
+  // clip may be is nothing to plan with: the field says so before the save.
+  const ceilingText = form.maxVideoSeconds.trim();
+  const ceilingNumber = ceilingText === "" ? null : Number(ceilingText);
+  const ceilingOk =
+    ceilingText === "" ||
+    (ceilingNumber !== null &&
+      Number.isInteger(ceilingNumber) &&
+      ceilingNumber >= 1 &&
+      ceilingNumber <= MAX_VIDEO_SECONDS);
   const canSave =
     !saving &&
     !idTaken &&
@@ -213,6 +234,7 @@ export function ModelEditor({
     form.protocol !== "" &&
     form.displayName.trim() !== "" &&
     form.model.trim() !== "" &&
+    ceilingOk &&
     urlShaped;
 
   const save = async () => {
@@ -225,6 +247,11 @@ export function ModelEditor({
       displayName: form.displayName.trim(),
       enabled: form.enabled,
     };
+    // Only a video model keeps a ceiling: the other categories have no such
+    // window, and a form that never showed the field leaves it out entirely.
+    if (category === "video" && ceilingNumber !== null) {
+      draft.maxVideoSeconds = ceilingNumber;
+    }
     // A blank key field keeps whatever is stored; typing one replaces it.
     // Clearing is its own button, so saving an unrelated edit cannot cost a
     // working key. A copy names its source instead: the client never sees
@@ -353,6 +380,33 @@ export function ModelEditor({
           value={form.model}
         />
       </label>
+
+      {category === "video" && (
+        <>
+          <label className="dialog-field">
+            <span>{t("settings:editor.maxVideoSeconds")}</span>
+            <input
+              aria-label={t("settings:editor.maxVideoSeconds")}
+              max={MAX_VIDEO_SECONDS}
+              min={1}
+              onChange={(event) =>
+                edit({ maxVideoSeconds: event.target.value })
+              }
+              placeholder="—"
+              step={1}
+              type="number"
+              value={form.maxVideoSeconds}
+            />
+          </label>
+          <p className="settings-hint">
+            {ceilingOk
+              ? t("settings:editor.maxVideoSecondsHint")
+              : t("settings:editor.maxVideoSecondsRange", {
+                  max: MAX_VIDEO_SECONDS,
+                })}
+          </p>
+        </>
+      )}
 
       <label className="dialog-field">
         <span>{t("settings:editor.apiKey")}</span>

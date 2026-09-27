@@ -1,8 +1,10 @@
-Shoot this act of a film as one continuous piece, about {{ seconds }} seconds long, a {{ aspect }} frame in the film's own look: {{ style }}.
+Shoot {% if part %}part {{ part }} of {{ total }} of this act{% else %}this act{% endif %} of a film as {% if part %}one continuous piece of{% else %}one continuous piece,{% endif %} about {{ seconds }} seconds long, a {{ aspect }} frame in the film's own look: {{ style }}.
 
-The act: {{ title }} — {{ summary }}
-It opens on: {{ first }}
+{% if part %}The act, whole: {{ title }} — {{ summary }}
+This part opens on{% else %}The act: {{ title }} — {{ summary }}
+It opens on{% endif %}: {{ first }}
 {% if middle %}It passes through: {{ middle }}
 {% endif %}It ends on: {{ last }}
+{% if part %}The parts are shot in order and joined as one act: keep the people and the place as the pictures show them, the same faces, the same clothes, the same light, and end this part on the last frame given so the next one carries on from it. Do not resolve the act, and do not start anything the frames after this part do not hold.{% endif %}
 
 The pictures given are the frames it moves between, in the order they come. Keep the people and the place as those pictures show them: the same faces, the same clothes, the same light. No text, no lettering, no watermark.

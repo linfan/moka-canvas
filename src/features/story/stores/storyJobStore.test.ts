@@ -895,6 +895,46 @@ describe("asking again for what did not come back", () => {
     expect(again?.prompt).toContain("Write this telling as 2 chapters.");
   });
 
+  it("asks for an act filmed in pieces once, however many pieces failed", async () => {
+    // The act is one ask, however many pieces it is made of: a retry that
+    // planned it once per failed piece would hand the server the same piece
+    // twice, which is a batch it refuses.
+    serving({ "/api/v1/projects/current/story/jobs": job() });
+    const act = openStory().chapters[0]!.acts[0]!;
+    act.keyframes[1]!.art = {
+      takes: [
+        {
+          assetIds: ["asset-second-frame"],
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+      confirmed: true,
+    };
+    // Two shots of four hundred seconds are over the thirteen minutes a clip
+    // may run, so the act is asked for as two pieces.
+    for (const keyframe of act.keyframes) keyframe.durationMs = 400_000;
+    const base = `actVideo:${ids.chapterFirst}:${ids.act}`;
+    const piece = (at: number) => ({
+      ...job().items[0],
+      id: `${base}:${at}`,
+      target: {
+        kind: "actVideo" as const,
+        chapterId: ids.chapterFirst,
+        actId: ids.act,
+      },
+      capability: "video" as const,
+      status: "failed" as const,
+    });
+    const held = job({ kind: "actVideo", items: [piece(1), piece(2)] });
+
+    await retryFailed(openStory(), held);
+
+    expect(lastAsk().items.map((item) => item.id)).toEqual([
+      `${base}:1`,
+      `${base}:2`,
+    ]);
+  });
+
   it("asks again for one part of a manuscript from the record it was made for", async () => {
     serving({
       "/api/v1/projects/current/story/jobs": [

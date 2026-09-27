@@ -152,6 +152,7 @@ impl Harness {
                 url: format!("{base_url}{suffix}"),
                 model: id.into(),
                 display_name: id.into(),
+                max_video_seconds: None,
                 enabled: true,
                 expected_revision: None,
             })
@@ -199,6 +200,7 @@ impl Harness {
                 url: format!("{base_url}/api/v1/services/audio/music/generation"),
                 model: "fun-music-v1".into(),
                 display_name: id.into(),
+                max_video_seconds: None,
                 enabled: true,
                 expected_revision: None,
             })

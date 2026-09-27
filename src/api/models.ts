@@ -31,6 +31,12 @@ export interface ModelView {
   /** The model name the provider knows, sent in the body where one travels. */
   model: string;
   displayName: string;
+  /**
+   * The longest one clip this model films, when the deployment knows it. Absent
+   * or null leaves the app's own ceiling standing in for it; a telling filmed
+   * in pieces is cut to this length.
+   */
+  maxVideoSeconds?: number | null;
   enabled: boolean;
   apiKey: ApiKeyView;
 }
@@ -119,6 +125,8 @@ export interface ModelDraft {
   url: string;
   model: string;
   displayName: string;
+  /** A video model's own clip ceiling; null or omitted means none is kept. */
+  maxVideoSeconds?: number | null;
   enabled: boolean;
   expectedRevision?: number | null;
   /**

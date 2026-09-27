@@ -62,7 +62,10 @@ function filmedAct(id: string, videoId: string, summary: string): StoryAct {
   shot.content = summary;
   shot.durationMs = 1_000;
   act.keyframes = [shot];
-  act.video = { takes: [{ assetId: videoId, createdAt: T0 }], confirmed: true };
+  act.video = {
+    takes: [{ assetIds: [videoId], createdAt: T0 }],
+    confirmed: true,
+  };
   act.videoConfirmed = true;
   return act;
 }
@@ -76,11 +79,11 @@ function told(): MokaFile {
   const story = moka.stories![0];
   const first = filmedAct("first", ids.actVideo, "站台上的灯亮起来。");
   first.voice = {
-    takes: [{ assetId: "asset-voice", createdAt: T0 }],
+    takes: [{ assetIds: ["asset-voice"], createdAt: T0 }],
     confirmed: true,
   };
   first.music = {
-    takes: [{ assetId: "asset-music", createdAt: T0 }],
+    takes: [{ assetIds: ["asset-music"], createdAt: T0 }],
     confirmed: true,
   };
   story.chapters[0] = { ...story.chapters[0], acts: [first] };
@@ -123,7 +126,10 @@ function crowded(): MokaFile {
         shot.content = "画面";
         shot.durationMs = 1_000;
         const assetId = `asset-${chapter}-${actAt}-${shotAt}`;
-        shot.video = { takes: [{ assetId, createdAt: T0 }], confirmed: true };
+        shot.video = {
+          takes: [{ assetIds: [assetId], createdAt: T0 }],
+          confirmed: true,
+        };
         moka.resources.videos.push(video(assetId, 1_000));
         filmed += 1;
         return shot;

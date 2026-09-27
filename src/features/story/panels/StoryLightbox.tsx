@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
@@ -12,15 +12,20 @@ import { assetUrl } from "../../../api/assets";
  * room's own viewer rather than the editor's preview dialog: that one is a
  * panel of the editor's state — folders, nodes, the canvas a file belongs to —
  * and a frame drawn for a story belongs to none of it.
+ *
+ * A clip that was filmed in pieces is watched as the pieces: the file that is
+ * there is played, and the next opens when it ends, which is the order the card
+ * and the finished cut read them in.
  */
 export function StoryLightbox({
-  assetId,
+  assetIds,
   label,
   note,
   video,
   onClose,
 }: {
-  assetId: string;
+  /** The files to show, in the order they play. */
+  assetIds: string[];
   /** What the drawing is of, which is also its alt text. */
   label: string;
   /** A line about the view, when there is one worth saying. */
@@ -30,6 +35,9 @@ export function StoryLightbox({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const [at, setAt] = useState(0);
+  const file = assetIds[Math.min(at, assetIds.length - 1)] ?? "";
+  const pieces = assetIds.length;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -55,12 +63,27 @@ export function StoryLightbox({
         role="dialog"
       >
         {video === true ? (
-          <video controls preload="metadata" src={assetUrl(assetId)} />
+          <video
+            autoPlay={at > 0}
+            controls
+            key={file}
+            onEnded={() => setAt((held) => held + 1)}
+            preload="metadata"
+            src={assetUrl(file)}
+          />
         ) : (
-          <img alt={label} src={assetUrl(assetId)} />
+          <img alt={label} src={assetUrl(file)} />
         )}
         <div className="story-lightbox-foot">
           <span>{label}</span>
+          {pieces > 1 && (
+            <span className="story-hint" data-testid="story-lightbox-piece">
+              {t("story:panels.piece", {
+                index: Math.min(at + 1, pieces),
+                total: pieces,
+              })}
+            </span>
+          )}
           {note !== undefined && <span className="story-hint">{note}</span>}
           <button
             className="link"

@@ -106,6 +106,7 @@ impl Rig {
                     url: endpoint_of(base_url, protocol, &id),
                     model: id.clone(),
                     display_name: id.clone(),
+                    max_video_seconds: None,
                     enabled: true,
                     expected_revision: None,
                 })
@@ -781,6 +782,7 @@ async fn a_model_with_no_stored_key_is_reported_before_anything_is_sent() {
             url: format!("{base_url}/v1/responses"),
             model: "gpt-5.5".into(),
             display_name: "GPT-5.5".into(),
+            max_video_seconds: None,
             enabled: true,
             expected_revision: None,
         })

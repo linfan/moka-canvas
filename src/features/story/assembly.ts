@@ -26,9 +26,11 @@ import { findResource } from "../../shared/domain/validate";
 import {
   actPlannedMs,
   currentTake,
+  takeFile,
   timelineSizeForAspect,
 } from "../../shared/domain/story";
 import type {
+  AssetId,
   DocumentCommand,
   MokaFile,
   ResourceEntry,
@@ -36,7 +38,6 @@ import type {
   StoryDocument,
   StoryEdit,
   StoryKeyframe,
-  StorySlot,
   StoryTake,
   TimelineClip,
   TimelineDocument,
@@ -60,8 +61,8 @@ export interface AssemblyUnit {
   startMs: number;
   /** How long it runs: what the material measures, or what it was planned for. */
   durationMs: number;
-  /** The clip of the fourth step that is laid down. */
-  take: StoryTake;
+  /** The file of the fourth step that is laid down. */
+  assetId: AssetId;
   /** What the shot was planned to run for, which is what its captions share. */
   plannedMs: number;
   /** Whether the reader agreed to this clip, which does not decide inclusion. */
@@ -89,7 +90,11 @@ export interface AssemblyPlan {
 /** What one shot of the plan is made of, at the granularity in force. */
 interface ShotSlot {
   keyframe?: StoryKeyframe;
-  slot: StorySlot;
+  /**
+   * The files the shot's clip is, in the order they play: one for a shot, and
+   * several for an act that outran one clip and was filmed in pieces.
+   */
+  assetIds: AssetId[];
   plannedMs: number;
   confirmed: boolean;
 }
@@ -99,20 +104,26 @@ interface ShotSlot {
  *
  * One shot per act when clips are made by act, and one per keyframe when they
  * are made by keyframe — the difference between a film of six long takes and
- * one of thirty short ones, decided here and nowhere else.
+ * one of thirty short ones, decided here and nowhere else. An act filmed in
+ * pieces is one shot of several files, laid down one after another: the pieces
+ * on the track in the order they were filmed in, which is the act.
  */
 function shotsOf(story: StoryDocument, act: StoryAct): ShotSlot[] {
   if (story.shotGranularity === "keyframe") {
-    return act.keyframes.map((keyframe) => ({
-      keyframe,
-      slot: keyframe.video,
-      plannedMs: keyframe.durationMs,
-      confirmed: keyframe.video.confirmed,
-    }));
+    return act.keyframes.map((keyframe) => {
+      const file = takeFile(currentTake(keyframe.video));
+      return {
+        keyframe,
+        assetIds: file === undefined ? [] : [file],
+        plannedMs: keyframe.durationMs,
+        confirmed: keyframe.video.confirmed,
+      };
+    });
   }
+  const take = currentTake(act.video);
   return [
     {
-      slot: act.video,
+      assetIds: take?.assetIds ?? [],
       plannedMs: actPlannedMs(act),
       confirmed: act.videoConfirmed,
     },
@@ -244,38 +255,42 @@ export function planAssembly(
             : { keyframeId: shot.keyframe.id }),
           place,
         };
-        const take = currentTake(shot.slot);
-        if (take === undefined) {
+        if (shot.assetIds.length === 0) {
           warnings.push({ kind: "noVideo", ...where });
           continue;
         }
-        const resource = findResource(moka, take.assetId);
-        if (resource === undefined) {
-          // An asset the document no longer holds cannot be laid on a track:
-          // the clip would be a hole with a name. Saying which one is the
-          // useful part of finding out.
-          warnings.push({ kind: "assetMissing", ...where });
-          continue;
-        }
         if (!shot.confirmed) warnings.push({ kind: "unconfirmed", ...where });
-        if (resource.probe?.durationMs === undefined) {
-          warnings.push({ kind: "noDuration", ...where });
+        // A piece with no measured length stands in at its even share of the
+        // act's plan, which is only ever read when the probe said nothing.
+        const share = Math.round(shot.plannedMs / shot.assetIds.length);
+        for (const assetId of shot.assetIds) {
+          const resource = findResource(moka, assetId);
+          if (resource === undefined) {
+            // An asset the document no longer holds cannot be laid on a track:
+            // the clip would be a hole with a name. Saying which one is the
+            // useful part of finding out.
+            warnings.push({ kind: "assetMissing", ...where });
+            continue;
+          }
+          if (resource.probe?.durationMs === undefined) {
+            warnings.push({ kind: "noDuration", ...where });
+          }
+          const durationMs = lengthOf(resource, share);
+          units.push({
+            actId: act.id,
+            ...(shot.keyframe === undefined
+              ? {}
+              : { keyframeId: shot.keyframe.id }),
+            chapterIndex: chapterAt + 1,
+            actIndex: actAt + 1,
+            startMs: at,
+            durationMs,
+            assetId,
+            plannedMs: share,
+            confirmed: shot.confirmed,
+          });
+          at += durationMs;
         }
-        const durationMs = lengthOf(resource, shot.plannedMs);
-        units.push({
-          actId: act.id,
-          ...(shot.keyframe === undefined
-            ? {}
-            : { keyframeId: shot.keyframe.id }),
-          chapterIndex: chapterAt + 1,
-          actIndex: actAt + 1,
-          startMs: at,
-          durationMs,
-          take,
-          plannedMs: shot.plannedMs,
-          confirmed: shot.confirmed,
-        });
-        at += durationMs;
       }
     });
   });
@@ -482,7 +497,7 @@ function layDown(
   const textTrack = options.tracks.find((track) => track.kind === "text");
 
   for (const unit of plan.units) {
-    const resource = findResource(moka, unit.take.assetId);
+    const resource = findResource(moka, unit.assetId);
     if (resource === undefined) continue;
     const clip = createClipFromAsset(resource, videoTrack.id, unit.startMs);
     clips.push({
@@ -504,7 +519,7 @@ function layDown(
     const trackId =
       cue.kind === "voice" ? options.rows.voice : options.rows.music;
     if (trackId === undefined) continue;
-    const resource = findResource(moka, cue.take.assetId);
+    const resource = findResource(moka, cue.take.assetIds[0]);
     if (resource === undefined) continue;
     const clip = createClipFromAsset(resource, trackId, cue.startMs);
     clips.push({ ...clip, kind: "audio" });

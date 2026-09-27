@@ -36,6 +36,7 @@ import {
   currentTake,
   elementOf,
   keyframeAt,
+  takeFile,
   targetKey,
 } from "../../../shared/domain/story";
 import type { SourceChunk } from "../../../shared/domain/storySource";
@@ -45,6 +46,7 @@ import type {
   StoryAspect,
   StoryDialogueLine,
   StoryDocument,
+  StoryKeyframe,
 } from "../../../shared/domain/types";
 import {
   storyActMusicPrompt,
@@ -63,7 +65,8 @@ import {
   type StoryLook,
 } from "../../../shared/prompts";
 import { i18n } from "../../../shared/i18n";
-import { useModelStore } from "../../settings/modelStore";
+import { effectiveDefaultId, useModelStore } from "../../settings/modelStore";
+import { storyAskModel } from "../stores/storyModels";
 
 /**
  * The name a piece is known by, which is also how its answer is recognised
@@ -139,16 +142,77 @@ export function imageSizeForAspect(aspect: StoryAspect): string {
  * How many seconds a clip is asked for: what the story plans for it, rounded to
  * seconds, never less than one and never past the length one clip may be.
  *
- * The ceiling is the app's own, and not the video settings' length: that
- * number is the default a canvas node asks with when nobody says, while a
- * telling says shot by shot what each clip is for — a shot planned to run
- * longer than the default is a shot the reader asked to see run that long.
+ * The ceiling is the video model's own where the deployment knows it, and the
+ * app's otherwise — and not the video settings' length: that number is the
+ * default a canvas node asks with when nobody says, while a telling says shot
+ * by shot what each clip is for — a shot planned to run longer than the default
+ * is a shot the reader asked to see run that long.
  */
 export function clampSeconds(
   ms: number,
   ceiling: number = MAX_VIDEO_SECONDS,
 ): number {
   return Math.min(ceiling, Math.max(1, Math.round(ms / 1000)));
+}
+
+/**
+ * The longest one clip may be, in seconds, for the video model this machine
+ * will ask: the one the room is set to, or the deployment's default, and that
+ * model's own declared window where it has one.
+ *
+ * Read where a batch is planned rather than held, the way every other ask is:
+ * a model swapped between two asks is the model the second one is planned for.
+ */
+export function videoCeiling(): number {
+  const chosen = storyAskModel("actVideo");
+  const view = useModelStore.getState().view;
+  const id =
+    chosen ??
+    (view === null ? null : (effectiveDefaultId(view, "video") ?? null));
+  const model = view?.models.find((held) => held.id === id);
+  const seconds = model?.maxVideoSeconds;
+  return typeof seconds === "number" && seconds > 0
+    ? Math.min(seconds, MAX_VIDEO_SECONDS)
+    : MAX_VIDEO_SECONDS;
+}
+
+/** One piece of an act's clip: the shots it moves between, and its length. */
+export interface ActClipPiece {
+  keyframes: StoryKeyframe[];
+  /** How long the piece is asked for, in whole seconds. */
+  seconds: number;
+}
+
+/**
+ * An act's clip as it is asked for: one piece while the act fits in one clip,
+ * and otherwise as many as it takes, each cut where a shot ends.
+ *
+ * The cuts are at shot boundaries because a piece of a film has to open and
+ * close on frames that exist: each piece begins where the one before it ended,
+ * so the pieces play as the single act the board wrote. A shot longer than the
+ * ceiling cannot be cut at all, so it is asked for the longest a clip may be,
+ * and what is lost is said out loud beside the act.
+ */
+export function actClipPieces(act: StoryAct, ceiling: number): ActClipPiece[] {
+  const drawn = act.keyframes.filter(
+    (keyframe) => currentTake(keyframe.art) !== undefined,
+  );
+  const pieces: ActClipPiece[] = [];
+  let run: StoryKeyframe[] = [];
+  let runMs = 0;
+  const close = () => {
+    if (run.length === 0) return;
+    pieces.push({ keyframes: run, seconds: clampSeconds(runMs, ceiling) });
+    run = [];
+    runMs = 0;
+  };
+  for (const keyframe of drawn) {
+    if (runMs > 0 && runMs + keyframe.durationMs > ceiling * 1000) close();
+    run.push(keyframe);
+    runMs += keyframe.durationMs;
+  }
+  close();
+  return pieces;
 }
 
 /**
@@ -393,7 +457,7 @@ export function planElementArt(
         // who was already drawn, from the picture that drew them.
         inputs:
           view === "turnaround" && main !== undefined
-            ? [{ role: "reference", assetId: main.assetId }]
+            ? [{ role: "reference", assetId: main.assetIds[0] }]
             : [],
         params: { size },
       },
@@ -415,7 +479,7 @@ function drawnCast(
   const { characters, scenes, props } = actCast(story, act);
   return [...characters, ...scenes, ...props].flatMap((element) => {
     const take = currentTake(element.main);
-    return take === undefined ? [] : [{ element, assetId: take.assetId }];
+    return take === undefined ? [] : [{ element, assetId: take.assetIds[0] }];
   });
 }
 
@@ -476,42 +540,53 @@ export function planKeyframeArt(
 // Step four: the clips
 // -----------------------------------------------------------------------------
 
-/** One act filmed whole, moving between the drawings its shots were given. */
+/**
+ * One act filmed whole, moving between the drawings its shots were given.
+ *
+ * An act longer than one clip may be is asked for in pieces cut at its shot
+ * boundaries — each piece opening on a frame the one before it closed on — so
+ * that what comes back plays as the act the board wrote rather than as the
+ * longest clip a provider would take. One piece is the act itself, and is
+ * asked for under the name it has always had.
+ */
 export function planActVideos(
   story: StoryDocument,
   chapterId: string,
   actIds: string[],
 ): StoryJobItemDraft[] {
   const look = lookOf(story);
+  const ceiling = videoCeiling();
   return actIds.flatMap((actId) => {
     const act = actAt(story, chapterId, actId);
     if (act === undefined || act.keyframes.length === 0) return [];
-    const drawn = act.keyframes.flatMap((keyframe) => {
-      const take = currentTake(keyframe.art);
-      return take === undefined
-        ? []
-        : [{ content: keyframe.content, assetId: take.assetId }];
-    });
-    if (drawn.length === 0) return [];
-    const first = drawn[0];
-    const last = drawn[drawn.length - 1];
-    const between = drawn.slice(1, -1);
-    const seconds = clampSeconds(actPlannedMs(act));
+    const pieces = actClipPieces(act, ceiling);
+    if (pieces.length === 0) return [];
     const target: StoryTarget = { kind: "actVideo", chapterId, actId };
-    const inputs: StoryJobInput[] = [
-      { role: "firstFrame", assetId: first.assetId },
-    ];
-    if (drawn.length > 1) {
-      inputs.push({ role: "lastFrame", assetId: last.assetId });
-    }
-    for (const frame of between) {
-      inputs.push({ role: "reference", assetId: frame.assetId });
-    }
-    return [
-      {
-        id: jobKey(target),
+    const base = jobKey(target);
+    const several = pieces.length > 1;
+    return pieces.map((piece, at) => {
+      const drawn = piece.keyframes.flatMap((keyframe) => {
+        const take = currentTake(keyframe.art);
+        return take === undefined
+          ? []
+          : [{ content: keyframe.content, assetId: take.assetIds[0] }];
+      });
+      const first = drawn[0];
+      const last = drawn[drawn.length - 1];
+      const between = drawn.slice(1, -1);
+      const inputs: StoryJobInput[] = [
+        { role: "firstFrame", assetId: first.assetId },
+      ];
+      if (drawn.length > 1) {
+        inputs.push({ role: "lastFrame", assetId: last.assetId });
+      }
+      for (const frame of between) {
+        inputs.push({ role: "reference", assetId: frame.assetId });
+      }
+      return {
+        id: several ? `${base}:${at + 1}` : base,
         target,
-        capability: "video",
+        capability: "video" as const,
         prompt: storyActVideoPrompt({
           ...look,
           title: act.title,
@@ -519,12 +594,13 @@ export function planActVideos(
           first: first.content,
           last: last.content,
           middle: between.map((frame) => frame.content).join("; "),
-          seconds,
+          seconds: piece.seconds,
+          ...(several ? { part: at + 1, total: pieces.length } : {}),
         }),
         inputs,
-        params: videoParams(story.brief.aspect, seconds),
-      },
-    ];
+        params: videoParams(story.brief.aspect, piece.seconds),
+      };
+    });
   });
 }
 
@@ -536,6 +612,7 @@ export function planKeyframeVideos(
   keyframeIds: string[],
 ): StoryJobItemDraft[] {
   const look = lookOf(story);
+  const ceiling = videoCeiling();
   const act = actAt(story, chapterId, actId);
   if (act === undefined) return [];
   return keyframeIds.flatMap((keyframeId) => {
@@ -545,8 +622,11 @@ export function planKeyframeVideos(
     if (frame === undefined) return [];
     const position = act.keyframes.indexOf(keyframe);
     const after = act.keyframes[position + 1] ?? keyframe;
-    const lastFrame = currentTake(after.art)?.assetId;
-    const seconds = clampSeconds(keyframe.durationMs);
+    const lastFrame = takeFile(currentTake(after.art));
+    // A shot is one frame to the next and cannot be cut anywhere in between,
+    // so a shot longer than the model films is made as long as it can be, and
+    // the row says so.
+    const seconds = clampSeconds(keyframe.durationMs, ceiling);
     const target: StoryTarget = {
       kind: "keyframeVideo",
       chapterId,
@@ -554,9 +634,9 @@ export function planKeyframeVideos(
       keyframeId,
     };
     const inputs: StoryJobInput[] = [
-      { role: "firstFrame", assetId: frame.assetId },
+      { role: "firstFrame", assetId: frame.assetIds[0] },
     ];
-    if (lastFrame !== undefined && lastFrame !== frame.assetId) {
+    if (lastFrame !== undefined && lastFrame !== frame.assetIds[0]) {
       inputs.push({ role: "lastFrame", assetId: lastFrame });
     }
     return [

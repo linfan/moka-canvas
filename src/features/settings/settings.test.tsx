@@ -462,6 +462,46 @@ describe("model settings", () => {
     });
   });
 
+  it("keeps a video model's own clip ceiling, and asks no other kind for one", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Video" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New video model" }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "Filmer" },
+    });
+    fireEvent.change(screen.getByLabelText("Model identifier"), {
+      target: { value: "filmer" },
+    });
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "happyhorse-1.1-t2v" },
+    });
+    // The window the provider films in, which is what a telling longer than it
+    // is filmed in pieces of.
+    fireEvent.change(screen.getByLabelText("Longest clip (seconds)"), {
+      target: { value: "15" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await screen.findByText("Filmer");
+
+    const [write] = writesTo("/api/v1/models");
+    expect(write.body).toMatchObject({
+      id: "filmer",
+      category: "video",
+      model: "happyhorse-1.1-t2v",
+      maxVideoSeconds: 15,
+    });
+
+    // A kind that films nothing is never asked for a clip window.
+    fireEvent.click(screen.getByRole("tab", { name: "Text" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+    expect(screen.queryByLabelText("Longest clip (seconds)")).toBeNull();
+  });
+
   it("suggests an identifier from the display name", async () => {
     await openSettings();
     fireEvent.click(

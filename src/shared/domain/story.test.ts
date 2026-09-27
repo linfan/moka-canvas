@@ -96,7 +96,7 @@ function storyOfFile(moka: MokaFile): StoryDocument {
 }
 
 function take(assetId: string): StorySlot["takes"][number] {
-  return { assetId, createdAt: NOW };
+  return { assetIds: [assetId], createdAt: NOW };
 }
 
 // -----------------------------------------------------------------------------
@@ -423,7 +423,7 @@ describe("mergeElements", () => {
     expect(merged[0].id).toBe(hero.id);
     expect(merged[0].description).toBe("新描述");
     expect(merged[0].descriptionConfirmed).toBe(true);
-    expect(merged[0].main.takes[0].assetId).toBe("asset-hero-main");
+    expect(merged[0].main.takes[0].assetIds[0]).toBe("asset-hero-main");
     expect(merged[0].turnaround?.takes).toHaveLength(1);
   });
 
@@ -580,8 +580,10 @@ describe("withTake", () => {
       slot = withTake(slot, take(`asset-${n}`), MAX_TAKES_PER_SLOT);
     }
     expect(slot.takes).toHaveLength(MAX_TAKES_PER_SLOT);
-    expect(slot.takes[0].assetId).toBe("asset-2");
-    expect(currentTake(slot)?.assetId).toBe(`asset-${MAX_TAKES_PER_SLOT + 1}`);
+    expect(slot.takes[0].assetIds[0]).toBe("asset-2");
+    expect(currentTake(slot)?.assetIds[0]).toBe(
+      `asset-${MAX_TAKES_PER_SLOT + 1}`,
+    );
   });
 });
 
@@ -635,9 +637,9 @@ describe("the sound of an act", () => {
       target,
       slot: { takes: [take("asset-act-voice")], confirmed: false },
     });
-    expect(storyOfFile(next).chapters[0].acts[0].voice?.takes[0]?.assetId).toBe(
-      "asset-act-voice",
-    );
+    expect(
+      storyOfFile(next).chapters[0].acts[0].voice?.takes[0]?.assetIds[0],
+    ).toBe("asset-act-voice");
 
     // And the score is a place of its own, not the same one written twice.
     const scored = expectRoundTrip(moka, {
@@ -1099,7 +1101,7 @@ describe("filing a drawing at a place", () => {
     const moka = buildStoryMokaFile();
     const ids = storyIds();
     const slot: StorySlot = {
-      takes: [{ assetId: "asset-new", createdAt: NOW }],
+      takes: [{ assetIds: ["asset-new"], createdAt: NOW }],
       confirmed: true,
     };
     const next = expectRoundTrip(moka, {
@@ -1133,7 +1135,7 @@ describe("filing a drawing at a place", () => {
     }).next;
     const prop = storyOfFile(next).elements.find((e) => e.id === ids.prop)!;
     expect(prop.main.takes).toHaveLength(MAX_TAKES_PER_SLOT);
-    expect(prop.main.takes[0].assetId).toBe("asset-3");
+    expect(prop.main.takes[0].assetIds[0]).toBe("asset-3");
   });
 
   it("refuses a place the story no longer holds", () => {
@@ -1246,7 +1248,7 @@ describe("taking a field away", () => {
       storyId: ids.story,
       patch: { film: take(ids.actVideo) },
     });
-    expect(storyOfFile(next).edit.film?.assetId).toBe(ids.actVideo);
+    expect(storyOfFile(next).edit.film?.assetIds[0]).toBe(ids.actVideo);
     expect(storyOfFile(apply(next, ...inverse).next).edit.film).toBeUndefined();
   });
 });
@@ -1265,7 +1267,7 @@ describe("what a story was assembled into", () => {
     });
     const edit = storyOfFile(next).edit;
     expect(edit.clipByAct).toEqual([{ actId: ids.act, clipId: "clip-cut-a" }]);
-    expect(edit.film?.assetId).toBe(ids.actVideo);
+    expect(edit.film?.assetIds[0]).toBe(ids.actVideo);
     expect(edit.timelineId).toBe(timelineIds().timeline);
 
     expect(
@@ -1531,7 +1533,7 @@ describe("actsRegenerationCost", () => {
 
     act.video = emptyStorySlot();
     act.keyframes[1]!.art = {
-      takes: [{ assetId: "asset-other-frame", createdAt: NOW }],
+      takes: [{ assetIds: ["asset-other-frame"], createdAt: NOW }],
       confirmed: false,
     };
     expect(actsRegenerationCost(chapter)).toEqual({

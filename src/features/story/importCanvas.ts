@@ -38,7 +38,7 @@ import {
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../shared/domain";
-import { currentTake } from "../../shared/domain/story";
+import { currentTake, takeFile } from "../../shared/domain/story";
 import { i18n } from "../../shared/i18n";
 import type { InputRole } from "../../api/generate";
 import type { StoryJobItemDraft } from "../../api/story";
@@ -366,7 +366,7 @@ function elementsBand(
       element.name,
       element.description,
     );
-    const main = currentTake(element.main)?.assetId;
+    const main = takeFile(currentTake(element.main));
     const drawn =
       main === undefined
         ? undefined
@@ -381,9 +381,9 @@ function elementsBand(
             planElementArt(story, [{ elementId: element.id, view: "main" }])[0],
           );
     if (drawn !== undefined) wire(sheet, described, drawn, "prompt");
-    const turnaround = currentTake(
-      element.turnaround ?? emptyStorySlot(),
-    )?.assetId;
+    const turnaround = takeFile(
+      currentTake(element.turnaround ?? emptyStorySlot()),
+    );
     const sheeted =
       turnaround === undefined
         ? undefined
@@ -419,7 +419,10 @@ function actSoundBand(
   place: string,
 ): void {
   // The clip first, then the sound under it, in the order the story room reads
-  // them; each stands in its own column of the act's row.
+  // them; each stands in its own column of the act's row. A clip filmed in
+  // pieces is one card a piece, in the order the pieces play, since that is how
+  // the board makes the film again: one ask after another.
+  const clipAsks = planActVideos(story, chapterId, [act.id]);
   const pieces: Array<{
     kind: "audio" | "video";
     assetId: AssetId | undefined;
@@ -427,22 +430,22 @@ function actSoundBand(
     title: string;
     category?: "music" | "voice";
   }> = [
-    {
-      kind: "video",
-      assetId: currentTake(act.video)?.assetId,
-      ask: planActVideos(story, chapterId, [act.id])[0],
+    ...(currentTake(act.video)?.assetIds ?? []).map((assetId, at) => ({
+      kind: "video" as const,
+      assetId,
+      ask: clipAsks[at],
       title: `${place} · ${i18n.t("story:import.clip")}`,
-    },
+    })),
     {
       kind: "audio",
-      assetId: currentTake(act.voice ?? emptyStorySlot())?.assetId,
+      assetId: takeFile(currentTake(act.voice ?? emptyStorySlot())),
       ask: planActVoice(story, chapterId, act.id)[0],
       title: `${place} · ${i18n.t("story:import.voice")}`,
       category: "voice",
     },
     {
       kind: "audio",
-      assetId: currentTake(act.music ?? emptyStorySlot())?.assetId,
+      assetId: takeFile(currentTake(act.music ?? emptyStorySlot())),
       ask: planActMusic(story, chapterId, act.id)[0],
       title: `${place} · ${i18n.t("story:import.score")}`,
       category: "music",
@@ -517,7 +520,7 @@ function tellingBand(
           actId: act.id,
           keyframeId: keyframe.id,
         };
-        const art = currentTake(keyframe.art)?.assetId;
+        const art = takeFile(currentTake(keyframe.art));
         const artAsk = planKeyframeArt(story, [target])[0];
         const frame =
           art === undefined
@@ -537,7 +540,7 @@ function tellingBand(
           wireAsk(sheet, artAsk, frame);
         }
 
-        const clip = currentTake(keyframe.video)?.assetId;
+        const clip = takeFile(currentTake(keyframe.video));
         const clipAsk = planKeyframeVideos(story, chapter.id, act.id, [
           keyframe.id,
         ])[0];

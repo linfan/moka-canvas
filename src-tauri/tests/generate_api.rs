@@ -87,6 +87,7 @@ async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capabili
                 url: format!("{base_url}{suffix}"),
                 model: (*id).into(),
                 display_name: (*id).into(),
+                max_video_seconds: None,
                 enabled: true,
                 expected_revision: None,
             })

@@ -45,6 +45,7 @@ fn draft(id: &str) -> ModelDraft {
         url: "https://provider.test/v1/chat/completions".to_string(),
         model: format!("model-{id}"),
         display_name: format!("Model {id}"),
+        max_video_seconds: None,
         enabled: true,
         expected_revision: None,
     }

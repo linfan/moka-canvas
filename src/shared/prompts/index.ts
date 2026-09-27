@@ -328,7 +328,11 @@ export function storyKeyframePrompt(
   });
 }
 
-/** One act filmed whole, moving between the frames that were drawn for it. */
+/**
+ * One act filmed whole, moving between the frames that were drawn for it —
+ * or, when the act outruns what one clip may be, one of the pieces it is
+ * filmed in, told apart by its place and asked to end where the next begins.
+ */
 export function storyActVideoPrompt(
   input: StoryLook & {
     title: string;
@@ -337,6 +341,9 @@ export function storyActVideoPrompt(
     last: string;
     middle: string;
     seconds: number;
+    /** Its place among the pieces, when the act is filmed in several. */
+    part?: number;
+    total?: number;
   },
 ): string {
   return render(storyActVideo, input);

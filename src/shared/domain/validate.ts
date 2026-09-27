@@ -44,6 +44,7 @@ import type {
   ResultSlot,
   StoryDocument,
   StorySlot,
+  StoryTake,
   ValidationIssue,
   WorkflowEdge,
   WorkflowNode,
@@ -289,6 +290,10 @@ export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
     if (list) list.push(holderId);
     else refs.set(assetId, [holderId]);
   };
+  /** Every file a take is made of is in use, not only the one it opens on. */
+  const files = (take: StoryTake, holderId: string) => {
+    for (const assetId of take.assetIds) add(assetId, holderId);
+  };
   for (const canvas of moka.canvas) {
     for (const node of canvas.nodes) {
       const data = node.data as Record<string, unknown>;
@@ -309,21 +314,22 @@ export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
   // or a timeline they appear on.
   for (const story of moka.stories ?? []) {
     add(story.brief.sourceAssetId, story.id);
-    add(story.edit.film?.assetId, story.id);
+    for (const file of story.edit.film?.assetIds ?? []) add(file, story.id);
     for (const element of story.elements) {
-      for (const take of element.main.takes) add(take.assetId, element.id);
+      for (const take of element.main.takes) files(take, element.id);
       for (const take of element.turnaround?.takes ?? [])
-        add(take.assetId, element.id);
+        files(take, element.id);
     }
     for (const chapter of story.chapters) {
       for (const act of chapter.acts) {
-        for (const take of act.video.takes) add(take.assetId, act.id);
-        for (const take of act.voice?.takes ?? []) add(take.assetId, act.id);
-        for (const take of act.music?.takes ?? []) add(take.assetId, act.id);
+        // A clip filmed in pieces keeps every piece in use, not only the one
+        // it opens on: the shelf must not offer to collect the rest.
+        for (const take of act.video.takes) files(take, act.id);
+        for (const take of act.voice?.takes ?? []) files(take, act.id);
+        for (const take of act.music?.takes ?? []) files(take, act.id);
         for (const keyframe of act.keyframes) {
-          for (const take of keyframe.art.takes) add(take.assetId, keyframe.id);
-          for (const take of keyframe.video.takes)
-            add(take.assetId, keyframe.id);
+          for (const take of keyframe.art.takes) files(take, keyframe.id);
+          for (const take of keyframe.video.takes) files(take, keyframe.id);
         }
       }
     }

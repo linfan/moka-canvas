@@ -2650,8 +2650,11 @@ function withSoundSlot(
 function checkStorySlot(slot: StorySlot): StorySlot {
   const seen = new Set<string>();
   const takes = slot.takes.filter((take) => {
-    if (seen.has(take.assetId)) return false;
-    seen.add(take.assetId);
+    // A take is kept once, by the files it is: a drawing filed again is the
+    // same drawing, and an act filmed in pieces filed again is the same pieces.
+    const key = take.assetIds.join("\u0000");
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
   return {

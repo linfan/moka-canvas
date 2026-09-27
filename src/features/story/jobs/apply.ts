@@ -92,11 +92,15 @@ function storyOf(record: StoryJobRecord): StoryDocument | undefined {
   return (moka?.stories ?? []).find((story) => story.id === record.storyId);
 }
 
-/** The take a filed asset is kept as, named after the ask that drew it. */
-function takeOf(record: StoryJobRecord, item: StoryJobItem): StoryTake {
+/** The take a filed asset — or an act's filed pieces — is kept as. */
+function takeOf(
+  record: StoryJobRecord,
+  item: StoryJobItem,
+  assetIds: string[],
+): StoryTake {
   const line = item.prompt.split("\n")[0]?.trim() ?? "";
   return {
-    assetId: item.assetIds?.[0] ?? "",
+    assetIds,
     jobId: record.id,
     itemId: item.id,
     ...(line === "" ? {} : { note: line.slice(0, 120) }),
@@ -523,14 +527,18 @@ function commandsFor(
       );
       return [];
     }
-    if (slot.takes.some((held) => held.assetId === assetId)) {
+    if (slot.takes.some((held) => held.assetIds.includes(assetId))) {
       // The place already keeps this drawing: reading the answer again is not
       // another take, and the batch has nothing left to write for it.
       report.skipped += 1;
       return [];
     }
     report.applied += 1;
-    return slotCommand(story, target, withTake(slot, takeOf(record, item)));
+    return slotCommand(
+      story,
+      target,
+      withTake(slot, takeOf(record, item, [assetId])),
+    );
   }
 
   switch (item.target.kind) {
@@ -582,6 +590,76 @@ function commandsFor(
   }
 }
 
+/** The part an act's piece is, counted from one; an act asked for whole is one. */
+function actPart(itemId: string, base: string): number {
+  const rest = itemId.slice(base.length);
+  const match = /^:(\d+)$/.exec(rest);
+  return match === null ? 1 : Number(match[1]);
+}
+
+/**
+ * The clips a batch of filmed acts makes of the story.
+ *
+ * Every piece of one act is read as one clip, in the order it was asked for:
+ * an act longer than one clip may be is filmed in several, and a sequence with
+ * a piece missing is not a shorter act but a broken one — the film would run to
+ * something the board never planned — so an act whose pieces did not all come
+ * back writes nothing, and the room goes on offering the whole of it again.
+ */
+function actVideoCommands(
+  story: StoryDocument,
+  record: StoryJobRecord,
+  report: ApplyReport,
+): DocumentCommand[] {
+  const pieces = record.items.filter((item) => item.target.kind === "actVideo");
+  if (pieces.length === 0) return [];
+  const commands: DocumentCommand[] = [];
+  const acts = new Map<string, StoryJobItem[]>();
+  for (const item of pieces) {
+    const target = item.target;
+    if (target.kind !== "actVideo") continue;
+    const key = `${target.chapterId}:${target.actId}`;
+    acts.set(key, [...(acts.get(key) ?? []), item]);
+  }
+  for (const held of acts.values()) {
+    const target = slotTargetOf(held[0]);
+    if (target === undefined || target.kind !== "actVideo") continue;
+    const base = jobKey(held[0].target);
+    const ordered = [...held].sort(
+      (one, other) => actPart(one.id, base) - actPart(other.id, base),
+    );
+    if (ordered.some((item) => item.status !== "succeeded")) {
+      // Counted as skipped with the rest of the batch: the pieces that did
+      // answer are on the shelf, and the clip they were to make is not.
+      report.skipped += ordered.length;
+      continue;
+    }
+    const slot = slotAt(story, target);
+    const files = ordered.map((item) => item.assetIds?.[0]);
+    if (slot === undefined || files.some((file) => file === undefined)) {
+      report.skipped += ordered.length;
+      report.notes.push(i18n.t("story:jobs.targetGone", { label: base }));
+      continue;
+    }
+    const take = takeOf(record, ordered[0], files as string[]);
+    if (
+      slot.takes.some(
+        (kept) =>
+          kept.assetIds.length === take.assetIds.length &&
+          kept.assetIds.every((file, at) => file === take.assetIds[at]),
+      )
+    ) {
+      // The place already keeps this clip: reading the answer again is not
+      // another take.
+      report.skipped += ordered.length;
+      continue;
+    }
+    report.applied += ordered.length;
+    commands.push(...slotCommand(story, target, withTake(slot, take)));
+  }
+  return commands;
+}
+
 /**
  * Writes a batch's answers into the story, and answers with what it wrote.
  *
@@ -604,12 +682,17 @@ export function applyJobResults(record: StoryJobRecord): ApplyReport {
   // is written: `outlineCommands` reads every piece that answered and returns
   // the single command the table is written with.
   const commands: DocumentCommand[] = outlineCommands(story, record, report);
+  // An act's pieces are one clip for the same reason, and are read the same way.
+  commands.push(...actVideoCommands(story, record, report));
   for (const item of record.items) {
     if (item.status !== "succeeded") {
-      report.skipped += 1;
+      // A piece of an act's clip is counted where its act is read.
+      if (item.target.kind !== "actVideo") report.skipped += 1;
       continue;
     }
-    if (item.target.kind === "outline") continue;
+    if (item.target.kind === "outline" || item.target.kind === "actVideo") {
+      continue;
+    }
     commands.push(...commandsFor(story, record, item, report));
   }
 
