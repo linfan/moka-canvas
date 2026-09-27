@@ -13,7 +13,14 @@ export type AppPhase =
 export interface Toast {
   id: number;
   kind: "info" | "success" | "error";
+  /** The one line that is always read, in the reader's language. */
   message: string;
+  /**
+   * The rest of what there was to say, when there was more than fits a line:
+   * the whole of a provider's complaint rather than its first sentence. Kept
+   * rather than cut, and shown when the reader chooses the toast.
+   */
+  detail?: string;
   /**
    * Where choosing the toast goes, for a report of something that has a place.
    * A toast is read and gone in a few seconds, so a reader who wants to see the
@@ -21,6 +28,40 @@ export interface Toast {
    * what tells them choosing it leads somewhere rather than only away.
    */
   choice?: { label: string; go: () => void };
+}
+
+/** How long a one-line toast may run before the rest is kept for the click. */
+const TOAST_SUMMARY_CHARS = 120;
+
+/** The earliest a summary may be cut: less than this reads as a truncated word. */
+const TOAST_EARLIEST_CUT = 24;
+
+/** Where one sentence ends and the next begins, in either language. */
+const SENTENCE_END = /[\n。！？!?]|\.\s/g;
+
+/**
+ * A message too long for one line, cut where a sentence ends.
+ *
+ * Only a sentence end is a place to cut: what a toast says is read out whole —
+ * out of the live region, and in one suite off the element itself — so a
+ * message cut mid-clause is read, and read back, wrong. A message with no
+ * sentence end within reach is left whole and wraps.
+ */
+export function splitToastMessage(message: string): {
+  message: string;
+  detail?: string;
+} {
+  if (message.length <= TOAST_SUMMARY_CHARS) return { message };
+  let cut = -1;
+  for (const match of message.matchAll(SENTENCE_END)) {
+    const at = (match.index ?? 0) + match[0].length;
+    if (at > TOAST_SUMMARY_CHARS) break;
+    if (at >= TOAST_EARLIEST_CUT) cut = at;
+  }
+  if (cut === -1) return { message };
+  const detail = message.slice(cut).trim();
+  if (detail === "") return { message };
+  return { message: message.slice(0, cut).trim(), detail };
 }
 
 interface AppState {
@@ -34,13 +75,14 @@ interface AppState {
     kind: Toast["kind"],
     message: string,
     choice?: Toast["choice"],
+    detail?: string,
   ) => void;
   dismissToast: (id: number) => void;
 }
 
 let nextToastId = 1;
 
-export const useAppStore = create<AppState>()((set, get) => ({
+export const useAppStore = create<AppState>()((set) => ({
   phase: "booting",
   config: null,
   bootError: null,
@@ -66,12 +108,27 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ phase });
   },
 
-  pushToast(kind, message, choice) {
+  pushToast(kind, message, choice, detail) {
     const id = nextToastId++;
+    // The line is the reader's own whatever else is carried, so it is cut —
+    // where a sentence ends — even when a caller handed over the rest: what is
+    // under the toast is everything there was to say, in order.
+    const said = splitToastMessage(message);
+    const under = [said.detail, detail]
+      .filter((part): part is string => part !== undefined && part !== "")
+      .join("\n");
     set((state) => ({
-      toasts: [...state.toasts, { id, kind, message, choice }],
+      toasts: [
+        ...state.toasts,
+        {
+          id,
+          kind,
+          message: said.message,
+          ...(under === "" ? {} : { detail: under }),
+          choice,
+        },
+      ],
     }));
-    setTimeout(() => get().dismissToast(id), 6000);
   },
 
   dismissToast(id) {

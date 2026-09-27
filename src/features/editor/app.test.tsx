@@ -11,7 +11,7 @@ import {
 import App from "../../App";
 import { buildGoldenMokaFile } from "../../shared/domain/fixtures";
 import { Toasts } from "./components/Toasts";
-import { useAppStore } from "./stores/appStore";
+import { splitToastMessage, useAppStore } from "./stores/appStore";
 import { useHistoryStore } from "./stores/historyStore";
 import { useProjectStore } from "./stores/projectStore";
 
@@ -264,5 +264,103 @@ describe("what has just happened", () => {
     fireEvent.click(said);
     expect(went).toBe(1);
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("keeps the rest of a report under the line, shown when it is asked for", () => {
+    render(<Toasts />);
+    act(() => {
+      useAppStore
+        .getState()
+        .pushToast(
+          "error",
+          "1 of 1 pieces did not come back.",
+          undefined,
+          "model gpt-4o-mini has no stored API key",
+        );
+    });
+    const line = screen.getByRole("button", { name: /did not come back/ });
+    expect(line).toHaveProperty("title", "Show the full report");
+    expect(line.getAttribute("aria-expanded")).toBe("false");
+    // Under the line, and not read out until it is asked for.
+    const under = screen.getByText("model gpt-4o-mini has no stored API key");
+    expect(under.hidden).toBe(true);
+
+    fireEvent.click(line);
+    expect(line.getAttribute("aria-expanded")).toBe("true");
+    expect(line).toHaveProperty("title", "Hide the full report");
+    expect(under.hidden).toBe(false);
+  });
+
+  it("goes where it says from its own control, and closes from another", () => {
+    render(<Toasts />);
+    let went = 0;
+    act(() => {
+      useAppStore.getState().pushToast(
+        "error",
+        "1 of 2 pieces did not come back.",
+        {
+          label: "Ask again",
+          go: () => {
+            went += 1;
+          },
+        },
+        "the provider refused it",
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask again" }));
+    expect(went).toBe(1);
+    expect(screen.queryByRole("button")).toBeNull();
+
+    act(() => {
+      useAppStore
+        .getState()
+        .pushToast("error", "One more", undefined, "because of this");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("stays while it is being read, and leaves once put away", () => {
+    vi.useFakeTimers();
+    try {
+      render(<Toasts />);
+      act(() => {
+        useAppStore
+          .getState()
+          .pushToast("error", "It broke", undefined, "and here is why");
+      });
+      const line = screen.getByRole("button", { name: "It broke" });
+      fireEvent.click(line);
+      act(() => {
+        vi.advanceTimersByTime(120_000);
+      });
+      expect(screen.getByRole("button", { name: "It broke" })).not.toBeNull();
+
+      fireEvent.click(line);
+      act(() => {
+        vi.advanceTimersByTime(20_000);
+      });
+      expect(screen.queryByRole("button")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cuts a message too long for a line where a sentence ends", () => {
+    const long = `The provider refused the request. ${"b".repeat(90)}. and it said why`;
+    expect(splitToastMessage(long)).toEqual({
+      message: "The provider refused the request.",
+      detail: `${"b".repeat(90)}. and it said why`,
+    });
+  });
+
+  it("leaves a long single sentence whole", () => {
+    // The exported package's path is read off a toast by one suite, so a
+    // message with nowhere to cut is wrapped rather than cut anywhere.
+    const whole = `Exported 3 files to /somewhere/${"x".repeat(140)}.mokapkg.zip`;
+    expect(splitToastMessage(whole)).toEqual({ message: whole });
+    expect(splitToastMessage("short and sweet")).toEqual({
+      message: "short and sweet",
+    });
   });
 });

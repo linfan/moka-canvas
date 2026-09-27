@@ -21,6 +21,8 @@
   "chooseFolder": "Choose folder",
   "choose": "Open",
   "dismiss": "Dismiss",
+  "showDetail": "Show the full report",
+  "hideDetail": "Hide the full report",
   "initFailed": "This canvas could not be initialized. Refresh to try again.",
   "dialog": {
     "folder": "Folder",

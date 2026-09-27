@@ -21,6 +21,8 @@
   "chooseFolder": "选择文件夹",
   "choose": "打开",
   "dismiss": "关闭",
+  "showDetail": "查看完整报错",
+  "hideDetail": "收起完整报错",
   "initFailed": "此画布无法初始化。请刷新后重试。",
   "dialog": {
     "folder": "文件夹",
