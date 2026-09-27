@@ -26,6 +26,7 @@ import type {
   RunStatus,
 } from "../../shared/domain";
 import { PROVIDER_EXECUTOR_KEY, findNode } from "../../shared/domain";
+import { i18n } from "../../shared/i18n";
 import { UnsavedWorkDialog } from "./components/UnsavedWorkDialog";
 import { generationUnavailable, useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
@@ -841,6 +842,43 @@ describe("run UI", () => {
     });
   });
 
+  it("says why a run's ask was refused, rather than dropping it", async () => {
+    await openEditor();
+    selectOperationNode();
+    const button = await screen.findByRole("button", {
+      name: "▶ Run this node",
+    });
+    act(() => {
+      useAppStore.setState({ toasts: [] });
+    });
+    // A capability with nothing behind it: the refusal is not a validation
+    // issue, so nothing else on the screen would say it.
+    api.startResponse = () => ({
+      body: {
+        code: "PROVIDER_NOT_CONFIGURED",
+        message: "a::b is not configured",
+      },
+      status: 422,
+    });
+
+    // In Chinese, which is the case the catalogue is for: the reason is said
+    // in the reader's own words, with the server's sentence kept under it so
+    // the configuration it named is not lost.
+    await act(async () => {
+      await i18n.changeLanguage("zh");
+    });
+    fireEvent.click(button);
+    await settle();
+
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.kind).toBe("error");
+    expect(said?.message).toBe("尚未配置该能力可用的模型或密钥");
+    expect(said?.detail).toBe("a::b is not configured");
+
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+  });
   it("says why a run did not finish, and not only that it did not", async () => {
     useProjectStore.getState().hydrate({
       root: "/tmp/golden",

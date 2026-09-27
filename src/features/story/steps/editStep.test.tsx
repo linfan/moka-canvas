@@ -250,6 +250,73 @@ describe("assembling a telling", () => {
     );
   });
 
+  it("says the save is blocked, and why, rather than that it is still saving", async () => {
+    openAtEdit(filmed());
+    useAppStore.setState({ toasts: [] });
+    // A write the server will not take: what is waiting stays in this window,
+    // and a reader told "still saving" would wait for a save that is not
+    // coming. What is said is the reason the write gave.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(
+            new Response(JSON.stringify(payload), {
+              status,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        if (init?.method === "POST" && url.includes("/commands")) {
+          return json(
+            { code: "INTERNAL", message: "io error: disk full" },
+            500,
+          );
+        }
+        if (url.includes("/api/v1/projects/current")) {
+          return json({
+            root: "/tmp/moka-edit-test",
+            moka: useProjectStore.getState().moka,
+            selfCheck: { ok: true, issues: [] },
+          });
+        }
+        return json([]);
+      }),
+    );
+
+    act(() => {
+      // A change of the reader's that says nothing new: what the case needs is
+      // something waiting to be written, not a different document.
+      useProjectStore.getState().applyLocal([
+        {
+          type: "setStoryEdit",
+          storyId: story().id,
+          patch: { timelineId: story().edit.timelineId ?? null },
+        },
+      ]);
+    });
+    await act(async () => {
+      await useProjectStore.getState().flush();
+    });
+    expect(useProjectStore.getState().saveStatus).toBe("error");
+    const before = story().edit;
+
+    fireEvent.click(screen.getByTestId("story-assemble"));
+
+    await waitFor(() => {
+      const said = useAppStore.getState().toasts.at(-1);
+      expect(said?.message).toBe("io error: disk full");
+    });
+    // The reason leads; "still saving" is kept under it, where it is what is
+    // left to say rather than the whole of it.
+    expect(useAppStore.getState().toasts.at(-1)?.detail).toBe(
+      "Changes are still being saved — try again in a moment",
+    );
+    // Nothing was laid down: an assembly against a document the server does
+    // not hold would rest on a revision it has moved past.
+    expect(story().edit).toEqual(before);
+  });
+
   it("writes the lines of the telling as captions when asked to", async () => {
     openAtEdit(filmed());
     expect(

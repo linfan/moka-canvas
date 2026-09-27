@@ -266,6 +266,59 @@ describe("uploading a manuscript", () => {
     expect(held?.metadata.revision).toBe(4);
   });
 
+  it("says the save is blocked, and why, rather than that it is still saving", async () => {
+    openRoom(buildEmptyStory("空故事"));
+    const upload = vi.spyOn(assetsApi, "upload");
+    // A document another window has moved on: the premise cannot be written and
+    // nothing is on its way, so the manuscript has nowhere to be filed. What a
+    // reader is told is the blockage — a reader told "still saving" waits for a
+    // save that is not coming.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === "POST" && url.includes("/commands")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                code: "REVISION_CONFLICT",
+                message: "canvas.moka changed on disk",
+              }),
+              {
+                status: 409,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }),
+    );
+
+    writePremise("末班列车上的两个人。");
+    await waitFor(() => {
+      expect(useProjectStore.getState().saveStatus).toBe("conflicted");
+    });
+
+    fireEvent.click(screen.getByTestId("story-idea-tab-upload"));
+    fireEvent.change(screen.getByTestId("story-file"), {
+      target: { files: [new File(["稿子"], "novel.txt")] },
+    });
+
+    await waitFor(() => {
+      const said = useAppStore.getState().toasts.at(-1);
+      expect(said?.message).toBe(
+        "The project changed elsewhere — reload it, or give this change up.",
+      );
+    });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("refuses the wrong kind of file, and one that is too big, with reasons", () => {
     openRoom(buildEmptyStory("空故事"));
     const upload = vi.spyOn(assetsApi, "upload");

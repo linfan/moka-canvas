@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { assetsApi } from "../../../api";
 import {
   batchNodeIds,
   buildBatchMokaFile,
@@ -33,6 +34,7 @@ import {
   distributeNodes,
   editTextContent,
   equalizeNodes,
+  fileNodeAsAsset,
   groupSelection,
   marqueeSelect,
   moveNodes,
@@ -934,5 +936,40 @@ describe("addNodeAt placement", () => {
     const node = findNode(canvasNow(), made)!;
     expect(node.bounds.x).toBe(2000 - DEFAULT_NODE_WIDTH / 2);
     expect(node.bounds.y).toBe(2000 - 40);
+  });
+});
+
+describe("filing a node as an asset", () => {
+  it("says why the filing waits when a change will not save, not that it is still saving", async () => {
+    const ids = goldenNodeIds();
+    hydrate();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const json = (payload: unknown, status = 200) =>
+        new Response(JSON.stringify(payload), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        });
+      if (init?.method === "POST" && url.includes("/commands")) {
+        return json({ code: "INTERNAL", message: "io error: disk full" }, 500);
+      }
+      return json({});
+    });
+    // A change of the reader's that the server will not take: what is on its
+    // way stays in this window, and filing the node as it stands would file
+    // the words as they were before it.
+    renameNode(ids.text, "站台上的两个人");
+    await useProjectStore.getState().flush();
+    expect(useProjectStore.getState().saveStatus).toBe("error");
+
+    const fileNode = vi.spyOn(assetsApi, "fileNode");
+    await fileNodeAsAsset(ids.canvasMain, ids.text);
+
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.message).toBe("io error: disk full");
+    expect(said?.detail).toBe(
+      "Changes are still being saved — try again in a moment",
+    );
+    expect(fileNode).not.toHaveBeenCalled();
   });
 });
