@@ -307,7 +307,13 @@ export async function backToLauncher(page: Page) {
 /** The credential the stand-in is sent. */
 export const CHANNEL_KEY = "e2e-stand-in-credential";
 
-/** The full endpoint address each category speaks at on the stand-in. */
+/**
+ * The full endpoint address each category speaks at on the stand-in.
+ *
+ * Music is not among them: a score is asked of a converter, and its address is
+ * the one that converter's own document gives — a stand-in shape of the
+ * capability's own would be an address no provider actually serves.
+ */
 function endpoint(capability: Capability): string {
   switch (capability) {
     case "text":
@@ -319,6 +325,7 @@ function endpoint(capability: Capability): string {
     case "speech":
       return `${PROVIDER_ADDRESS}/audio/speech`;
   }
+  throw new Error(`no stand-in address for a ${capability} model of its own`);
 }
 
 /**
@@ -331,7 +338,11 @@ const CONVERTER_ENDPOINTS: Record<string, string> = {
   bailianMusic: "/api/v1/services/audio/music/generation",
 };
 
-/** How each category is spoken to, which is one protocol per shape. */
+/**
+ * How each category is spoken to, which is one protocol per shape. Music has
+ * no shape of its own here for the reason `endpoint` gives: a score names the
+ * converter it is asked of.
+ */
 function protocolOf(capability: Capability): string {
   switch (capability) {
     case "text":
@@ -343,6 +354,7 @@ function protocolOf(capability: Capability): string {
     case "speech":
       return "openaiSpeech";
   }
+  throw new Error(`no stand-in protocol for a ${capability} model of its own`);
 }
 
 /**
