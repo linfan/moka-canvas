@@ -231,7 +231,13 @@ export function LauncherPage() {
           mode={dialog}
           nativePickers={mode === "tauri"}
           onClose={() => setDialog(null)}
-          onDone={enterProject}
+          // A project made here begins with a telling: its board holds nothing
+          // to look at yet, while the story room is where the work starts, so
+          // that is the room a new project opens onto. Opening and importing
+          // bring work of their own and land on the board as before.
+          onDone={(selfCheck) =>
+            enterProject(selfCheck, dialog === "create" ? "story" : "editing")
+          }
         />
       )}
 
