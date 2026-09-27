@@ -1307,6 +1307,7 @@ export class LeaferEditorController {
     const factor = wheelZoomFactor(
       event.deltaY,
       event.ctrlKey || event.metaKey,
+      this.camera.zoom,
     );
     this.emitCamera(
       zoomAtPoint(this.camera, this.size, screen, factor),

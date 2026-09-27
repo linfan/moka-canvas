@@ -56,13 +56,28 @@ export function zoomAtPoint(
   };
 }
 
+/** The zoom a wheel step is measured against: a one-to-one view of the art. */
+const WHEEL_ZOOM_REFERENCE = 1;
+
 /**
- * Zoom factor for one wheel event. `fine` marks the held-modifier step — a
- * quarter of the usual one — which is also what a Mac trackpad pinch sends,
- * for aiming at a detail without overshooting it.
+ * Zoom factor for one wheel event, at the zoom the camera is held at.
+ *
+ * One notch has to serve a canvas showing a handful of nodes and one showing a
+ * city block, and a step fixed in proportion serves neither: read against the
+ * whole visible field it crawls when far out and cannot be aimed at close in.
+ * So the step follows what the viewport holds — the world on screen grows as
+ * the zoom falls — taken as its square root, which crosses a large canvas in
+ * a few rolls without the near view running away from the hand. `fine` marks
+ * the held-modifier step — a quarter of the usual one — which is also what a
+ * Mac trackpad pinch sends, for aiming at a detail without overshooting it.
  */
-export function wheelZoomFactor(deltaY: number, fine: boolean): number {
-  return Math.pow(1.0015, -deltaY * (fine ? 0.25 : 1));
+export function wheelZoomFactor(
+  deltaY: number,
+  fine: boolean,
+  zoom: number,
+): number {
+  const gain = Math.sqrt(WHEEL_ZOOM_REFERENCE / zoom);
+  return Math.pow(1.0015, -deltaY * (fine ? 0.25 : 1) * gain);
 }
 
 /** Pan by a screen-space pixel delta. */
