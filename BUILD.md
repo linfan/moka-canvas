@@ -11,7 +11,54 @@ Prerequisites and commands for building and packaging Moka Canvas on each host.
 | Rust toolchain | stable  | Includes `cargo` and `rustup`                     |
 | Tauri CLI      | 2.x     | Installed as a dev dependency (`@tauri-apps/cli`) |
 
-Platform-specific requirements for native bundling (Xcode CLI tools, WebView2, WiX/NSIS) are documented by [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+[Tauri prerequisites](https://tauri.app/start/prerequisites/) is the upstream reference for the bundling toolchains; what each host needs for this project is below.
+
+## Platform prerequisites
+
+### macOS
+
+| Requirement     | Install                                                           |
+| --------------- | ----------------------------------------------------------------- |
+| Xcode CLI tools | `xcode-select --install` — clang, the SDK and `codesign`          |
+| Rust toolchain  | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Node.js 22+     | `brew install node`, or the installer from nodejs.org             |
+
+The window renders in the system's own WebKit, so the desktop app runs with nothing else installed. `make package-macos` needs no further tools either.
+
+### Windows
+
+| Requirement          | Install                                                                                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| MSVC C++ build tools | `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` — the "Desktop development with C++" workload |
+| Rust toolchain       | `winget install Rustlang.Rustup`, then `rustup default stable-msvc` (the MSVC host target, not GNU)                                                                                                    |
+| Node.js 22+          | `winget install OpenJS.NodeJS.LTS`                                                                                                                                                                     |
+| WebView2 Runtime     | preinstalled on Windows 11 and current Windows 10; on a machine without one, install the Evergreen Bootstrapper from the [WebView2 page](https://developer.microsoft.com/microsoft-edge/webview2/)     |
+
+The app's window is drawn by WebView2 — Edge's rendering engine — so it is needed to run `make tauri-dev` as much as the installed app: without it there is no window to draw in. The NSIS setup installs it on machines that lack it, by downloading Microsoft's bootstrapper, so that install needs network. WiX and NSIS themselves are only needed to build installers, which `make package-windows` covers per the Tauri prerequisites.
+
+## Clip export (ffmpeg)
+
+Timeline export is done by ffmpeg, which is not bundled. The program runs without it — export reports itself unavailable and its dialog names every way out — and a machine that is meant to export needs a build with **libass** (the `ass` filter that burns captions in) and `xfade` (the transitions). The plain `brew install ffmpeg` formula is built without libass: a cut with no words exports, and one with words is refused by name rather than quietly losing them.
+
+The renderer is looked for in three places, in this order: `clip.ffmpegPath` in the configuration file (`clip` in `config/moka.example.yaml`), the `MOKA_FFMPEG` environment variable, then the platform search path. A named path that is not there is unavailable rather than a different ffmpeg being run instead, which is what makes a machine's renderer deterministic.
+
+macOS:
+
+```sh
+brew install ffmpeg-full
+```
+
+`ffmpeg-full` is keg-only — linking it would shadow the slim `ffmpeg` — so point the program at it afterwards: `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg` on Apple Silicon, `/usr/local/opt/ffmpeg-full/bin/ffmpeg` on Intel.
+
+```sh
+MOKA_FFMPEG=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg make tauri-dev
+```
+
+or write it into the configuration file as `clip.ffmpegPath` so every run finds it. The Rust suites look for their renderer the same way, and a machine whose ffmpeg lacks libass fails the two clip tests that burn a caption in, so a full run on macOS is `MOKA_FFMPEG=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg make check`.
+
+Windows: install a full-featured build — gyan.dev's ["full"](https://www.gyan.dev/ffmpeg/builds/), or a [BtbN](https://github.com/BtbN/FFmpeg-Builds/releases) release — and name it the same way, `clip.ffmpegPath: 'C:\path\to\ffmpeg.exe'` or `MOKA_FFMPEG`, or put its `bin` directory on `PATH`.
+
+Any build can be asked what it has: `ffmpeg -h filter=ass` describes the filter when it is there, and says `Unknown filter 'ass'.` when it is not.
 
 ## Setup
 
