@@ -1,0 +1,8 @@
+{
+  "displayName": "Volcengine · Ark Image (Seedream)",
+  "labels": { "zh": "火山方舟 · 图像生成（Seedream）" },
+  "urlExample": "https://ark.cn-beijing.volces.com/api/v3/images/generations",
+  "script": "volcengine-image.lua",
+  "order": 30,
+  "version": 1
+}

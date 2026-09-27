@@ -2185,3 +2185,619 @@ async fn a_bailian_answer_without_a_message_is_read_from_its_bare_text() {
         "totals nobody reported are not invented"
     );
 }
+
+// ------------------------------------------------------------- volcengine
+
+/// The paths this platform's converters are spoken at, each under the endpoint
+/// its own document names.
+fn volcengine_channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall {
+    let (id, path) = match capability {
+        Capability::Text => ("volcengineText", "/api/v3/chat/completions"),
+        Capability::Image => ("volcengineImage", "/api/v3/images/generations"),
+        Capability::Video => ("volcengineVideo", "/api/v3/contents/generations/tasks"),
+        other => panic!("no Volcengine converter serves {}", other.as_str()),
+    };
+    at(id, base_url, model_id, capability, path)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_question_is_asked_with_its_switch_and_read_in_its_answer() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v3/chat/completions",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("chat", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "id": "0217",
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": { "role": "assistant", "content": "A lantern drifts." },
+                    }],
+                    "usage": { "prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9 },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seed-1-6", Capability::Text);
+    let mut request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "temperature": 0.7, "maxTokens": 64, "reasoningEffort": "high" }),
+    );
+    request.system = Some("Answer in one sentence.".into());
+    let result = scripted()
+        .await
+        .generate(&call, &request, &[], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern drifts."));
+    assert_eq!(result.usage.and_then(|usage| usage.input_tokens), Some(5));
+    assert_eq!(result.usage.and_then(|usage| usage.output_tokens), Some(4));
+    assert_eq!(
+        recorded.headers().authorization.as_deref(),
+        Some(&format!("Bearer {API_KEY}")[..]),
+        "the credential travels the way this platform reads it"
+    );
+    // An effort the room named is a switch to this service rather than a word,
+    // and anything but `none` means the model is asked to think.
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "doubao-seed-1-6",
+            "messages": [
+                { "role": "system", "content": "Answer in one sentence." },
+                { "role": "user", "content": "describe a lantern" },
+            ],
+            "temperature": 0.7,
+            "max_tokens": 64,
+            "thinking": { "type": "enabled" },
+        })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_question_with_a_picture_carries_it_inside_the_message() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v3/chat/completions",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("chat", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "choices": [{ "message": { "role": "assistant", "content": "A lighthouse." } }],
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seed-1-6", Capability::Text);
+    let photo = reference("photo", InputRole::Reference);
+    // The switch off is stated as the service spells it, and the service's own
+    // middle travels as no switch at all.
+    let request = generation(
+        Capability::Text,
+        "what is in this picture",
+        json!({ "reasoningEffort": "none" }),
+    );
+    scripted()
+        .await
+        .generate(&call, &request, &[photo], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "doubao-seed-1-6",
+            "messages": [{ "role": "user", "content": [
+                { "type": "text", "text": "what is in this picture" },
+                { "type": "image_url", "image_url": {
+                    "url": format!("data:image/png;base64,{}", base64(&png(4, 3))),
+                } },
+            ] }],
+            "thinking": { "type": "disabled" },
+        })
+    );
+
+    let auto = generation(
+        Capability::Text,
+        "what is in this picture",
+        json!({ "reasoningEffort": "auto" }),
+    );
+    scripted()
+        .await
+        .generate(&call, &auto, &[], &Cancel::new())
+        .await
+        .expect("the answer arrives");
+    assert!(
+        recorded.body(1).get("thinking").is_none(),
+        "the middle is what saying nothing is"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_answer_arrives_in_pieces_when_a_stream_was_asked_for() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v3/chat/completions",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("chat", &headers, None);
+                recorded.note_body(&body);
+                stream(&[
+                    r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":"A "}}]}"#,
+                    r#"{"choices":[{"index":0,"delta":{"content":"lantern."}}]}"#,
+                    r#"{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}"#,
+                    "[DONE]",
+                ])
+            }
+        }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seed-1-6", Capability::Text);
+    let request = generation(
+        Capability::Text,
+        "describe a lantern",
+        json!({ "stream": true }),
+    );
+    let (sink, seen) = watching();
+    let result = scripted()
+        .await
+        .generate_stream(&call, &request, &[], &sink, &Cancel::new())
+        .await
+        .expect("the stream is read to its end");
+
+    assert_eq!(result.text.as_deref(), Some("A lantern."));
+    assert_eq!(shown(&seen), "A lantern.");
+    assert_eq!(
+        result.usage.and_then(|usage| usage.output_tokens),
+        Some(2),
+        "the totals the closing event carried are kept"
+    );
+    let body = recorded.body(0);
+    assert_eq!(body["stream"], json!(true));
+    // The totals of a streamed answer travel only where they were asked for.
+    assert_eq!(body["stream_options"], json!({ "include_usage": true }));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_shape_and_its_copies_are_sent_as_the_platform_reads_them() {
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v3/images/generations",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            async move {
+                recorded.note("draw", &headers, None);
+                recorded.note_body(&body);
+                // A drawing carried in the answer itself, so a case that only
+                // cares about what was asked has nothing to fetch.
+                Json(json!({
+                    "model": "doubao-seedream-4-0",
+                    "data": [{ "b64_json": base64(&png(4, 3)) }],
+                    "usage": { "generated_images": 1 },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seedream-4-0", Capability::Image);
+    for (asked, (shape, told)) in [
+        // About two megapixels in the proportion asked for, both sides a
+        // multiple of sixteen.
+        ("1:1", Some("2048x2048")),
+        ("16:9", Some("2048x1152")),
+        ("9:16", Some("1152x2048")),
+        ("3:4", Some("1536x2048")),
+        ("4:3", Some("2048x1536")),
+        ("21:9", Some("2048x880")),
+        // A size the service takes is passed on, in the spelling it reads.
+        ("1024x1024", Some("1024x1024")),
+        ("1280*720", Some("1280x720")),
+        ("2K", Some("2K")),
+        ("4k", Some("4K")),
+        // Its own way of leaving the choice to the service.
+        ("auto", None),
+        ("", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request = generation(Capability::Image, "a lighthouse", json!({ "size": shape }));
+        scripted()
+            .await
+            .generate(&call, &request, &[], &Cancel::new())
+            .await
+            .expect("the drawing arrives");
+        let body = recorded.body(asked);
+        assert_eq!(
+            body.get("size").and_then(Value::as_str),
+            told,
+            "asked for {shape}"
+        );
+        assert_eq!(
+            body.get("sequential_image_generation"),
+            None,
+            "one copy is what saying nothing asks for"
+        );
+        assert_eq!(
+            body["watermark"],
+            json!(false),
+            "the platform stamps by default, which a picture for a film is not asked for"
+        );
+    }
+
+    // Several copies are a group here rather than a count, and the pictures
+    // beside the words ride as the list this service reads them from.
+    let photo = reference("photo", InputRole::Reference);
+    let request = generation(
+        Capability::Image,
+        "make it snow",
+        json!({ "size": "16:9", "count": 2 }),
+    );
+    scripted()
+        .await
+        .generate(&call, &request, &[photo], &Cancel::new())
+        .await
+        .expect("the drawings arrive");
+    let body = recorded.body(12);
+    assert_eq!(body["sequential_image_generation"], json!("auto"), "{body}");
+    assert_eq!(
+        body["sequential_image_generation_options"],
+        json!({ "max_images": 2 }),
+        "{body}"
+    );
+    assert_eq!(
+        body["image"],
+        json!([format!("data:image/png;base64,{}", base64(&png(4, 3)))]),
+        "{body}"
+    );
+
+    // A background travels under the two words this service knows; leaving the
+    // choice open is the service making it, which travelling as nothing says.
+    for (asked, (background, told)) in [
+        ("transparent", Some("transparent")),
+        ("opaque", Some("opaque")),
+        ("auto", None),
+        ("", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request = generation(
+            Capability::Image,
+            "a lighthouse",
+            json!({ "background": background }),
+        );
+        scripted()
+            .await
+            .generate(&call, &request, &[], &Cancel::new())
+            .await
+            .expect("the drawing arrives");
+        assert_eq!(
+            recorded
+                .body(13 + asked)
+                .get("background")
+                .and_then(Value::as_str),
+            told,
+            "asked for {background}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_drawing_is_fetched_from_where_it_was_left() {
+    let picture = png(6, 5);
+    let elsewhere = Recorded::default();
+    let serving = elsewhere.clone();
+    let stored = picture.clone();
+    let elsewhere_url = serve(Router::new().route(
+        "/made/lantern.png",
+        get(move |headers: HeaderMap| {
+            let recorded = serving.clone();
+            let stored = stored.clone();
+            async move {
+                recorded.note("drawing", &headers, None);
+                ([(axum::http::header::CONTENT_TYPE, "image/png")], stored)
+            }
+        }),
+    ))
+    .await;
+
+    let recorded = Recorded::default();
+    let answering = recorded.clone();
+    let base_url = serve(Router::new().route(
+        "/api/v3/images/generations",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let recorded = answering.clone();
+            let address = format!("{elsewhere_url}/made/lantern.png");
+            async move {
+                recorded.note("draw", &headers, None);
+                recorded.note_body(&body);
+                Json(json!({
+                    "model": "doubao-seedream-4-0",
+                    "data": [{ "url": address }],
+                    "usage": { "generated_images": 1, "output_tokens": 1234 },
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seedream-4-0", Capability::Image);
+    let result = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Image, "a lighthouse", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect("the drawing arrives");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].bytes, picture);
+    assert_eq!(result.items[0].mime, "image/png", "sniffed, not assumed");
+    assert_eq!(
+        (result.items[0].width, result.items[0].height),
+        (Some(6), Some(5))
+    );
+    assert_eq!(result.usage.and_then(|usage| usage.images), Some(1));
+    assert_eq!(
+        result.usage.and_then(|usage| usage.output_tokens),
+        Some(1234)
+    );
+    assert!(
+        elsewhere.headers().authorization.is_none(),
+        "a credential never follows an answer to a host that did not produce it"
+    );
+    assert_eq!(recorded.asked(), ["draw"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_answer_without_a_drawing_is_refused_rather_than_stored_empty() {
+    let base_url = serve(Router::new().route(
+        "/api/v3/images/generations",
+        post(|| async { Json(json!({ "model": "doubao-seedream-4-0", "data": [] })) }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seedream-4-0", Capability::Image);
+    let error = scripted()
+        .await
+        .generate(
+            &call,
+            &generation(Capability::Image, "a lighthouse", json!({})),
+            &[],
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("a drawing that never came is not an answer");
+
+    // A success that carried no drawing is a refusal to act on rather than a
+    // call to repeat: the service's own words say what was wrong with the ask.
+    assert_eq!(error.code(), "PROVIDER_BAD_REQUEST");
+    assert!(
+        error.to_string().contains("without a drawing"),
+        "what the script made of the answer is kept: {error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_shot_is_started_polled_and_collected() {
+    let recorded = Recorded::default();
+    let started = recorded.clone();
+    let polled = recorded.clone();
+    let collected = recorded.clone();
+    let base_url = serve(
+        Router::new()
+            .route(
+                "/api/v3/contents/generations/tasks",
+                post(move |headers: HeaderMap, body: Bytes| {
+                    let recorded = started.clone();
+                    async move {
+                        recorded.note("start", &headers, None);
+                        recorded.note_body(&body);
+                        Json(json!({ "id": "cgt-1" }))
+                    }
+                }),
+            )
+            .route(
+                "/api/v3/contents/generations/tasks/{id}",
+                get(move |headers: HeaderMap| {
+                    let recorded = polled.clone();
+                    async move {
+                        recorded.note("poll", &headers, None);
+                        // The first look finds work in progress; the second
+                        // finds the shot finished and names where it was left.
+                        if recorded.next_poll() == 0 {
+                            return Json(json!({ "id": "cgt-1", "status": "running" }));
+                        }
+                        let address = format!(
+                            "http://{}/api/v3/contents/generations/tasks/cgt-1/video",
+                            reached_on(&headers)
+                        );
+                        Json(json!({
+                            "id": "cgt-1",
+                            "status": "succeeded",
+                            "content": { "video_url": address },
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/api/v3/contents/generations/tasks/cgt-1/video",
+                get(move |headers: HeaderMap| {
+                    let recorded = collected.clone();
+                    async move {
+                        recorded.note("video", &headers, None);
+                        Response::builder()
+                            .header(axum::http::header::CONTENT_TYPE, "video/mp4")
+                            .body(Body::from(b"mp4-bytes".to_vec()))
+                            .expect("a response builds")
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seedance-1-0-pro", Capability::Video);
+    let cancel = Cancel::new();
+    let inputs = [
+        reference("opening", InputRole::FirstFrame),
+        reference("middle", InputRole::Reference),
+        reference("closing", InputRole::LastFrame),
+    ];
+    let request = generation(
+        Capability::Video,
+        "a lantern drifts",
+        json!({
+            "seconds": 6,
+            "resolution": "720",
+            "ratio": "16:9",
+            "generateAudio": true,
+            "watermark": false,
+        }),
+    );
+    let task = scripted()
+        .await
+        .create_task(&call, &request, &inputs, &cancel)
+        .await
+        .expect("the job starts");
+
+    assert_eq!(task.reference, "cgt-1");
+    assert_eq!(task.protocol, Protocol::new("volcengineVideo"));
+    assert_eq!(task.capability, Capability::Video);
+    // The shot is described as a list of content: the words, then each picture
+    // under the name of the end it belongs to.
+    assert_eq!(
+        recorded.body(0),
+        json!({
+            "model": "doubao-seedance-1-0-pro",
+            "content": [
+                { "type": "text", "text": "a lantern drifts" },
+                { "type": "image_url", "image_url": { "url": inputs[0].data_url() },
+                  "role": "first_frame" },
+                { "type": "image_url", "image_url": { "url": inputs[1].data_url() },
+                  "role": "reference_image" },
+                { "type": "image_url", "image_url": { "url": inputs[2].data_url() },
+                  "role": "last_frame" },
+            ],
+            "ratio": "16:9",
+            "duration": 6,
+            "resolution": "720p",
+            "watermark": false,
+            "generate_audio": true,
+        })
+    );
+
+    match scripted().await.poll_task(&call, &task, &cancel).await {
+        Ok(TaskState::Pending { retry_after_ms }) => {
+            assert!(retry_after_ms > 0, "a poll is worth waiting for")
+        }
+        other => panic!("expected a job still running, got {other:?}"),
+    }
+    match scripted()
+        .await
+        .poll_task(&call, &task, &cancel)
+        .await
+        .expect("the job is collected")
+    {
+        TaskState::Succeeded(result) => {
+            assert_eq!(result.items.len(), 1);
+            assert_eq!(result.items[0].mime, "video/mp4");
+            assert_eq!(result.items[0].kind, Capability::Video);
+            assert_eq!(result.items[0].bytes, b"mp4-bytes");
+        }
+        other => panic!("expected the finished shot, got {other:?}"),
+    }
+    assert_eq!(recorded.asked(), ["start", "poll", "poll", "video"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_job_that_failed_reports_the_platforms_explanation() {
+    let base_url = serve(Router::new().route(
+        "/api/v3/contents/generations/tasks/{id}",
+        get(|| async {
+            Json(json!({
+                "id": "cgt-2",
+                "status": "failed",
+                "error": { "code": "ContentFilter", "message": "the prompt was refused" },
+            }))
+        }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seedance-1-0-pro", Capability::Video);
+    let task = moka_canvas::generate::AsyncTask {
+        id: "task-2".into(),
+        reference: "cgt-2".into(),
+        protocol: Protocol::new("volcengineVideo"),
+        capability: Capability::Video,
+        model: "doubao-seedance-1-0-pro".into(),
+        created_at: "2026-01-01T00:00:00Z".into(),
+    };
+
+    match scripted()
+        .await
+        .poll_task(&call, &task, &Cancel::new())
+        .await
+        .expect("the job answered")
+    {
+        TaskState::Failed { message, retryable } => {
+            assert_eq!(message, "the prompt was refused");
+            assert!(!retryable, "the same job would fail the same way");
+        }
+        other => panic!("expected a failed job, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_volcengine_job_that_was_cancelled_ends_as_a_failure() {
+    let base_url = serve(Router::new().route(
+        "/api/v3/contents/generations/tasks/{id}",
+        get(|| async { Json(json!({ "id": "cgt-3", "status": "cancelled" })) }),
+    ))
+    .await;
+
+    let call = volcengine_channel(&base_url, "doubao-seedance-1-0-pro", Capability::Video);
+    let task = moka_canvas::generate::AsyncTask {
+        id: "task-3".into(),
+        reference: "cgt-3".into(),
+        protocol: Protocol::new("volcengineVideo"),
+        capability: Capability::Video,
+        model: "doubao-seedance-1-0-pro".into(),
+        created_at: "2026-01-01T00:00:00Z".into(),
+    };
+
+    match scripted()
+        .await
+        .poll_task(&call, &task, &Cancel::new())
+        .await
+        .expect("the job answered")
+    {
+        TaskState::Failed { message, retryable } => {
+            assert!(message.contains("cancelled"), "{message}");
+            assert!(!retryable);
+        }
+        other => panic!("expected an ended job, got {other:?}"),
+    }
+}

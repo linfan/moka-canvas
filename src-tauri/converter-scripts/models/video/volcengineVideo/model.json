@@ -1,0 +1,8 @@
+{
+  "displayName": "Volcengine · Ark Video (Seedance)",
+  "labels": { "zh": "火山方舟 · 视频生成（Seedance）" },
+  "urlExample": "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks",
+  "script": "volcengine-video.lua",
+  "order": 40,
+  "version": 1
+}

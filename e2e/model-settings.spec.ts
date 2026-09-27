@@ -193,6 +193,7 @@ test("a category offers only the protocols that serve it", async ({ page }) => {
     "OpenAI-compatible · Videos API",
     "Google Gemini · long-running (Veo)",
     "Alibaba Cloud · Bailian Video",
+    "Volcengine · Ark Video (Seedance)",
   ]);
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(
     "https://api.openai.com/v1/videos",
@@ -284,6 +285,7 @@ test("every shape a category offers comes from its converter's model.json", asyn
   await expect(protocol.locator("option")).toHaveText([
     "OpenAI-compatible · Images API",
     "Alibaba Cloud · Bailian Image (Wan)",
+    "Volcengine · Ark Image (Seedream)",
   ]);
   await protocol.selectOption("bailianImage");
   await expect(dialog.getByLabel("Endpoint URL")).toHaveValue(

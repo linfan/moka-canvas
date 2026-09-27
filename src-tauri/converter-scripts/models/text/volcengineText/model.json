@@ -1,0 +1,8 @@
+{
+  "displayName": "Volcengine · Ark Chat (Doubao)",
+  "labels": { "zh": "火山方舟 · 文本生成（豆包）" },
+  "urlExample": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  "script": "volcengine-chat.lua",
+  "order": 50,
+  "version": 1
+}
