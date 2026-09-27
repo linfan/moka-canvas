@@ -53,7 +53,7 @@ impl PlanError {
 pub struct RenderPlan {
     /// The files the command opens, in the order their stream numbers count in.
     pub inputs: Vec<PlanInput>,
-    /// The `-filter_complex_script` body, relative file names and all.
+    /// The `-filter_complex` body, relative file names and all.
     pub graph: String,
     /// The burn-in script, when the timeline has words on it.
     pub ass: Option<String>,

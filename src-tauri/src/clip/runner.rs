@@ -22,9 +22,6 @@ use tokio::sync::oneshot;
 
 /// The file the renderer writes inside the scratch directory.
 pub const OUTPUT_FILE: &str = "out.mp4";
-/// The graph, read from the working directory so no path is ever escaped
-/// into the filter text.
-pub const GRAPH_FILE: &str = "graph.txt";
 /// The burn-in script; the graph names it the same way.
 pub const ASS_FILE: &str = "subs.ass";
 /// How much of a failure's own words are kept for the message.
@@ -147,8 +144,6 @@ pub async fn run(
     std::fs::create_dir_all(&spec.temp_dir)
         .map_err(|error| RunError::Unstartable(error.to_string()))?;
     let scratch = Scratch(spec.temp_dir.clone());
-    std::fs::write(spec.temp_dir.join(GRAPH_FILE), spec.graph.as_bytes())
-        .map_err(|error| RunError::Unstartable(error.to_string()))?;
     if let Some(ass) = &spec.ass {
         std::fs::write(spec.temp_dir.join(ASS_FILE), ass.as_bytes())
             .map_err(|error| RunError::Unstartable(error.to_string()))?;
@@ -341,8 +336,12 @@ pub fn ffmpeg_args(spec: &RunSpec) -> Vec<String> {
         args.push("-i".into());
         args.push(input.path.to_string_lossy().into_owned());
     }
-    args.push("-filter_complex_script".into());
-    args.push(GRAPH_FILE.into());
+    // The graph travels as the argument itself: the newest ffmpeg builds no
+    // longer read it from a file (`-filter_complex_script` is gone), and it
+    // holds nothing but fixed spellings and names relative to the working
+    // directory the command is placed in.
+    args.push("-filter_complex".into());
+    args.push(spec.graph.clone());
     args.push("-map".into());
     args.push("[vout]".into());
     if spec.audio {
@@ -479,7 +478,14 @@ mod tests {
         let args = ffmpeg_args(&spec);
         let joined = args.join(" ");
         assert!(joined.contains("-ss 0.5 -t 2 -i /tmp/does-not-matter.mp4"));
-        assert!(joined.contains("-filter_complex_script graph.txt"));
+        // The graph is the argument after the option, not a file beside it:
+        // the newest ffmpeg builds have no script-file spelling left.
+        let at = args
+            .iter()
+            .position(|arg| arg == "-filter_complex")
+            .expect("the graph is handed over");
+        assert_eq!(args[at + 1], spec.graph);
+        assert!(!joined.contains("filter_complex_script"), "{joined}");
         assert!(joined.contains("-map [vout]"));
         assert!(joined.contains("-map [aout]"));
         assert!(joined.contains("-t 2 -r 30"));
@@ -522,6 +528,7 @@ mod tests {
             root.path(),
             "fake-ffmpeg.sh",
             "#!/bin/sh\n\
+             printf '%s\\n' \"$@\" > args.txt\n\
              printf 'out_time_ms=500000\\nprogress=continue\\n'\n\
              printf 'out_time_ms=1000000\\nprogress=continue\\n'\n\
              printf 'progress=continue\\nout_time_ms=1500000\\n'\n\
@@ -546,7 +553,15 @@ mod tests {
             seen.windows(2).all(|pair| pair[0] <= pair[1]),
             "progress never goes backwards: {seen:?}"
         );
-        assert!(temp_dir.join(GRAPH_FILE).is_file());
+        // What the renderer was handed is the plan's own graph, as the
+        // argument itself rather than a file beside it.
+        let handed = std::fs::read_to_string(temp_dir.join("args.txt")).expect("the arguments");
+        assert!(handed.contains("-filter_complex\n"), "{handed}");
+        assert!(
+            handed.contains("color=c=#000000:s=1920x1080:r=30:d=2,format=yuv420p[vout]"),
+            "{handed}"
+        );
+        assert!(!handed.contains("filter_complex_script"), "{handed}");
         assert_eq!(std::fs::read(&artifact.path).unwrap(), b"artifact");
 
         // The scratch directory leaves with the artifact, once it has been
