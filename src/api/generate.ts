@@ -230,8 +230,16 @@ export const generateApi = {
     });
   },
 
-  audio(request: GenerateRequest, signal?: AbortSignal) {
-    return http.request<GenerateResponse>(path("audio"), {
+  speech(request: GenerateRequest, signal?: AbortSignal) {
+    return http.request<GenerateResponse>(path("speech"), {
+      method: "POST",
+      body: request,
+      signal,
+    });
+  },
+
+  music(request: GenerateRequest, signal?: AbortSignal) {
+    return http.request<GenerateResponse>(path("music"), {
       method: "POST",
       body: request,
       signal,

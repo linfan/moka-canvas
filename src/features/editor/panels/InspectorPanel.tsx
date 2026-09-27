@@ -16,6 +16,7 @@ import type {
 } from "../../../shared/domain";
 import {
   ASSET_CATEGORY_LABELS,
+  ASSET_KIND_LABELS,
   BACKGROUND_MODES,
   CAPABILITY_LABELS,
   PROVIDER_EXECUTOR_KEY,
@@ -1187,7 +1188,7 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
           label={t("editor:field.shelf")}
           value={
             shelf
-              ? `${t(ASSET_CATEGORY_LABELS[shelf])} · ${t(CAPABILITY_LABELS[kindOfShelf(shelf)])}`
+              ? `${t(ASSET_CATEGORY_LABELS[shelf])} · ${t(ASSET_KIND_LABELS[kindOfShelf(shelf)])}`
               : ""
           }
         />

@@ -56,7 +56,7 @@ function models(models: ModelsView["models"]): ModelsView {
     defaults: {
       text: null,
       image: null,
-      audio: null,
+      speech: null,
       music: null,
       video: null,
       asr: null,
@@ -73,7 +73,7 @@ function models(models: ModelsView["models"]): ModelsView {
         mode: "auto",
         ratio: "16:9",
       },
-      audio: {
+      speech: {
         voice: "alloy",
         format: "mp3",
         speed: 1,
@@ -83,6 +83,7 @@ function models(models: ModelsView["models"]): ModelsView {
         rate: 1,
         pitch: 1,
       },
+      music: { format: "mp3", watermark: false },
       story: { splitChars: 12_000, readChars: 8_000 },
     },
     secretStorage: "unset",
@@ -831,21 +832,39 @@ describe("the parameters a node carries", () => {
     expect(specOf(empty.audio)?.params.voice).toBe("some-model-voice");
   });
 
-  it("files an audio result where the node says rather than by default", async () => {
+  it("moves a sound ask between the two capabilities it may be made in", async () => {
     const empty = withEmptyNodes();
     await openEditor();
     selectNode(empty.audio);
     await settle();
     openParams();
     await settle();
-    const music = within(panel()).getByRole("checkbox", {
-      name: "File under Music",
-    });
-    expect(music).toHaveProperty("checked", false);
 
-    fireEvent.click(music);
+    // A fresh sound ask is a read-aloud one, and its fields are the voice's.
+    expect(
+      within(panel())
+        .getByRole("radio", { name: "Speech" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    const voice = within(panel()).getByRole("textbox", { name: "Voice" });
+    fireEvent.change(voice, { target: { value: "some-model-voice" } });
+    fireEvent.blur(voice);
     await settle();
-    expect(specOf(empty.audio)?.params.music).toBe(true);
+    expect(specOf(empty.audio)?.capability).toBe("speech");
+    expect(specOf(empty.audio)?.params.voice).toBe("some-model-voice");
+
+    // Asking for a score instead moves the ask, and the voice's parameters do
+    // not come along: each capability reads a vocabulary of its own.
+    fireEvent.click(within(panel()).getByRole("radio", { name: "Music" }));
+    await settle();
+    expect(specOf(empty.audio)?.capability).toBe("music");
+    expect(specOf(empty.audio)?.params.voice).toBeUndefined();
+    expect(
+      within(panel()).queryByRole("textbox", { name: "Voice" }),
+    ).toBeNull();
+    expect(
+      within(panel()).getByRole("textbox", { name: "Lyrics" }),
+    ).toBeTruthy();
   });
 
   it("lets one text node frame its own answer", async () => {

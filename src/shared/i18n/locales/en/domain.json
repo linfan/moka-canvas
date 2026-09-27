@@ -17,7 +17,8 @@
   "capability": {
     "text": "Text",
     "image": "Image",
-    "audio": "Audio",
+    "speech": "Speech",
+    "music": "Music",
     "video": "Video",
     "asr": "Speech recognition"
   },

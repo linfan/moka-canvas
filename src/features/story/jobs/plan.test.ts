@@ -41,7 +41,7 @@ function settingsWithVideoSeconds(seconds: number): ModelsView {
     defaults: {
       text: null,
       image: null,
-      audio: null,
+      speech: null,
       music: null,
       video: null,
       asr: null,
@@ -58,7 +58,7 @@ function settingsWithVideoSeconds(seconds: number): ModelsView {
         mode: "auto",
         ratio: "",
       },
-      audio: {
+      speech: {
         voice: "",
         format: "",
         speed: 1,
@@ -68,6 +68,7 @@ function settingsWithVideoSeconds(seconds: number): ModelsView {
         rate: 1,
         pitch: 1,
       },
+      music: { format: "mp3", watermark: false },
       story: { splitChars: 12_000, readChars: 8_000 },
     },
     secretStorage: "unset",
@@ -561,7 +562,7 @@ describe("the sound of an act", () => {
     const items = planActVoice(lined, ids.chapterFirst, ids.act);
     expect(items).toHaveLength(1);
     expect(items[0].id).toBe(`actVoice:${ids.chapterFirst}:${ids.act}`);
-    expect(items[0].capability).toBe("audio");
+    expect(items[0].capability).toBe("speech");
     expect(items[0].prompt).toContain("林：车已经停运了。（平静）");
     expect(items[0].prompt).toContain("周：下一班还来。");
     expect(items[0].prompt.indexOf("车已经停运了")).toBeLessThan(
@@ -587,20 +588,20 @@ describe("the sound of an act", () => {
     expect(planActVoice(silent, ids.chapterFirst, ids.act)).toEqual([]);
   });
 
-  it("asks for the score with the board's own words and the music flag", () => {
+  it("asks for the score in the music capability, with the board's own words", () => {
     const items = planActMusic(story(), ids.chapterFirst, ids.act);
     expect(items).toHaveLength(1);
     expect(items[0].id).toBe(`actMusic:${ids.chapterFirst}:${ids.act}`);
-    expect(items[0].capability).toBe("audio");
+    // The capability is what the answer is filed by: a score asked of a
+    // speech model would land on the voice shelf.
+    expect(items[0].capability).toBe("music");
     expect(items[0].prompt).toContain("低音提琴，缓慢");
     expect(items[0].prompt).toContain("雨声");
     expect(items[0].prompt).toContain("空站台");
-    // The flag is what the server files the answer by: without it a score
-    // would land on the voice shelf.
-    expect(items[0]?.params?.music).toBe(true);
     // A score plays under the lines rather than being sung over them: the
-    // service that can write words for a song is told not to.
-    expect(items[0]?.params?.instrumental).toBe(true);
+    // service that can write words for a song is told not to. Shape and
+    // watermark are the music preferences' to fill, so they are not sent.
+    expect(items[0]?.params).toEqual({ instrumental: true });
   });
 
   it("asks for nothing when the board says nothing about the sound", () => {

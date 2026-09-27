@@ -21,12 +21,15 @@ import {
 } from "./fixtures";
 import {
   boundsForShape,
+  capabilityServes,
   createCanvas,
   createNode,
   createProject,
   createSession,
   executorKeyForNode,
+  generationCapabilityFor,
   generationSpecFromSnapshot,
+  paramsForCapability,
 } from "./factories";
 import { newId } from "./ids";
 import type {
@@ -1018,6 +1021,59 @@ describe("a spec rebuilt from what an asset recorded", () => {
     expect(spec?.inputMode).toBe("mentions");
     expect(spec?.params).toEqual({});
     expect(spec?.referenceNodeIds).toEqual(["node-one"]);
+  });
+
+  it("takes either sound capability on a sound node, and no other", () => {
+    const spoken = { ...asked, capability: "speech" };
+    const scored = { ...asked, capability: "music" };
+    expect(generationSpecFromSnapshot(spoken, "audio")?.capability).toBe(
+      "speech",
+    );
+    expect(generationSpecFromSnapshot(scored, "audio")?.capability).toBe(
+      "music",
+    );
+    // A picture was asked for with a picture's words; on a sound node it is
+    // not an ask to put back but a mismatch the document already reports.
+    expect(generationSpecFromSnapshot(spoken, "image")).toBeNull();
+    expect(generationSpecFromSnapshot(asked, "audio")).toBeNull();
+    expect(generationSpecFromSnapshot(spoken, "group")).toBeNull();
+  });
+});
+
+describe("the capabilities a sound node is served by", () => {
+  it("serves sound from speech and music, and nothing else from either", () => {
+    expect(capabilityServes("speech", "audio")).toBe(true);
+    expect(capabilityServes("music", "audio")).toBe(true);
+    expect(capabilityServes("image", "audio")).toBe(false);
+    expect(capabilityServes("speech", "image")).toBe(false);
+    expect(capabilityServes("music", "video")).toBe(false);
+    expect(capabilityServes("video", "video")).toBe(true);
+  });
+
+  it("starts a fresh sound ask as a read-aloud one", () => {
+    expect(generationCapabilityFor("audio")).toBe("speech");
+    expect(generationCapabilityFor("image")).toBe("image");
+    expect(generationCapabilityFor("group")).toBeNull();
+  });
+
+  it("cuts parameters to the vocabulary of the capability they land in", () => {
+    const asked = {
+      voice: "alloy",
+      format: "mp3",
+      speed: 1.2,
+      instrumental: true,
+      lyrics: "la la",
+    };
+    expect(paramsForCapability("speech", asked)).toEqual({
+      voice: "alloy",
+      format: "mp3",
+      speed: 1.2,
+    });
+    expect(paramsForCapability("music", asked)).toEqual({
+      format: "mp3",
+      instrumental: true,
+      lyrics: "la la",
+    });
   });
 });
 

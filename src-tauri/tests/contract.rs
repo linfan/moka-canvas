@@ -1,8 +1,8 @@
 use moka_canvas::domain::validate::{
-    mention_node_ids, mention_spans, model_identifier_shaped, resource_path_valid,
-    topological_order, validate_canvas, validate_moka_file, MAX_ASSET_TAGS, MAX_ASSET_TAG_LENGTH,
-    MAX_ASSISTANT_MESSAGES_PER_SESSION, MAX_ASSISTANT_SESSIONS_PER_CANVAS, MAX_PROMPT_LENGTH,
-    MAX_RESULT_SLOTS,
+    generation_param_keys, mention_node_ids, mention_spans, model_identifier_shaped,
+    resource_path_valid, topological_order, validate_canvas, validate_moka_file, MAX_ASSET_TAGS,
+    MAX_ASSET_TAG_LENGTH, MAX_ASSISTANT_MESSAGES_PER_SESSION, MAX_ASSISTANT_SESSIONS_PER_CANVAS,
+    MAX_PROMPT_LENGTH, MAX_RESULT_SLOTS,
 };
 use moka_canvas::domain::{
     AssistantMessage, AssistantReference, AssistantRole, AssistantSession, CanvasDocument,
@@ -642,4 +642,58 @@ fn a_document_with_no_folders_carries_no_folder_field() {
         .all(|canvas| canvas.folder_id.is_none()));
     let bytes = std::fs::read(fixture_path("minimal.canvas.moka")).unwrap();
     assert_eq!(encode_moka_file(&golden, None).unwrap(), bytes);
+}
+
+/// The parameter keys the web half states for one capability, read out of the
+/// TypeScript constant rather than restated here: the segment runs from its
+/// own `name: [` to the bracket that closes it.
+fn web_param_keys(source: &str, capability: &str) -> Vec<String> {
+    let declaration = source
+        .find("GENERATION_PARAM_KEYS")
+        .expect("the web half states a parameter vocabulary");
+    // The table itself, not the rest of the file: the port table above it names
+    // the same capabilities in the same shape.
+    let block = &source[declaration..];
+    let end_of_block = block.find("\n};").expect("the parameter vocabulary ends");
+    let block = &block[..end_of_block];
+
+    let head = format!("\n  {capability}: [");
+    let start = block
+        .find(&head)
+        .unwrap_or_else(|| panic!("the web half states no {capability} list"))
+        + head.len();
+    let end = block[start..]
+        .find(']')
+        .unwrap_or_else(|| panic!("the {capability} list never closes"))
+        + start;
+    block[start..end]
+        .split(',')
+        .map(|entry| entry.trim().trim_matches('"').to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+/// The vocabulary of an ask is one list, not two that are expected to agree.
+///
+/// A key a converter reads but this half refuses — or the reverse — reads as a
+/// provider ignoring a parameter nobody sent, which is why the two lists are
+/// held together here rather than by whoever edits them next.
+#[test]
+fn the_parameter_vocabulary_is_one_list_in_both_halves() {
+    let source = include_str!("../../src/shared/domain/constants.ts");
+    for capability in [
+        Capability::Text,
+        Capability::Image,
+        Capability::Speech,
+        Capability::Music,
+        Capability::Video,
+        Capability::Asr,
+    ] {
+        assert_eq!(
+            generation_param_keys(capability),
+            web_param_keys(source, capability.as_str()),
+            "both halves must read the same keys, in the same order, for {}",
+            capability.as_str()
+        );
+    }
 }

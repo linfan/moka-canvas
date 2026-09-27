@@ -36,7 +36,6 @@
     "new": "New {{category}} model",
     "empty": "No {{category}} models yet. Add one: a complete endpoint URL, the protocol it speaks, and its own key.",
     "gap": "No enabled {{category}} model: a {{category}} node that names no model of its own will be refused. Enable one above, or add one.",
-    "musicGap": "No music model chosen: a telling's score is asked of the audio default.",
     "voiceGap": "No voice is set: a speech model refuses a request that names no voice. Set one under Preferences."
   },
   "card": {
@@ -48,9 +47,7 @@
     "deleteConfirm": "Delete “{{name}}”? The stored key goes with it.",
     "key": "Key {{masked}}",
     "stored": "stored",
-    "noKey": "No key stored",
-    "music": "Music",
-    "useAsMusic": "Use {{name}} to compose scores and the music under a telling's acts"
+    "noKey": "No key stored"
   },
   "editor": {
     "headingEdit": "Edit “{{name}}” · {{category}}",
@@ -124,8 +121,8 @@
     "aspectRatio": "Aspect ratio",
     "generateAudio": "Generate audio",
     "watermark": "Watermark",
-    "audioDefaults": "Audio defaults",
-    "audio": "Audio",
+    "speechDefaults": "Audio defaults",
+    "speech": "Audio",
     "voice": "Voice",
     "voiceTip": "The voice the model knows",
     "format": "Format",
@@ -136,6 +133,8 @@
     "pitch": "Pitch",
     "voiceInstructions": "Voice instructions",
     "voiceInstructionsTip": "Spoken as directions to the voice",
+    "musicDefaults": "Music defaults",
+    "music": "Music",
     "storyDefaults": "Story room defaults",
     "story": "Story room",
     "splitChars": "Manuscript part length",

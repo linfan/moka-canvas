@@ -361,6 +361,7 @@ describe("capabilityFor", () => {
     expect(capabilityFor("rewrite")).toBe("text");
     expect(capabilityFor("image")).toBe("image");
     expect(capabilityFor("video")).toBe("video");
-    expect(capabilityFor("audio")).toBe("audio");
+    // A sound card starts as a voice, which is where a run made from it asks.
+    expect(capabilityFor("audio")).toBe("speech");
   });
 });

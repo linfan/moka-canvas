@@ -36,7 +36,6 @@
     "new": "新建{{category}}模型",
     "empty": "还没有{{category}}模型。添加一个：完整的端点 URL、它使用的协议，以及它自己的密钥。",
     "gap": "没有已启用的{{category}}模型：未指定自身模型的{{category}}节点会被拒绝。请在上方启用一个，或添加一个。",
-    "musicGap": "尚未选定配乐模型：故事的配乐会交给音频默认模型。",
     "voiceGap": "尚未设置音色：语音模型会拒绝不带音色的合成请求。请在「偏好设置」里填写音色。"
   },
   "card": {
@@ -48,9 +47,7 @@
     "deleteConfirm": "删除“{{name}}”？已存储的密钥也会一并删除。",
     "key": "密钥 {{masked}}",
     "stored": "已存储",
-    "noKey": "未存储密钥",
-    "music": "配乐",
-    "useAsMusic": "用 {{name}} 生成配乐（故事里各幕的音乐与音效）"
+    "noKey": "未存储密钥"
   },
   "editor": {
     "headingEdit": "编辑“{{name}}” · {{category}}",
@@ -124,8 +121,8 @@
     "aspectRatio": "宽高比",
     "generateAudio": "生成音频",
     "watermark": "水印",
-    "audioDefaults": "音频默认值",
-    "audio": "音频",
+    "speechDefaults": "语音合成默认值",
+    "speech": "语音合成",
     "voice": "音色",
     "voiceTip": "模型认识的音色",
     "format": "格式",
@@ -136,6 +133,8 @@
     "pitch": "音调",
     "voiceInstructions": "音色指令",
     "voiceInstructionsTip": "作为对音色的指示朗读",
+    "musicDefaults": "音乐生成默认值",
+    "music": "音乐生成",
     "storyDefaults": "剧情房间默认值",
     "story": "剧情房间",
     "splitChars": "原文每段字数上限",

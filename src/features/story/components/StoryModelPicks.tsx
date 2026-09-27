@@ -10,16 +10,17 @@ import {
 /**
  * Which capability a place is asked of.
  *
- * A score is composed by an audio model — the same capability as the voice,
- * and a different model in a deployment that keeps both — so the score's
- * picker offers audio models under the name of what they make here.
+ * A telling asks two kinds of sound: its lines are read aloud by a speech
+ * model, and the music under its acts is composed by a music model. The
+ * pickers are named after what the room makes there, so the voice place
+ * speaks in the capability's own terms rather than the file's.
  */
 const CAPABILITY_OF_PLACE: Record<StoryAskPlace, Capability> = {
   text: "text",
   image: "image",
   video: "video",
-  audio: "audio",
-  music: "audio",
+  audio: "speech",
+  music: "music",
 };
 
 /**

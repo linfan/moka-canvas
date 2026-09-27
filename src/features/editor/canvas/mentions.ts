@@ -5,7 +5,7 @@ import type {
   ResourceEntry,
   WorkflowNode,
 } from "../../../shared/domain";
-import { CAPABILITY_LABELS, findNode } from "../../../shared/domain";
+import { ASSET_KIND_LABELS, findNode } from "../../../shared/domain";
 import { i18n } from "../../../shared/i18n";
 import {
   mediaInfoForNode,
@@ -76,10 +76,10 @@ export const GROUP_ORDER = [
 export type GroupKey = (typeof GROUP_ORDER)[number];
 
 export const GROUP_LABELS: Record<GroupKey, string> = {
-  text: CAPABILITY_LABELS.text,
-  image: CAPABILITY_LABELS.image,
-  video: CAPABILITY_LABELS.video,
-  audio: CAPABILITY_LABELS.audio,
+  text: ASSET_KIND_LABELS.text,
+  image: ASSET_KIND_LABELS.image,
+  video: ASSET_KIND_LABELS.video,
+  audio: ASSET_KIND_LABELS.audio,
   group: "domain:nodeTitle.group",
 };
 

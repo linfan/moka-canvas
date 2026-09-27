@@ -9,7 +9,11 @@ import type {
   NodeId,
   WorkflowNode,
 } from "../../shared/domain";
-import { findNode, mentionSpans } from "../../shared/domain";
+import {
+  findNode,
+  generationCapabilityFor,
+  mentionSpans,
+} from "../../shared/domain";
 import { i18n } from "../../shared/i18n";
 import {
   answerSystemPrompt,
@@ -84,10 +88,14 @@ export const INTENT_PLACEHOLDERS: Record<AssistantIntent, string> = {
  * A card is asked for through a run, so the model it wants is not on this wire
  * at all — but a board with no picture model has no way to answer a request for
  * a picture either, and saying so before the ask is worth more than a run that
- * would only be refused.
+ * would only be refused. A sound card starts as a voice, since that is the
+ * capability a fresh sound ask is made in; which of the two it lands in is the
+ * reader's to move on the card itself.
  */
 export function capabilityFor(intent: AssistantIntent): Capability {
-  return mediaKindFor(intent) ?? "text";
+  const kind = mediaKindFor(intent);
+  if (kind === null) return "text";
+  return generationCapabilityFor(kind) ?? "text";
 }
 
 /**

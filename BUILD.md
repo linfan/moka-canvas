@@ -62,26 +62,26 @@ Every protocol this program speaks is a converter, and a converter is a director
 
 `model.json` is the whole declaration:
 
-| Field | Meaning |
-| --- | --- |
-| `displayName` | The name it goes by where no label matches, and the name the server's own messages use. Required. |
-| `labels` | Names per locale, e.g. `{"zh": "…"}`. A language with no entry falls back to `displayName`, then to the id. |
-| `urlExample` | An address shown to the reader as a shape to copy. Required. |
-| `script` | The Lua file beside this document. Required. |
-| `order` | Where it sits within its capability, ascending, ties by name (default 1000). |
-| `auth` | Where the credential rides: `{"header": "Authorization", "scheme": "Bearer"}` unless it says otherwise; `{"header": "x-goog-api-key", "scheme": ""}` for a key with no scheme; `{"header": ""}` for an endpoint that takes none. Only addresses inside the configured endpoint's origin are ever given it. |
-| `features` | Free-form flags the interface reads, e.g. `{"mask": true}` for an image protocol with a mask field of its own. |
-| `version` | How the built-in deploy decides whether to take over a directory (see below). Omit for a hand-written converter. |
+| Field         | Meaning                                                                                                                                                                                                                                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `displayName` | The name it goes by where no label matches, and the name the server's own messages use. Required.                                                                                                                                                                                                          |
+| `labels`      | Names per locale, e.g. `{"zh": "…"}`. A language with no entry falls back to `displayName`, then to the id.                                                                                                                                                                                                |
+| `urlExample`  | An address shown to the reader as a shape to copy. Required.                                                                                                                                                                                                                                               |
+| `script`      | The Lua file beside this document. Required.                                                                                                                                                                                                                                                               |
+| `order`       | Where it sits within its capability, ascending, ties by name (default 1000).                                                                                                                                                                                                                               |
+| `auth`        | Where the credential rides: `{"header": "Authorization", "scheme": "Bearer"}` unless it says otherwise; `{"header": "x-goog-api-key", "scheme": ""}` for a key with no scheme; `{"header": ""}` for an endpoint that takes none. Only addresses inside the configured endpoint's origin are ever given it. |
+| `features`    | Free-form flags the interface reads, e.g. `{"mask": true}` for an image protocol with a mask field of its own.                                                                                                                                                                                             |
+| `version`     | How the built-in deploy decides whether to take over a directory (see below). Omit for a hand-written converter.                                                                                                                                                                                           |
 
 The Lua side is a set of hooks, all optional, and which ones a script exports is what the host believes it can do:
 
-| Hook | Purpose |
-| --- | --- |
-| `build_request(call, req, inputs)` | Describes one call: `{method, url, headers = {name = value}, body = …}`, or `{request = …, handler = …}` when the answer needs a function of its own to read it, or `{error = …}` to refuse before anything is sent. |
-| `parse_response(status, headers, body)` | Reads that answer into `{text, items, usage, error}`. |
-| `build_stream_request(call, req, inputs)` | The same, for an endpoint that answers in events; exporting it is what says the converter streams. Each event is read by `parse_event(event)`. |
-| `build_task_request` / `parse_task_response` | Starts a job that outlives one request; the reply names the provider's handle with `{reference = …}`. |
-| `build_poll_request` / `parse_poll_response` | One look at that job: `{status = "pending"}`, `{status = "succeeded", result = {items = …}}`, `{status = "failed", error = …}`, or `{status = "expired"}`. |
+| Hook                                         | Purpose                                                                                                                                                                                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build_request(call, req, inputs)`           | Describes one call: `{method, url, headers = {name = value}, body = …}`, or `{request = …, handler = …}` when the answer needs a function of its own to read it, or `{error = …}` to refuse before anything is sent. |
+| `parse_response(status, headers, body)`      | Reads that answer into `{text, items, usage, error}`.                                                                                                                                                                |
+| `build_stream_request(call, req, inputs)`    | The same, for an endpoint that answers in events; exporting it is what says the converter streams. Each event is read by `parse_event(event)`.                                                                       |
+| `build_task_request` / `parse_task_response` | Starts a job that outlives one request; the reply names the provider's handle with `{reference = …}`.                                                                                                                |
+| `build_poll_request` / `parse_poll_response` | One look at that job: `{status = "pending"}`, `{status = "succeeded", result = {items = …}}`, `{status = "failed", error = …}`, or `{status = "expired"}`.                                                           |
 
 Inside a script, `call` is `{url, model}` (the complete configured endpoint and the provider's model name), `req` is `{prompt, system, capability, params}`, and each input is `{role, filename, mime, data_url}` with its bytes base64-encoded in the data URL. An item may report its bytes as `{url = …}` (the host fetches it, with the credential following the same origin rule), `{data_url = …}`, `{base64 = …}`, or `{raw = true}` for the answer's own body. The host API is `json`, `base64`, `log` and `util`; the credential is never handed to a script.
 

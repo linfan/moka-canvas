@@ -29,6 +29,7 @@ import {
   STORY_NAME_MAX,
   STORY_SCHEMA_VERSION,
 } from "./constants";
+import { capabilityServes } from "./factories";
 import { STORY_ASPECTS } from "./types";
 import type {
   CanvasDocument,
@@ -433,7 +434,7 @@ function generationIssues(
   const spec = data.generation;
   if (!spec) return issues;
 
-  if (spec.capability !== node.kind) {
+  if (!capabilityServes(spec.capability, node.kind)) {
     at(
       "GENERATION_CAPABILITY_MISMATCH",
       i18n.t("errors:validate.capabilityMismatch", {

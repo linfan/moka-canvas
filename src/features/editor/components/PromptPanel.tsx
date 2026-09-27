@@ -5,11 +5,13 @@ import {
   CAPABILITY_LABELS,
   MAX_PROMPT_LENGTH,
   boundsForShape,
+  capabilityServes,
   defaultGenerationSpec,
   findNode,
   generationCapabilityFor,
   mentionNodeIds,
   nowIso,
+  paramsForCapability,
   type AssetId,
   type Capability,
   type GenerationInputMode,
@@ -70,7 +72,8 @@ const SHAPE_PARAM: Record<Capability, string | null> = {
   image: "size",
   video: "ratio",
   text: null,
-  audio: null,
+  speech: null,
+  music: null,
   asr: null,
 };
 
@@ -342,6 +345,16 @@ export function PromptPanel() {
   const spec = stored ?? defaultGenerationSpec(node.kind);
   if (!spec) return null;
 
+  /**
+   * Which capability this ask is in. A stored spec says so itself — a sound
+   * node is the one kind two capabilities serve — and a node nothing has been
+   * asked of yet starts in the capability its kind implies.
+   */
+  const asked =
+    stored && capabilityServes(stored.capability, node.kind)
+      ? stored.capability
+      : capability;
+
   /** Everything arriving at this node, which is what feeds a folded ask. */
   const wired = canvas.edges.filter((edge) => edge.target.nodeId === node.id);
 
@@ -380,7 +393,7 @@ export function PromptPanel() {
 
   const inputMode = inputModeFor(promptShown);
   const mode = modeFor(inputMode);
-  const models = modelOptionsFor(view, capability);
+  const models = modelOptionsFor(view, asked);
   const going = stepStatus !== null && isActive(stepStatus);
   const stopping = run !== null && going && run.cancelRequested;
   /**
@@ -413,7 +426,7 @@ export function PromptPanel() {
   const refusal = refusalFor({
     available: generationOn,
     noModel,
-    capability,
+    capability: asked,
     prompt,
     dangling,
     fedFromUpstream,
@@ -446,10 +459,27 @@ export function PromptPanel() {
     // already holds something keeps the size its content gave it, since a
     // picture has the shape it has whatever was asked for.
     const reshaped =
-      value !== null && key === SHAPE_PARAM[capability] && !holdsSomething(node)
+      value !== null && key === SHAPE_PARAM[asked] && !holdsSomething(node)
         ? boundsForShape(node.bounds, `${value}`)
         : null;
     commit({ params }, reshaped ?? undefined);
+  };
+
+  /**
+   * Moves a sound ask between the two capabilities that serve it.
+   *
+   * The model goes with the move: a voice model does not compose, and a
+   * reference to one left standing over a score's ask would only be refused
+   * when a run reached it. The parameters are cut to the capability the ask
+   * lands in, by the same reading the document's own migration uses.
+   */
+  const switchCapability = (next: Capability) => {
+    if (next === asked) return;
+    commit({
+      capability: next,
+      model: "",
+      params: paramsForCapability(next, spec.params),
+    });
   };
 
   // Losing focus with nothing typed is not a request. The panel came up on its
@@ -802,7 +832,7 @@ export function PromptPanel() {
               <div className="prompt-panel-models">
                 <p className="prompt-panel-note">
                   {t("editor:promptPanel.noModelPeriod", {
-                    kind: t(CAPABILITY_LABELS[capability]).toLowerCase(),
+                    kind: t(CAPABILITY_LABELS[asked]).toLowerCase(),
                   })}
                 </p>
                 <button
@@ -812,7 +842,7 @@ export function PromptPanel() {
                     // to a list to be searched.
                     useModelStore
                       .getState()
-                      .openModelForCapability(capability, spec.model || null)
+                      .openModelForCapability(asked, spec.model || null)
                   }
                   type="button"
                 >
@@ -821,7 +851,7 @@ export function PromptPanel() {
               </div>
             ) : (
               <ModelPicker
-                capability={capability}
+                capability={asked}
                 noneLabel={t("editor:promptPanel.providerDefault")}
                 onChange={(reference) => commit({ model: reference ?? "" })}
                 value={spec.model || null}
@@ -850,9 +880,14 @@ export function PromptPanel() {
 
         {tab === "parameter" && (
           <GenerationParams
-            capability={capability}
+            capability={asked}
             defaults={view?.preferences ?? null}
             key={node.id}
+            onCapabilityChange={
+              asked === "speech" || asked === "music"
+                ? switchCapability
+                : undefined
+            }
             onChange={setParam}
             params={spec.params}
           />

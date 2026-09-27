@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { assetUrl } from "../../../api";
 import {
-  CAPABILITY_LABELS,
+  ASSET_KIND_LABELS,
   PROJECT_ASSET_CATEGORIES,
   type AssetId,
   type AssetKind,
@@ -296,7 +296,7 @@ export function AssetPickerModal() {
             <option value="">{t("editor:picker.everyKind")}</option>
             {SHELF_KINDS.map((kind) => (
               <option key={kind} value={kind}>
-                {t(CAPABILITY_LABELS[kind])}
+                {t(ASSET_KIND_LABELS[kind])}
               </option>
             ))}
           </select>
@@ -364,7 +364,7 @@ export function AssetPickerModal() {
                       className={`asset-pick-kind is-${kind}`}
                       data-testid={`asset-pick-kind-${entry.id}`}
                     >
-                      {t(CAPABILITY_LABELS[kind])}
+                      {t(ASSET_KIND_LABELS[kind])}
                     </span>
                     {thumb ? (
                       <img alt="" className="asset-pick-thumb" src={thumb} />

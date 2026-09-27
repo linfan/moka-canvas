@@ -18,7 +18,7 @@ import type {
 } from "../../../shared/domain";
 import {
   ASSET_CATEGORY_LABELS,
-  CAPABILITY_LABELS,
+  ASSET_KIND_LABELS,
   PROJECT_ASSET_CATEGORIES,
 } from "../../../shared/domain";
 import { i18n } from "../../../shared/i18n";
@@ -765,11 +765,11 @@ export function AssetShelf({
             onClick={() => chooseKind(each)}
             role="tab"
             title={t("editor:shelf.addToNode", {
-              kind: t(CAPABILITY_LABELS[each]).toLowerCase(),
+              kind: t(ASSET_KIND_LABELS[each]).toLowerCase(),
             })}
             type="button"
           >
-            {t(CAPABILITY_LABELS[each])}
+            {t(ASSET_KIND_LABELS[each])}
             <span>{kindCount(moka, each, lens)}</span>
           </button>
         ))}
@@ -878,7 +878,7 @@ export function AssetShelf({
         <p className="inspector-empty">
           {emptyText ??
             t("editor:shelf.empty", {
-              kind: t(CAPABILITY_LABELS[kind]).toLowerCase(),
+              kind: t(ASSET_KIND_LABELS[kind]).toLowerCase(),
             })}
         </p>
       )}
