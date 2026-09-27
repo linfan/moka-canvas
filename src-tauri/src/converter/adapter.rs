@@ -692,7 +692,7 @@ fn stored(
 fn fallback_for(capability: Capability) -> &'static str {
     match capability {
         Capability::Image => "image/png",
-        Capability::Audio => "audio/mpeg",
+        Capability::Speech | Capability::Music => "audio/mpeg",
         Capability::Video => "video/mp4",
         Capability::Text | Capability::Asr => "application/octet-stream",
     }

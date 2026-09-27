@@ -70,7 +70,11 @@ async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capabili
         let (protocol, suffix) = match capability {
             Capability::Text => (Protocol::new("openaiResponses"), "/v1/responses"),
             Capability::Image => (Protocol::new("openaiImages"), "/v1/images/generations"),
-            Capability::Audio => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+            Capability::Speech => (Protocol::new("openaiSpeech"), "/v1/audio/speech"),
+            Capability::Music => (
+                Protocol::new("bailianMusic"),
+                "/api/v1/services/audio/music/generation",
+            ),
             Capability::Video => (Protocol::new("openaiVideos"), "/v1/videos"),
             Capability::Asr => (
                 Protocol::from_wire_name("bailianAsr"),
@@ -101,7 +105,8 @@ async fn configured(harness: &Harness, base_url: &str, models: &[(&str, Capabili
         match capability {
             Capability::Text => defaults.text = Some((*id).to_string()),
             Capability::Image => defaults.image = Some((*id).to_string()),
-            Capability::Audio => defaults.audio = Some((*id).to_string()),
+            Capability::Speech => defaults.speech = Some((*id).to_string()),
+            Capability::Music => defaults.music = Some((*id).to_string()),
             Capability::Video => defaults.video = Some((*id).to_string()),
             Capability::Asr => defaults.asr = Some((*id).to_string()),
         }
@@ -469,16 +474,21 @@ async fn speech_comes_back_as_sound_rather_than_as_text() {
         }),
     ))
     .await;
-    configured(&harness, &base_url, &[("a-voice-model", Capability::Audio)]).await;
+    configured(
+        &harness,
+        &base_url,
+        &[("a-voice-model", Capability::Speech)],
+    )
+    .await;
 
     let (status, body) = send_json(
         &harness.app,
-        generation("audio", json!({ "prompt": "read this aloud" })),
+        generation("speech", json!({ "prompt": "read this aloud" })),
     )
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["outputs"][0]["kind"], "audio");
+    assert_eq!(body["outputs"][0]["kind"], "speech");
     assert_eq!(body["outputs"][0]["mime"], "audio/mpeg");
     assert_eq!(body["outputs"][0]["bytes"], 9);
     assert!(body["text"].is_null(), "the sound is the answer");

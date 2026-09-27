@@ -257,7 +257,7 @@ fn refuse_if_over(
 /// reference inside a video request is still bounded as an image.
 fn modality(mime: &str) -> Capability {
     if mime.starts_with("audio/") {
-        Capability::Audio
+        Capability::Speech
     } else if mime.starts_with("video/") {
         Capability::Video
     } else if mime.starts_with("image/") {

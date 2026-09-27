@@ -224,7 +224,7 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
             config_id: "a-voice".into(),
             model: "gpt-5.5".into(),
             display_name: "A voice".into(),
-            category: Capability::Audio,
+            category: Capability::Speech,
             protocol: Protocol::new("openaiSpeech"),
             url: format!("{base_url}/v1/audio/speech"),
         },
@@ -236,7 +236,7 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
         .generate(
             &speech,
             &GenerateRequest {
-                capability: Capability::Audio,
+                capability: Capability::Speech,
                 prompt: "say it".into(),
                 ..GenerateRequest::default()
             },

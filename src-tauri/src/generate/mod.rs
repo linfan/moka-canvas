@@ -533,7 +533,7 @@ mod tests {
                     GeneratedItem {
                         bytes: vec![0; 7],
                         mime: "audio/wav".into(),
-                        kind: Capability::Audio,
+                        kind: Capability::Speech,
                         width: None,
                         height: None,
                         duration_ms: Some(1000),

@@ -103,13 +103,27 @@ impl Gateway {
     }
 
     /// Speech.
-    pub async fn audio(
+    pub async fn speech(
         &self,
         request: GenerateRequest,
         cancel: &Cancel,
     ) -> Result<GenerateResult, ProviderError> {
         self.answer(
-            stamped(request, Capability::Audio),
+            stamped(request, Capability::Speech),
+            &DeltaSink::default(),
+            cancel,
+        )
+        .await
+    }
+
+    /// A score.
+    pub async fn music(
+        &self,
+        request: GenerateRequest,
+        cancel: &Cancel,
+    ) -> Result<GenerateResult, ProviderError> {
+        self.answer(
+            stamped(request, Capability::Music),
             &DeltaSink::default(),
             cancel,
         )
@@ -446,15 +460,22 @@ fn merged(mut request: GenerateRequest, preferences: &Preferences) -> GenerateRe
             offer(params, "background", &preferences.image.background);
             offer_value(params, "count", preferences.image.count);
         }
-        Capability::Audio => {
-            offer(params, "voice", &preferences.audio.voice);
-            offer(params, "format", &preferences.audio.format);
-            offer(params, "instructions", &preferences.audio.instructions);
-            offer_value(params, "speed", preferences.audio.speed);
-            offer_value(params, "sampleRate", preferences.audio.sample_rate);
-            offer_value(params, "volume", preferences.audio.volume);
-            offer_value(params, "rate", preferences.audio.rate);
-            offer_value(params, "pitch", preferences.audio.pitch);
+        Capability::Speech => {
+            offer(params, "voice", &preferences.speech.voice);
+            offer(params, "format", &preferences.speech.format);
+            offer(params, "instructions", &preferences.speech.instructions);
+            offer_value(params, "speed", preferences.speech.speed);
+            offer_value(params, "sampleRate", preferences.speech.sample_rate);
+            offer_value(params, "volume", preferences.speech.volume);
+            offer_value(params, "rate", preferences.speech.rate);
+            offer_value(params, "pitch", preferences.speech.pitch);
+        }
+        Capability::Music => {
+            // A score is shaped by less than a voice: the format it comes back
+            // as, and whether it carries a watermark. What it is about stays
+            // with the ask that made it.
+            offer(params, "format", &preferences.music.format);
+            offer_value(params, "watermark", preferences.music.watermark);
         }
         Capability::Video => {
             offer(params, "resolution", &preferences.video.resolution);
@@ -618,7 +639,7 @@ mod tests {
                 mode: "reference".into(),
                 ratio: "16:9".into(),
             },
-            audio: crate::metadata::AudioPreferences {
+            speech: crate::metadata::SpeechPreferences {
                 voice: "nova".into(),
                 format: "wav".into(),
                 speed: 1.25,
@@ -627,6 +648,10 @@ mod tests {
                 volume: 80,
                 rate: 1.1,
                 pitch: 1.0,
+            },
+            music: crate::metadata::MusicPreferences {
+                format: "wav".into(),
+                watermark: true,
             },
             story: crate::metadata::StoryPreferences {
                 split_chars: 6_000,
@@ -676,15 +701,21 @@ mod tests {
         assert_eq!(video.params["mode"], "reference");
         assert_eq!(video.params["ratio"], "16:9");
 
-        let audio = merged(request(Capability::Audio, json!({})), &preferences());
-        assert_eq!(audio.params["voice"], "nova");
-        assert_eq!(audio.params["format"], "wav");
-        assert_eq!(audio.params["speed"], 1.25);
-        assert_eq!(audio.params["instructions"], "speak slowly");
-        assert_eq!(audio.params["sampleRate"], 24000);
-        assert_eq!(audio.params["volume"], 80);
-        assert_eq!(audio.params["rate"], 1.1);
-        assert_eq!(audio.params["pitch"], 1.0);
+        let speech = merged(request(Capability::Speech, json!({})), &preferences());
+        assert_eq!(speech.params["voice"], "nova");
+        assert_eq!(speech.params["format"], "wav");
+        assert_eq!(speech.params["speed"], 1.25);
+        assert_eq!(speech.params["instructions"], "speak slowly");
+        assert_eq!(speech.params["sampleRate"], 24000);
+        assert_eq!(speech.params["volume"], 80);
+        assert_eq!(speech.params["rate"], 1.1);
+        assert_eq!(speech.params["pitch"], 1.0);
+
+        // A score takes the shape preferences and nothing of a voice's.
+        let music = merged(request(Capability::Music, json!({})), &preferences());
+        assert_eq!(music.params["format"], "wav");
+        assert_eq!(music.params["watermark"], true);
+        assert_eq!(music.params.len(), 2);
 
         let text = merged(request(Capability::Text, json!({})), &preferences());
         assert_eq!(text.params["reasoningEffort"], "high");
@@ -698,9 +729,9 @@ mod tests {
 
         // Speech has a direction of its own, and a persona meant for text
         // would replace it rather than join it.
-        let audio = merged(request(Capability::Audio, json!({})), &preferences());
-        assert_eq!(audio.system, None);
-        assert_eq!(audio.params["instructions"], "speak slowly");
+        let speech = merged(request(Capability::Speech, json!({})), &preferences());
+        assert_eq!(speech.system, None);
+        assert_eq!(speech.params["instructions"], "speak slowly");
 
         // A request that brought its own instruction keeps it.
         let own = merged(

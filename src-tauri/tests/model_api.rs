@@ -116,7 +116,7 @@ async fn a_fresh_install_reports_an_empty_configuration() {
         json!({
             "text": null,
             "image": null,
-            "audio": null,
+            "speech": null,
             "music": null,
             "video": null,
             "asr": null,

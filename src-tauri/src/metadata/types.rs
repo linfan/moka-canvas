@@ -128,17 +128,17 @@ pub type ModelRecord = ModelConfig;
 
 /// Default model per capability, addressed by model configuration id.
 ///
-/// `music` is not a capability: the model that composes a score is an audio
-/// model like the one that reads a line aloud, and the two are told apart by
-/// what they were kept for rather than by what they can do. A story asks the
-/// music default for a score and the audio default for a voice, and a
-/// deployment that keeps one audio model answers both from it.
+/// One per capability, plainly: a score's model is a music model like a
+/// read-aloud's is a speech one, and neither answers for the other.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Defaults {
     pub text: Option<String>,
     pub image: Option<String>,
-    pub audio: Option<String>,
+    /// What the speech default was stored as before sound was split in two;
+    /// the schema-3 upgrade reclassifies what it and the other place name.
+    #[serde(alias = "audio")]
+    pub speech: Option<String>,
     pub music: Option<String>,
     pub video: Option<String>,
     pub asr: Option<String>,
@@ -188,9 +188,11 @@ impl Default for VideoPreferences {
     }
 }
 
+/// What a read-aloud ask is shaped by. The group was called audio before
+/// sound was split in two; a document that named it that still reads as this.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct AudioPreferences {
+pub struct SpeechPreferences {
     pub voice: String,
     pub format: String,
     pub speed: f64,
@@ -201,7 +203,7 @@ pub struct AudioPreferences {
     pub pitch: f64,
 }
 
-impl Default for AudioPreferences {
+impl Default for SpeechPreferences {
     fn default() -> Self {
         Self {
             // No voice is invented: what a model answers to is its own, and a
@@ -214,6 +216,25 @@ impl Default for AudioPreferences {
             volume: 50,
             rate: 1.0,
             pitch: 1.0,
+        }
+    }
+}
+
+/// What a score's ask is shaped by. Less than a voice's: what a score is
+/// about belongs to the ask itself, and the music preferences only say what
+/// shape the answer takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MusicPreferences {
+    pub format: String,
+    pub watermark: bool,
+}
+
+impl Default for MusicPreferences {
+    fn default() -> Self {
+        Self {
+            format: "mp3".to_string(),
+            watermark: false,
         }
     }
 }
@@ -248,10 +269,15 @@ pub struct Preferences {
     pub reasoning_effort: String,
     pub image: ImagePreferences,
     pub video: VideoPreferences,
-    pub audio: AudioPreferences,
+    /// The voice group, stored under `audio` until sound was split in two; an
+    /// older document's group is read as this one rather than dropped.
+    #[serde(alias = "audio")]
+    pub speech: SpeechPreferences,
     /// Without a field-level default an existing models document would fail to
     /// parse, and the whole of it — configurations, keys, defaults — would be
-    /// reset rather than read.
+    /// reset rather than read. The music group arrived the same way.
+    #[serde(default)]
+    pub music: MusicPreferences,
     #[serde(default)]
     pub story: StoryPreferences,
 }
@@ -263,7 +289,8 @@ impl Default for Preferences {
             reasoning_effort: "auto".to_string(),
             image: ImagePreferences::default(),
             video: VideoPreferences::default(),
-            audio: AudioPreferences::default(),
+            speech: SpeechPreferences::default(),
+            music: MusicPreferences::default(),
             story: StoryPreferences::default(),
         }
     }
@@ -503,27 +530,32 @@ mod tests {
         assert!(!preferences.video.watermark);
         // Left blank on purpose: the voice a model answers to is named by the
         // model, so one is never chosen for it here.
-        assert_eq!(preferences.audio.voice, "");
+        assert_eq!(preferences.speech.voice, "");
+        assert!(!preferences.music.watermark);
         assert_eq!(preferences.reasoning_effort, "auto");
         assert_eq!(preferences.story.split_chars, 12_000);
         assert_eq!(preferences.story.read_chars, 8_000);
     }
 
     #[test]
-    fn a_models_document_written_before_the_story_room_keeps_its_preferences() {
-        // The story group arrived after the first documents did. A field with
-        // no default would fail the whole document and reset every model
-        // configuration along with it.
+    fn a_models_document_written_before_later_groups_keeps_its_preferences() {
+        // The story group arrived after the first documents did, and the
+        // music one after that; a group with no default would fail the whole
+        // document and reset every model configuration along with it. The
+        // voice settings were stored under `audio` before the split, and are
+        // read through the alias rather than lost.
         let stored: Preferences = serde_json::from_str(
             r#"{"systemPrompt":"be brief","reasoningEffort":"low",
                 "image":{"size":"1:1","quality":"auto","background":"","count":1},
                 "video":{"seconds":6,"resolution":"720","generateAudio":true,
                          "watermark":false,"mode":"auto","ratio":""},
-                "audio":{"voice":"","format":"mp3","speed":1.0,"instructions":"",
+                "audio":{"voice":"alloy","format":"mp3","speed":1.0,"instructions":"",
                          "sampleRate":22050,"volume":50,"rate":1.0,"pitch":1.0}}"#,
         )
-        .expect("a document without the story group must parse");
+        .expect("a document without the later groups must parse");
         assert_eq!(stored.system_prompt, "be brief");
+        assert_eq!(stored.speech.voice, "alloy");
+        assert_eq!(stored.music, MusicPreferences::default());
         assert_eq!(stored.story, StoryPreferences::default());
     }
 

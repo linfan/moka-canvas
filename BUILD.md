@@ -58,7 +58,7 @@ Every protocol this program speaks is a converter, and a converter is a director
   <script>.lua    what it does
 ```
 
-`<capability>` is one of `text`, `image`, `audio`, `video`, `asr`. `<id>` is the directory's own name: the wire name a model configuration stores, so it must not change once a model speaks it. The `.lua` file name is free — `model.json` names it.
+`<capability>` is one of `text`, `image`, `speech`, `music`, `video`, `asr`. `<id>` is the directory's own name: the wire name a model configuration stores, so it must not change once a model speaks it. The `.lua` file name is free — `model.json` names it.
 
 `model.json` is the whole declaration:
 

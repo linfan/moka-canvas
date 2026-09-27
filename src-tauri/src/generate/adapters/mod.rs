@@ -672,7 +672,13 @@ pub(crate) fn media_item(
         .map(|sniffed| sniffed.mime_type().to_string())
         .or_else(|| claimed.map(str::to_string))
         .filter(|mime| mime != UNSPECIFIED_MIME);
-    let family = format!("{}/", kind.as_str());
+    // Sound is two capabilities and one family: a line read aloud and a score
+    // both come back as `audio/...`.
+    let family = match kind {
+        Capability::Speech | Capability::Music => "audio",
+        other => other.as_str(),
+    };
+    let family = format!("{family}/");
     let mime = match named {
         Some(mime) if mime.starts_with(&family) => mime,
         Some(mime) => {
@@ -1139,12 +1145,12 @@ mod tests {
         let item = media_item(
             bytes,
             Some("audio/L16;codec=pcm"),
-            Capability::Audio,
+            Capability::Speech,
             "audio/mpeg",
         )
         .expect("the bytes are audio");
         assert_eq!(item.mime, "audio/x-wav");
-        assert_eq!(item.kind, Capability::Audio);
+        assert_eq!(item.kind, Capability::Speech);
 
         // Nothing recognised and nothing claimed: the answer is stored as the
         // mime such media usually arrives under, rather than refused.
@@ -1156,7 +1162,7 @@ mod tests {
         let item = media_item(
             vec![1, 2, 3],
             Some(UNSPECIFIED_MIME),
-            Capability::Audio,
+            Capability::Speech,
             "audio/mpeg",
         )
         .expect("the bytes are kept");
@@ -1170,7 +1176,7 @@ mod tests {
         let error = media_item(
             br#"{"error":{"message":"that voice is not on this key"}}"#.to_vec(),
             Some("application/json"),
-            Capability::Audio,
+            Capability::Speech,
             "audio/mpeg",
         )
         .expect_err("the answer is not audio");
@@ -1184,7 +1190,7 @@ mod tests {
         let error = media_item(
             Vec::new(),
             Some("audio/mpeg"),
-            Capability::Audio,
+            Capability::Speech,
             "audio/mpeg",
         )
         .expect_err("there is nothing to store");

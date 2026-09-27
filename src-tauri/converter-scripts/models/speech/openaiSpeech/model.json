@@ -1,0 +1,17 @@
+{
+  "displayName": "OpenAI-compatible · Speech API",
+  "labels": {
+    "zh": "OpenAI 兼容 · Speech API"
+  },
+  "urlExample": "https://api.openai.com/v1/audio/speech",
+  "script": "openai-speech.lua",
+  "order": 10,
+  "auth": {
+    "header": "Authorization",
+    "scheme": "Bearer"
+  },
+  "features": {
+    "needsVoice": true
+  },
+  "version": 5
+}

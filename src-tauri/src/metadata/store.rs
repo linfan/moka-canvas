@@ -146,7 +146,7 @@ impl FileMetadataStore {
         migrate::check_schema(meta.schema_version)?;
 
         let recent = load_or_reset(root, RECENT_DOC, &mut recovered);
-        let (models, secrets) = load_models_and_secrets(root, &mut recovered)?;
+        let (models, secrets) = load_models_and_secrets(root, meta.schema_version, &mut recovered)?;
         let prompt_sources = load_or_reset(root, PROMPT_SOURCES_DOC, &mut recovered);
 
         let keys = Arc::new(KeyProvider::new(root, mode));
@@ -907,21 +907,32 @@ fn write_meta(root: &Path, meta: &MetaDoc) -> Result<(), MetadataError> {
 }
 
 /// Loads the model document, running the schema-2 upgrade when the directory
-/// still carries the legacy provider document.
+/// still carries the legacy provider document, and the schema-3 one when it
+/// was written before sound was split into two capabilities.
 ///
-/// The upgrade is a clean break: only the generation preferences survive it.
-/// Credentials stored against channel identifiers become orphans that the
-/// collector below drops, because a channel key was never a model key.
+/// The schema-2 upgrade is a clean break: only the generation preferences
+/// survive it. Credentials stored against channel identifiers become orphans
+/// that the collector below drops, because a channel key was never a model
+/// key. The schema-3 upgrade keeps everything, placing each model and default
+/// under the capability it serves.
 fn load_models_and_secrets(
     root: &Path,
+    schema_version: u32,
     recovered: &mut Vec<DocumentCorruption>,
 ) -> Result<(ModelsDoc, SecretsDoc), MetadataError> {
     let mut models: ModelsDoc = load_or_reset(root, MODELS_DOC, recovered);
+    let mut rewritten = false;
     if models.revision == 0 && models.models.is_empty() && migrate::needs_models_upgrade(root) {
         models.preferences = migrate::upgrade_to_models(root)?;
         // Written at once, so the surviving preferences are on the disk before
         // anything can fail: an upgrade that only lived in memory would be
         // lost to the next startup, which finds no legacy document to read.
+        rewritten = true;
+    }
+    if schema_version < SCHEMA_VERSION && migrate::split_sound_capability(&mut models) {
+        rewritten = true;
+    }
+    if rewritten {
         let bytes = docs::serialize(MODELS_DOC, &models)
             .map_err(|error| MetadataError::write_failed(error.reason))?;
         fs::atomic_write(root, &root.join(MODELS_DOC), &bytes, DOCUMENT_MODE)

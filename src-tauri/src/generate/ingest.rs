@@ -58,7 +58,7 @@ pub async fn ingest_generated(
             name: display_name(node, run, index, pieces.len()),
             bytes: piece.bytes.to_vec(),
             mime: piece.mime.to_string(),
-            category_hint: category_hint(piece.kind, spec),
+            category_hint: category_hint(piece.kind),
             provenance: provenance.clone(),
         })
         .collect();
@@ -182,18 +182,14 @@ fn display_name(node: &WorkflowNode, run: &RunRecord, index: usize, count: usize
     }
 }
 
-/// Audio is the one category a sniffer cannot settle, so the store's hint is
-/// what tells speech from music. Everything else follows its mime.
-fn category_hint(kind: Capability, spec: Option<&GenerationSpec>) -> Option<String> {
-    if kind != Capability::Audio {
-        return None;
+/// Sound is the one family a sniffer cannot settle, and the capability is
+/// what tells the two kinds apart. Everything else follows its mime.
+fn category_hint(kind: Capability) -> Option<String> {
+    match kind {
+        Capability::Speech => Some("voice".to_string()),
+        Capability::Music => Some("music".to_string()),
+        _ => None,
     }
-    let music = spec
-        .and_then(|spec| spec.params.as_ref())
-        .and_then(|params| params.get("music"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    (!music).then(|| "voice".to_string())
 }
 
 fn provenance(

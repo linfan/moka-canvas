@@ -124,7 +124,8 @@ impl Rig {
         match capability {
             Capability::Text => defaults.text = Some(reference.into()),
             Capability::Image => defaults.image = Some(reference.into()),
-            Capability::Audio => defaults.audio = Some(reference.into()),
+            Capability::Speech => defaults.speech = Some(reference.into()),
+            Capability::Music => defaults.music = Some(reference.into()),
             Capability::Video => defaults.video = Some(reference.into()),
             Capability::Asr => defaults.asr = Some(reference.into()),
         }
@@ -254,7 +255,8 @@ fn default_protocol(capability: Capability) -> Protocol {
     match capability {
         Capability::Text => Protocol::new("openaiChat"),
         Capability::Image => Protocol::new("openaiImages"),
-        Capability::Audio => Protocol::new("openaiSpeech"),
+        Capability::Speech => Protocol::new("openaiSpeech"),
+        Capability::Music => Protocol::new("bailianMusic"),
         Capability::Video => Protocol::new("openaiVideos"),
         // A test that wants a recognition model places a converter script of
         // its own; this is only what such a call stands in as here.

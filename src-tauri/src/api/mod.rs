@@ -240,7 +240,8 @@ fn generate_router() -> axum::Router<ApiState> {
     axum::Router::new()
         .route("/api/v1/generate/text", post(routes::generate_text))
         .route("/api/v1/generate/image", post(routes::generate_image))
-        .route("/api/v1/generate/audio", post(routes::generate_audio))
+        .route("/api/v1/generate/speech", post(routes::generate_speech))
+        .route("/api/v1/generate/music", post(routes::generate_music))
         .route("/api/v1/generate/video", post(routes::generate_video))
         .route("/api/v1/generate/asr", post(routes::generate_asr))
         .route(

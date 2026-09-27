@@ -131,7 +131,8 @@ fn channel(base_url: &str, model_id: &str, capability: Capability) -> ModelCall 
     let (protocol, path) = match capability {
         Capability::Text => ("openaiChat", "/v1/chat/completions"),
         Capability::Image => ("openaiImages", "/v1/images/generations"),
-        Capability::Audio => ("openaiSpeech", "/v1/audio/speech"),
+        Capability::Speech => ("openaiSpeech", "/v1/audio/speech"),
+        Capability::Music => ("bailianMusic", "/api/v1/services/audio/music/generation"),
         Capability::Video => ("openaiVideos", "/v1/videos"),
         // Recognition is served by a converter of its own; what it is asked at
         // is that converter's business, and no test here asks it anything.
@@ -793,9 +794,9 @@ async fn audio_arrives_as_the_bytes_the_provider_answered_with() {
     ))
     .await;
 
-    let call = channel(&base_url, "a-voice", Capability::Audio);
+    let call = channel(&base_url, "a-voice", Capability::Speech);
     let request = generation(
-        Capability::Audio,
+        Capability::Speech,
         "read this aloud",
         json!({ "voice": "alloy", "format": "wav" }),
     );
@@ -807,7 +808,7 @@ async fn audio_arrives_as_the_bytes_the_provider_answered_with() {
 
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].mime, "audio/wav", "the answer said so");
-    assert_eq!(result.items[0].kind, Capability::Audio);
+    assert_eq!(result.items[0].kind, Capability::Speech);
     assert_eq!(result.items[0].bytes, b"RIFF-audio");
     assert_eq!(result.text, None);
 
@@ -833,12 +834,12 @@ async fn an_audio_answer_that_is_not_audio_is_refused_rather_than_stored() {
     ))
     .await;
 
-    let call = channel(&base_url, "a-voice", Capability::Audio);
+    let call = channel(&base_url, "a-voice", Capability::Speech);
     let error = scripted()
         .await
         .generate(
             &call,
-            &generation(Capability::Audio, "read this", json!({})),
+            &generation(Capability::Speech, "read this", json!({})),
             &[],
             &Cancel::new(),
         )
@@ -1519,12 +1520,12 @@ async fn gemini_speech_is_read_as_the_container_it_is_rather_than_as_the_name_it
     ))
     .await;
 
-    let call = gemini_channel(&base_url, "a-voice", Capability::Audio);
+    let call = gemini_channel(&base_url, "a-voice", Capability::Speech);
     let result = scripted()
         .await
         .generate(
             &call,
-            &generation(Capability::Audio, "read this", json!({})),
+            &generation(Capability::Speech, "read this", json!({})),
             &[],
             &Cancel::new(),
         )
@@ -1535,7 +1536,7 @@ async fn gemini_speech_is_read_as_the_container_it_is_rather_than_as_the_name_it
     // stored under, so the bytes decide.
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].mime, "audio/x-wav");
-    assert_eq!(result.items[0].kind, Capability::Audio);
+    assert_eq!(result.items[0].kind, Capability::Speech);
 }
 
 /// A provider that starts a job, answers one look with work still to do, and

@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::folders::{folder_depth, folders_of, holds_itself};
 use super::{
-    generation_capability_for, story, timeline, CanvasDocument, Capability, Cardinality, DataType,
-    MokaFile, NodeId, NodeKind, PortDirection, ResourceEntry, ValidationIssue, WorkflowEdge,
-    WorkflowNode, ASSET_CATEGORIES, ASSET_ORIGINS,
+    story, timeline, CanvasDocument, Capability, Cardinality, DataType, MokaFile, NodeId, NodeKind,
+    PortDirection, ResourceEntry, ValidationIssue, WorkflowEdge, WorkflowNode, ASSET_CATEGORIES,
+    ASSET_ORIGINS,
 };
 
 pub const COORDINATE_LIMIT: f64 = 1_000_000.0;
@@ -119,8 +119,11 @@ pub fn model_identifier_shaped(model: &str) -> bool {
         && !model.chars().any(|character| character.is_whitespace())
 }
 
-/// Parameters each capability accepts; mirrors `GENERATION_PARAM_KEYS` in
-/// `src/shared/domain/constants.ts`.
+/// The parameters an ask of each capability may carry: the keys its
+/// converters read. Every surface that states an ask — a canvas node, a story
+/// piece — is held to the same list, and the web half keeps the same keys in
+/// the same order (`GENERATION_PARAM_KEYS` in `src/shared/domain/constants.ts`,
+/// which a test reads and compares).
 pub fn generation_param_keys(capability: Capability) -> &'static [&'static str] {
     match capability {
         Capability::Text => &[
@@ -130,18 +133,23 @@ pub fn generation_param_keys(capability: Capability) -> &'static [&'static str] 
             "instructions",
         ],
         Capability::Image => &["size", "quality", "background", "count"],
-        Capability::Audio => &[
+        Capability::Speech => &[
             "voice",
             "format",
             "speed",
             "instructions",
-            // Kept for a score rather than for a voice: the flag that says the
-            // piece is music rather than speech, and the fields a music service
-            // is asked with.
-            "music",
+            "sampleRate",
+            "volume",
+            "rate",
+            "pitch",
+        ],
+        Capability::Music => &[
+            "format",
+            // What a score is asked with: whether it carries words, and the
+            // fields a music service reads them from.
+            "instrumental",
             "lyrics",
             "gender",
-            "instrumental",
             "watermark",
         ],
         Capability::Video => &[
@@ -380,7 +388,7 @@ fn generation_issues(
         return issues;
     };
 
-    if generation_capability_for(node.kind) != Some(spec.capability) {
+    if !spec.capability.serves(node.kind) {
         issues.push(issue(
             "GENERATION_CAPABILITY_MISMATCH",
             format!(

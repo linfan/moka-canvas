@@ -97,7 +97,8 @@ impl StoryJobKind {
             }
             StoryJobKind::ElementArt | StoryJobKind::KeyframeArt => Capability::Image,
             StoryJobKind::ActVideo | StoryJobKind::KeyframeVideo => Capability::Video,
-            StoryJobKind::Voice | StoryJobKind::Music => Capability::Audio,
+            StoryJobKind::Voice => Capability::Speech,
+            StoryJobKind::Music => Capability::Music,
         }
     }
 

@@ -7,7 +7,7 @@ use moka_canvas::domain::validate::{
 use moka_canvas::domain::{
     AssistantMessage, AssistantReference, AssistantRole, AssistantSession, CanvasDocument,
     Capability, EdgeEndpoint, GenerationInputMode, GenerationMode, GenerationSpec, MokaFile,
-    NodeKind, ResultSlot, ResultSlotStatus, WorkflowEdge, WorkflowNode,
+    NodeKind, ResultSlot, ResultSlotStatus, WorkflowEdge, WorkflowNode, CANVAS_SCHEMA_VERSION,
 };
 use moka_canvas::project::codec::{decode_moka_file, encode_moka_file, CodecError};
 use std::path::PathBuf;
@@ -354,6 +354,88 @@ fn rejects_unknown_generation_params() {
         messages(&canvas, "VALIDATION_FAILED"),
         ["Unknown parameter \"brush\" for image generation"]
     );
+}
+
+/// A sound node asks in either of the two sound capabilities, and in nothing
+/// else: the kind says how the node is drawn, its spec says what it wants.
+#[test]
+fn a_sound_node_may_ask_in_both_sound_capabilities_and_no_other() {
+    let mut canvas = golden_canvas();
+    for (id, capability) in [
+        (IMAGE_NODE, Capability::Speech),
+        (OPERATION_NODE, Capability::Music),
+    ] {
+        let node = node_mut(&mut canvas, id);
+        node.kind = NodeKind::Audio;
+        node.data.generation = Some(generation(capability, "a spoken line"));
+    }
+    assert!(!flagged(
+        &canvas,
+        IMAGE_NODE,
+        "GENERATION_CAPABILITY_MISMATCH"
+    ));
+    assert!(!flagged(
+        &canvas,
+        OPERATION_NODE,
+        "GENERATION_CAPABILITY_MISMATCH"
+    ));
+
+    // A sound node asking for words is a spec that would reach the wrong
+    // endpoint, and is said so.
+    let text = node_mut(&mut canvas, OPERATION_NODE);
+    text.data.generation = Some(generation(Capability::Text, "a written line"));
+    assert!(flagged(
+        &canvas,
+        OPERATION_NODE,
+        "GENERATION_CAPABILITY_MISMATCH"
+    ));
+}
+
+/// Sound was one capability before it was two. A canvas from that time reads
+/// as speech, and an ask that said in its `music` parameter that it wanted a
+/// score reads as music — with its parameters cut to what the capability it
+/// lands in takes.
+#[test]
+fn a_canvas_from_before_the_split_reads_as_speech_and_music() {
+    let mut moka = golden_from_json();
+    let canvas = &mut moka.canvas[0];
+    canvas.schema_version = 2;
+
+    let mut voice = generation(Capability::Speech, "read this aloud");
+    voice.params = Some(serde_json::json!({ "voice": "alloy", "music": false }));
+    let mut score = generation(Capability::Speech, "low strings, slow");
+    score.params = Some(serde_json::json!({
+        "music": true, "format": "mp3", "voice": "ghost"
+    }));
+    for (id, spec) in [(IMAGE_NODE, voice), (OPERATION_NODE, score)] {
+        let node = node_mut(canvas, id);
+        node.kind = NodeKind::Audio;
+        node.data.generation = Some(spec);
+    }
+
+    let decoded = decode_moka_file(&encode_moka_file(&moka, None).unwrap()).unwrap();
+    let canvas = &decoded.canvas[0];
+    assert_eq!(canvas.schema_version, CANVAS_SCHEMA_VERSION);
+    let spec_of = |id: &str| {
+        canvas
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .and_then(|node| node.data.generation.as_ref())
+            .expect("the node kept its ask")
+    };
+
+    let voice = spec_of(IMAGE_NODE);
+    assert_eq!(voice.capability, Capability::Speech);
+    // The flag was the old way of saying "speech", and is not a parameter the
+    // capability takes.
+    assert_eq!(voice.params, Some(serde_json::json!({ "voice": "alloy" })));
+
+    let score = spec_of(OPERATION_NODE);
+    assert_eq!(score.capability, Capability::Music);
+    // The score lands in music, whose parameters are the ones a music service
+    // reads: the flag that said so and the voice meant for a line are gone.
+    assert_eq!(score.params, Some(serde_json::json!({ "format": "mp3" })));
 }
 
 #[test]
