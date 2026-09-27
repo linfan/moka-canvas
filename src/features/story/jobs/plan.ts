@@ -20,6 +20,7 @@ import type {
   StoryTarget,
 } from "../../../api/story";
 import {
+  MAX_REFERENCE_IMAGES,
   MAX_VIDEO_SECONDS,
   STORY_READ_CHARS_DEFAULT,
   STORY_SPLIT_CHARS_DEFAULT,
@@ -483,6 +484,29 @@ function drawnCast(
   });
 }
 
+/**
+ * The cast a frame travels with, and the cast left to the words.
+ *
+ * One ask carries a bounded set of reference pictures, and a service asked for
+ * more refuses the whole batch rather than drawing with the first of them, so
+ * a frame takes the first of its cast that fit — in the order the prompt
+ * numbers them — and the rest are left to the words, the way an element nobody
+ * has drawn always was.
+ */
+export function frameCast(
+  story: StoryDocument,
+  act: StoryAct,
+): {
+  carried: Array<{ element: StoryElement; assetId: string }>;
+  beyond: StoryElement[];
+} {
+  const drawn = drawnCast(story, act);
+  return {
+    carried: drawn.slice(0, MAX_REFERENCE_IMAGES),
+    beyond: drawn.slice(MAX_REFERENCE_IMAGES).map(({ element }) => element),
+  };
+}
+
 /** One frame of a board, drawn with the cast that stands in it. */
 export function planKeyframeArt(
   story: StoryDocument,
@@ -499,7 +523,7 @@ export function planKeyframeArt(
         : act.keyframes.find((held) => held.id === keyframeId);
     if (chapter === undefined || act === undefined || keyframe === undefined)
       return [];
-    const cast = drawnCast(story, act);
+    const cast = frameCast(story, act).carried;
     const target: StoryTarget = {
       kind: "keyframeArt",
       chapterId,

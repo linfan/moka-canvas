@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { ModelsView } from "../../../api/models";
+import { MAX_REFERENCE_IMAGES } from "../../../shared/domain/constants";
 import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
 import type { StoryDocument } from "../../../shared/domain/types";
 import { useModelStore } from "../../settings/modelStore";
 import {
   clampSeconds,
+  frameCast,
   imageSizeForAspect,
   itemsForTargets,
   jobKey,
@@ -375,6 +377,52 @@ describe("planning the drawings", () => {
       .split("\n")
       .filter((line) => /^\d+\./.test(line.trim()));
     expect(numbered.length).toBe(items[0].inputs?.length);
+  });
+
+  it("carries the first references a frame has room for, and leaves the rest to the words", () => {
+    // A prop with a picture of its own is a fourth reference, and one image
+    // request carries three: what is past the bound is not numbered, so the
+    // frame is drawn from the words for it.
+    const held = story();
+    const withProp: StoryDocument = {
+      ...held,
+      elements: held.elements.map((element) =>
+        element.id !== ids.prop
+          ? element
+          : {
+              ...element,
+              main: {
+                takes: [
+                  {
+                    assetIds: ["asset-prop-main"],
+                    createdAt: "2026-01-01T00:00:00Z",
+                  },
+                ],
+                confirmed: true,
+              },
+            },
+      ),
+    };
+    const act = withProp.chapters[0].acts[0];
+    expect(
+      frameCast(withProp, act).carried.map(({ assetId }) => assetId),
+    ).toEqual([ids.heroMain, ids.partnerMain, ids.sceneMain]);
+    expect(
+      frameCast(withProp, act).beyond.map((element) => element.name),
+    ).toEqual(["旧车票"]);
+
+    const [item] = planKeyframeArt(withProp, [
+      {
+        chapterId: ids.chapterFirst,
+        actId: ids.act,
+        keyframeId: ids.frameFirst,
+      },
+    ]);
+    expect(item.inputs).toHaveLength(MAX_REFERENCE_IMAGES);
+    expect(item.inputs?.map((input) => input.assetId)).not.toContain(
+      "asset-prop-main",
+    );
+    expect(item.prompt).not.toContain("旧车票");
   });
 
   it("plans nothing for a frame that was taken away", () => {
