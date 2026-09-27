@@ -80,7 +80,7 @@ pub fn status_for_code(code: &str) -> StatusCode {
         // Retrying once the disk or the deployment is fixed can succeed.
         "METADATA_UNAVAILABLE"
         | "METADATA_WRITE_FAILED"
-        | "METADATA_MIGRATION_FAILED"
+        | "METADATA_SCHEMA_UNSUPPORTED"
         | "CONFIG_METADATA_KEY_MISSING"
         | "CONFIG_METADATA_DIR_INVALID"
         | "CONFIG_METADATA_STORE_UNSUPPORTED" => StatusCode::SERVICE_UNAVAILABLE,

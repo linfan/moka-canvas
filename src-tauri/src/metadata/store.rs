@@ -25,7 +25,6 @@ use super::docs::{
     PROMPT_SOURCES_DOC, RECENT_DOC, SECRETS_DOC,
 };
 use super::fs::{self, DirLock, DOCUMENT_MODE, SECRET_MODE};
-use super::migrate;
 use super::redact;
 use super::types::{
     Defaults, DocumentInfo, MetadataInfo, MetadataStoreKind, ModelConfig, ModelDraft, ModelRecord,
@@ -115,8 +114,8 @@ pub struct FileMetadataStore {
 }
 
 impl FileMetadataStore {
-    /// Takes the directory lock, clears crash leftovers, creates or migrates
-    /// the documents, and loads the snapshot.
+    /// Takes the directory lock, clears crash leftovers, creates the
+    /// documents, and loads the snapshot.
     pub fn open(
         root: &Path,
         config: &MetadataConfig,
@@ -142,11 +141,11 @@ impl FileMetadataStore {
         })?;
 
         let mut recovered = Vec::new();
-        let mut meta = load_meta(root, &mut recovered)?;
-        migrate::check_schema(meta.schema_version)?;
+        let meta = load_meta(root, &mut recovered)?;
+        check_schema(meta.schema_version)?;
 
         let recent = load_or_reset(root, RECENT_DOC, &mut recovered);
-        let (models, secrets) = load_models_and_secrets(root, meta.schema_version, &mut recovered)?;
+        let (models, secrets) = load_models_and_secrets(root, &mut recovered)?;
         let prompt_sources = load_or_reset(root, PROMPT_SOURCES_DOC, &mut recovered);
 
         let keys = Arc::new(KeyProvider::new(root, mode));
@@ -161,14 +160,6 @@ impl FileMetadataStore {
         } else {
             secrets
         };
-
-        // The header says what the documents mean; write the current version
-        // once the upgrade above has finished reading anything legacy.
-        if meta.schema_version != SCHEMA_VERSION {
-            meta.schema_version = SCHEMA_VERSION;
-            meta.updated_at = now_iso();
-            write_meta(root, &meta)?;
-        }
 
         let secret_storage = keys.storage();
         Ok(Self {
@@ -907,51 +898,29 @@ fn write_meta(root: &Path, meta: &MetaDoc) -> Result<(), MetadataError> {
     Ok(())
 }
 
-/// Loads the model document, running the schema-2 upgrade when the directory
-/// still carries the legacy provider document, and the schema-3 one when it
-/// was written before sound was split into two capabilities.
-///
-/// The schema-2 upgrade is a clean break: only the generation preferences
-/// survive it. Credentials stored against channel identifiers become orphans
-/// that the collector below drops, because a channel key was never a model
-/// key. The schema-3 upgrade keeps everything, placing each model and default
-/// under the capability it serves.
+/// Loads the model and secret documents, each resetting on its own when it
+/// cannot be read.
 fn load_models_and_secrets(
     root: &Path,
-    schema_version: u32,
     recovered: &mut Vec<DocumentCorruption>,
 ) -> Result<(ModelsDoc, SecretsDoc), MetadataError> {
-    let mut models: ModelsDoc = load_or_reset(root, MODELS_DOC, recovered);
-    let mut rewritten = false;
-    if models.revision == 0 && models.models.is_empty() && migrate::needs_models_upgrade(root) {
-        models.preferences = migrate::upgrade_to_models(root)?;
-        // Written at once, so the surviving preferences are on the disk before
-        // anything can fail: an upgrade that only lived in memory would be
-        // lost to the next startup, which finds no legacy document to read.
-        rewritten = true;
-    }
-    // A document from before the split is written back whole rather than only
-    // where the placement moved something: every model and default in it is
-    // stored under the one old capability's name, so a model that keeps
-    // serving the same place still has to be written as the capability it now
-    // reads as — the alias that reads it is this build's, and the file is
-    // what a reader without that alias would find.
-    if schema_version < SCHEMA_VERSION {
-        migrate::split_sound_capability(&mut models);
-        rewritten = true;
-    }
-    if rewritten {
-        let bytes = docs::serialize(MODELS_DOC, &models)
-            .map_err(|error| MetadataError::write_failed(error.reason))?;
-        fs::atomic_write(root, &root.join(MODELS_DOC), &bytes, DOCUMENT_MODE)
-            .map_err(|error| MetadataError::write_failed(format!("{MODELS_DOC}: {error}")))?;
-    }
+    let models: ModelsDoc = load_or_reset(root, MODELS_DOC, recovered);
     Ok((models, load_or_reset(root, SECRETS_DOC, recovered)))
 }
 
-/// Drops credentials whose model configuration no longer exists, the residue
-/// of a crash between the two writes of a deletion — or of the schema-2
-/// upgrade, which retires every channel identifier a key could be sealed to.
+/// Only this build's document format is read. A directory stamped otherwise is
+/// refused whole rather than half-read through rules that no longer exist, and
+/// the error names the version it holds so the way forward — setting the
+/// directory aside — is a choice the user can make.
+fn check_schema(found: u32) -> Result<(), MetadataError> {
+    if found != SCHEMA_VERSION {
+        return Err(MetadataError::schema_unsupported(found, SCHEMA_VERSION));
+    }
+    Ok(())
+}
+
+/// Drops credentials whose model configuration no longer exists: the residue
+/// of a crash between the two writes of a deletion.
 fn collect_orphan_secrets(
     root: &Path,
     secrets: &SecretsDoc,
@@ -1064,15 +1033,14 @@ mod tests {
             .any(|document| document.name == MODELS_DOC && document.corrupt));
     }
 
-    /// A directory from before the split is written back in the new words even
-    /// where nothing about it moved.
+    /// A directory stamped with another schema version is refused whole, with
+    /// the version it holds named.
     ///
-    /// The old capability's name is what its models, its defaults and its
-    /// preferences were stored under, and this build reads those through
-    /// aliases the file itself does not carry: a document left as it was would
-    /// say schema 3 while still naming a capability the schema does not have.
+    /// This build reads one document format; reading an older one would mean
+    /// half-reading it through rules that no longer exist, and rewriting it
+    /// would destroy what an older build would still understand.
     #[test]
-    fn a_directory_from_before_the_split_is_rewritten_in_the_new_words() {
+    fn a_directory_from_another_schema_is_refused() {
         let root = tempfile::tempdir().unwrap();
         let config = MetadataConfig::default();
         std::fs::create_dir_all(root.path()).unwrap();
@@ -1081,28 +1049,19 @@ mod tests {
             br#"{"schemaVersion":2,"store":"file","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","appVersion":"0.2.1"}"#,
         )
         .unwrap();
-        std::fs::write(
-            root.path().join(MODELS_DOC),
-            br#"{"revision":4,"version":1,"models":[{"id":"speaker","category":"audio","protocol":"bailianSpeech","url":"https://example.test/tts","model":"cosyvoice","displayName":"Speaker","enabled":true}],"defaults":{"text":null,"image":null,"audio":"speaker","video":null,"asr":null},"preferences":{"systemPrompt":"","reasoningEffort":"auto","image":{"size":"1:1","quality":"auto","background":"","count":1},"video":{"seconds":6,"resolution":"720","generateAudio":true,"watermark":false,"mode":"auto","ratio":""},"audio":{"voice":"longxiaochun","format":"mp3","speed":1.0,"instructions":"","sampleRate":22050,"volume":50,"rate":1.0,"pitch":1.0}}}"#,
-        )
-        .unwrap();
 
-        FileMetadataStore::open(root.path(), &config, RuntimeMode::Web).unwrap();
+        let error = FileMetadataStore::open(root.path(), &config, RuntimeMode::Web)
+            .err()
+            .expect("a directory from another schema must be refused");
+        assert_eq!(error.code(), "METADATA_SCHEMA_UNSUPPORTED");
+        assert!(error.to_string().contains("version 2"), "{error}");
 
-        let written: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(root.path().join(MODELS_DOC)).unwrap())
-                .unwrap();
-        assert_eq!(written["models"][0]["category"], "speech");
-        assert_eq!(written["defaults"]["speech"], "speaker");
-        assert!(written["defaults"].get("audio").is_none(), "{written}");
-        assert_eq!(written["preferences"]["speech"]["voice"], "longxiaochun");
-        assert!(written["preferences"].get("audio").is_none(), "{written}");
-        assert!(written["preferences"].get("music").is_some(), "{written}");
-
+        // Nothing was rewritten or moved aside: the directory is left exactly
+        // as it was, for the user to set aside or keep.
         let meta: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(root.path().join(META_DOC)).unwrap())
                 .unwrap();
-        assert_eq!(meta["schemaVersion"], SCHEMA_VERSION);
+        assert_eq!(meta["schemaVersion"], 2);
     }
 
     #[test]

@@ -404,17 +404,16 @@ live in the platform application-data directory, never in the program tree. See
    keys are **not** expected to work unless the master key travelled
    with them — that is the documented behaviour, not a defect.
 8. Before installing an **older** build over a newer one, back up the
-   metadata directory by copying it whole. A directory written by a
-   newer schema version refuses to open and does not downgrade
-   itself; the backup is the only way back. Record that the backup
-   was taken.
+   metadata directory by copying it whole. A directory stamped with a
+   schema version other than the one a build reads refuses to open;
+   nothing is migrated or downgraded in place, so the backup is the
+   only way back. Record that the backup was taken.
 9. Project documents follow the same rule, so copy any open project
    directory too before rolling back. A `.moka` stamped with a canvas
-   schema newer than the running build is reported as an unsupported
-   version and is never rewritten downwards. Within a schema stamp the
-   build does accept, optional fields it does not know — per-node
-   generation settings, for instance — are ignored on read instead of
-   rejecting the document.
+   schema other than the running build's is reported as an unsupported
+   version and is never rewritten. Optional fields the build does not
+   know — per-node generation settings, for instance — are ignored on
+   read instead of rejecting the document.
 
 ## Performance smoke (reference machine)
 

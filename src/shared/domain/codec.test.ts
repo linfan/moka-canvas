@@ -4,19 +4,17 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CANVAS_SCHEMA_VERSION } from "./constants";
 import {
-  buildBeforeTheSplitMokaFile,
   buildConversationMokaFile,
   buildCutMokaFile,
   buildGenerationMokaFile,
   buildGoldenMokaFile,
-  buildLegacyV1MokaFile,
   buildShelfMokaFile,
   buildStoryMokaFile,
   buildTreeMokaFile,
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 import { derivePorts } from "./factories";
-import type { GenerationSpec, MediaNodeData, MokaFile } from "./types";
+import type { MediaNodeData, MokaFile } from "./types";
 
 const FIXTURE_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -30,7 +28,6 @@ const SHELF_JSON = join(FIXTURE_DIR, "shelf.moka.json");
 const SHELF_BINARY = join(FIXTURE_DIR, "shelf.canvas.moka");
 const TREE_JSON = join(FIXTURE_DIR, "tree.moka.json");
 const TREE_BINARY = join(FIXTURE_DIR, "tree.canvas.moka");
-const LEGACY_BINARY = join(FIXTURE_DIR, "v1-legacy.moka");
 const CUT_JSON = join(FIXTURE_DIR, "cut.moka.json");
 const CUT_BINARY = join(FIXTURE_DIR, "cut.canvas.moka");
 
@@ -117,61 +114,19 @@ describe("moka codec", () => {
     }
   });
 
-  it("migrates a v1 canvas onto the v2 port table", () => {
-    const decoded = decodeMokaFile(encodeMokaFile(buildLegacyV1MokaFile()));
-    const canvas = decoded.canvas[0];
-    expect(canvas.schemaVersion).toBe(CANVAS_SCHEMA_VERSION);
-    expect(canvas.nodes[0].ports.map((p) => p.id)).toEqual([
-      "prompt",
-      "images",
-      "audio",
-      "video",
-      "out",
-      "legacyNote",
-    ]);
-    expect(canvas.nodes[1].ports.map((p) => p.id)).toEqual([
-      "prompt",
-      "images",
-      "mask",
-      "out",
-    ]);
-    expect(canvas.nodes[0].ports.at(-1)?.label).toBe("Legacy note");
-  });
-
-  it("keeps migration idempotent and byte-canonical", () => {
-    const once = encodeMokaFile(
-      decodeMokaFile(encodeMokaFile(buildLegacyV1MokaFile())),
-    );
-    const twice = encodeMokaFile(decodeMokaFile(once));
-    expect(Buffer.from(twice).equals(Buffer.from(once))).toBe(true);
-    expect(normalize(decodeMokaFile(twice))).toEqual(
-      normalize(decodeMokaFile(once)),
-    );
-  });
-
-  it("reads the committed v1 legacy fixture", () => {
-    const legacy = encodeMokaFile(buildLegacyV1MokaFile());
-    if (process.env.UPDATE_FIXTURES === "1" || !existsSync(LEGACY_BINARY)) {
-      mkdirSync(FIXTURE_DIR, { recursive: true });
-      writeFileSync(LEGACY_BINARY, legacy);
-    }
-    expect(
-      Buffer.from(readFileSync(LEGACY_BINARY)).equals(Buffer.from(legacy)),
-    ).toBe(true);
-    expect(
-      normalize(decodeMokaFile(new Uint8Array(readFileSync(LEGACY_BINARY)))),
-    ).toEqual(normalize(decodeMokaFile(legacy)));
-  });
-
-  it("rejects a canvas schema from the future", () => {
-    const golden = buildGoldenMokaFile();
-    golden.canvas[0].schemaVersion = CANVAS_SCHEMA_VERSION + 1;
-    const encoded = encodeMokaFile(golden);
-    try {
-      decodeMokaFile(encoded);
-      expect.unreachable();
-    } catch (error) {
-      expect((error as MokaCodecError).code).toBe("MOKA_VERSION_UNSUPPORTED");
+  it("refuses a canvas schema that is not the one this build reads", () => {
+    for (const version of [
+      CANVAS_SCHEMA_VERSION - 1,
+      CANVAS_SCHEMA_VERSION + 1,
+    ]) {
+      const golden = buildGoldenMokaFile();
+      golden.canvas[0].schemaVersion = version;
+      try {
+        decodeMokaFile(encodeMokaFile(golden));
+        expect.unreachable();
+      } catch (error) {
+        expect((error as MokaCodecError).code).toBe("MOKA_VERSION_UNSUPPORTED");
+      }
     }
   });
 
@@ -202,41 +157,6 @@ describe("moka codec", () => {
       decodeMokaFile(encodeMokaFile(single)).stories![0].chapters[0].acts[0]
         .video.takes[0].assetIds,
     ).toEqual([one]);
-  });
-
-  it("reads a sound ask from before the split as the capability it meant", () => {
-    const decoded = decodeMokaFile(
-      encodeMokaFile(buildBeforeTheSplitMokaFile()),
-    );
-    const canvas = decoded.canvas[0];
-    expect(canvas.schemaVersion).toBe(CANVAS_SCHEMA_VERSION);
-
-    const specOf = (title: string) => {
-      const node = canvas.nodes.find((entry) => entry.title === title)!;
-      return (node.data as { generation: GenerationSpec }).generation;
-    };
-
-    // The reading is a speech ask, and only a voice's keys came with it: the
-    // size is a picture's, and the flag that said "not a score" is retired.
-    const spoken = specOf("Narration");
-    expect(spoken.capability).toBe("speech");
-    expect(spoken.params).toEqual({ voice: "alloy", speed: 1.2 });
-
-    // The score is a music ask, cut to the vocabulary a music model reads.
-    const scored = specOf("Score");
-    expect(scored.capability).toBe("music");
-    expect(scored.params).toEqual({ instrumental: true });
-  });
-
-  it("keeps the split migration idempotent and byte-canonical", () => {
-    const once = encodeMokaFile(
-      decodeMokaFile(encodeMokaFile(buildBeforeTheSplitMokaFile())),
-    );
-    const twice = encodeMokaFile(decodeMokaFile(once));
-    expect(Buffer.from(twice).equals(Buffer.from(once))).toBe(true);
-    expect(normalize(decodeMokaFile(twice))).toEqual(
-      normalize(decodeMokaFile(once)),
-    );
   });
 
   /**

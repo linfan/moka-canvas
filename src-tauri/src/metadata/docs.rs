@@ -16,7 +16,8 @@ pub const META_DOC: &str = "meta.json";
 pub const RECENT_DOC: &str = "recent-projects.json";
 pub const MODELS_DOC: &str = "models.json";
 /// What the model document was called while it still grouped models into
-/// provider channels. Read once by the schema-2 upgrade and then removed.
+/// provider channels. This build neither reads nor writes it; the name is
+/// kept so a directory still carrying one does not pack it into a package.
 pub const LEGACY_PROVIDERS_DOC: &str = "providers.json";
 pub const SECRETS_DOC: &str = "secrets.json";
 pub const PROMPT_SOURCES_DOC: &str = "prompts/sources.json";

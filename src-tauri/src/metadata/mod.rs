@@ -14,7 +14,6 @@ pub mod contract;
 pub mod crypto;
 pub mod docs;
 pub mod fs;
-pub mod migrate;
 pub mod paths;
 pub mod redact;
 pub mod store;
@@ -39,11 +38,11 @@ use crate::config::{MetadataConfig, RuntimeMode};
 /// The only implemented backend.
 pub const FILE_STORE: &str = "file";
 
-/// Current document format version, recorded in `meta.json`.
+/// The one document format version this build reads, recorded in `meta.json`.
 ///
-/// Version 2 replaced provider channels with standalone model configurations;
-/// version 3 split the audio capability into speech and music. See [`migrate`]
-/// for what each upgrade keeps and what it drops.
+/// There are no upgrades between versions: a directory stamped otherwise is
+/// refused at startup with the schema it holds named, and starting fresh means
+/// setting the directory aside.
 pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Error)]
@@ -52,8 +51,12 @@ pub enum MetadataError {
     Unavailable(String),
     #[error("metadata could not be written: {0}")]
     WriteFailed(String),
-    #[error("metadata migration failed: {0}")]
-    MigrationFailed(String),
+    #[error(
+        "this metadata directory was written by schema version {found}; \
+         this build reads version {expected} and does not migrate, \
+         so set the directory aside to start fresh"
+    )]
+    SchemaUnsupported { found: u32, expected: u32 },
     #[error(
         "{document} changed underneath this request (expected revision {expected}, found {actual})"
     )]
@@ -83,8 +86,8 @@ impl MetadataError {
         Self::WriteFailed(message.into())
     }
 
-    pub fn migration_failed(message: impl Into<String>) -> Self {
-        Self::MigrationFailed(message.into())
+    pub fn schema_unsupported(found: u32, expected: u32) -> Self {
+        Self::SchemaUnsupported { found, expected }
     }
 
     pub fn key_missing(message: impl Into<String>) -> Self {
@@ -115,7 +118,7 @@ impl MetadataError {
         match self {
             Self::Conflict { .. } => "METADATA_CONFLICT",
             Self::WriteFailed(_) => "METADATA_WRITE_FAILED",
-            Self::MigrationFailed(_) => "METADATA_MIGRATION_FAILED",
+            Self::SchemaUnsupported { .. } => "METADATA_SCHEMA_UNSUPPORTED",
             Self::KeyMissing(_) => "CONFIG_METADATA_KEY_MISSING",
             Self::Unavailable(_) | Self::SecretUnreadable(_) => "METADATA_UNAVAILABLE",
             Self::NotFound(_) => "NOT_FOUND",
@@ -234,7 +237,7 @@ pub trait MetadataStore: Send + Sync {
 }
 
 /// Opens the metadata directory: takes the cross-process lock, clears crash
-/// leftovers, creates or migrates the documents, and loads the snapshot.
+/// leftovers, creates the documents, and loads the snapshot.
 ///
 /// Must complete before the HTTP server binds, so an unusable configuration
 /// directory fails startup instead of degrading into an app that appears to

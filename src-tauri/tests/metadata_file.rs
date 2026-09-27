@@ -1,6 +1,5 @@
 //! Tests for the file backend specifically: the on-disk layout, permission
-//! bits, the directory lock, quarantine of a damaged document, and the
-//! schema-2 upgrade that replaced provider channels with model configs.
+//! bits, the directory lock, and quarantine of a damaged document.
 //!
 //! Behaviour that any backend must provide lives in the contract suite, which
 //! this file runs as-is against the file implementation.
@@ -12,7 +11,7 @@ use base64::Engine;
 use moka_canvas::config::{MetadataConfig, RuntimeMode};
 use moka_canvas::metadata::contract::{run_metadata_suite, StoreFactory};
 use moka_canvas::metadata::crypto::{KEY_ENV, MASTER_KEY_FILE};
-use moka_canvas::metadata::docs::{LEGACY_PROVIDERS_DOC, MODELS_DOC, RECENT_DOC, SECRETS_DOC};
+use moka_canvas::metadata::docs::{MODELS_DOC, RECENT_DOC, SECRETS_DOC};
 use moka_canvas::metadata::fs::{LOCK_FILE, SECRET_MODE, TMP_DIR};
 use moka_canvas::metadata::{
     self, MetadataError, MetadataStore, ModelDraft, Protocol, RecentProject, SecretStorage,
@@ -263,58 +262,6 @@ async fn a_damaged_document_is_quarantined_without_taking_the_others_down() {
         .collect();
     assert_eq!(quarantined.len(), 1, "{quarantined:?}");
     assert!(quarantined[0].starts_with("recent-projects.corrupt."));
-}
-
-#[tokio::test]
-async fn a_legacy_provider_document_upgrades_to_an_empty_model_list() {
-    let root = tempfile::tempdir().unwrap();
-    seed_master_key(root.path());
-    // What schema 1 left behind: a channel with models and defaults pointing
-    // into it, plus preferences that describe answers rather than providers.
-    std::fs::write(
-        root.path().join(LEGACY_PROVIDERS_DOC),
-        r#"{"revision":4,"version":1,
-           "channels":[{"id":"legacy","name":"Legacy","baseUrl":"https://provider.test/v1",
-                        "protocol":"openai","enabled":true,
-                        "models":[{"id":"gpt","capability":"text","alias":"","enabled":true}]}],
-           "defaults":{"text":"legacy::gpt"},
-           "preferences":{"systemPrompt":"be brief","reasoningEffort":"auto",
-             "image":{"size":"1:1","quality":"auto","background":"","count":1},
-             "video":{"seconds":6,"resolution":"720","generateAudio":true,
-                      "watermark":false,"mode":"auto"},
-             "audio":{"voice":"alloy","format":"mp3","speed":1,"instructions":""}}}"#,
-    )
-    .unwrap();
-
-    let store = open(root.path()).expect("the upgrade runs at startup");
-    let snapshot = store.models_snapshot().await.unwrap();
-    assert!(
-        snapshot.models.is_empty(),
-        "channels are gone; models are configured anew"
-    );
-    assert_eq!(
-        snapshot.defaults.text, None,
-        "old references point at nothing"
-    );
-    assert_eq!(
-        snapshot.preferences.system_prompt, "be brief",
-        "preferences describe answers, not providers, so they survive"
-    );
-
-    // The legacy document was moved aside rather than deleted, and nothing
-    // reads it any more.
-    assert!(!root.path().join(LEGACY_PROVIDERS_DOC).exists());
-    let kept: Vec<String> = names_in(root.path())
-        .into_iter()
-        .filter(|name| name.starts_with("providers.legacy."))
-        .collect();
-    assert_eq!(kept.len(), 1, "{kept:?}");
-
-    // The upgrade is not repeated on the next startup.
-    drop(store);
-    let reopened = open(root.path()).expect("the store reopens");
-    let snapshot = reopened.models_snapshot().await.unwrap();
-    assert_eq!(snapshot.preferences.system_prompt, "be brief");
 }
 
 #[tokio::test]

@@ -470,8 +470,9 @@ export function PromptPanel() {
    *
    * The model goes with the move: a voice model does not compose, and a
    * reference to one left standing over a score's ask would only be refused
-   * when a run reached it. The parameters are cut to the capability the ask
-   * lands in, by the same reading the document's own migration uses.
+   * when a run reached it. The parameters are cut to what the capability the
+   * ask lands in takes — a voice field on a score is nothing the services a
+   * score can reach would read.
    */
   const switchCapability = (next: Capability) => {
     if (next === asked) return;

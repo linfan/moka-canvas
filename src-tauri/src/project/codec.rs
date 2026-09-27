@@ -1,8 +1,6 @@
 use crate::domain::story::STORY_SCHEMA_VERSION;
 use crate::domain::validate::resource_path_valid;
-use crate::domain::{
-    reconcile_generation_spec, reconcile_ports, MokaFile, CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION,
-};
+use crate::domain::{reconcile_ports, MokaFile, CANVAS_SCHEMA_VERSION, MOKA_FILE_VERSION};
 use thiserror::Error;
 
 pub const MOKA_MAGIC: [u8; 4] = [0x4d, 0x4f, 0x4b, 0x41];
@@ -83,17 +81,16 @@ pub fn decode_moka_file(bytes: &[u8]) -> Result<MokaFile, CodecError> {
         }
     }
     for canvas in moka.canvas.iter_mut() {
-        if canvas.schema_version > CANVAS_SCHEMA_VERSION {
+        // One schema version is read. An older document would have to be read
+        // through rules this build no longer carries, and rewriting it would
+        // destroy what an older build still understands; a newer one says the
+        // app was rolled back over a document this build cannot know.
+        if canvas.schema_version != CANVAS_SCHEMA_VERSION {
             return Err(CodecError::SchemaUnsupported(canvas.schema_version));
         }
-        let before_the_split = canvas.schema_version < CANVAS_SCHEMA_VERSION;
-        canvas.schema_version = CANVAS_SCHEMA_VERSION;
         for node in canvas.nodes.iter_mut() {
             let stored = std::mem::take(&mut node.ports);
             node.ports = reconcile_ports(node.kind, &stored);
-            if before_the_split {
-                reconcile_generation_spec(&mut node.data.generation);
-            }
         }
     }
     // A story written by a newer build is refused rather than read as though
@@ -110,46 +107,55 @@ pub fn decode_moka_file(bytes: &[u8]) -> Result<MokaFile, CodecError> {
 mod tests {
     use super::*;
 
-    const LEGACY: &[u8] = include_bytes!("../../../fixtures/v1-legacy.moka");
-
-    fn port_ids(moka: &MokaFile, node: usize) -> Vec<&str> {
-        moka.canvas[0].nodes[node]
-            .ports
-            .iter()
-            .map(|port| port.id.as_str())
-            .collect()
-    }
+    const GOLDEN: &[u8] = include_bytes!("../../../fixtures/minimal.canvas.moka");
 
     #[test]
-    fn migrates_a_v1_canvas_onto_the_v2_port_table() {
-        let moka = decode_moka_file(LEGACY).unwrap();
-        assert_eq!(moka.canvas[0].schema_version, CANVAS_SCHEMA_VERSION);
-        assert_eq!(
-            port_ids(&moka, 0),
-            vec!["prompt", "images", "audio", "video", "out", "legacyNote"]
-        );
-        assert_eq!(port_ids(&moka, 1), vec!["prompt", "images", "mask", "out"]);
-        assert_eq!(
-            moka.canvas[0].nodes[0].ports.last().unwrap().label,
-            "Legacy note"
-        );
-    }
-
-    #[test]
-    fn keeps_migration_idempotent_and_byte_canonical() {
-        let once = encode_moka_file(&decode_moka_file(LEGACY).unwrap(), None).unwrap();
+    fn keeps_a_re_save_byte_canonical() {
+        let once = encode_moka_file(&decode_moka_file(GOLDEN).unwrap(), None).unwrap();
         let twice = encode_moka_file(&decode_moka_file(&once).unwrap(), None).unwrap();
         assert_eq!(once, twice);
     }
 
+    /// Ports are derived data: the table wins for every port it knows, and a
+    /// port it does not know stays behind the table's own.
     #[test]
-    fn rejects_a_canvas_schema_from_the_future() {
-        let mut moka = decode_moka_file(LEGACY).unwrap();
-        moka.canvas[0].schema_version = CANVAS_SCHEMA_VERSION + 1;
+    fn reads_ports_from_the_table_and_keeps_one_it_does_not_know() {
+        let mut moka = decode_moka_file(GOLDEN).unwrap();
+        let node = &mut moka.canvas[0].nodes[0];
+        let kind = node.kind;
+        node.ports = vec![crate::domain::PortDefinition {
+            id: "handAdded".into(),
+            direction: crate::domain::PortDirection::Input,
+            data_types: vec![crate::domain::DataType::Text],
+            required: false,
+            cardinality: crate::domain::Cardinality::One,
+            label: "Hand added".into(),
+        }];
         let bytes = encode_moka_file(&moka, None).unwrap();
+
+        let read = decode_moka_file(&bytes).unwrap();
+        let ports = &read.canvas[0].nodes[0].ports;
+        let mut expected: Vec<String> = crate::domain::derive_ports(kind)
+            .into_iter()
+            .map(|port| port.id)
+            .collect();
+        expected.push("handAdded".into());
         assert_eq!(
-            decode_moka_file(&bytes).unwrap_err().code(),
-            "MOKA_VERSION_UNSUPPORTED"
+            ports.iter().map(|port| port.id.clone()).collect::<Vec<_>>(),
+            expected
         );
+    }
+
+    #[test]
+    fn refuses_a_canvas_schema_that_is_not_the_current_one() {
+        for version in [CANVAS_SCHEMA_VERSION - 1, CANVAS_SCHEMA_VERSION + 1] {
+            let mut moka = decode_moka_file(GOLDEN).unwrap();
+            moka.canvas[0].schema_version = version;
+            let bytes = encode_moka_file(&moka, None).unwrap();
+            assert_eq!(
+                decode_moka_file(&bytes).unwrap_err().code(),
+                "MOKA_VERSION_UNSUPPORTED"
+            );
+        }
     }
 }

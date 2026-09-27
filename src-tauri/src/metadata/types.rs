@@ -143,9 +143,6 @@ pub type ModelRecord = ModelConfig;
 pub struct Defaults {
     pub text: Option<String>,
     pub image: Option<String>,
-    /// What the speech default was stored as before sound was split in two;
-    /// the schema-3 upgrade reclassifies what it and the other place name.
-    #[serde(alias = "audio")]
     pub speech: Option<String>,
     pub music: Option<String>,
     pub video: Option<String>,
@@ -196,8 +193,7 @@ impl Default for VideoPreferences {
     }
 }
 
-/// What a read-aloud ask is shaped by. The group was called audio before
-/// sound was split in two; a document that named it that still reads as this.
+/// What a read-aloud ask is shaped by.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SpeechPreferences {
@@ -277,13 +273,10 @@ pub struct Preferences {
     pub reasoning_effort: String,
     pub image: ImagePreferences,
     pub video: VideoPreferences,
-    /// The voice group, stored under `audio` until sound was split in two; an
-    /// older document's group is read as this one rather than dropped.
-    #[serde(alias = "audio")]
     pub speech: SpeechPreferences,
-    /// Without a field-level default an existing models document would fail to
-    /// parse, and the whole of it — configurations, keys, defaults — would be
-    /// reset rather than read. The music group arrived the same way.
+    /// Without a field-level default a document stored without this group
+    /// would fail to parse, and the whole of it — configurations, keys,
+    /// defaults — would be reset rather than read.
     #[serde(default)]
     pub music: MusicPreferences,
     #[serde(default)]
@@ -547,21 +540,19 @@ mod tests {
     }
 
     #[test]
-    fn a_models_document_written_before_later_groups_keeps_its_preferences() {
-        // The story group arrived after the first documents did, and the
-        // music one after that; a group with no default would fail the whole
-        // document and reset every model configuration along with it. The
-        // voice settings were stored under `audio` before the split, and are
-        // read through the alias rather than lost.
+    fn a_models_document_without_the_optional_groups_keeps_its_preferences() {
+        // A group stored with a default reads as its default rather than
+        // failing the whole document and resetting every model configuration
+        // along with it.
         let stored: Preferences = serde_json::from_str(
             r#"{"systemPrompt":"be brief","reasoningEffort":"low",
                 "image":{"size":"1:1","quality":"auto","background":"","count":1},
                 "video":{"seconds":6,"resolution":"720","generateAudio":true,
                          "watermark":false,"mode":"auto","ratio":""},
-                "audio":{"voice":"alloy","format":"mp3","speed":1.0,"instructions":"",
-                         "sampleRate":22050,"volume":50,"rate":1.0,"pitch":1.0}}"#,
+                "speech":{"voice":"alloy","format":"mp3","speed":1.0,"instructions":"",
+                          "sampleRate":22050,"volume":50,"rate":1.0,"pitch":1.0}}"#,
         )
-        .expect("a document without the later groups must parse");
+        .expect("a document without the optional groups must parse");
         assert_eq!(stored.system_prompt, "be brief");
         assert_eq!(stored.speech.voice, "alloy");
         assert_eq!(stored.music, MusicPreferences::default());

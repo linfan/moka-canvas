@@ -208,15 +208,16 @@ and are exported as `.moka` packages; see the release checklist.
 
 ## Upgrades and rollbacks
 
-`meta.json` records a schema version. A directory written by a **newer** version
-refuses to open: the process exits with `METADATA_MIGRATION_FAILED` and a message
-saying the directory was written by a newer build. It never downgrades or
-overwrites in place.
+`meta.json` records a schema version. Only the version this build reads opens:
+a directory stamped otherwise exits the process with
+`METADATA_SCHEMA_UNSUPPORTED` and a message naming the version it found. Nothing
+is migrated, downgraded, or overwritten in place — set the directory aside and
+configure it anew.
 
 Before rolling back the application version, back up the metadata directory
-(whole-directory copy, as above). A rollback that hits a newer schema version
-leaves the old build unable to start until the directory is restored from a
-backup taken before the upgrade or removed entirely.
+(whole-directory copy, as above). The rolled-back build refuses the directory
+the newer one stamped, so it cannot start until the directory is restored from
+that backup or set aside entirely.
 
 Changing the bundle identifier changes the resolved directory. Point
 `MOKA_METADATA_DIR` at the previous path to keep the existing configuration.

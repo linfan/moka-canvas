@@ -125,10 +125,10 @@ pub async fn run_metadata_suite(open: &StoreFactory) -> Vec<ContractFailure> {
         over_limit_documents_are_rejected(store).await,
     );
 
-    // Reopening exercises migration and load idempotency: a backend that
-    // writes something it cannot read back fails here. The backend holds its
-    // location lock for the store's lifetime, so the shared store has to go
-    // before these checks can take the same location again.
+    // Reopening exercises load idempotency: a backend that writes something
+    // it cannot read back fails here. The backend holds its location lock for
+    // the store's lifetime, so the shared store has to go before these checks
+    // can take the same location again.
     drop(owned);
     record(
         &mut failures,
@@ -746,8 +746,8 @@ async fn reopen_is_idempotent(open: &StoreFactory) -> Result<(), String> {
     let seeded = describe("seeded snapshot", first.models_snapshot()).await?;
     drop(first);
 
-    // Two further boots: a migration that ran again on each one would keep
-    // advancing the revision or reshaping the document.
+    // Two further boots: reopening must not advance the revision or reshape
+    // the document.
     for attempt in 0..2 {
         let reopened = open().map_err(|error| format!("reopen {attempt}: {error}"))?;
         let snapshot = describe("snapshot after reopen", reopened.models_snapshot()).await?;
