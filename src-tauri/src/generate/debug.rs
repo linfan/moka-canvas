@@ -1372,6 +1372,7 @@ mod tests {
                 protocol: Protocol::from_wire_name("openaiChat"),
                 url: "https://api.example.invalid/v1/chat/completions".into(),
                 category: crate::domain::Capability::Text,
+                scene: None,
             },
             "sk-secret-value-1234".into(),
             crate::config::GenerateConfig::default(),

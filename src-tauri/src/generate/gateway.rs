@@ -21,7 +21,7 @@ use serde_json::{Map, Value};
 
 use crate::config::GenerateConfig;
 use crate::domain::Capability;
-use crate::metadata::Preferences;
+use crate::metadata::{Preferences, Scene};
 use crate::project::ProjectStore;
 use crate::telemetry::GenerationNote;
 
@@ -30,7 +30,7 @@ use super::error::ProviderError;
 use super::jobs::TaskRegistry;
 use super::media::{load_inputs, AudioWindow, MediaInput};
 use super::models::{resolve_within, ModelRepo, ResolvedModel};
-use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, TaskState};
+use super::{AsyncTask, Cancel, DeltaSink, GenerateRequest, GenerateResult, InputRole, TaskState};
 
 /// One generation, resolved and ready to send.
 ///
@@ -278,7 +278,8 @@ impl Gateway {
         // through whatever the default is now would ask one provider about a
         // handle another issued.
         let snapshot = self.models.snapshot().await?;
-        let resolved = resolve_within(&snapshot, &tracked.model, tracked.capability)?;
+        let resolved =
+            resolve_within(&snapshot, &tracked.model, tracked.capability, tracked.scene)?;
         let call = self.address(&resolved).await?;
         let state = for_protocol(tracked.protocol.clone())
             .poll_task(&call, &tracked, cancel)
@@ -376,7 +377,10 @@ impl Gateway {
         let snapshot = self.models.snapshot().await?;
         let capability = request.capability;
         let request = merged(request, &snapshot.preferences);
-        let resolved = resolve_within(&snapshot, &request.model, capability)?;
+        // Read after the preferences are merged, because a machine whose video
+        // mode is "reference" is saying what its pictures mean.
+        let scene = scene_of(&request);
+        let resolved = resolve_within(&snapshot, &request.model, capability, scene)?;
         let inputs = load_inputs(
             self.assets.as_ref(),
             &request,
@@ -428,6 +432,42 @@ impl Gateway {
                 Err(error) => return Err(error),
             }
         }
+    }
+}
+
+/// The scenario a request is, read from the capability, the pictures it
+/// carries, and the mode it asks in.
+///
+/// Roles rather than mime types: the media has not been loaded yet at the
+/// moment a model is chosen, and the role is what the caller meant anyway. A
+/// mode of "reference" says the pictures are the subject rather than the
+/// frames a clip moves between, which is a scene of its own wherever frames
+/// are labelled. `None` for a capability with no scenes to route.
+pub fn scene_of(request: &GenerateRequest) -> Option<Scene> {
+    let pictures = request.inputs.iter().any(|input| {
+        matches!(
+            input.role,
+            InputRole::Reference | InputRole::FirstFrame | InputRole::LastFrame | InputRole::Mask
+        )
+    });
+    match request.capability {
+        Capability::Video => Some(if !pictures {
+            Scene::TextToVideo
+        } else if request.text_param("mode") == Some("reference") {
+            Scene::ReferenceToVideo
+        } else if request.inputs_in(InputRole::FirstFrame).next().is_some()
+            && request.inputs_in(InputRole::LastFrame).next().is_some()
+        {
+            Scene::FirstLastFrame
+        } else {
+            Scene::ImageToVideo
+        }),
+        Capability::Image => Some(if pictures {
+            Scene::ImageEdit
+        } else {
+            Scene::TextToImage
+        }),
+        _ => None,
     }
 }
 
@@ -720,6 +760,73 @@ mod tests {
         let text = merged(request(Capability::Text, json!({})), &preferences());
         assert_eq!(text.params["reasoningEffort"], "high");
         assert_eq!(text.params.len(), 1, "text has one preference of its own");
+    }
+
+    #[test]
+    fn a_scene_is_read_off_the_pictures_and_the_mode() {
+        let with = |capability: Capability, roles: &[InputRole]| {
+            let mut held = request(capability, json!({}));
+            held.inputs = roles
+                .iter()
+                .enumerate()
+                .map(|(at, role)| super::super::GenerateInput {
+                    role: *role,
+                    asset_id: format!("asset-{at}"),
+                    window: None,
+                })
+                .collect();
+            held
+        };
+
+        // A shot asked for from words alone, and one that opens on a picture.
+        assert_eq!(
+            scene_of(&with(Capability::Video, &[])),
+            Some(Scene::TextToVideo)
+        );
+        assert_eq!(
+            scene_of(&with(Capability::Video, &[InputRole::FirstFrame])),
+            Some(Scene::ImageToVideo)
+        );
+        assert_eq!(
+            scene_of(&with(
+                Capability::Video,
+                &[InputRole::FirstFrame, InputRole::LastFrame]
+            )),
+            Some(Scene::FirstLastFrame)
+        );
+        assert_eq!(
+            scene_of(&with(Capability::Video, &[InputRole::Reference])),
+            Some(Scene::ImageToVideo),
+            "unlabelled pictures are frames until the mode says otherwise"
+        );
+
+        // The mode is the caller saying what its pictures mean, and it wins
+        // over the positions they arrived in.
+        let mut asked = with(
+            Capability::Video,
+            &[InputRole::FirstFrame, InputRole::Reference],
+        );
+        asked
+            .params
+            .insert("mode".to_string(), Value::String("reference".into()));
+        assert_eq!(scene_of(&asked), Some(Scene::ReferenceToVideo));
+
+        // Pictures make an image request an edit; none make it a drawing.
+        assert_eq!(
+            scene_of(&with(Capability::Image, &[InputRole::Reference])),
+            Some(Scene::ImageEdit)
+        );
+        assert_eq!(
+            scene_of(&with(Capability::Image, &[InputRole::Mask])),
+            Some(Scene::ImageEdit)
+        );
+        assert_eq!(
+            scene_of(&with(Capability::Image, &[])),
+            Some(Scene::TextToImage)
+        );
+
+        // A capability with one shape has no scene to route.
+        assert_eq!(scene_of(&with(Capability::Text, &[])), None);
     }
 
     #[test]

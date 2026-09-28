@@ -141,7 +141,11 @@ describe("the board a telling makes", () => {
     expect(joined(canvas, card(canvas, "周 · main"), frame, "images")).toBe(
       false,
     );
-    expect(joined(canvas, frame, clip, "firstFrame")).toBe(true);
+    // The clip's ask travels with its pictures as references — no frame has
+    // been given a shoot role — so the wire runs into the images port, the
+    // same one a frame's own drawn-from pictures use.
+    expect(joined(canvas, frame, clip, "images")).toBe(true);
+    expect(joined(canvas, frame, clip, "firstFrame")).toBe(false);
     // A turn-around is drawn from the one picture of the character there is.
     expect(
       joined(
@@ -151,6 +155,19 @@ describe("the board a telling makes", () => {
         "images",
       ),
     ).toBe(true);
+  });
+
+  it("wires a clip the way the shoot role of its piece says its pictures travel", () => {
+    const { moka, story } = fixture();
+    story.chapters[0].acts[0].keyframes[0].filmRole = "firstFrame";
+    const canvas = planStoryCanvas(story, moka, "雨夜列车");
+    const frame = card(canvas, "1.1.1 · frame");
+    const clip = card(canvas, "1.1 · clip");
+
+    // A frame marked as a first frame opens a piece of its own, and the wire
+    // runs into the port that role names rather than into the images port.
+    expect(joined(canvas, frame, clip, "firstFrame")).toBe(true);
+    expect(joined(canvas, frame, clip, "images")).toBe(false);
   });
 
   it("carries the ask each card was made with", () => {

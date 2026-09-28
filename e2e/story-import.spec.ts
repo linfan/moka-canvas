@@ -230,10 +230,10 @@ test("a telling is imported into a board, and into a cut of its own", async ({
     expect(held.every((card) => card.prompt !== undefined)).toBe(true);
     expect(made.cards.some((card) => card.kind === "video")).toBe(true);
     // The wires are the telling's own relations: what a card was made from,
-    // and which material an ask was sent.
-    expect(made.ports).toEqual(
-      expect.arrayContaining(["prompt", "images", "firstFrame"]),
-    );
+    // and which material an ask was sent. No frame has been given a shoot
+    // role, so an act's clip carries its pictures as references and the wires
+    // run into the images port.
+    expect(made.ports).toEqual(expect.arrayContaining(["prompt", "images"]));
 
     // Step five's button takes it into a cut of its own.
     await openStoryRoom(page);

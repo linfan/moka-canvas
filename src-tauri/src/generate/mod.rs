@@ -45,7 +45,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{AssetId, Capability, IsoTimestamp};
-use crate::metadata::Protocol;
+use crate::metadata::{Protocol, Scene};
 
 pub use context::{collect_generation_inputs, context_node_ids, ResolvedInputs};
 pub use error::ProviderError;
@@ -257,6 +257,11 @@ pub struct AsyncTask {
     /// The resolved model configuration id, kept so a poll cannot be pointed
     /// at a different model than the one that created the job.
     pub model: String,
+    /// The scenario the job was placed with, kept so a poll resolves the same
+    /// sub-model at the same address. A note written before scenes existed
+    /// has none, and polls as the configuration's own model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<Scene>,
     pub created_at: IsoTimestamp,
     /// The answer, where the converter had one in the same call that would
     /// have started a job. Written down with the handle, so the first poll

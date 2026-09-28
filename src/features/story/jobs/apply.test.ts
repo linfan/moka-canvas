@@ -142,24 +142,31 @@ describe("writing a batch's answers into the story", () => {
 
   it("keeps an act's pieces as the one clip they make, in the order they play", () => {
     const base = `actVideo:${ids.chapterFirst}:${ids.act}`;
+    // Three pieces is what a board with a pair, a first frame and a run of
+    // references asks for; the order they play in is the order they are kept.
     const pieces = [
       actPiece(`${base}:1`, "asset-act-1"),
       actPiece(`${base}:2`, "asset-act-2"),
+      actPiece(`${base}:3`, "asset-act-3"),
     ];
     const report = applyJobResults(record("actVideo", pieces));
 
-    expect(report.applied).toBe(2);
+    expect(report.applied).toBe(3);
     expect(report.skipped).toBe(0);
     const act = story().chapters[0].acts[0];
     const clip = act.video.takes[act.video.takes.length - 1];
-    expect(clip?.assetIds).toEqual(["asset-act-1", "asset-act-2"]);
+    expect(clip?.assetIds).toEqual([
+      "asset-act-1",
+      "asset-act-2",
+      "asset-act-3",
+    ]);
     // The piece that opens the act is the ask written on the clip.
     expect(clip?.itemId).toBe(`${base}:1`);
 
     // Read again, the same pieces are not another clip.
     const again = applyJobResults(record("actVideo", pieces));
     expect(again.applied).toBe(0);
-    expect(again.skipped).toBe(2);
+    expect(again.skipped).toBe(3);
     expect(story().chapters[0].acts[0].video.takes).toHaveLength(
       act.video.takes.length,
     );

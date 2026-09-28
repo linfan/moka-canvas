@@ -77,6 +77,74 @@ impl Protocol {
     }
 }
 
+/// A scenario one configured model may be asked for.
+///
+/// Some providers name a different model — or serve it at a different address
+/// — per scenario: one model for a shot made from words alone, another for a
+/// shot that opens on a picture, another for a run of reference pictures. The
+/// scenario is read off the request, and where a configuration routes its
+/// scenarios through sub-models it picks the one that answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Scene {
+    TextToVideo,
+    ImageToVideo,
+    FirstLastFrame,
+    ReferenceToVideo,
+    TextToImage,
+    ImageEdit,
+}
+
+impl Scene {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::TextToVideo => "textToVideo",
+            Self::ImageToVideo => "imageToVideo",
+            Self::FirstLastFrame => "firstLastFrame",
+            Self::ReferenceToVideo => "referenceToVideo",
+            Self::TextToImage => "textToImage",
+            Self::ImageEdit => "imageEdit",
+        }
+    }
+
+    /// The scenarios a category's configurations may route on. A capability
+    /// with one shape has none, and its configurations keep one model for
+    /// everything.
+    pub fn of_category(category: Capability) -> &'static [Scene] {
+        match category {
+            Capability::Video => &[
+                Scene::TextToVideo,
+                Scene::ImageToVideo,
+                Scene::FirstLastFrame,
+                Scene::ReferenceToVideo,
+            ],
+            Capability::Image => &[Scene::TextToImage, Scene::ImageEdit],
+            _ => &[],
+        }
+    }
+}
+
+/// One scenario's own model name and address, under a configuration.
+///
+/// A sub-model is a routing entry rather than a model of its own: it borrows
+/// the configuration's protocol and credential, names the model the provider
+/// knows for its scenarios, and carries an address of its own only where the
+/// provider serves those scenarios somewhere else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubModel {
+    /// The model name the provider knows for these scenarios.
+    pub model: String,
+    /// The address these scenarios are served at; `None` inherits the
+    /// configuration's own address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The scenarios this sub-model answers for. One scenario is routed to at
+    /// most one sub-model, so which one answers is never a guess.
+    #[serde(default)]
+    pub scenes: Vec<Scene>,
+}
+
 /// One configured model, standing on its own.
 ///
 /// There is no provider grouping: every model carries its own address,
@@ -108,6 +176,10 @@ pub struct ModelConfig {
     /// absent means the app's own ceiling stands in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_video_seconds: Option<u32>,
+    /// Per-scenario models, where the deployment needs them. Empty means the
+    /// one model above answers every request, whatever scenario it is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_models: Vec<SubModel>,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -125,6 +197,8 @@ pub struct ModelDraft {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_video_seconds: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_models: Vec<SubModel>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
@@ -513,6 +587,7 @@ mod tests {
             model: "gpt-4o".to_string(),
             display_name: "GPT-4o".to_string(),
             max_video_seconds: None,
+            sub_models: Vec::new(),
             enabled: true,
         };
         let json = serde_json::to_string(&config).unwrap();
@@ -521,6 +596,46 @@ mod tests {
         assert!(json.contains("\"displayName\""), "{json}");
         assert!(json.contains("\"category\":\"text\""), "{json}");
         assert!(json.contains("\"protocol\":\"openaiChat\""), "{json}");
+        assert!(
+            !json.contains("subModels"),
+            "a configuration that routes nothing writes nothing about scenes: {json}"
+        );
+    }
+
+    #[test]
+    fn sub_models_are_read_from_a_document_that_carries_them() {
+        // A configuration written before sub-models existed parses without
+        // them, and one that carries them parses with everything spelled out.
+        let legacy = r#"{
+            "id": "filmer", "category": "video", "protocol": "openaiVideos",
+            "url": "https://provider.test/v1/videos", "model": "filmer",
+            "displayName": "Filmer"
+        }"#;
+        let config: ModelConfig = serde_json::from_str(legacy).unwrap();
+        assert!(config.sub_models.is_empty());
+        assert!(config.enabled, "enabled still defaults to true");
+
+        let routed = r#"{
+            "id": "filmer", "category": "video", "protocol": "openaiVideos",
+            "url": "https://provider.test/v1/videos", "model": "filmer",
+            "displayName": "Filmer",
+            "subModels": [
+                {"model": "happy-t2v", "scenes": ["textToVideo"]},
+                {"model": "happy-i2v", "url": "https://provider.test/v1/images",
+                 "scenes": ["imageToVideo", "firstLastFrame"]}
+            ]
+        }"#;
+        let config: ModelConfig = serde_json::from_str(routed).unwrap();
+        assert_eq!(config.sub_models.len(), 2);
+        assert_eq!(config.sub_models[0].model, "happy-t2v");
+        assert_eq!(
+            config.sub_models[0].url, None,
+            "an address left off means the configuration's own"
+        );
+        assert_eq!(
+            config.sub_models[1].scenes,
+            vec![Scene::ImageToVideo, Scene::FirstLastFrame]
+        );
     }
 
     #[test]

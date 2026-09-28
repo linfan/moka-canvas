@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ModelDraft, ModelView, ProtocolGroups } from "../../api";
+import type {
+  ModelDraft,
+  ModelView,
+  ProtocolGroups,
+  SubModel,
+} from "../../api";
 import {
   CAPABILITY_LABELS,
   MAX_MODEL_ID_LENGTH,
   MAX_MODEL_NAME_LENGTH,
   MAX_VIDEO_SECONDS,
+  MODEL_SCENE_LABELS,
+  SCENES_OF_CATEGORY,
   type Capability,
+  type ModelScene,
 } from "../../shared/domain";
 import {
   protocolChoices,
@@ -37,8 +45,75 @@ interface FormState {
   displayName: string;
   /** The longest one clip may be, as text so a blank field can mean none. */
   maxVideoSeconds: string;
+  /** Per-scenario rows; empty means the one model answers everything. */
+  subModels: SubModelDraft[];
   enabled: boolean;
   apiKey: string;
+}
+
+/**
+ * One scenario row as the form holds it: the address as text so a blank field
+ * can mean "wherever the main one asks".
+ */
+export interface SubModelDraft {
+  model: string;
+  url: string;
+  scenes: ModelScene[];
+}
+
+/**
+ * The rows with one scene's check moved to the row that just took it.
+ *
+ * A scenario is answered by at most one sub-model, so checking it somewhere
+ * takes it from wherever it was: two rows both claiming one scene would be a
+ * configuration the server refuses, and a form that can build one is a form
+ * that fails at save.
+ */
+export function toggleScene(
+  rows: SubModelDraft[],
+  at: number,
+  scene: ModelScene,
+  checked: boolean,
+): SubModelDraft[] {
+  return rows.map((row, index) => {
+    if (index === at) {
+      const scenes = checked
+        ? [...row.scenes.filter((held) => held !== scene), scene]
+        : row.scenes.filter((held) => held !== scene);
+      return { ...row, scenes };
+    }
+    return checked && row.scenes.includes(scene)
+      ? { ...row, scenes: row.scenes.filter((held) => held !== scene) }
+      : row;
+  });
+}
+
+/** The scenes no row answers for, in the category's own order. */
+export function uncoveredScenes(
+  category: Capability,
+  rows: SubModelDraft[],
+): ModelScene[] {
+  const claimed = new Set(rows.flatMap((row) => row.scenes));
+  return SCENES_OF_CATEGORY[category].filter((scene) => !claimed.has(scene));
+}
+
+/** What one row is missing, as a message key, or null when it is complete. */
+export function subModelProblem(row: SubModelDraft): string | null {
+  if (row.model.trim() === "") return "settings:editor.subModelNeedsModel";
+  if (row.url.trim() !== "" && !/^https?:\/\/\S+$/.test(row.url.trim())) {
+    return "settings:editor.subModelUrlBad";
+  }
+  if (row.scenes.length === 0) return "settings:editor.subModelNeedsScene";
+  return null;
+}
+
+/** The stored rows as the form holds them. */
+function draftRows(subModels: SubModel[] | undefined): SubModelDraft[] {
+  return (subModels ?? []).map((sub) => ({
+    model: sub.model,
+    url: sub.url ?? "",
+    scenes: [...sub.scenes],
+  }));
 }
 
 function initialForm(
@@ -62,6 +137,7 @@ function initialForm(
         MAX_MODEL_NAME_LENGTH,
       ),
       maxVideoSeconds: ceilingText(copySource.maxVideoSeconds),
+      subModels: draftRows(copySource.subModels),
       enabled: copySource.enabled,
       apiKey: "",
     };
@@ -79,6 +155,7 @@ function initialForm(
       model: "",
       displayName: "",
       maxVideoSeconds: "",
+      subModels: [],
       enabled: true,
       apiKey: "",
     };
@@ -91,6 +168,7 @@ function initialForm(
     model: model.model,
     displayName: model.displayName,
     maxVideoSeconds: ceilingText(model.maxVideoSeconds),
+    subModels: draftRows(model.subModels),
     enabled: model.enabled,
     apiKey: "",
   };
@@ -235,7 +313,15 @@ export function ModelEditor({
     form.displayName.trim() !== "" &&
     form.model.trim() !== "" &&
     ceilingOk &&
-    urlShaped;
+    urlShaped &&
+    form.subModels.every((row) => subModelProblem(row) === null);
+  // The scenarios a routed category has that no row answers for. Only said
+  // once routing exists: a configuration with no sub-models answers every
+  // scenario itself, which is how one behaved before the rows existed.
+  const uncovered =
+    category === "image" || category === "video"
+      ? uncoveredScenes(category, form.subModels)
+      : [];
 
   const save = async () => {
     const draft: ModelDraft = {
@@ -251,6 +337,18 @@ export function ModelEditor({
     // window, and a form that never showed the field leaves it out entirely.
     if (category === "video" && ceilingNumber !== null) {
       draft.maxVideoSeconds = ceilingNumber;
+    }
+    // Scenario routing belongs to video and image models, and the rows travel
+    // only where there is something to say — or something stored to clear.
+    if (
+      (category === "image" || category === "video") &&
+      (form.subModels.length > 0 || (model?.subModels?.length ?? 0) > 0)
+    ) {
+      draft.subModels = form.subModels.map((row) => ({
+        model: row.model.trim(),
+        ...(row.url.trim() === "" ? {} : { url: row.url.trim() }),
+        scenes: [...row.scenes],
+      }));
     }
     // A blank key field keeps whatever is stored; typing one replaces it.
     // Clearing is its own button, so saving an unrelated edit cannot cost a
@@ -405,6 +503,131 @@ export function ModelEditor({
                   max: MAX_VIDEO_SECONDS,
                 })}
           </p>
+        </>
+      )}
+
+      {(category === "image" || category === "video") && (
+        <>
+          <h4 className="settings-heading">{t("settings:editor.subModels")}</h4>
+          <p className="settings-hint">{t("settings:editor.subModelsHint")}</p>
+          {form.subModels.map((row, at) => {
+            const problem = subModelProblem(row);
+            return (
+              <div className="settings-sub-model" key={at}>
+                <label className="dialog-field">
+                  <span>{t("settings:editor.subModelModel")}</span>
+                  <input
+                    aria-label={`${t("settings:editor.subModelModel")} ${at + 1}`}
+                    data-testid={`model-sub-${at}-model`}
+                    maxLength={MAX_MODEL_NAME_LENGTH}
+                    onChange={(event) =>
+                      edit({
+                        subModels: form.subModels.map((held, index) =>
+                          index === at
+                            ? { ...held, model: event.target.value }
+                            : held,
+                        ),
+                      })
+                    }
+                    placeholder={t("settings:editor.subModelModelTip")}
+                    value={row.model}
+                  />
+                </label>
+                <label className="dialog-field">
+                  <span>{t("settings:editor.subModelUrl")}</span>
+                  <input
+                    aria-label={`${t("settings:editor.subModelUrl")} ${at + 1}`}
+                    data-testid={`model-sub-${at}-url`}
+                    onChange={(event) =>
+                      edit({
+                        subModels: form.subModels.map((held, index) =>
+                          index === at
+                            ? { ...held, url: event.target.value }
+                            : held,
+                        ),
+                      })
+                    }
+                    placeholder={
+                      form.url.trim() === ""
+                        ? t("settings:editor.subModelUrlTip")
+                        : form.url.trim()
+                    }
+                    value={row.url}
+                  />
+                </label>
+                <div className="settings-row">
+                  {SCENES_OF_CATEGORY[category].map((scene) => (
+                    <label className="settings-check" key={scene}>
+                      <input
+                        aria-label={`${t("settings:editor.subModelScene")} ${at + 1} ${t(MODEL_SCENE_LABELS[scene])}`}
+                        checked={row.scenes.includes(scene)}
+                        data-testid={`model-sub-${at}-scene-${scene}`}
+                        onChange={(event) =>
+                          edit({
+                            subModels: toggleScene(
+                              form.subModels,
+                              at,
+                              scene,
+                              event.target.checked,
+                            ),
+                          })
+                        }
+                        type="checkbox"
+                      />
+                      <span>{t(MODEL_SCENE_LABELS[scene])}</span>
+                    </label>
+                  ))}
+                  <button
+                    aria-label={`${t("settings:editor.subModelRemove")} ${at + 1}`}
+                    data-testid={`model-sub-${at}-remove`}
+                    onClick={() =>
+                      edit({
+                        subModels: form.subModels.filter(
+                          (_held, index) => index !== at,
+                        ),
+                      })
+                    }
+                    type="button"
+                  >
+                    {t("settings:editor.subModelRemove")}
+                  </button>
+                </div>
+                {problem !== null && (
+                  <p className="settings-hint" role="alert">
+                    {t(problem)}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          <div className="settings-row">
+            <button
+              data-testid="model-sub-add"
+              onClick={() =>
+                edit({
+                  subModels: [
+                    ...form.subModels,
+                    { model: "", url: "", scenes: [] },
+                  ],
+                })
+              }
+              type="button"
+            >
+              {t("settings:editor.subModelAdd")}
+            </button>
+          </div>
+          {form.subModels.length > 0 && uncovered.length > 0 && (
+            <p
+              className="settings-hint"
+              role="status"
+              data-testid="model-sub-uncovered"
+            >
+              {t("settings:editor.subModelsUncovered")}{" "}
+              {uncovered
+                .map((scene) => t(MODEL_SCENE_LABELS[scene]))
+                .join(" / ")}
+            </p>
+          )}
         </>
       )}
 

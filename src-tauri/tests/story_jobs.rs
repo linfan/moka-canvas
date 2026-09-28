@@ -157,6 +157,7 @@ impl Harness {
                 model: id.into(),
                 display_name: id.into(),
                 max_video_seconds: None,
+                sub_models: Vec::new(),
                 enabled: true,
                 expected_revision: None,
             })
@@ -206,6 +207,7 @@ impl Harness {
                 model: "fun-music-v1".into(),
                 display_name: id.into(),
                 max_video_seconds: None,
+                sub_models: Vec::new(),
                 enabled: true,
                 expected_revision: None,
             })

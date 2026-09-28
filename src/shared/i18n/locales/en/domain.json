@@ -86,6 +86,19 @@
     "scene": "Scene",
     "prop": "Prop"
   },
+  "filmRole": {
+    "reference": "Reference",
+    "firstFrame": "First frame",
+    "firstLastFrame": "First and last frame"
+  },
+  "modelScene": {
+    "textToVideo": "Text to video",
+    "imageToVideo": "Image to video",
+    "firstLastFrame": "First and last frame",
+    "referenceToVideo": "Reference pictures to video",
+    "textToImage": "Text to image",
+    "imageEdit": "Image edit"
+  },
   "storyStep": {
     "idea": "Idea",
     "outline": "Outline",

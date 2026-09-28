@@ -7115,6 +7115,12 @@ button > .story-spin {
   width: 92px;
 }
 
+/* The shoot role under a drawn frame, kept to the frame column's own width. */
+.story-kf-role {
+  font-size: 12px;
+  max-width: 100%;
+}
+
 .story-kf-remove {
   background: none;
   border: none;

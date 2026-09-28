@@ -277,6 +277,7 @@ mod tests {
             category: capability,
             protocol: Protocol::from_wire_name("openaiImages"),
             url: "https://provider.example/v1/images/generations".into(),
+            scene: None,
         };
         ModelCall::new(&resolved, KEY.to_string(), GenerateConfig::default())
             .expect("a model is addressed")

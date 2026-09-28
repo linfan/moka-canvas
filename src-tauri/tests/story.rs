@@ -124,6 +124,7 @@ fn frame(index: usize) -> StoryKeyframe {
         shot_size: StoryShotSize::Medium,
         camera_move: story::StoryCameraMove::Static,
         angle: story::StoryCameraAngle::EyeLevel,
+        film_role: story::StoryFilmRole::Reference,
         content: "画面".into(),
         dialogue: Vec::new(),
         duration_ms: 1_000,
@@ -219,6 +220,7 @@ fn story_document() -> MokaFile {
         shot_size: StoryShotSize::Wide,
         camera_move: story::StoryCameraMove::PushIn,
         angle: story::StoryCameraAngle::EyeLevel,
+        film_role: story::StoryFilmRole::Reference,
         content: "雨中的站台，一个人立在灯下。".into(),
         dialogue: vec![StoryDialogueLine {
             character_id: Some(HERO.into()),
@@ -245,6 +247,7 @@ fn story_document() -> MokaFile {
         shot_size: StoryShotSize::Close,
         camera_move: story::StoryCameraMove::Static,
         angle: story::StoryCameraAngle::OverTheShoulder,
+        film_role: story::StoryFilmRole::Reference,
         dialogue: Vec::new(),
         duration_ms: 3_000,
         art: empty_slot(),
@@ -855,6 +858,44 @@ fn moves_only_the_fields_a_shot_patch_names_and_keeps_a_shot_to_its_length() {
     );
 }
 
+/// A shot's role in filming is a word a document carries only when it says
+/// something other than the plain one: a board that has never heard of roles is
+/// one whose shots are all written back the same way, without the word.
+#[test]
+fn keeps_a_shots_role_in_filming_on_the_side_of_the_plain_word() {
+    let moka = story_document();
+    let plain = serde_json::to_string(story_of(&moka)).unwrap();
+    assert!(!plain.contains("filmRole"), "the plain word is not written");
+    assert_eq!(
+        story_of(&moka).chapters[0].acts[0].keyframes[0].film_role,
+        story::StoryFilmRole::Reference
+    );
+
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryKeyframe {
+            story_id: STORY.into(),
+            chapter_id: CHAPTER_FIRST.into(),
+            act_id: ACT.into(),
+            keyframe_id: FRAME_FIRST.into(),
+            patch: StoryKeyframePatch {
+                film_role: Some(story::StoryFilmRole::FirstLastFrame),
+                ..Default::default()
+            },
+        }],
+    );
+    let keyframes = &story_of(&next).chapters[0].acts[0].keyframes;
+    assert_eq!(keyframes[0].film_role, story::StoryFilmRole::FirstLastFrame);
+    // The shot beside it was never named, so it is a reference.
+    assert_eq!(keyframes[1].film_role, story::StoryFilmRole::Reference);
+
+    let written = serde_json::to_string(&keyframes[0]).unwrap();
+    assert!(written.contains(r#""filmRole":"firstLastFrame""#));
+    assert!(!serde_json::to_string(&keyframes[1])
+        .unwrap()
+        .contains("filmRole"));
+}
+
 #[test]
 fn files_a_drawing_at_the_place_a_target_names() {
     let moka = story_document();
@@ -1294,6 +1335,7 @@ fn reads_a_word_it_does_not_know_as_the_plainest_thing_it_could_be() {
                     "shotSize": "gigantic",
                     "cameraMove": "swooping",
                     "angle": "sideways",
+                    "filmRole": "solo",
                     "content": "",
                     "dialogue": [],
                     "durationMs": 1000,
@@ -1334,6 +1376,7 @@ fn reads_a_word_it_does_not_know_as_the_plainest_thing_it_could_be() {
     assert_eq!(frame.shot_size, StoryShotSize::Medium);
     assert_eq!(frame.camera_move, story::StoryCameraMove::Static);
     assert_eq!(frame.angle, story::StoryCameraAngle::EyeLevel);
+    assert_eq!(frame.film_role, story::StoryFilmRole::Reference);
 }
 
 #[test]

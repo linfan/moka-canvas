@@ -108,6 +108,18 @@ describe("problemMessage in Chinese", () => {
     ).toBe("a::b 生成的是 image，不是 text");
   });
 
+  it("says which scenario has no sub-model, in the reader's own words", () => {
+    expect(
+      problemMessage(
+        "MODEL_SCENE_UNCONFIGURED",
+        "the model filmer has no sub-model for the referenceToVideo scene",
+        { reference: "filmer", capability: "video", scene: "referenceToVideo" },
+      ),
+    ).toBe(
+      "模型「filmer」没有为「参考图生视频」场景配置子模型，请到设置里补充后再试",
+    );
+  });
+
   it("falls back to the server's English for a code nobody translated", () => {
     expect(problemMessage("VALIDATION_FAILED", "Duplicate node id n-1")).toBe(
       "Duplicate node id n-1",

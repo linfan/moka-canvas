@@ -225,6 +225,48 @@ export function isCapability(value: unknown): value is Capability {
 }
 
 /**
+ * The scenarios a request may turn out to be, per capability.
+ *
+ * A provider that names a different model — or serves it at a different
+ * address — per scenario says so with sub-models, and one of these is what a
+ * sub-model answers for. Which scenario a request is follows from the
+ * pictures it carries and the mode it asks in.
+ */
+export const MODEL_SCENES = [
+  "textToVideo",
+  "imageToVideo",
+  "firstLastFrame",
+  "referenceToVideo",
+  "textToImage",
+  "imageEdit",
+] as const;
+export type ModelScene = (typeof MODEL_SCENES)[number];
+
+/** The scenarios each capability's configurations may route on. */
+export const SCENES_OF_CATEGORY: Record<Capability, readonly ModelScene[]> = {
+  text: [],
+  image: ["textToImage", "imageEdit"],
+  speech: [],
+  music: [],
+  video: ["textToVideo", "imageToVideo", "firstLastFrame", "referenceToVideo"],
+  asr: [],
+};
+
+/** The words each scenario is shown as. */
+export const MODEL_SCENE_LABELS: Record<ModelScene, string> = {
+  textToVideo: "domain:modelScene.textToVideo",
+  imageToVideo: "domain:modelScene.imageToVideo",
+  firstLastFrame: "domain:modelScene.firstLastFrame",
+  referenceToVideo: "domain:modelScene.referenceToVideo",
+  textToImage: "domain:modelScene.textToImage",
+  imageEdit: "domain:modelScene.imageEdit",
+};
+
+export function isModelScene(value: unknown): value is ModelScene {
+  return MODEL_SCENES.includes(value as ModelScene);
+}
+
+/**
  * The kinds of card a project holds.
  *
  * Left out of the kinds a card is filed under is recognition: it reads a
@@ -369,6 +411,13 @@ export const ELEMENT_KIND_LABELS: Record<string, string> = {
   character: "domain:elementKind.character",
   scene: "domain:elementKind.scene",
   prop: "domain:elementKind.prop",
+};
+
+/** How a drawn frame is used when the act is shot. */
+export const FILM_ROLE_LABELS: Record<string, string> = {
+  reference: "domain:filmRole.reference",
+  firstFrame: "domain:filmRole.firstFrame",
+  firstLastFrame: "domain:filmRole.firstLastFrame",
 };
 
 /**
@@ -672,6 +721,7 @@ export const CONFIGURATION_PROBLEM_CODES = [
   "PROVIDER_KEY_MISSING",
   "PROVIDER_AUTH",
   "MODEL_CAPABILITY_MISMATCH",
+  "MODEL_SCENE_UNCONFIGURED",
   "GENERATION_CAPABILITY_MISMATCH",
   "GENERATION_MODEL_MISSING",
   "EXECUTOR_DISABLED",

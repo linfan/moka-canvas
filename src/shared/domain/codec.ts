@@ -20,6 +20,7 @@ import {
   STORY_CAMERA_ANGLES,
   STORY_CAMERA_MOVES,
   STORY_ELEMENT_KINDS,
+  STORY_FILM_ROLES,
   STORY_SHOT_GRANULARITIES,
   STORY_SHOT_SIZES,
 } from "./types";
@@ -420,7 +421,7 @@ function encodeStoryDialogue(line: StoryDialogueLine): Record<string, unknown> {
 }
 
 function encodeStoryKeyframe(keyframe: StoryKeyframe): Record<string, unknown> {
-  return {
+  const doc: Record<string, unknown> = {
     id: keyframe.id,
     title: keyframe.title,
     shotSize: keyframe.shotSize,
@@ -432,6 +433,12 @@ function encodeStoryKeyframe(keyframe: StoryKeyframe): Record<string, unknown> {
     art: encodeStorySlot(keyframe.art),
     video: encodeStorySlot(keyframe.video),
   };
+  // The plain role is written as silence, the way the Rust half reads it: a
+  // board whose frames are all references keeps the shape it came in with.
+  if (keyframe.filmRole !== undefined && keyframe.filmRole !== "reference") {
+    doc.filmRole = keyframe.filmRole;
+  }
+  return doc;
 }
 
 function encodeStoryAct(act: StoryAct): Record<string, unknown> {
@@ -1254,7 +1261,7 @@ function decodeStoryDialogue(value: unknown): StoryDialogueLine {
 
 function decodeStoryKeyframe(value: unknown): StoryKeyframe {
   const doc = asRecord(value, "stories[].keyframes[]");
-  return {
+  const keyframe: StoryKeyframe = {
     id: asString(doc.id, "keyframes[].id"),
     title: asString(doc.title, "keyframes[].title"),
     shotSize: fallbackOneOf(STORY_SHOT_SIZES, doc.shotSize, "medium"),
@@ -1271,6 +1278,17 @@ function decodeStoryKeyframe(value: unknown): StoryKeyframe {
     art: decodeStorySlot(doc.art),
     video: decodeStorySlot(doc.video),
   };
+  // A frame nobody has said anything about stays a frame nobody has said
+  // anything about: reference is what the absence means, and the word is
+  // written down only when some other one was.
+  if (doc.filmRole !== undefined) {
+    keyframe.filmRole = fallbackOneOf(
+      STORY_FILM_ROLES,
+      doc.filmRole,
+      "reference",
+    );
+  }
+  return keyframe;
 }
 
 function decodeStoryAct(value: unknown): StoryAct {

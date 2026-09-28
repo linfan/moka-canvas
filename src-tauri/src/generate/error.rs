@@ -40,6 +40,16 @@ pub enum ProviderError {
         found: String,
     },
 
+    /// A configuration routes its scenarios through sub-models and none of
+    /// them covers this request. Wrong rather than late: asking again is
+    /// refused the same way, and the repair is in Settings.
+    #[error("the model {reference} has no sub-model for the {scene} scene")]
+    SceneUnconfigured {
+        reference: String,
+        capability: String,
+        scene: String,
+    },
+
     #[error("the provider rejected the stored credential: {0}")]
     Auth(String),
 
@@ -120,6 +130,7 @@ impl ProviderError {
             Self::NotConfigured { .. } => "PROVIDER_NOT_CONFIGURED",
             Self::KeyMissing { .. } => "PROVIDER_KEY_MISSING",
             Self::CapabilityMismatch { .. } => "MODEL_CAPABILITY_MISMATCH",
+            Self::SceneUnconfigured { .. } => "MODEL_SCENE_UNCONFIGURED",
             Self::Auth(_) => "PROVIDER_AUTH",
             Self::RateLimited { .. } => "PROVIDER_RATE_LIMIT",
             Self::Timeout(_) => "PROVIDER_TIMEOUT",
@@ -170,6 +181,15 @@ impl ProviderError {
                 "reference": reference,
                 "requested": capability,
                 "actual": found,
+            })),
+            Self::SceneUnconfigured {
+                reference,
+                capability,
+                scene,
+            } => Some(serde_json::json!({
+                "reference": reference,
+                "capability": capability,
+                "scene": scene,
             })),
             Self::Auth(detail) => Some(serde_json::json!({ "detail": detail })),
             Self::RateLimited {
@@ -255,6 +275,29 @@ mod tests {
         assert!(ProviderError::not_configured("text", "nothing is set")
             .code()
             .eq("PROVIDER_NOT_CONFIGURED"));
+    }
+
+    #[test]
+    fn a_scene_a_configuration_does_not_route_names_what_to_fix() {
+        let error = ProviderError::SceneUnconfigured {
+            reference: "filmer".into(),
+            capability: "video".into(),
+            scene: "referenceToVideo".into(),
+        };
+        assert_eq!(error.code(), "MODEL_SCENE_UNCONFIGURED");
+        assert_eq!(
+            error.details(),
+            Some(serde_json::json!({
+                "reference": "filmer",
+                "capability": "video",
+                "scene": "referenceToVideo",
+            })),
+            "the client has to be told which configuration and which scene"
+        );
+        assert!(
+            !error.retryable(),
+            "the same request would be refused the same way"
+        );
     }
 
     #[test]

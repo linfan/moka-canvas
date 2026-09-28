@@ -1310,6 +1310,24 @@ describe("the board commands", () => {
       ),
     ).toBe("VALIDATION_FAILED");
   });
+
+  it("moves a shot's role in filming, and puts the plain use back on undo", () => {
+    const moka = buildStoryMokaFile();
+    const ids = storyIds();
+    const next = expectRoundTrip(moka, {
+      type: "updateStoryKeyframe",
+      storyId: ids.story,
+      chapterId: ids.chapterFirst,
+      actId: ids.act,
+      keyframeId: ids.frameFirst,
+      patch: { filmRole: "firstLastFrame" },
+    });
+    const frames = storyOfFile(next).chapters[0].acts[0].keyframes;
+    expect(frames[0].filmRole).toBe("firstLastFrame");
+    // The shot beside it was never named, and no word is carried for it: the
+    // plain use is what a frame with nothing said about it means.
+    expect(frames[1].filmRole).toBeUndefined();
+  });
 });
 
 describe("filing a drawing at a place", () => {

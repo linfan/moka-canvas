@@ -4,9 +4,11 @@ import { useTranslation } from "react-i18next";
 import {
   CAMERA_ANGLE_LABELS,
   CAMERA_MOVE_LABELS,
+  FILM_ROLE_LABELS,
   SHOT_SIZE_LABELS,
   STORY_CAMERA_ANGLES,
   STORY_CAMERA_MOVES,
+  STORY_FILM_ROLES,
   STORY_SHOT_SIZES,
   createKeyframe,
   currentTake,
@@ -20,6 +22,7 @@ import type {
   StoryAct,
   StoryDialogueLine,
   StoryDocument,
+  StoryFilmRole,
   StoryKeyframe,
   StoryKeyframePatch,
   StorySlot,
@@ -29,9 +32,12 @@ import { i18n } from "../../../shared/i18n";
 import { storyKeyframePromptParts } from "../../../shared/prompts";
 import { execute } from "../../editor/commands/execute";
 import {
+  drawnFrames,
+  filmRoleOf,
   keyframeCast,
   planKeyframeArt,
   planKeyframeVideos,
+  settledRoleFrames,
 } from "../jobs/plan";
 import { useStoryRun } from "../stores/storyJobStore";
 import { KeyframeContentField, type MentionKind } from "./KeyframeContentField";
@@ -80,6 +86,12 @@ export function KeyframeTable({
   const { t } = useTranslation();
   const [dialogueAt, setDialogueAt] = useState<string | null>(null);
   const perShot = story.shotGranularity === "keyframe";
+  // The last drawn frame cannot open a pair — nothing is drawn after it — and
+  // the act's own closing frame, when the pair before it takes it, is not the
+  // reader's to give a role at all.
+  const drawn = drawnFrames(act);
+  const lastDrawn = drawn.length === 0 ? undefined : drawn[drawn.length - 1].id;
+  const settled = settledRoleFrames(act);
 
   const addShot = () => {
     writeKeyframes(story, chapterId, act, [
@@ -121,6 +133,8 @@ export function KeyframeTable({
                 setDialogueAt(dialogueAt === keyframe.id ? null : keyframe.id)
               }
               perShot={perShot}
+              roleLocked={settled.has(keyframe.id)}
+              rolePairable={keyframe.id !== lastDrawn}
               story={story}
             />
           ))}
@@ -144,6 +158,66 @@ export function KeyframeTable({
   );
 }
 
+/**
+ * How a drawn frame is used when the act is shot.
+ *
+ * Offered beside the picture it belongs to, and only while the story is
+ * boarded an act at a time: a shot made into its own clip is filmed from its
+ * own frame whatever any role says, so the pick has nothing to decide there.
+ * A role the reader gave before the board moved on — a pair whose frame after
+ * it was taken away — is kept on show as a disabled word rather than quietly
+ * rewritten, since what the act does with the frame is not what the frame says.
+ */
+function FilmRoleSelect({
+  role,
+  index,
+  locked,
+  pairable,
+  onWrite,
+}: {
+  role: StoryFilmRole;
+  index: number;
+  /** Whether the act closes on this frame's pair, taking its role away. */
+  locked: boolean;
+  /** Whether pairing with the frame after it is still on offer. */
+  pairable: boolean;
+  onWrite: (role: StoryFilmRole) => void;
+}) {
+  const { t } = useTranslation();
+  const cell = t("story:storyboard.cell", {
+    at: index + 1,
+    name: t("story:storyboard.filmRole"),
+  });
+  return (
+    <select
+      aria-label={cell}
+      className="story-kf-role"
+      data-testid={`story-kf-role-${index}`}
+      disabled={locked}
+      onChange={(event) => onWrite(event.target.value as StoryFilmRole)}
+      title={
+        locked
+          ? t("story:storyboard.filmRoleSettled")
+          : t("story:storyboard.filmRoleHint")
+      }
+      value={role}
+    >
+      {STORY_FILM_ROLES.filter(
+        (each) => each !== "firstLastFrame" || pairable,
+      ).map((each) => (
+        <option key={each} value={each}>
+          {t(FILM_ROLE_LABELS[each])}
+        </option>
+      ))}
+      {!pairable && role === "firstLastFrame" && (
+        <option disabled value="firstLastFrame">
+          {t(FILM_ROLE_LABELS.firstLastFrame)}
+        </option>
+      )}
+    </select>
+  );
+}
+
 /** One shot of the table, and the row the lines of its dialogue are edited in. */
 function KeyframeRow({
   story,
@@ -153,6 +227,8 @@ function KeyframeRow({
   index,
   guesses,
   perShot,
+  roleLocked,
+  rolePairable,
   busy,
   clipBusy,
   dialogueOpen,
@@ -165,6 +241,10 @@ function KeyframeRow({
   index: number;
   guesses: StoryGuess[];
   perShot: boolean;
+  /** Whether the act closes on this frame's pair, taking its role away. */
+  roleLocked: boolean;
+  /** Whether pairing with the frame after it is still on offer. */
+  rolePairable: boolean;
   busy: boolean;
   /** Whether this shot's own clip is being made just now. */
   clipBusy: boolean;
@@ -344,6 +424,17 @@ function KeyframeRow({
         </td>
         <td className="story-col-frame">
           <StorySlotView
+            actions={
+              perShot ? undefined : (
+                <FilmRoleSelect
+                  index={index}
+                  locked={roleLocked}
+                  onWrite={(role) => write({ filmRole: role })}
+                  pairable={rolePairable}
+                  role={filmRoleOf(keyframe)}
+                />
+              )
+            }
             busy={busy}
             canGenerate
             label={t("story:storyboard.frame")}

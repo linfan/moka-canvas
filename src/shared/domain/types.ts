@@ -660,6 +660,21 @@ export const STORY_CAMERA_ANGLES = [
 export type StoryCameraAngle = (typeof STORY_CAMERA_ANGLES)[number];
 
 /**
+ * What a drawn frame is for when the act is shot.
+ *
+ * `firstFrame` opens a video of its own, `firstLastFrame` pairs with the frame
+ * after it as the ends of one video, and `reference` joins the run of
+ * references around it. Absent means `reference`, which is what a board that
+ * has never heard of roles means.
+ */
+export const STORY_FILM_ROLES = [
+  "reference",
+  "firstFrame",
+  "firstLastFrame",
+] as const;
+export type StoryFilmRole = (typeof STORY_FILM_ROLES)[number];
+
+/**
  * A line of dialogue.
  *
  * The speaker's name is kept beside the reference, so a line still reads after
@@ -680,6 +695,8 @@ export interface StoryKeyframe {
   shotSize: StoryShotSize;
   cameraMove: StoryCameraMove;
   angle: StoryCameraAngle;
+  /** How the frame is used when the act is shot; absent means `reference`. */
+  filmRole?: StoryFilmRole;
   /** What this shot shows. */
   content: string;
   dialogue: StoryDialogueLine[];
@@ -902,6 +919,7 @@ export interface StoryKeyframePatch {
   shotSize?: StoryShotSize;
   cameraMove?: StoryCameraMove;
   angle?: StoryCameraAngle;
+  filmRole?: StoryFilmRole;
   content?: string;
   dialogue?: StoryDialogueLine[];
   durationMs?: number;

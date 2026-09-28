@@ -234,6 +234,7 @@ function upsert(draft: ModelDraft) {
     displayName: draft.displayName,
     enabled: draft.enabled,
     apiKey: key,
+    ...(draft.subModels ? { subModels: draft.subModels } : {}),
   };
   view = {
     ...view,
@@ -503,6 +504,138 @@ describe("model settings", () => {
       await screen.findByRole("button", { name: "New text model" }),
     );
     expect(screen.queryByLabelText("Longest clip (seconds)")).toBeNull();
+  });
+
+  it("routes a video model's scenarios through its sub-models", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Video" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New video model" }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "Routed" },
+    });
+    fireEvent.change(screen.getByLabelText("Model identifier"), {
+      target: { value: "routed" },
+    });
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "happy-1.1-t2v" },
+    });
+
+    // One row per scenario group: a name, an address of its own or none, and
+    // the scenarios it answers for.
+    fireEvent.click(screen.getByTestId("model-sub-add"));
+    fireEvent.change(screen.getByTestId("model-sub-0-model"), {
+      target: { value: "happy-1.1-t2v" },
+    });
+    fireEvent.change(screen.getByTestId("model-sub-0-url"), {
+      target: { value: "https://api.openai.com/v1/videos/t2v" },
+    });
+    fireEvent.click(screen.getByTestId("model-sub-0-scene-textToVideo"));
+    fireEvent.click(screen.getByTestId("model-sub-0-scene-imageToVideo"));
+
+    fireEvent.click(screen.getByTestId("model-sub-add"));
+    fireEvent.change(screen.getByTestId("model-sub-1-model"), {
+      target: { value: "happy-1.1-i2v" },
+    });
+    fireEvent.click(screen.getByTestId("model-sub-1-scene-imageToVideo"));
+    fireEvent.click(screen.getByTestId("model-sub-1-scene-firstLastFrame"));
+
+    // A scenario is answered by one row, so checking it takes it from the row
+    // that held it.
+    expect(
+      (screen.getByTestId("model-sub-0-scene-imageToVideo") as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    // What no row answers for is said before the save, not left to a failure.
+    expect(screen.getByTestId("model-sub-uncovered").textContent).toContain(
+      "Reference pictures to video",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await screen.findByText("Routed");
+
+    const [write] = writesTo("/api/v1/models");
+    expect(write.body).toMatchObject({
+      id: "routed",
+      category: "video",
+      subModels: [
+        {
+          model: "happy-1.1-t2v",
+          url: "https://api.openai.com/v1/videos/t2v",
+          scenes: ["textToVideo"],
+        },
+        {
+          model: "happy-1.1-i2v",
+          scenes: ["imageToVideo", "firstLastFrame"],
+        },
+      ],
+    });
+
+    // The rows come back when the configuration is opened again.
+    fireEvent.click(
+      within(cardOf("Routed")).getByRole("button", { name: "Edit" }),
+    );
+    const name = (await screen.findByTestId(
+      "model-sub-0-model",
+    )) as HTMLInputElement;
+    expect(name.value).toBe("happy-1.1-t2v");
+    expect(
+      (
+        screen.getByTestId(
+          "model-sub-1-scene-firstLastFrame",
+        ) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+  });
+
+  it("refuses to save a scenario row without a name or a scene", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Video" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New video model" }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "Half" },
+    });
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "half-1" },
+    });
+    fireEvent.click(screen.getByTestId("model-sub-add"));
+
+    const save = () =>
+      screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement;
+    expect(save().disabled).toBe(true);
+    expect(screen.getByText("A sub-model needs a name.")).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId("model-sub-0-model"), {
+      target: { value: "half-i2v" },
+    });
+    expect(screen.getByText("Check at least one scenario.")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("model-sub-0-scene-imageToVideo"));
+    expect(save().disabled).toBe(false);
+
+    // An address that is not one is refused where it is typed, the way the
+    // main address is.
+    fireEvent.change(screen.getByTestId("model-sub-0-url"), {
+      target: { value: "api.example.com/video" },
+    });
+    expect(
+      screen.getByText(
+        "A sub-model URL has to start with http:// or https://.",
+      ),
+    ).toBeTruthy();
+    expect(save().disabled).toBe(true);
+  });
+
+  it("offers no scenario rows to a kind with one shape", async () => {
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+    expect(screen.queryByTestId("model-sub-add")).toBeNull();
   });
 
   it("suggests an identifier from the display name", async () => {

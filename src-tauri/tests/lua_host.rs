@@ -91,6 +91,7 @@ fn scripted(id: &str, base_url: &str, capability: Capability) -> ModelCall {
         category: capability,
         protocol: Protocol::from_wire_name(id),
         url: format!("{base_url}/generation"),
+        scene: None,
     };
     ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
         .expect("a client builds")

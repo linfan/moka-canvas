@@ -1,10 +1,11 @@
 Shoot {% if part %}part {{ part }} of {{ total }} of this act{% else %}this act{% endif %} of a film as {% if part %}one continuous piece of{% else %}one continuous piece,{% endif %} about {{ seconds }} seconds long, a {{ aspect }} frame in the film's own look: {{ style }}.
 
 {% if part %}The act, whole: {{ title }} — {{ summary }}
-This part opens on{% else %}The act: {{ title }} — {{ summary }}
-It opens on{% endif %}: {{ first }}
+{% else %}The act: {{ title }} — {{ summary }}
+{% endif %}{% if references %}{% if part %}This part covers{% else %}It covers{% endif %}: {{ middle }}
+{% else %}{% if part %}This part opens on{% else %}It opens on{% endif %}: {{ first }}
 {% if middle %}It passes through: {{ middle }}
 {% endif %}It ends on: {{ last }}
-{% if part %}The parts are shot in order and joined as one act: keep the people and the place as the pictures show them, the same faces, the same clothes, the same light, and end this part on the last frame given so the next one carries on from it. Do not resolve the act, and do not start anything the frames after this part do not hold.{% endif %}
+{% endif %}{% if part %}{% if references %}The parts are shot in order and joined as one act: keep the people and the place as the pictures show them, the same faces, the same clothes, the same light, and do not resolve the act before the pictures after this part are in place.{% else %}The parts are shot in order and joined as one act: keep the people and the place as the pictures show them, the same faces, the same clothes, the same light, and end this part on the last frame given so the next one carries on from it. Do not resolve the act, and do not start anything the frames after this part do not hold.{% endif %}{% endif %}
 
-The pictures given are the frames it moves between, in the order they come. Keep the people and the place as those pictures show them: the same faces, the same clothes, the same light. No text, no lettering, no watermark.
+{% if references %}The pictures given are references the shots are drawn from, in the order they come: keep the people, the place and the light as those pictures show them, and make one continuous shot of the words above rather than moving between the pictures themselves.{% else %}The pictures given are the frames it moves between, in the order they come. Keep the people and the place as those pictures show them: the same faces, the same clothes, the same light.{% endif %} No text, no lettering, no watermark.

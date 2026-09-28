@@ -47,6 +47,7 @@ import type {
   StoryAspect,
   StoryDialogueLine,
   StoryDocument,
+  StoryFilmRole,
   StoryKeyframe,
 } from "../../../shared/domain/types";
 import {
@@ -177,42 +178,127 @@ export function videoCeiling(): number {
     : MAX_VIDEO_SECONDS;
 }
 
-/** One piece of an act's clip: the shots it moves between, and its length. */
+/** How one piece of an act's clip travels with its pictures. */
+export type ActClipKind = "frame" | "pair" | "reference";
+
+/** One piece of an act's clip: the shots it is made of, and its length. */
 export interface ActClipPiece {
   keyframes: StoryKeyframe[];
   /** How long the piece is asked for, in whole seconds. */
   seconds: number;
+  /** Whether it opens on one frame, pairs two, or is drawn from references. */
+  kind: ActClipKind;
+}
+
+/** The frames of an act that were drawn, in board order. */
+export function drawnFrames(act: StoryAct): StoryKeyframe[] {
+  return act.keyframes.filter(
+    (keyframe) => currentTake(keyframe.art) !== undefined,
+  );
 }
 
 /**
- * An act's clip as it is asked for: one piece while the act fits in one clip,
- * and otherwise as many as it takes, each cut where a shot ends.
+ * How a frame is used when the act is shot.
  *
- * The cuts are at shot boundaries because a piece of a film has to open and
- * close on frames that exist: each piece begins where the one before it ended,
- * so the pieces play as the single act the board wrote. A shot longer than the
- * ceiling cannot be cut at all, so it is asked for the longest a clip may be,
- * and what is lost is said out loud beside the act.
+ * Nothing said is the plainest use there is: a frame nobody has given a role is
+ * one of the references a video is drawn from, which is also what a board
+ * written before roles existed meant.
+ */
+export function filmRoleOf(keyframe: StoryKeyframe): StoryFilmRole {
+  return keyframe.filmRole ?? "reference";
+}
+
+/**
+ * The frames whose role is not the reader's to choose any more: the last frame
+ * of an act whose next-to-last drawn frame is a first-and-last frame, since
+ * that pair already closes the act with it. Every frame before those two stays
+ * choosable, because a frame may as well open the piece after it as close the
+ * one before.
+ */
+export function settledRoleFrames(act: StoryAct): Set<string> {
+  const drawn = drawnFrames(act);
+  const settled = new Set<string>();
+  const last = drawn.length - 1;
+  if (last >= 1 && filmRoleOf(drawn[last - 1]) === "firstLastFrame") {
+    settled.add(drawn[last].id);
+  }
+  return settled;
+}
+
+/** Whether the frame at `at` opens a piece of its own under its role. */
+function opensItsOwnPiece(drawn: StoryKeyframe[], at: number): boolean {
+  const role = filmRoleOf(drawn[at]);
+  return (
+    role === "firstFrame" ||
+    (role === "firstLastFrame" && at + 1 < drawn.length)
+  );
+}
+
+/**
+ * An act's clip as it is asked for: the pieces its roles and its length make
+ * of it, each opening where the one before closed.
+ *
+ * A frame marked as a first-and-last frame pairs with the frame after it as
+ * the ends of one video, a frame marked as a first frame opens a video of its
+ * own, and every other frame joins the run of references around it — which is
+ * cut at shot boundaries whenever it outruns what one clip may be, since a
+ * piece of a film has to open and close on frames that exist. A pair longer
+ * than the ceiling cannot be cut at all, so it is asked for the longest a clip
+ * may be, and what is lost is said out loud beside the act.
  */
 export function actClipPieces(act: StoryAct, ceiling: number): ActClipPiece[] {
-  const drawn = act.keyframes.filter(
-    (keyframe) => currentTake(keyframe.art) !== undefined,
-  );
+  const drawn = drawnFrames(act);
   const pieces: ActClipPiece[] = [];
-  let run: StoryKeyframe[] = [];
-  let runMs = 0;
-  const close = () => {
-    if (run.length === 0) return;
-    pieces.push({ keyframes: run, seconds: clampSeconds(runMs, ceiling) });
-    run = [];
-    runMs = 0;
-  };
-  for (const keyframe of drawn) {
-    if (runMs > 0 && runMs + keyframe.durationMs > ceiling * 1000) close();
-    run.push(keyframe);
-    runMs += keyframe.durationMs;
+  let index = 0;
+  while (index < drawn.length) {
+    const frame = drawn[index];
+    const role = filmRoleOf(frame);
+    // Whether this pair's tail is the act's closing frame: then nothing opens
+    // on it, and its length rides with the pair that holds it rather than
+    // being counted twice.
+    const holdsAct = index + 1 === drawn.length - 1;
+    if (index + 1 < drawn.length && role === "firstLastFrame") {
+      const tail = drawn[index + 1];
+      pieces.push({
+        keyframes: [frame, tail],
+        seconds: clampSeconds(
+          frame.durationMs + (holdsAct ? tail.durationMs : 0),
+          ceiling,
+        ),
+        kind: "pair",
+      });
+      // A tail that is not closing the act goes on to open its own piece,
+      // under whatever role it was given.
+      index += holdsAct ? 2 : 1;
+      continue;
+    }
+    if (role === "firstFrame") {
+      pieces.push({
+        keyframes: [frame],
+        seconds: clampSeconds(frame.durationMs, ceiling),
+        kind: "frame",
+      });
+      index += 1;
+      continue;
+    }
+    // The run of references this frame belongs to — the last frame of an act
+    // whose pair never came degrades into one — cut where it outruns the
+    // ceiling, at the same shot boundaries an act was always cut at.
+    const run: StoryKeyframe[] = [];
+    let runMs = 0;
+    while (index < drawn.length && !opensItsOwnPiece(drawn, index)) {
+      const held = drawn[index];
+      if (runMs > 0 && runMs + held.durationMs > ceiling * 1000) break;
+      run.push(held);
+      runMs += held.durationMs;
+      index += 1;
+    }
+    pieces.push({
+      keyframes: run,
+      seconds: clampSeconds(runMs, ceiling),
+      kind: "reference",
+    });
   }
-  close();
   return pieces;
 }
 
@@ -243,16 +329,19 @@ export function storyReadChars(): number {
  * The story decides the first two — a clip is as long as the story planned and
  * as wide as the story is told — and the preferences decide the rest, since
  * whether a provider writes sound into its clip is not a thing a telling has
- * an opinion about.
+ * an opinion about. A mode handed in is what the pictures of this clip mean,
+ * stated by the caller rather than guessed from the machine's own taste.
  */
 function videoParams(
   ratio: StoryAspect,
   seconds: number,
+  mode?: "auto" | "reference",
 ): Record<string, unknown> {
   const video = useModelStore.getState().view?.preferences.video;
   return {
     seconds,
     ratio,
+    ...(mode === undefined ? {} : { mode }),
     ...(video?.resolution ? { resolution: video.resolution } : {}),
     generateAudio: video?.generateAudio ?? false,
     watermark: video?.watermark ?? false,
@@ -582,12 +671,13 @@ export function planKeyframeArt(
 // -----------------------------------------------------------------------------
 
 /**
- * One act filmed whole, moving between the drawings its shots were given.
+ * One act filmed whole, as the pieces its roles and its length make of it.
  *
- * An act longer than one clip may be is asked for in pieces cut at its shot
- * boundaries — each piece opening on a frame the one before it closed on — so
- * that what comes back plays as the act the board wrote rather than as the
- * longest clip a provider would take. One piece is the act itself, and is
+ * The drawings its shots were given travel the way each piece uses them: the
+ * ends a video moves between, or the references the shots are drawn from —
+ * stated per piece so that no provider has to guess, and so a pair is not
+ * refused for arriving beside the references of another piece. What comes
+ * back plays as the act the board wrote. One piece is the act itself, and is
  * asked for under the name it has always had.
  */
 export function planActVideos(
@@ -606,7 +696,7 @@ export function planActVideos(
     const base = jobKey(target);
     const several = pieces.length > 1;
     return pieces.map((piece, at) => {
-      const drawn = piece.keyframes.flatMap((keyframe) => {
+      const held = piece.keyframes.flatMap((keyframe) => {
         const take = currentTake(keyframe.art);
         return take === undefined
           ? []
@@ -617,18 +707,21 @@ export function planActVideos(
               },
             ];
       });
-      const first = drawn[0];
-      const last = drawn[drawn.length - 1];
-      const between = drawn.slice(1, -1);
-      const inputs: StoryJobInput[] = [
-        { role: "firstFrame", assetId: first.assetId },
-      ];
-      if (drawn.length > 1) {
-        inputs.push({ role: "lastFrame", assetId: last.assetId });
-      }
-      for (const frame of between) {
-        inputs.push({ role: "reference", assetId: frame.assetId });
-      }
+      const first = held[0];
+      const last = held[held.length - 1];
+      const between = held.slice(1, -1);
+      const references = piece.kind === "reference";
+      const inputs: StoryJobInput[] = references
+        ? held.map((frame) => ({
+            role: "reference" as const,
+            assetId: frame.assetId,
+          }))
+        : [
+            { role: "firstFrame", assetId: first.assetId },
+            ...(piece.kind === "pair"
+              ? [{ role: "lastFrame" as const, assetId: last.assetId }]
+              : []),
+          ];
       return {
         id: several ? `${base}:${at + 1}` : base,
         target,
@@ -639,12 +732,19 @@ export function planActVideos(
           summary: act.summary,
           first: first.content,
           last: last.content,
-          middle: between.map((frame) => frame.content).join("; "),
+          middle: (references ? held : between)
+            .map((frame) => frame.content)
+            .join("; "),
+          mode: references ? "references" : "frames",
           seconds: piece.seconds,
           ...(several ? { part: at + 1, total: pieces.length } : {}),
         }),
         inputs,
-        params: videoParams(story.brief.aspect, piece.seconds),
+        params: videoParams(
+          story.brief.aspect,
+          piece.seconds,
+          references ? "reference" : "auto",
+        ),
       };
     });
   });

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{Capability, IsoTimestamp};
 use crate::metadata::{
     Defaults, MetadataStore, ModelConfig, ModelDraft, ModelRecord, ModelsSnapshot, Preferences,
-    Protocol, SecretInfo, SecretStorage,
+    Protocol, Scene, SecretInfo, SecretStorage, SubModel,
 };
 
 use super::error::ProviderError;
@@ -32,6 +32,11 @@ const MAX_NAME_LEN: usize = 120;
 
 const MAX_IMAGES_PER_RUN: u32 = 10;
 const MAX_VIDEO_SECONDS: u32 = 600;
+
+/// How many scenario rows one configuration may carry. The scenes a category
+/// has are few, and a list longer than this is a form somebody filled by
+/// mistake rather than a deployment's shape.
+const MAX_SUB_MODELS: usize = 8;
 
 /// How much of a telling one ask may carry, in characters. The ceiling leaves
 /// room for the instructions that travel with the telling's own words, since
@@ -89,6 +94,8 @@ pub struct ModelView {
     /// The longest one clip this model films, when the deployment knows it.
     /// `None` means the app's own ceiling stands in for it.
     pub max_video_seconds: Option<u32>,
+    /// Per-scenario models, where the configuration routes them.
+    pub sub_models: Vec<SubModel>,
     pub enabled: bool,
     pub api_key: ApiKeyView,
 }
@@ -132,6 +139,9 @@ pub struct ResolvedModel {
     pub protocol: Protocol,
     /// The complete endpoint address requests are sent to.
     pub url: String,
+    /// The scenario this resolution was made for; `None` where the caller had
+    /// none to name. Kept so a poll asks the provider that was asked.
+    pub scene: Option<Scene>,
 }
 
 /// Reads and writes model configuration through the metadata store.
@@ -167,6 +177,7 @@ impl ModelRepo {
                 model: model.model,
                 display_name: model.display_name,
                 max_video_seconds: model.max_video_seconds,
+                sub_models: model.sub_models,
                 enabled: model.enabled,
                 api_key: ApiKeyView::disclosed(secret),
             });
@@ -230,6 +241,7 @@ impl ModelRepo {
         // any other kind: a text model carrying one is dropped rather than
         // refused, since what it asks for is a form that never had the field.
         draft.max_video_seconds = check_video_ceiling(draft.category, draft.max_video_seconds)?;
+        check_sub_models(&mut draft)?;
         Ok(self.metadata.upsert_model(&draft).await?)
     }
 
@@ -324,7 +336,7 @@ impl ModelRepo {
         let snapshot = self.metadata.models_snapshot().await?;
         for (capability, reference) in defaults_by_capability(defaults) {
             let Some(reference) = reference else { continue };
-            resolve_in(&snapshot, reference, capability)?;
+            resolve_in(&snapshot, reference, capability, None)?;
         }
         Ok(self
             .metadata
@@ -346,13 +358,17 @@ impl ModelRepo {
 
     /// Resolves a model configuration identifier against the stored
     /// configuration.
+    ///
+    /// Configuration-level rather than request-level: no scene is named, so a
+    /// configuration that routes its scenes resolves to its own model — the
+    /// caller is asking what is stored, not what would answer an ask.
     pub async fn resolve(
         &self,
         reference: &str,
         capability: Capability,
     ) -> Result<ResolvedModel, ProviderError> {
         let snapshot = self.metadata.models_snapshot().await?;
-        resolve_in(&snapshot, reference, capability)
+        resolve_in(&snapshot, reference, capability, None)
     }
 
     /// Resolves the default model for a capability, which is what a node with
@@ -363,7 +379,7 @@ impl ModelRepo {
     ) -> Result<ResolvedModel, ProviderError> {
         let snapshot = self.metadata.models_snapshot().await?;
         // An empty reference is how a caller asks for the default.
-        resolve_within(&snapshot, "", capability)
+        resolve_within(&snapshot, "", capability, None)
     }
 
     /// The plaintext credential, fetched as late as possible. A caller must
@@ -426,23 +442,32 @@ fn clear_references(defaults: &mut Defaults, model_id: &str) -> bool {
 /// the model from before the edit and the parameters from after it. An empty
 /// reference means the caller has no model of its own and wants the default
 /// for the capability.
+///
+/// The scene is what the ask turned out to be, and where the configuration
+/// routes its scenes it picks the sub-model that answers. It is named here
+/// rather than guessed later so that the model a request is placed with is
+/// decided once, before anything is sent.
 pub fn resolve_within(
     snapshot: &ModelsSnapshot,
     reference: &str,
     capability: Capability,
+    scene: Option<Scene>,
 ) -> Result<ResolvedModel, ProviderError> {
     let named = reference.trim();
     if !named.is_empty() {
-        return resolve_in(snapshot, named, capability);
+        return resolve_in(snapshot, named, capability, scene);
     }
     // The default is the stored one while it still names a model that can
     // serve the capability. One that was deleted or disabled since — or no
     // stored default at all — falls back to the first model that can serve,
     // so a capability with models is never refused for want of a hand-picked
-    // default.
+    // default. A default that is there but does not route this scene is the
+    // reader's to fix: swapping in another model would only hide it.
     if let Some(stored) = default_for(&snapshot.defaults, capability) {
-        if let Ok(resolved) = resolve_in(snapshot, stored, capability) {
-            return Ok(resolved);
+        match resolve_in(snapshot, stored, capability, scene) {
+            Ok(resolved) => return Ok(resolved),
+            Err(ProviderError::NotConfigured { .. }) => {}
+            Err(error) => return Err(error),
         }
     }
     match snapshot
@@ -450,7 +475,7 @@ pub fn resolve_within(
         .iter()
         .find(|model| model.enabled && model.category == capability)
     {
-        Some(model) => resolve_in(snapshot, &model.id, capability),
+        Some(model) => resolve_in(snapshot, &model.id, capability, scene),
         None => Err(ProviderError::not_configured(
             capability.as_str(),
             "no default model is set",
@@ -462,6 +487,7 @@ fn resolve_in(
     snapshot: &ModelsSnapshot,
     reference: &str,
     capability: Capability,
+    scene: Option<Scene>,
 ) -> Result<ResolvedModel, ProviderError> {
     let want = capability.as_str();
     let named = reference.trim();
@@ -497,14 +523,116 @@ fn resolve_in(
             found: config.category.as_str().to_string(),
         });
     }
+    let (model, url) = route_scene(config, scene)?;
     Ok(ResolvedModel {
         config_id: config.id.clone(),
-        model: config.model.clone(),
+        model,
         display_name: config.display_name.clone(),
         category: capability,
         protocol: config.protocol.clone(),
-        url: config.url.clone(),
+        url,
+        scene,
     })
+}
+
+/// The model name and address one scene is answered by.
+///
+/// A configuration with no sub-models answers everything itself, whatever the
+/// scene — which is how every configuration behaved before sub-models existed.
+/// A caller that names no scene (a configuration-level resolve, a job note
+/// from before scenes were kept) is served the same way rather than refused,
+/// because there is nothing to route. And a scene no sub-model claims is
+/// refused: sending it to some other model would be the guess this feature
+/// exists to remove.
+fn route_scene(
+    config: &ModelConfig,
+    scene: Option<Scene>,
+) -> Result<(String, String), ProviderError> {
+    if config.sub_models.is_empty() {
+        return Ok((config.model.clone(), config.url.clone()));
+    }
+    let Some(scene) = scene else {
+        return Ok((config.model.clone(), config.url.clone()));
+    };
+    for sub in &config.sub_models {
+        if sub.scenes.contains(&scene) {
+            let url = sub.url.clone().unwrap_or_else(|| config.url.clone());
+            return Ok((sub.model.clone(), url));
+        }
+    }
+    Err(ProviderError::SceneUnconfigured {
+        reference: config.id.clone(),
+        capability: config.category.as_str().to_string(),
+        scene: scene.as_str().to_string(),
+    })
+}
+
+/// The sub-models a draft may keep, or the refusal it is.
+///
+/// A sub-model is a routing entry rather than a model of its own: it needs a
+/// model name, at least one scene of its own category, and an address of its
+/// own only where the provider serves it elsewhere. No scene may be claimed
+/// twice across the rows, since a scene that routed two ways would answer
+/// whichever row was written first.
+fn check_sub_models(draft: &mut ModelDraft) -> Result<(), ProviderError> {
+    if draft.sub_models.is_empty() {
+        return Ok(());
+    }
+    let scenes = Scene::of_category(draft.category);
+    if scenes.is_empty() {
+        return Err(ProviderError::invalid(format!(
+            "a {} model has no scenes to route",
+            draft.category.as_str()
+        )));
+    }
+    if draft.sub_models.len() > MAX_SUB_MODELS {
+        return Err(ProviderError::invalid(format!(
+            "a model configuration takes at most {MAX_SUB_MODELS} sub-models"
+        )));
+    }
+    let mut claimed: Vec<Scene> = Vec::new();
+    for sub in draft.sub_models.iter_mut() {
+        sub.model = sub.model.trim().to_string();
+        if sub.model.is_empty() {
+            return Err(ProviderError::invalid("a sub-model needs a model name"));
+        }
+        if sub.model.chars().count() > MAX_NAME_LEN {
+            return Err(ProviderError::invalid(format!(
+                "a sub-model name must be at most {MAX_NAME_LEN} characters"
+            )));
+        }
+        sub.url = match sub.url.take() {
+            Some(url) if !url.trim().is_empty() => Some(normalize_url(&url)?),
+            _ => None,
+        };
+        if sub.scenes.is_empty() {
+            return Err(ProviderError::invalid(
+                "a sub-model has to answer for at least one scene",
+            ));
+        }
+        let mut own: Vec<Scene> = Vec::new();
+        for scene in sub.scenes.drain(..) {
+            if !scenes.contains(&scene) {
+                return Err(ProviderError::invalid(format!(
+                    "the {} scene is not a scene of a {} model",
+                    scene.as_str(),
+                    draft.category.as_str()
+                )));
+            }
+            if claimed.contains(&scene) {
+                return Err(ProviderError::invalid(format!(
+                    "the {} scene is claimed by more than one sub-model",
+                    scene.as_str()
+                )));
+            }
+            if !own.contains(&scene) {
+                own.push(scene);
+            }
+        }
+        sub.scenes = own;
+        claimed.extend(sub.scenes.iter().copied());
+    }
+    Ok(())
 }
 
 /// Checks a model's endpoint address and returns the form to store.
@@ -634,6 +762,7 @@ mod tests {
             model: id.to_string(),
             display_name: format!("Model {id}"),
             max_video_seconds: None,
+            sub_models: Vec::new(),
             enabled: true,
         }
     }
@@ -652,14 +781,14 @@ mod tests {
     #[test]
     fn resolution_needs_the_configuration_and_the_right_category() {
         let snapshot = configured();
-        let resolved = resolve_in(&snapshot, "painter", Capability::Image).unwrap();
+        let resolved = resolve_in(&snapshot, "painter", Capability::Image, None).unwrap();
         assert_eq!(resolved.config_id, "painter");
         assert_eq!(resolved.model, "painter");
         assert_eq!(resolved.category, Capability::Image);
         assert_eq!(resolved.protocol, Protocol::from_wire_name("openaiImages"));
         assert_eq!(resolved.url, "https://provider.test/v1/chat/completions");
 
-        let mismatch = resolve_in(&snapshot, "painter", Capability::Text).unwrap_err();
+        let mismatch = resolve_in(&snapshot, "painter", Capability::Text, None).unwrap_err();
         assert_eq!(mismatch.code(), "MODEL_CAPABILITY_MISMATCH");
         assert_eq!(
             mismatch
@@ -669,13 +798,14 @@ mod tests {
             "the client has to be told what the model does generate"
         );
 
-        let error = resolve_in(&snapshot, "gone", Capability::Image).unwrap_err();
+        let error = resolve_in(&snapshot, "gone", Capability::Image, None).unwrap_err();
         assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
     }
 
     #[test]
     fn an_old_channel_reference_says_what_it_is() {
-        let error = resolve_in(&configured(), "main::painter", Capability::Image).unwrap_err();
+        let error =
+            resolve_in(&configured(), "main::painter", Capability::Image, None).unwrap_err();
         assert_eq!(error.code(), "VALIDATION_FAILED");
         assert!(error.to_string().contains("channel"), "{error}");
     }
@@ -684,7 +814,7 @@ mod tests {
     fn a_disabled_model_does_not_resolve() {
         let mut snapshot = configured();
         snapshot.models[1].enabled = false;
-        let error = resolve_in(&snapshot, "painter", Capability::Image).unwrap_err();
+        let error = resolve_in(&snapshot, "painter", Capability::Image, None).unwrap_err();
         assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
         assert!(error.to_string().contains("disabled"));
     }
@@ -693,28 +823,240 @@ mod tests {
     fn an_empty_reference_falls_back_to_the_default() {
         let mut snapshot = configured();
         snapshot.defaults.image = Some("painter".to_string());
-        let resolved = resolve_within(&snapshot, "", Capability::Image).unwrap();
+        let resolved = resolve_within(&snapshot, "", Capability::Image, None).unwrap();
         assert_eq!(resolved.config_id, "painter");
 
         // No stored default: the first enabled model of the capability serves.
-        let resolved = resolve_within(&snapshot, "", Capability::Text).unwrap();
+        let resolved = resolve_within(&snapshot, "", Capability::Text, None).unwrap();
         assert_eq!(resolved.config_id, "writer");
 
         // A stored default that is gone falls back the same way.
         snapshot.defaults.text = Some("ghost".to_string());
-        let resolved = resolve_within(&snapshot, "", Capability::Text).unwrap();
+        let resolved = resolve_within(&snapshot, "", Capability::Text, None).unwrap();
         assert_eq!(resolved.config_id, "writer");
 
         // So does one that was disabled since it was chosen: "backup" is the
         // second text model, and "writer" stays the fallback ahead of it.
         snapshot.defaults.text = Some("backup".to_string());
         snapshot.models[2].enabled = false;
-        let resolved = resolve_within(&snapshot, "", Capability::Text).unwrap();
+        let resolved = resolve_within(&snapshot, "", Capability::Text, None).unwrap();
         assert_eq!(resolved.config_id, "writer");
 
-        let error = resolve_within(&snapshot, "", Capability::Video).unwrap_err();
+        let error = resolve_within(&snapshot, "", Capability::Video, None).unwrap_err();
         assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
         assert!(error.to_string().contains("no default"), "{error}");
+    }
+
+    /// A video configuration that routes its scenes through sub-models.
+    fn routed() -> ModelsSnapshot {
+        let mut snapshot = configured();
+        let mut video = model("filmer", Capability::Video);
+        video.sub_models = vec![
+            SubModel {
+                model: "happy-1.1-t2v".to_string(),
+                url: None,
+                scenes: vec![Scene::TextToVideo],
+            },
+            SubModel {
+                model: "happy-1.1-i2v".to_string(),
+                url: Some("https://provider.test/v1/video/images".to_string()),
+                scenes: vec![Scene::ImageToVideo, Scene::FirstLastFrame],
+            },
+        ];
+        snapshot.models.push(video);
+        snapshot
+    }
+
+    fn video_draft() -> ModelDraft {
+        ModelDraft {
+            id: "filmer".to_string(),
+            category: Capability::Video,
+            protocol: Protocol::from_wire_name("openaiVideos"),
+            url: "https://provider.test/v1/videos".to_string(),
+            model: "filmer".to_string(),
+            display_name: "Filmer".to_string(),
+            max_video_seconds: None,
+            sub_models: Vec::new(),
+            enabled: true,
+            expected_revision: None,
+        }
+    }
+
+    #[test]
+    fn a_scene_picks_the_sub_model_that_answers_it() {
+        let snapshot = routed();
+        let resolved = resolve_in(
+            &snapshot,
+            "filmer",
+            Capability::Video,
+            Some(Scene::TextToVideo),
+        )
+        .unwrap();
+        assert_eq!(resolved.model, "happy-1.1-t2v");
+        assert_eq!(
+            resolved.url, "https://provider.test/v1/chat/completions",
+            "a sub-model with no address of its own asks where the configuration asks"
+        );
+        assert_eq!(resolved.scene, Some(Scene::TextToVideo));
+
+        let resolved = resolve_in(
+            &snapshot,
+            "filmer",
+            Capability::Video,
+            Some(Scene::FirstLastFrame),
+        )
+        .unwrap();
+        assert_eq!(resolved.model, "happy-1.1-i2v");
+        assert_eq!(resolved.url, "https://provider.test/v1/video/images");
+        assert_eq!(
+            resolved.config_id, "filmer",
+            "the configuration stays what a credential and a job note are keyed by"
+        );
+    }
+
+    #[test]
+    fn a_scene_no_sub_model_covers_is_refused() {
+        let error = resolve_in(
+            &routed(),
+            "filmer",
+            Capability::Video,
+            Some(Scene::ReferenceToVideo),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "MODEL_SCENE_UNCONFIGURED");
+        let details = error.details().expect("details");
+        assert_eq!(details["reference"], "filmer");
+        assert_eq!(details["scene"], "referenceToVideo");
+        assert!(!error.retryable(), "asking again is refused the same way");
+    }
+
+    #[test]
+    fn a_configuration_without_sub_models_answers_whatever_the_scene() {
+        let resolved = resolve_in(
+            &configured(),
+            "painter",
+            Capability::Image,
+            Some(Scene::ImageEdit),
+        )
+        .unwrap();
+        assert_eq!(resolved.model, "painter");
+        assert_eq!(resolved.url, "https://provider.test/v1/chat/completions");
+    }
+
+    #[test]
+    fn a_configuration_level_resolve_keeps_its_own_model() {
+        let resolved = resolve_in(&routed(), "filmer", Capability::Video, None).unwrap();
+        assert_eq!(resolved.model, "filmer");
+        assert_eq!(resolved.scene, None);
+    }
+
+    #[test]
+    fn a_default_is_not_swapped_for_a_scene_it_does_not_route() {
+        let mut snapshot = routed();
+        snapshot.defaults.video = Some("filmer".to_string());
+        // The stored default is there and simply does not route this scene:
+        // that is the reader's to fix, not a reason to ask another model.
+        let error = resolve_within(
+            &snapshot,
+            "",
+            Capability::Video,
+            Some(Scene::ReferenceToVideo),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "MODEL_SCENE_UNCONFIGURED");
+
+        // A default that is gone still falls back to the first model that serves.
+        snapshot.defaults.video = Some("ghost".to_string());
+        let resolved =
+            resolve_within(&snapshot, "", Capability::Video, Some(Scene::TextToVideo)).unwrap();
+        assert_eq!(resolved.config_id, "filmer");
+    }
+
+    #[test]
+    fn sub_models_have_to_be_shaped_and_claim_distinct_scenes() {
+        let mut draft = video_draft();
+        draft.sub_models = vec![SubModel {
+            model: "  ".to_string(),
+            url: None,
+            scenes: vec![Scene::ImageToVideo],
+        }];
+        assert!(check_sub_models(&mut draft).is_err(), "a blank name");
+
+        let mut draft = video_draft();
+        draft.sub_models = vec![SubModel {
+            model: "a".to_string(),
+            url: None,
+            scenes: Vec::new(),
+        }];
+        assert!(check_sub_models(&mut draft).is_err(), "no scene at all");
+
+        let mut draft = video_draft();
+        draft.sub_models = vec![
+            SubModel {
+                model: "a".to_string(),
+                url: None,
+                scenes: vec![Scene::TextToVideo],
+            },
+            SubModel {
+                model: "b".to_string(),
+                url: None,
+                scenes: vec![Scene::TextToVideo],
+            },
+        ];
+        let error = check_sub_models(&mut draft).unwrap_err();
+        assert!(error.to_string().contains("textToVideo"), "{error}");
+
+        let mut draft = video_draft();
+        draft.sub_models = vec![SubModel {
+            model: "a".to_string(),
+            url: None,
+            scenes: vec![Scene::TextToImage],
+        }];
+        assert!(
+            check_sub_models(&mut draft).is_err(),
+            "a scene of another category"
+        );
+
+        let mut draft = video_draft();
+        draft.category = Capability::Text;
+        draft.sub_models = vec![SubModel {
+            model: "a".to_string(),
+            url: None,
+            scenes: vec![Scene::TextToVideo],
+        }];
+        assert!(
+            check_sub_models(&mut draft).is_err(),
+            "a capability with no scenes to route"
+        );
+
+        let mut draft = video_draft();
+        draft.sub_models = vec![SubModel {
+            model: "  happy-i2v  ".to_string(),
+            url: Some("  https://provider.test/v1/video/  ".to_string()),
+            scenes: vec![Scene::ImageToVideo, Scene::ImageToVideo],
+        }];
+        check_sub_models(&mut draft).unwrap();
+        assert_eq!(draft.sub_models[0].model, "happy-i2v");
+        assert_eq!(
+            draft.sub_models[0].url.as_deref(),
+            Some("https://provider.test/v1/video")
+        );
+        assert_eq!(
+            draft.sub_models[0].scenes,
+            vec![Scene::ImageToVideo],
+            "a scene named twice in one row is one claim"
+        );
+
+        let mut draft = video_draft();
+        draft.sub_models = vec![SubModel {
+            model: "a".to_string(),
+            url: Some("not a url".to_string()),
+            scenes: vec![Scene::TextToVideo],
+        }];
+        assert!(
+            check_sub_models(&mut draft).is_err(),
+            "an undialable address"
+        );
     }
 
     #[test]
@@ -748,9 +1090,9 @@ mod tests {
         snapshot.defaults.music = Some("musician".to_string());
 
         // Each default answers for its own capability.
-        let music = resolve_within(&snapshot, "", Capability::Music).unwrap();
+        let music = resolve_within(&snapshot, "", Capability::Music, None).unwrap();
         assert_eq!(music.config_id, "musician");
-        let voice = resolve_within(&snapshot, "", Capability::Speech).unwrap();
+        let voice = resolve_within(&snapshot, "", Capability::Speech, None).unwrap();
         assert_eq!(voice.config_id, "speaker");
 
         // A voice model is no longer a score's model: a deployment with none
@@ -761,7 +1103,7 @@ mod tests {
             .models
             .push(model("speaker", Capability::Speech));
         speech_only.defaults.speech = Some("speaker".to_string());
-        let error = resolve_within(&speech_only, "", Capability::Music).unwrap_err();
+        let error = resolve_within(&speech_only, "", Capability::Music, None).unwrap_err();
         assert_eq!(error.code(), "PROVIDER_NOT_CONFIGURED");
         assert!(error.to_string().contains("music"), "{error}");
     }

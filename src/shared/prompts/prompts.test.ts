@@ -429,6 +429,27 @@ describe("story prompts", () => {
     expect(prompt).not.toContain("passes through");
   });
 
+  it("shoots a piece drawn from references without calling them frames to move between", () => {
+    const prompt = storyActVideoPrompt({
+      aspect: "16:9",
+      style: "现代都市风",
+      title: "第 1 幕 空站台",
+      summary: "站台上的灯一盏一盏亮起来。",
+      first: "雨中的站台。",
+      last: "另一人转过身来。",
+      middle: "雨中的站台。; 另一人转过身来。",
+      mode: "references",
+      seconds: 5,
+    });
+    expect(prompt).toContain("about 5 seconds");
+    expect(prompt).toContain("It covers: 雨中的站台。; 另一人转过身来。");
+    expect(prompt).toContain("references the shots are drawn from");
+    expect(prompt).not.toContain("frames it moves between");
+    expect(prompt).not.toContain("It opens on");
+    expect(prompt).not.toContain("It ends on");
+    expect(prompt).not.toContain("{{");
+  });
+
   it("shoots one shot from the frame it starts on", () => {
     const prompt = storyKeyframeVideoPrompt({
       aspect: "9:16",

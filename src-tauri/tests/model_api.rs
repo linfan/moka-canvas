@@ -145,6 +145,55 @@ async fn a_credential_is_neither_returned_nor_left_in_the_configuration() {
 }
 
 #[tokio::test]
+async fn a_models_scenario_rows_travel_through_the_wire_and_are_validated() {
+    let root = tempfile::tempdir().unwrap();
+    let harness = harness(root.path());
+    let mut body = model_body("filmer", None);
+    body["category"] = json!("video");
+    body["protocol"] = json!("openaiVideos");
+    body["url"] = json!("https://provider.test/v1/videos");
+    body["subModels"] = json!([
+        { "model": "happy-t2v", "scenes": ["textToVideo"] },
+        {
+            "model": "happy-i2v",
+            "url": "https://provider.test/v1/video/images",
+            "scenes": ["imageToVideo", "firstLastFrame"]
+        }
+    ]);
+
+    let view = put_model(&harness.app, body).await;
+    let stored = &view["models"][0];
+    assert_eq!(stored["subModels"][0]["model"], "happy-t2v");
+    assert_eq!(
+        stored["subModels"][0].get("url"),
+        None,
+        "a row with no address of its own writes none"
+    );
+    assert_eq!(
+        stored["subModels"][1]["url"],
+        "https://provider.test/v1/video/images"
+    );
+
+    // One scenario is answered by one row, so a second row claiming it is
+    // refused where it is configured.
+    let mut clashing = model_body("filmer", None);
+    clashing["category"] = json!("video");
+    clashing["protocol"] = json!("openaiVideos");
+    clashing["url"] = json!("https://provider.test/v1/videos");
+    clashing["subModels"] = json!([
+        { "model": "a", "scenes": ["imageToVideo"] },
+        { "model": "b", "scenes": ["imageToVideo"] }
+    ]);
+    let (status, problem) = send(
+        &harness.app,
+        json_request("PUT", "/api/v1/models", clashing),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert_eq!(problem["code"], "VALIDATION_FAILED");
+}
+
+#[tokio::test]
 async fn an_edit_that_does_not_carry_a_credential_keeps_the_stored_one() {
     let root = tempfile::tempdir().unwrap();
     let harness = harness(root.path());

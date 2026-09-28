@@ -365,6 +365,11 @@ export function storyKeyframePrompt(input: StoryKeyframePromptInput): string {
  * One act filmed whole, moving between the frames that were drawn for it —
  * or, when the act outruns what one clip may be, one of the pieces it is
  * filmed in, told apart by its place and asked to end where the next begins.
+ *
+ * A piece whose pictures are references rather than frames says so in `mode`:
+ * then `middle` carries the words of every shot the piece covers, and the
+ * prompt asks for a shot drawn from those pictures instead of one moving
+ * between them. Left off, the words describe frames as they always have.
  */
 export function storyActVideoPrompt(
   input: StoryLook & {
@@ -374,12 +379,17 @@ export function storyActVideoPrompt(
     last: string;
     middle: string;
     seconds: number;
+    /** How the pictures travel: frames to move between, or references. */
+    mode?: "frames" | "references";
     /** Its place among the pieces, when the act is filmed in several. */
     part?: number;
     total?: number;
   },
 ): string {
-  return render(storyActVideo, input);
+  return render(storyActVideo, {
+    ...input,
+    references: input.mode === "references",
+  });
 }
 
 /** One shot filmed, starting from the frame that was drawn for it. */
