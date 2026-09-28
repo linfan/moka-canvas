@@ -11,6 +11,7 @@ import {
   createKeyframe,
   currentTake,
   slotWithCurrent,
+  storyMentions,
   type StoryGuess,
 } from "../../../shared/domain";
 import type {
@@ -22,21 +23,25 @@ import type {
   StoryKeyframePatch,
   StorySlot,
 } from "../../../shared/domain/types";
+import { assetUrl } from "../../../api/assets";
 import { i18n } from "../../../shared/i18n";
+import { storyKeyframePromptParts } from "../../../shared/prompts";
 import { execute } from "../../editor/commands/execute";
-import { planKeyframeArt, planKeyframeVideos } from "../jobs/plan";
+import {
+  keyframeCast,
+  planKeyframeArt,
+  planKeyframeVideos,
+} from "../jobs/plan";
 import { useStoryRun } from "../stores/storyJobStore";
+import { KeyframeContentField, type MentionKind } from "./KeyframeContentField";
 import { frameRatio } from "./ratios";
+import { StoryLightbox } from "./StoryLightbox";
 import { StorySlotView } from "./StorySlotView";
 import { useField } from "./useField";
 
 /** The longest and shortest a shot may be, in seconds. */
 const SHOT_MIN_S = 0.4;
 const SHOT_MAX_S = 60;
-/** How many lines a cell's content grows to before it scrolls. */
-const CONTENT_ROWS = 6;
-/** About how many characters fit in the content column of one row. */
-const CONTENT_LINE = 34;
 
 /**
  * One act's shots, as the table a board is: framing, movement, what is shown,
@@ -171,9 +176,6 @@ function KeyframeRow({
 }) {
   const { t } = useTranslation();
   const run = useStoryRun();
-  const content = useField(keyframe.content, (value) => {
-    if (value !== keyframe.content) write({ content: value });
-  });
   const at = index + 1;
   const cell = (name: string) => t("story:storyboard.cell", { at, name });
   const clip = currentTake(keyframe.video);
@@ -263,18 +265,14 @@ function KeyframeRow({
           </select>
         </Cell>
         <td className="story-col-content">
-          <textarea
-            aria-label={cell(t("story:storyboard.content"))}
-            data-testid={`story-kf-content-${index}`}
-            disabled={locked}
-            maxLength={2000}
-            onBlur={content.commit}
-            onChange={(event) => content.set(event.target.value)}
-            rows={Math.min(
-              CONTENT_ROWS,
-              Math.max(2, Math.ceil(content.value.length / CONTENT_LINE)),
-            )}
-            value={content.value}
+          <KeyframePromptCell
+            act={act}
+            chapterId={chapterId}
+            index={index}
+            keyframe={keyframe}
+            locked={locked}
+            story={story}
+            write={write}
           />
         </td>
         <td>
@@ -315,7 +313,7 @@ function KeyframeRow({
             value={Math.round((keyframe.durationMs / 1000) * 10) / 10}
           />
         </td>
-        <td>
+        <td className="story-col-frame">
           <StorySlotView
             busy={busy}
             canGenerate={act.keysConfirmed}
@@ -430,6 +428,150 @@ function KeyframeRow({
       )}
     </>
   );
+}
+
+/**
+ * The 画面内容 cell: the ask exactly as it will be made, with the shot's own
+ * words edited in place and the pictures they name beneath them.
+ *
+ * The template's sentences stand around the words as the muted scaffolding
+ * they are, and the words between them are the only part a reader owns. Every
+ * `name` mention in them is a picture the ask travels with, in the order the
+ * names first appear, so what is read here is what the model is sent — and the
+ * thumbnails under it are the pictures that ride along: the ones the story's
+ * limit left behind stand dimmed among them.
+ */
+function KeyframePromptCell({
+  story,
+  chapterId,
+  act,
+  keyframe,
+  locked,
+  index,
+  write,
+}: {
+  story: StoryDocument;
+  chapterId: string;
+  act: StoryAct;
+  keyframe: StoryKeyframe;
+  locked: boolean;
+  index: number;
+  write: (patch: StoryKeyframePatch) => void;
+}) {
+  const { t } = useTranslation();
+  const [zoomed, setZoomed] = useState<{
+    assetIds: string[];
+    label: string;
+  } | null>(null);
+  const content = useField(keyframe.content, (value) => {
+    if (value !== keyframe.content) write({ content: value });
+  });
+  const chapterTitle =
+    story.chapters.find((held) => held.id === chapterId)?.title ?? "";
+  const cast = keyframeCast(story, content.value);
+  // The same words the plan will send, read apart: the fixed scaffolding is
+  // the muted part, and the hole it was written around is the field below.
+  const parts = storyKeyframePromptParts({
+    aspect: story.brief.aspect,
+    style: story.brief.style,
+    chapter: { title: chapterTitle },
+    act: { summary: act.summary },
+    keyframe: {
+      content: content.value,
+      shotSize: keyframe.shotSize,
+      cameraMove: keyframe.cameraMove,
+      angle: keyframe.angle,
+    },
+    cast: cast.carried.map(({ element }) => ({
+      name: element.name,
+      description: element.description,
+    })),
+  });
+
+  return (
+    <>
+      <div className="story-prompt" data-testid={`story-kf-prompt-${index}`}>
+        <span className="story-prompt-scaffold">{parts.before}</span>
+        <KeyframeContentField
+          kinds={mentionKinds(story, cast, content.value)}
+          label={t("story:storyboard.content")}
+          locked={locked}
+          onChange={content.set}
+          onCommit={content.commit}
+          testId={`story-kf-content-${index}`}
+          value={content.value}
+        />
+        <span className="story-prompt-scaffold">{parts.after}</span>
+      </div>
+      {(cast.carried.length > 0 || cast.beyond.length > 0) && (
+        <div className="story-ref-strip" data-testid={`story-kf-refs-${index}`}>
+          {cast.carried.map(({ element, assetId }, at) => (
+            <button
+              aria-label={t("story:storyboard.enlargeRef", {
+                name: element.name,
+              })}
+              className="story-ref-thumb"
+              data-testid={`story-kf-ref-${index}-${at}`}
+              key={element.id}
+              onClick={() =>
+                setZoomed({ assetIds: [assetId], label: element.name })
+              }
+              title={t("story:storyboard.mentionCarried", {
+                name: element.name,
+              })}
+              type="button"
+            >
+              <img alt={element.name} src={assetUrl(assetId)} />
+            </button>
+          ))}
+          {cast.beyond.map(({ element, assetId }, at) => (
+            <button
+              aria-label={t("story:storyboard.notCarried", {
+                name: element.name,
+              })}
+              className="story-ref-thumb is-beyond"
+              data-testid={`story-kf-ref-beyond-${index}-${at}`}
+              key={element.id}
+              onClick={() =>
+                setZoomed({ assetIds: [assetId], label: element.name })
+              }
+              title={t("story:storyboard.notCarried", { name: element.name })}
+              type="button"
+            >
+              <img alt={element.name} src={assetUrl(assetId)} />
+            </button>
+          ))}
+        </div>
+      )}
+      {zoomed !== null && (
+        <StoryLightbox
+          assetIds={zoomed.assetIds}
+          label={zoomed.label}
+          onClose={() => setZoomed(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/** How each name the words mention stands in this frame's ask. */
+function mentionKinds(
+  story: StoryDocument,
+  cast: ReturnType<typeof keyframeCast>,
+  content: string,
+): Record<string, MentionKind> {
+  const carried = new Set(cast.carried.map(({ element }) => element.name));
+  const beyond = new Set(cast.beyond.map(({ element }) => element.name));
+  const known = new Set(story.elements.map((element) => element.name));
+  const kinds: Record<string, MentionKind> = {};
+  for (const { name } of storyMentions(content)) {
+    if (kinds[name] !== undefined) continue;
+    if (carried.has(name)) kinds[name] = "carried";
+    else if (beyond.has(name)) kinds[name] = "beyond";
+    else if (known.has(name)) kinds[name] = "undrawn";
+    else kinds[name] = "unknown";
+  }
+  return kinds;
 }
 
 /**

@@ -9,7 +9,6 @@ import {
   formatDuration,
   type StoryGuess,
 } from "../../../shared/domain";
-import { MAX_REFERENCE_IMAGES } from "../../../shared/domain/constants";
 import type {
   DocumentCommand,
   MokaFile,
@@ -24,7 +23,6 @@ import { execute } from "../../editor/commands/execute";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import {
   actClipPieces,
-  frameCast,
   planActMusic,
   planActVideos,
   planActVoice,
@@ -127,9 +125,6 @@ export function ActCard({
   const undrawn = references.filter(
     (element) => currentTake(element.main) === undefined,
   );
-  // Nor can a drawn one past the number of references a frame may carry, which
-  // is the same stranger by another road.
-  const beyond = frameCast(story, act).beyond;
 
   const missing = act.keyframes.filter(
     (keyframe) => keyframe.art.takes.length === 0,
@@ -398,26 +393,6 @@ export function ActCard({
                   names: undrawn.map((element) => element.name).join("、"),
                 })
               : t("story:storyboard.noRefs")}
-          </span>
-        )}
-
-        {/*
-          A drawn reference past the frame's own bound is worth saying for the
-          same reason an undrawn one is: it is not in the pictures, and what
-          comes back is a picture of a stranger.
-        */}
-        {beyond.length > 0 && (
-          <span
-            className="story-hint"
-            data-testid={`story-act-over-ref-${index}`}
-            title={t("story:storyboard.overRefsHint", {
-              max: MAX_REFERENCE_IMAGES,
-            })}
-          >
-            {t("story:storyboard.overRefs", {
-              names: beyond.map((element) => element.name).join("、"),
-              max: MAX_REFERENCE_IMAGES,
-            })}
           </span>
         )}
 

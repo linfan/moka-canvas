@@ -30,6 +30,7 @@ import {
   MAX_TRANSITIONS_PER_TIMELINE,
   MIN_KEYFRAME_MS,
   MIN_TOTAL_DURATION_MS,
+  REFERENCE_IMAGES_MAX,
   STORY_IDEA_MAX,
   STORY_NAME_MAX,
   STORY_SCHEMA_VERSION,
@@ -2032,6 +2033,33 @@ function applyOne(
             type: "updateStoryGranularity",
             storyId: command.storyId,
             shotGranularity: previous,
+          },
+        ],
+      };
+    }
+
+    case "updateStoryReferenceLimit": {
+      const story = storyOf(moka, command.storyId);
+      if (
+        !Number.isInteger(command.maxReferenceImages) ||
+        command.maxReferenceImages < 0 ||
+        command.maxReferenceImages > REFERENCE_IMAGES_MAX
+      )
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.storyReferenceLimitInvalid"),
+        );
+      const previous = story.maxReferenceImages;
+      return {
+        next: replaceStory(moka, {
+          ...story,
+          maxReferenceImages: command.maxReferenceImages,
+        }),
+        inverse: [
+          {
+            type: "updateStoryReferenceLimit",
+            storyId: command.storyId,
+            maxReferenceImages: previous,
           },
         ],
       };

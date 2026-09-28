@@ -15,7 +15,7 @@
  */
 import { Environment } from "nunjucks";
 
-import { formatDuration } from "../domain/story";
+import { formatDuration, stripStoryMentions } from "../domain/story";
 import type { StoryAspect, StoryElementKind } from "../domain";
 import ask from "./assistant/ask.tmpl?raw";
 import answerSystem from "./assistant/answer-system.tmpl?raw";
@@ -299,33 +299,66 @@ export function storyElementTurnaroundPrompt(
   return render(storyElementTurnaround, input);
 }
 
+/** What one frame's ask is written from: the look, the shot, and the pictures
+ * that travel with it. */
+export interface StoryKeyframePromptInput extends StoryLook {
+  chapter: { title: string };
+  act: { summary: string };
+  keyframe: {
+    content: string;
+    shotSize: string;
+    cameraMove: string;
+    angle: string;
+  };
+  cast: Array<{ name: string; description: string }>;
+}
+
+/** The mark the content is rendered between so the words around it can be read
+ * apart again; a character no prose carries. */
+const CONTENT_SEAM = "\u0000";
+
+/**
+ * One frame's ask in two: the template's own words, and the hole the shot's
+ * content is written into.
+ *
+ * The room shows a reader the prompt exactly as it will be sent — the fixed
+ * scaffolding, the shot's own words, the numbered references and the look —
+ * and the part of it a reader edits is the content alone. Reading the words
+ * around the content apart is what that display is made of.
+ */
+export function storyKeyframePromptParts(input: StoryKeyframePromptInput): {
+  before: string;
+  content: string;
+  after: string;
+} {
+  const whole = render(storyKeyframe, {
+    ...input,
+    summary: input.act.summary,
+    content: CONTENT_SEAM,
+    shotSize: input.keyframe.shotSize,
+    cameraMove: input.keyframe.cameraMove,
+    angle: input.keyframe.angle,
+  });
+  const at = whole.indexOf(CONTENT_SEAM);
+  return {
+    before: whole.slice(0, at),
+    content: input.keyframe.content,
+    after: whole.slice(at + CONTENT_SEAM.length),
+  };
+}
+
 /**
  * One frame of a board, drawn with the cast that stands in it.
  *
  * The cast is written into the prompt in the order its pictures travel, so the
  * numbered references the model reads are the numbered references it is given.
+ * The shot's own words travel without the backticks that mark their mentions:
+ * those are the room's own sign for which pictures ride along, and the model is
+ * owed the sentence they were written around.
  */
-export function storyKeyframePrompt(
-  input: StoryLook & {
-    chapter: { title: string };
-    act: { summary: string };
-    keyframe: {
-      content: string;
-      shotSize: string;
-      cameraMove: string;
-      angle: string;
-    };
-    cast: Array<{ name: string; description: string }>;
-  },
-): string {
-  return render(storyKeyframe, {
-    ...input,
-    summary: input.act.summary,
-    content: input.keyframe.content,
-    shotSize: input.keyframe.shotSize,
-    cameraMove: input.keyframe.cameraMove,
-    angle: input.keyframe.angle,
-  });
+export function storyKeyframePrompt(input: StoryKeyframePromptInput): string {
+  const parts = storyKeyframePromptParts(input);
+  return parts.before + stripStoryMentions(parts.content) + parts.after;
 }
 
 /**

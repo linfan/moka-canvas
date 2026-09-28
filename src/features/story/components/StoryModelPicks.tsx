@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Capability } from "../../../shared/domain";
 import { ModelPicker } from "../../settings/ModelPicker";
@@ -32,7 +33,14 @@ const CAPABILITY_OF_PLACE: Record<StoryAskPlace, Capability> = {
  * the deployment's default, and the pickers are kept per place — a telling's
  * score is not its voice, even when one model does both.
  */
-export function StoryModelPicks({ places }: { places: StoryAskPlace[] }) {
+export function StoryModelPicks({
+  places,
+  children,
+}: {
+  places: StoryAskPlace[];
+  /** A control that belongs beside the picks, in the same row. */
+  children?: ReactNode;
+}) {
   const { t } = useTranslation();
   const choices = useStoryModels((state) => state.choices);
 
@@ -67,6 +75,7 @@ export function StoryModelPicks({ places }: { places: StoryAskPlace[] }) {
           </div>
         ),
       )}
+      {children}
     </div>
   );
 }

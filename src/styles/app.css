@@ -6749,6 +6749,16 @@ button > .story-spin {
   padding: 5px 8px;
 }
 
+/*
+  The framing a shot is written with is read at a glance or not at all: the
+  selects keep enough room for their words, and the table scrolls sideways
+  instead of squeezing them into stubs.
+*/
+
+.story-table select {
+  min-width: 84px;
+}
+
 .story-table textarea {
   resize: none;
 }
@@ -6762,6 +6772,108 @@ button > .story-spin {
 
 .story-col-content {
   min-width: 240px;
+}
+
+/*
+  The prompt a frame is asked with, exactly as it is sent: the template's own
+  sentences greyed and read-only, the shot's words edited in place between
+  them, and the pictures those words call in under them.
+*/
+
+.story-prompt {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.story-prompt-scaffold {
+  color: var(--muted);
+}
+
+.story-prompt-field {
+  background: var(--bg);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  min-width: 45%;
+  padding: 4px 6px;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+
+.story-prompt-field:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.story-prompt-field[contenteditable="false"] {
+  background: none;
+  border-color: transparent;
+  padding: 0;
+}
+
+/* A mentioned name, in the style of a code span. */
+.story-mention {
+  background: rgb(255 255 255 / 7%);
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+/* A name the limit left behind, or one no drawing can be sent for: the words
+   stay, the picture does not. */
+.story-mention.is-beyond {
+  opacity: 0.55;
+}
+
+.story-mention.is-undrawn,
+.story-mention.is-unknown {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+/* The pictures the words call in, in the order they are named. */
+.story-ref-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.story-ref-thumb {
+  background: none;
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  cursor: zoom-in;
+  height: 44px;
+  overflow: hidden;
+  padding: 0;
+  width: 44px;
+}
+
+.story-ref-thumb img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.story-ref-thumb.is-beyond {
+  opacity: 0.45;
+}
+
+/*
+  The frame column: a bound on the picture, because a drawn frame's own size
+  would otherwise widen the table and squeeze the framing selects beside it.
+*/
+
+.story-table .story-col-frame {
+  width: 128px;
+}
+
+.story-table .story-col-frame .story-slot-picture img {
+  max-width: 128px;
 }
 
 .story-kf-seconds {

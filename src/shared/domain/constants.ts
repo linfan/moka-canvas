@@ -287,15 +287,19 @@ export const MAX_TAKES_PER_SLOT = 12;
 export const MAX_ACTS_PER_CHAPTER = 30;
 export const MAX_KEYFRAMES_PER_ACT = 12;
 /**
- * How many reference pictures one frame's ask may carry.
+ * How many reference pictures one frame's ask carries when the story says
+ * nothing: the bound the shape that draws with references is happiest with.
  *
- * An image service takes a bounded set of reference pictures — the shape that
- * draws with references takes three — and a request over the bound is refused
- * whole rather than drawn with the first of them, so a crowded act's frame
- * travels with the first of its cast that fit and the rest are left to the
- * words.
+ * The pictures themselves are the shot's own mentions, which name a place's
+ * element one by one; this is how many of them fit in one ask. An image
+ * service takes a bounded set — the shapes that draw with references take
+ * three to nine — and a request over the bound is refused whole rather than
+ * drawn with the first of them, so the story says how many of the mentioned
+ * pictures travel and the rest are left to the words.
  */
-export const MAX_REFERENCE_IMAGES = 3;
+export const REFERENCE_IMAGES_DEFAULT = 3;
+/** The most reference pictures one frame's ask may be set to carry. */
+export const REFERENCE_IMAGES_MAX = 9;
 export const MIN_KEYFRAME_MS = 400;
 export const MAX_KEYFRAME_MS = 60_000;
 export const MIN_TOTAL_DURATION_MS = 30_000;

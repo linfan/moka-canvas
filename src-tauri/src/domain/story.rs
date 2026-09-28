@@ -22,6 +22,10 @@ pub const MAX_ELEMENTS_PER_STORY: usize = 200;
 pub const MAX_TAKES_PER_SLOT: usize = 12;
 pub const MAX_ACTS_PER_CHAPTER: usize = 30;
 pub const MAX_KEYFRAMES_PER_ACT: usize = 12;
+/// How many of a frame's mentioned reference pictures its ask carries when the
+/// story says nothing, and the most it may be set to carry.
+pub const REFERENCE_IMAGES_DEFAULT: u32 = 3;
+pub const REFERENCE_IMAGES_MAX: u32 = 9;
 pub const MAX_DIALOGUE_LINES_PER_KEYFRAME: usize = 12;
 pub const MAX_DIALOGUE_LINE_LENGTH: usize = 500;
 pub const MIN_KEYFRAME_MS: i64 = 400;
@@ -408,10 +412,18 @@ pub struct StoryDocument {
     pub elements: Vec<StoryElement>,
     #[serde(deserialize_with = "word")]
     pub shot_granularity: StoryShotGranularity,
+    /// How many of a frame's mentioned reference pictures its ask may carry;
+    /// a document written before the limit existed carries the default.
+    #[serde(default = "default_max_reference_images")]
+    pub max_reference_images: u32,
     #[serde(default)]
     pub edit: StoryEdit,
     pub created_at: IsoTimestamp,
     pub updated_at: IsoTimestamp,
+}
+
+fn default_max_reference_images() -> u32 {
+    REFERENCE_IMAGES_DEFAULT
 }
 
 /// A place in a story that holds a slot, as a command and a job name it.
@@ -834,6 +846,15 @@ pub fn validate_story(story: &StoryDocument) -> Vec<ValidationIssue> {
     if story.elements.len() > MAX_ELEMENTS_PER_STORY {
         issues.push(issue("STORY_ELEMENT_LIMIT", "Element limit reached".into()));
     }
+    if story.max_reference_images > REFERENCE_IMAGES_MAX {
+        issues.push(issue(
+            "VALIDATION_FAILED",
+            format!(
+                "Story reference picture limit {} is out of range",
+                story.max_reference_images
+            ),
+        ));
+    }
 
     let mut slots: Vec<&StorySlot> = Vec::new();
     for element in &story.elements {
@@ -968,6 +989,12 @@ fn check_story(story: &StoryDocument) -> Result<(), CommandError> {
         return Err(CommandError::new(
             "STORY_ELEMENT_LIMIT",
             "Element limit reached",
+        ));
+    }
+    if story.max_reference_images > REFERENCE_IMAGES_MAX {
+        return Err(CommandError::new(
+            "VALIDATION_FAILED",
+            "Story reference picture limit is out of range",
         ));
     }
     for chapter in &story.chapters {
@@ -1171,6 +1198,28 @@ pub fn apply_story_command(
                 vec![DocumentCommand::UpdateStoryGranularity {
                     story_id: story_id.clone(),
                     shot_granularity: previous,
+                }],
+            ))
+        }
+        DocumentCommand::UpdateStoryReferenceLimit {
+            story_id,
+            max_reference_images,
+        } => {
+            let story = story_of(moka, story_id)?;
+            if *max_reference_images > REFERENCE_IMAGES_MAX {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "Story reference picture limit is out of range",
+                ));
+            }
+            let previous = story.max_reference_images;
+            let mut next = story.clone();
+            next.max_reference_images = *max_reference_images;
+            Ok((
+                replace_story(moka, next),
+                vec![DocumentCommand::UpdateStoryReferenceLimit {
+                    story_id: story_id.clone(),
+                    max_reference_images: previous,
                 }],
             ))
         }

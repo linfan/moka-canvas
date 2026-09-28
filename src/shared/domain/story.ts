@@ -701,6 +701,50 @@ export function actCast(
  * just now" and a job's "which place is this item for" are the same answer
  * without either of them having to read the document.
  */
+/**
+ * The element names a shot's words mention, in the order they are written.
+ *
+ * A mention is a name between backticks, the way a Markdown line names a piece
+ * of code: the telling's prose keeps its own words and the bracketed name is
+ * how the frame's ask is told which picture to hold to, and in what order. A
+ * backtick with no partner before the text ends — a content cut short, a
+ * reader mid-typing — is left as the character it is rather than swallowing
+ * the rest of the shot.
+ */
+export function storyMentions(
+  content: string,
+): Array<{ start: number; end: number; name: string }> {
+  const found: Array<{ start: number; end: number; name: string }> = [];
+  let cursor = 0;
+  while (cursor < content.length) {
+    const open = content.indexOf("`", cursor);
+    if (open < 0) break;
+    const close = content.indexOf("`", open + 1);
+    if (close < 0) break;
+    const name = content.slice(open + 1, close).trim();
+    if (name !== "") found.push({ start: open, end: close + 1, name });
+    cursor = close + 1;
+  }
+  return found;
+}
+
+/**
+ * The same words without the backticks that make a mention one.
+ *
+ * What is sent to a model is the sentence as the telling means it — `林` is
+ * the character 林 — while the backticks are the app's own mark for which
+ * picture travels with the ask, and no model is owed them.
+ */
+export function stripStoryMentions(content: string): string {
+  let out = "";
+  let cursor = 0;
+  for (const span of storyMentions(content)) {
+    out += content.slice(cursor, span.start) + span.name;
+    cursor = span.end;
+  }
+  return out + content.slice(cursor);
+}
+
 export function targetKey(target: StorySlotTarget): string {
   switch (target.kind) {
     case "element":

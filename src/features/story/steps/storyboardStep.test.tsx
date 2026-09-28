@@ -523,7 +523,7 @@ describe("writing an episode's board", () => {
     expect(acts()[0]?.keyframes).toHaveLength(2);
   });
 
-  it("draws no frame until the table is agreed to, then draws the cast a frame carries", async () => {
+  it("draws no frame until the table is agreed to, then draws the pictures the words name", async () => {
     openAtBoard(withOpenTable());
     expect(
       (screen.getByTestId("story-act-draw-0") as HTMLButtonElement).disabled,
@@ -538,24 +538,100 @@ describe("writing an episode's board", () => {
     await waitFor(() => expect(starts).toHaveLength(1));
     const [item] = starts[0]!.items;
     expect(starts[0]!.kind).toBe("keyframeArt");
-    // Characters first, then the place, then the things — the order the prompt
-    // numbers its references in, and the order the pictures travel in, cut to
-    // the few references one image request may carry.
+    // The shot's words name the picture that travels with it, in the order the
+    // names first appear; a name left as plain words carries nothing.
     expect(item?.inputs?.map((input) => input.assetId)).toEqual([
-      ids.heroMain,
       ids.partnerMain,
-      ids.sceneMain,
     ]);
-    expect(item?.prompt).toContain("1. 林");
-    expect(item?.prompt).toContain("2. 周");
-    expect(item?.prompt).toContain("3. 末班车车厢");
-    // The prop is a fourth reference, past what a frame carries, so it is not
-    // numbered — and the card says which one it is before the drawing is asked
-    // for.
+    expect(item?.prompt).toContain("1. 周");
     expect(item?.prompt).not.toContain("旧车票");
-    expect(screen.getByTestId("story-act-over-ref-0").textContent).toContain(
-      "旧车票",
+  });
+
+  it("shows the ask as it will be sent, with the mentioned names and their pictures", () => {
+    openAtBoard(boarded());
+    // The scaffolding the template writes — the episode, the framing, the look
+    // — stands around the shot's own words as the greyed part of the cell.
+    const prompt = screen.getByTestId("story-kf-prompt-0").textContent ?? "";
+    expect(prompt).toContain('One frame of a film, from "第一章 站台"');
+    expect(prompt).toContain("It is a wide shot");
+    expect(prompt).toContain("in the film's own look: 现代都市风");
+    expect(prompt).toContain("1. 林 — ");
+    // The one name the words mention stands as a chip, and its picture rides.
+    const cell = screen.getByTestId("story-kf-content-0");
+    const chips = cell.querySelectorAll("[data-mention-name]");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.textContent).toBe("林");
+    expect(chips[0]?.className).toContain("is-carried");
+    const thumbs = screen.getByTestId("story-kf-refs-0");
+    expect(within(thumbs).getAllByRole("button")).toHaveLength(1);
+    expect(thumbs.querySelector("img")?.getAttribute("src")).toContain(
+      ids.heroMain,
     );
+  });
+
+  it("drops a picture when its mention is taken out of the words", async () => {
+    openAtBoard(boarded());
+    const field = screen.getByTestId("story-kf-content-0");
+    expect(screen.getByTestId("story-kf-refs-0")).toBeDefined();
+    // The chip is one thing: taking it out takes the name out of the words and
+    // its picture out of the ask, together.
+    field.querySelector("[data-mention-name]")?.remove();
+    fireEvent.input(field);
+    await waitFor(() =>
+      expect(screen.queryByTestId("story-kf-refs-0")).toBeNull(),
+    );
+    fireEvent.blur(field);
+    await waitFor(() =>
+      expect(story().chapters[0]!.acts[0]!.keyframes[0]!.content).toBe(
+        "雨中的站台，立在灯下。",
+      ),
+    );
+  });
+
+  it("marks a name the limit leaves behind, and one nobody has drawn", () => {
+    const moka = boarded();
+    const held = moka.stories![0]!;
+    held.maxReferenceImages = 2;
+    held.chapters[0]!.acts[0]!.keyframes[0]!.content =
+      "`林`看着`周`，`末班车车厢`里很暗。";
+    openAtBoard(moka);
+    const cell = screen.getByTestId("story-kf-content-0");
+    const chips = Array.from(cell.querySelectorAll("[data-mention-name]"));
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "林",
+      "周",
+      "末班车车厢",
+    ]);
+    expect(chips[0]?.className).toContain("is-carried");
+    expect(chips[1]?.className).toContain("is-carried");
+    // The third mention is drawn and over the limit: its words stay, its
+    // picture stands dimmed among the ones that travel.
+    expect(chips[2]?.className).toContain("is-beyond");
+    expect(
+      within(screen.getByTestId("story-kf-refs-0")).getAllByRole("button"),
+    ).toHaveLength(3);
+    expect(screen.getByTestId("story-kf-ref-beyond-0-0")).toBeDefined();
+  });
+
+  it("leaves a mentioned name nobody has drawn to the words", () => {
+    const moka = buildStoryMokaFile();
+    moka.stories![0]!.chapters[0]!.acts[0]!.keyframes[0]!.content =
+      "`旧车票`攥在手里。";
+    openAtBoard(moka);
+    const chip = screen
+      .getByTestId("story-kf-content-0")
+      .querySelector("[data-mention-name]");
+    expect(chip?.className).toContain("is-undrawn");
+    expect(screen.queryByTestId("story-kf-refs-0")).toBeNull();
+  });
+
+  it("writes the reference limit the reader sets beside the models", async () => {
+    openAtBoard(boarded());
+    const input = screen.getByTestId("story-max-refs") as HTMLInputElement;
+    expect(input.value).toBe("3");
+    fireEvent.change(input, { target: { value: "5" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(story().maxReferenceImages).toBe(5));
   });
 
   it("agrees to the table under it, and leaves a clear way back to it", async () => {

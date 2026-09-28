@@ -1,16 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { ModelsView } from "../../../api/models";
-import { MAX_REFERENCE_IMAGES } from "../../../shared/domain/constants";
 import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
 import type { StoryDocument } from "../../../shared/domain/types";
 import { useModelStore } from "../../settings/modelStore";
 import {
   clampSeconds,
-  frameCast,
   imageSizeForAspect,
   itemsForTargets,
   jobKey,
+  keyframeCast,
   planActMusic,
   planActVideos,
   planActVoice,
@@ -153,6 +152,26 @@ function drawnStory(): StoryDocument {
               ),
             },
       ),
+    })),
+  };
+}
+
+/** The fixture with one shot's words replaced — its mentions with them. */
+function withContent(
+  content: string,
+  keyframeId: string = ids.frameFirst,
+): StoryDocument {
+  const held = story();
+  return {
+    ...held,
+    chapters: held.chapters.map((chapter) => ({
+      ...chapter,
+      acts: chapter.acts.map((act) => ({
+        ...act,
+        keyframes: act.keyframes.map((keyframe) =>
+          keyframe.id === keyframeId ? { ...keyframe, content } : keyframe,
+        ),
+      })),
     })),
   };
 }
@@ -334,36 +353,64 @@ describe("planning the drawings", () => {
     expect(items).toEqual([]);
   });
 
-  it("draws a frame with its act's cast, in the order the pictures travel", () => {
-    const items = planKeyframeArt(story(), [
+  it("draws a frame with the pictures its own words name, in the order they are named", () => {
+    // The mentions decide: a place named before a character is the place's
+    // picture first and the character's second, whatever the act's cast lists.
+    const items = planKeyframeArt(
+      withContent("`末班车车厢`里，`林`立在灯下。"),
+      [
+        {
+          chapterId: ids.chapterFirst,
+          actId: ids.act,
+          keyframeId: ids.frameFirst,
+        },
+      ],
+    );
+
+    expect(items[0].id).toBe(
+      `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
+    );
+    expect(items[0].capability).toBe("image");
+    expect(items[0].inputs).toEqual([
+      { role: "reference", assetId: ids.sceneMain },
+      { role: "reference", assetId: ids.heroMain },
+    ]);
+    expect(items[0].prompt).toContain("1. 末班车车厢 —");
+    expect(items[0].prompt).toContain("2. 林 —");
+    // The backticks the mentions are written with travel nowhere: the model
+    // reads the sentence the telling means.
+    expect(items[0].prompt).toContain("This shot: 末班车车厢里，林立在灯下。");
+    expect(items[0].prompt).not.toContain("`");
+  });
+
+  it("leaves a name nobody has drawn to the words", () => {
+    // The prop has no drawing of its own, so the mention is prose: it is not
+    // numbered as a reference and no picture travels with the ask.
+    const items = planKeyframeArt(withContent("`旧车票`攥在手里。"), [
       {
         chapterId: ids.chapterFirst,
         actId: ids.act,
         keyframeId: ids.frameFirst,
       },
     ]);
-
-    expect(items[0].id).toBe(
-      `keyframe:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}`,
-    );
-    expect(items[0].capability).toBe("image");
-    // The cast is what the act names and the story has a picture of, in the
-    // order the prompt numbers them: characters, then the place, then things.
-    expect(items[0].inputs).toEqual([
-      { role: "reference", assetId: ids.heroMain },
-      { role: "reference", assetId: ids.partnerMain },
-      { role: "reference", assetId: ids.sceneMain },
-    ]);
-    expect(items[0].prompt).toContain("1. 林 —");
-    expect(items[0].prompt).toContain("2. 周 —");
-    expect(items[0].prompt).toContain("3. 末班车车厢 —");
-    // The prop has no drawing, so it is not numbered as a reference.
-    expect(items[0].prompt).not.toContain("旧车票");
+    expect(items[0].inputs).toEqual([]);
+    expect(items[0].prompt).not.toContain("旧车票 —");
+    expect(items[0].prompt).toContain("旧车票攥在手里。");
   });
 
-  it("writes a scene into the prompt and leaves it out of the pictures", () => {
-    // A place is drawn like anything else, so it travels as a reference;
-    // what must not happen is a numbered reference with no picture behind it.
+  it("carries no picture for a frame whose words name none", () => {
+    const items = planKeyframeArt(withContent("雨下个不停。"), [
+      {
+        chapterId: ids.chapterFirst,
+        actId: ids.act,
+        keyframeId: ids.frameFirst,
+      },
+    ]);
+    expect(items[0].inputs).toEqual([]);
+  });
+
+  it("numbers exactly the pictures that travel", () => {
+    // What must not happen is a numbered reference with no picture behind it.
     const items = planKeyframeArt(story(), [
       {
         chapterId: ids.chapterFirst,
@@ -377,52 +424,43 @@ describe("planning the drawings", () => {
       .split("\n")
       .filter((line) => /^\d+\./.test(line.trim()));
     expect(numbered.length).toBe(items[0].inputs?.length);
+    expect(numbered[0]).toContain("周");
   });
 
-  it("carries the first references a frame has room for, and leaves the rest to the words", () => {
-    // A prop with a picture of its own is a fourth reference, and one image
-    // request carries three: what is past the bound is not numbered, so the
-    // frame is drawn from the words for it.
-    const held = story();
-    const withProp: StoryDocument = {
-      ...held,
-      elements: held.elements.map((element) =>
-        element.id !== ids.prop
-          ? element
-          : {
-              ...element,
-              main: {
-                takes: [
-                  {
-                    assetIds: ["asset-prop-main"],
-                    createdAt: "2026-01-01T00:00:00Z",
-                  },
-                ],
-                confirmed: true,
-              },
-            },
-      ),
-    };
-    const act = withProp.chapters[0].acts[0];
-    expect(
-      frameCast(withProp, act).carried.map(({ assetId }) => assetId),
-    ).toEqual([ids.heroMain, ids.partnerMain, ids.sceneMain]);
-    expect(
-      frameCast(withProp, act).beyond.map((element) => element.name),
-    ).toEqual(["旧车票"]);
+  it("carries the first pictures the story's limit allows, in the order they are named", () => {
+    // Three drawn elements are mentioned and the story allows two: the first
+    // two travel and the third is left to the words.
+    const words = "`林`看着`周`，`末班车车厢`里很暗。";
+    const held = withContent(words);
+    const limited: StoryDocument = { ...held, maxReferenceImages: 2 };
+    const cast = keyframeCast(limited, words);
+    expect(cast.carried.map(({ assetId }) => assetId)).toEqual([
+      ids.heroMain,
+      ids.partnerMain,
+    ]);
+    expect(cast.beyond.map(({ element }) => element.name)).toEqual([
+      "末班车车厢",
+    ]);
+    expect(cast.undrawn).toEqual([]);
 
-    const [item] = planKeyframeArt(withProp, [
+    const [item] = planKeyframeArt(limited, [
       {
         chapterId: ids.chapterFirst,
         actId: ids.act,
         keyframeId: ids.frameFirst,
       },
     ]);
-    expect(item.inputs).toHaveLength(MAX_REFERENCE_IMAGES);
-    expect(item.inputs?.map((input) => input.assetId)).not.toContain(
-      "asset-prop-main",
-    );
-    expect(item.prompt).not.toContain("旧车票");
+    expect(item.inputs?.map((input) => input.assetId)).toEqual([
+      ids.heroMain,
+      ids.partnerMain,
+    ]);
+    expect(item.prompt).not.toContain("末班车车厢 —");
+  });
+
+  it("names a mentioned name that matches nothing as undrawn", () => {
+    const cast = keyframeCast(story(), "`陌生人`走过来。");
+    expect(cast.carried).toEqual([]);
+    expect(cast.undrawn).toEqual(["陌生人"]);
   });
 
   it("plans nothing for a frame that was taken away", () => {
@@ -458,8 +496,11 @@ describe("planning the clips", () => {
       { role: "firstFrame", assetId: ids.frameArt },
       { role: "lastFrame", assetId: "asset-frame-second" },
     ]);
-    expect(items[0].prompt).toContain("雨中的站台，一个人立在灯下。");
-    expect(items[0].prompt).toContain("另一人转过身来。");
+    // The shot's words travel as the telling means them: the backticks that
+    // marked their mentions are the room's own and are not sent.
+    expect(items[0].prompt).toContain("雨中的站台，林立在灯下。");
+    expect(items[0].prompt).toContain("周转过身来。");
+    expect(items[0].prompt).not.toContain("`");
   });
 
   it("plans no act video while none of its shots is drawn", () => {

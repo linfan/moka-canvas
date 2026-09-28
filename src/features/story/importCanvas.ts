@@ -24,6 +24,7 @@ import {
   findResource,
   newId,
   nowIso,
+  stripStoryMentions,
   validateEdgeCandidate,
   type AssetId,
   type CanvasDocument,
@@ -341,12 +342,17 @@ function wireAsk(
   }
 }
 
-/** The words of a shot: what it shows, and the lines said in it. */
+/**
+ * The words of a shot: what it shows, and the lines said in it.
+ *
+ * The backticks around a mentioned name are the room's own mark, not the
+ * telling's words, so the card is written without them.
+ */
 function shotWords(keyframe: StoryKeyframe): string {
   const lines = keyframe.dialogue
     .map((line) => spokenLine(line))
     .filter((line) => line !== "");
-  return [keyframe.content.trim(), ...lines]
+  return [stripStoryMentions(keyframe.content).trim(), ...lines]
     .filter((part) => part !== "")
     .join("\n");
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { stripStoryMentions } from "../domain/story";
 import {
   answerSystemPrompt,
   askPrompt,
@@ -15,6 +16,7 @@ import {
   storyElementsPrompt,
   storyFactsPrompt,
   storyKeyframePrompt,
+  storyKeyframePromptParts,
   storyKeyframeVideoPrompt,
   storyOutlinePrompt,
   storySplitPrompt,
@@ -344,6 +346,37 @@ describe("story prompts", () => {
     expect(prompt).toContain("2. 周 — 年轻。");
     expect(prompt).toContain("现代都市风");
     expect(prompt).not.toContain("{{");
+  });
+
+  it("reads the ask apart around the shot's words, and sends them without the marks", () => {
+    const input = {
+      aspect: "16:9" as const,
+      style: "现代都市风",
+      chapter: { title: "第一章 站台" },
+      act: { summary: "站台上的灯一盏一盏亮起来。" },
+      keyframe: {
+        content: "雨中的站台，`林`立在灯下。",
+        shotSize: "wide",
+        cameraMove: "pushIn",
+        angle: "eyeLevel",
+      },
+      cast: [{ name: "林", description: "四十岁上下。" }],
+    };
+    const parts = storyKeyframePromptParts(input);
+    // The hole the content is written into sits between the scaffolding: what
+    // comes before it ends at the shot's introduction, and nothing of the
+    // shot's own words is in the greyed part.
+    expect(parts.content).toBe("雨中的站台，`林`立在灯下。");
+    expect(parts.before).toContain("This shot: ");
+    expect(parts.before).not.toContain("雨中的站台");
+    expect(parts.after.startsWith("\nIt is a wide shot")).toBe(true);
+    expect(parts.after).toContain("1. 林 — 四十岁上下。");
+    // What is shown is what is sent: the parts spliced back are the ask, with
+    // the mentions' backticks stripped from the words alone.
+    expect(parts.before + stripStoryMentions(parts.content) + parts.after).toBe(
+      storyKeyframePrompt(input),
+    );
+    expect(storyKeyframePrompt(input)).not.toContain("`");
   });
 
   it("draws a frame with no cast without asking for references", () => {

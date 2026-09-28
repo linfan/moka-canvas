@@ -15,6 +15,7 @@ import {
   type StoryGuess,
   type StoryShotGranularity,
 } from "../../../shared/domain";
+import { REFERENCE_IMAGES_MAX } from "../../../shared/domain/constants";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -33,6 +34,7 @@ import {
   useStoryRun,
 } from "../stores/storyJobStore";
 import { useStoryStore } from "../stores/storyStore";
+import { useField } from "../panels/useField";
 import { useElapsed } from "./useElapsed";
 
 /** How many episodes one batch is asked to board at once. */
@@ -222,9 +224,9 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           step="storyboard"
         />
         <p className="story-step-lead">{t("story:storyboard.lead")}</p>
-        <StoryModelPicks
-          places={["text", "image", "video", "audio", "music"]}
-        />
+        <StoryModelPicks places={["text", "image", "video", "audio", "music"]}>
+          <ReferenceLimitField story={story} />
+        </StoryModelPicks>
 
         <div className="story-chapter-strip" role="tablist">
           {story.chapters.map((held, at) => {
@@ -472,6 +474,48 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * How many of a shot's mentioned pictures its ask may carry.
+ *
+ * The number stands beside the models because it belongs to the ask the same
+ * way they do: one shape of image model takes three reference pictures and
+ * another nine, and the service refuses the whole request over the bound
+ * rather than drawing with the first of them.
+ */
+function ReferenceLimitField({ story }: { story: StoryDocument }) {
+  const { t } = useTranslation();
+  const limit = useField(String(story.maxReferenceImages), (value) => {
+    const count = Number(value);
+    if (!Number.isInteger(count)) return;
+    const clamped = Math.min(REFERENCE_IMAGES_MAX, Math.max(0, count));
+    if (clamped === story.maxReferenceImages) return;
+    execute(i18n.t("story:history.storyboard"), [
+      {
+        type: "updateStoryReferenceLimit",
+        storyId: story.id,
+        maxReferenceImages: clamped,
+      },
+    ]);
+  });
+  return (
+    <label className="story-model" data-testid="story-ref-limit">
+      <span className="story-hint">{t("story:storyboard.maxRefs")}</span>
+      <input
+        aria-label={t("story:storyboard.maxRefs")}
+        data-testid="story-max-refs"
+        max={REFERENCE_IMAGES_MAX}
+        min={0}
+        onBlur={limit.commit}
+        onChange={(event) => limit.set(event.target.value)}
+        step={1}
+        title={t("story:storyboard.maxRefsHint")}
+        type="number"
+        value={limit.value}
+      />
+    </label>
   );
 }
 

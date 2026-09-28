@@ -116,6 +116,13 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await expect(page.getByTestId("story-act-1")).toBeVisible();
     await expect(firstAct.getByTestId("story-kf-0")).toBeVisible();
 
+    // The cell shows the ask as it will be sent: the name the words mention
+    // stands as a chip, and the picture it calls in stands under them.
+    await expect(
+      firstAct.getByTestId("story-kf-content-0").locator("[data-mention-name]"),
+    ).toHaveText("Keeper");
+    await expect(firstAct.getByTestId("story-kf-ref-0-0")).toBeVisible();
+
     // Nothing is drawn until the table has been agreed to, and the button that
     // agrees to it stands with the pictures' own asks, under the table: a board
     // nobody agreed to has no way on from it.
@@ -142,12 +149,26 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await firstAct.getByTestId("story-act-keys-0").click();
     await expect(firstAct.getByTestId("story-kf-size-0")).toBeDisabled();
 
+    /** How wide a cell of the framing row stands, in whole pixels. */
+    const widthOf = async (testId: string) => {
+      const box = await firstAct.getByTestId(testId).boundingBox();
+      return Math.round(box?.width ?? -1);
+    };
+
     // One frame of the act, drawn from the cast step three settled on, while
     // its own ask is the only thing that waits on it.
     await firstAct.getByTestId("story-kf-slot-0-generate").click();
     await expect(firstAct.getByTestId("story-kf-slot-0-confirm")).toBeVisible({
       timeout: 60_000,
     });
+
+    // A drawn frame's own size must not push the framing columns aside: with
+    // the picture in place the selects still hold their words whole, and the
+    // frame itself stays a peek rather than widening the row.
+    expect(await widthOf("story-kf-size-0")).toBeGreaterThan(80);
+    expect(await widthOf("story-kf-move-0")).toBeGreaterThan(80);
+    expect(await widthOf("story-kf-angle-0")).toBeGreaterThan(80);
+    expect(await widthOf("story-kf-slot-0")).toBeLessThanOrEqual(160);
     await expect(
       firstAct.getByTestId("story-kf-slot-1-generate"),
     ).toBeEnabled();

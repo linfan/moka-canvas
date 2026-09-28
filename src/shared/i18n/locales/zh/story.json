@@ -313,6 +313,13 @@
     "granularityBody": "已经生成的 {{count}} 段视频会保留在素材库里，但第五步只会装配按格的那些。",
     "granularityNote": "两种粒度的视频各存各的地方，来回切换不会丢。",
     "granularityConfirm": "改成按格",
+    "maxRefs": "参考图上限",
+    "maxRefsHint": "一格最多带几张它提及到的参考图，0 到 9",
+    "mentionCarried": "{{name}} 的图会随这条提示词一起发送",
+    "notCarried": "{{name}} 超过参考图上限，这次不随行",
+    "mentionUndrawn": "{{name}} 还没有图，只按文字来画",
+    "mentionUnknown": "没有叫 {{name}} 的剧情元素，只按文字来写",
+    "enlargeRef": "查看 {{name}} 大图",
     "chapterAt": "第 {{number}} 集 {{title}}",
     "target": "目标时长 {{duration}}",
     "settled": "已确认 {{done}}/{{total}} 幕",
@@ -393,9 +400,7 @@
     "playClip": "播放这一段",
     "missingRef": "{{names}} 还没有图，这一格不会带上",
     "noRefs": "这一幕一个参考图都没有，画面只按文字来写",
-    "undrawnHint": "没有图的元素不进参考图：先在第三步把它画出来，画面才认得住它",
-    "overRefs": "{{names}} 超过了一格能带的 {{max}} 个参考图，只按文字来画",
-    "overRefsHint": "一格最多带 {{max}} 个参考图，多出来的角色不进参考图，只按文字来画"
+    "undrawnHint": "没有图的元素不进参考图：先在第三步把它画出来，画面才认得住它"
   },
   "edit": {
     "lead": "把各幕拼成一条时间线，渲染成完整成片，再交给剪辑室精修。",

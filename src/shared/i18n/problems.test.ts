@@ -46,12 +46,23 @@ describe("problemMessage in Chinese", () => {
   });
 
   it("shows a known code in Chinese rather than the server's English", () => {
+    // A trouble whose sentence has a hole in it takes the provider's own
+    // words: the Chinese says what the trouble is, the detail says what the
+    // provider said about it.
     expect(
       problemMessage(
         "PROVIDER_AUTH",
-        "the provider rejected the stored credential",
+        "the provider rejected the stored credential: bad key",
+        { detail: "bad key" },
       ),
-    ).toBe("服务商拒绝了凭据（401/403）");
+    ).toBe("服务商拒绝了凭据（401/403）：bad key");
+    expect(
+      problemMessage(
+        "PROVIDER_BAD_REQUEST",
+        "the provider rejected the request: status 400: 6 image items",
+        { detail: "status 400: 6 image items" },
+      ),
+    ).toBe("服务商拒绝了该请求：status 400: 6 image items");
     expect(
       problemMessage("REVISION_CONFLICT", "canvas.moka changed on disk"),
     ).toBe("文档已被其他窗口修改，请刷新后重试");
@@ -116,6 +127,14 @@ describe("problemMessage in Chinese", () => {
     expect(
       problemMessage("MODEL_CAPABILITY_MISMATCH", "a::b generates image"),
     ).toBe("a::b generates image");
+    // A refusal whose record carries no detail is the same case: the Chinese
+    // sentence would stand there with a hole where the reason belongs.
+    expect(
+      problemMessage(
+        "PROVIDER_BAD_REQUEST",
+        "the provider rejected the request",
+      ),
+    ).toBe("the provider rejected the request");
   });
 });
 
@@ -171,7 +190,7 @@ describe("ApiError", () => {
       details: { detail: "come back in 42s", retryable: true },
     });
 
-    expect(error.message).toBe("服务商正在限流，请稍后重试");
+    expect(error.message).toBe("服务商正在限流：come back in 42s");
     expect(error.code).toBe("PROVIDER_RATE_LIMIT");
     expect(error.status).toBe(429);
     expect(error.details).toEqual({

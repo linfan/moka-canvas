@@ -783,6 +783,14 @@ export interface StoryDocument {
   elements: StoryElement[];
   /** Whether a clip is made of a whole act or of each of its shots. */
   shotGranularity: StoryShotGranularity;
+  /**
+   * How many of a frame's mentioned reference pictures its ask may carry.
+   *
+   * The mentions in a shot's content name the elements whose drawings travel
+   * with it, in the order they are named; this is how many of them fit in one
+   * ask, past which the rest are left to the words.
+   */
+  maxReferenceImages: number;
   edit: StoryEdit;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
@@ -1158,6 +1166,12 @@ export type DocumentCommand =
       type: "updateStoryGranularity";
       storyId: string;
       shotGranularity: StoryShotGranularity;
+    }
+  /** Only the picture limit moves; frames already drawn are kept as they are. */
+  | {
+      type: "updateStoryReferenceLimit";
+      storyId: string;
+      maxReferenceImages: number;
     }
   /**
    * The outline, whole.

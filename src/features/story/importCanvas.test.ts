@@ -81,9 +81,10 @@ describe("the board a telling makes", () => {
     expect(card(canvas, "1.1 第 1 幕 空站台").data).toMatchObject({
       content: "站台上的灯一盏一盏亮起来。",
     });
-    // The words of a shot are what it shows and what is said in it.
+    // The words of a shot are what it shows and what is said in it — written
+    // without the backticks that mark a mention, which are the room's own.
     expect(card(canvas, "1.1.1").data).toMatchObject({
-      content: "雨中的站台，一个人立在灯下。\n林：车已经停运了。（平静）",
+      content: "雨中的站台，林立在灯下。\n林：车已经停运了。（平静）",
     });
     expect(card(canvas, "2. 第二章 车厢")).toBeDefined();
     // The drawings and the clip are the shelf's own files, read through the
@@ -131,11 +132,15 @@ describe("the board a telling makes", () => {
     expect(joined(canvas, act, shot, "prompt")).toBe(true);
     expect(joined(canvas, shot, frame, "prompt")).toBe(true);
     expect(joined(canvas, act, clip, "prompt")).toBe(true);
-    // The frame was drawn from the cast's own pictures, and the clip starts
-    // from the frame — the wires an ask's own references make.
-    for (const name of ["林 · main", "周 · main", "末班车车厢 · main"]) {
-      expect(joined(canvas, card(canvas, name), frame, "images")).toBe(true);
-    }
+    // The frame was drawn from the picture its own words named, and the clip
+    // starts from the frame — the wires an ask's own references make. A name
+    // the words do not mention is not wired, however drawn it is.
+    expect(joined(canvas, card(canvas, "林 · main"), frame, "images")).toBe(
+      true,
+    );
+    expect(joined(canvas, card(canvas, "周 · main"), frame, "images")).toBe(
+      false,
+    );
     expect(joined(canvas, frame, clip, "firstFrame")).toBe(true);
     // A turn-around is drawn from the one picture of the character there is.
     expect(
