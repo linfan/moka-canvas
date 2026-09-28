@@ -50,6 +50,40 @@ function card(page: Page, kind: string, name: string): Locator {
   return page.getByTestId(`story-element-${kind}-${name}`);
 }
 
+/**
+ * Keeper's main drawing as the server holds it, and the shelf beside it: the
+ * files the place keeps, oldest first, and every file the project still has.
+ */
+async function keeperMainAndShelf(
+  page: Page,
+): Promise<{ takes: string[]; images: string[] }> {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/v1/projects/current");
+    const body = (await response.json()) as {
+      moka?: {
+        resources?: { images?: { id?: string }[] };
+        stories?: {
+          elements?: {
+            name?: string;
+            main?: { takes?: { assetIds?: string[] }[] };
+          }[];
+        }[];
+      };
+    };
+    const element = (body.moka?.stories?.[0]?.elements ?? []).find(
+      (each) => each.name === "Keeper",
+    );
+    return {
+      takes: (element?.main?.takes ?? []).map(
+        (take) => take.assetIds?.[0] ?? "",
+      ),
+      images: (body.moka?.resources?.images ?? []).map(
+        (entry) => entry.id ?? "",
+      ),
+    };
+  });
+}
+
 test("the chapters are read for their cast, drawn, and agreed to", async ({
   page,
 }) => {
@@ -177,6 +211,43 @@ test("the cast a reading left, and what the reader said since, outlast the room"
     await expect(card(page, "character", "Keeper").locator("img")).toBeVisible({
       timeout: 60_000,
     });
+
+    // Drawn again, which appends rather than replaces — and the older drawing
+    // is thrown away from the list: out of the story, and off the shelf with
+    // it. The drawing in use is not one to throw away, so it carries no ✕.
+    await card(page, "character", "Keeper")
+      .getByTestId("story-slot-main-again")
+      .click();
+    await expect(
+      card(page, "character", "Keeper").getByTestId("story-slot-main-pick"),
+    ).toBeVisible({ timeout: 60_000 });
+    await card(page, "character", "Keeper")
+      .getByTestId("story-slot-main-pick")
+      .click();
+    // The place holds both drawings, oldest first; the newest is the one it is
+    // keeping, and the older one is the reader's to throw away.
+    const drawn = await keeperMainAndShelf(page);
+    const [unwanted, kept] = drawn.takes as [string, string];
+    expect(unwanted).not.toBe(kept);
+    await page.getByTestId(`story-pick-remove-${unwanted}`).click();
+    await page.getByTestId("story-pick-remove-confirm").click();
+    await expect(page.getByTestId(`story-pick-${unwanted}`)).toHaveCount(0);
+    await expect(page.getByTestId(`story-pick-remove-${kept}`)).toHaveCount(0);
+
+    await expect
+      .poll(async () => (await keeperMainAndShelf(page)).takes)
+      .toEqual([kept]);
+    await expect
+      .poll(async () =>
+        (await keeperMainAndShelf(page)).images.includes(unwanted),
+      )
+      .toBe(false);
+
+    // The ask stands until the file has been answered for, and only then is
+    // there a list to walk out of.
+    await expect(page.getByTestId("story-pick-ask")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("story-picks")).toHaveCount(0);
 
     // What the reader says to the cast by hand: one added, one taken out, and
     // a description of their own over the words the reading brought.

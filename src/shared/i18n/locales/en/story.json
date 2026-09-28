@@ -249,7 +249,15 @@
     "pickUndated": "An earlier drawing",
     "confirm": "Agree",
     "confirmed": "Agreed ✓",
-    "enlarge": "Look at {{label}} closely"
+    "enlarge": "Look at {{label}} closely",
+    "removeOld": "Throw an old drawing of {{label}} away",
+    "removeAsk": "Throw this old drawing away?",
+    "removeNote": "The file is taken off the shelf for good, and that cannot be undone. One the project still uses elsewhere is only removed from the story.",
+    "removeDo": "Delete",
+    "removeKept": "The file is still used elsewhere, so it stays on the shelf.",
+    "removeUnsettled": "The change has not been saved yet, so the file stays on the shelf.",
+    "removeGone": "That drawing is no longer in the list.",
+    "removeFailed": "The file could not be removed: {{reason}}"
   },
   "elements": {
     "lead": "What the telling is made of, one card each — the characters it follows, the places it happens in, and the things that matter to it.",

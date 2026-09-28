@@ -41,6 +41,7 @@ import {
   mergeChapters,
   mergeChaptersAt,
   mergeElements,
+  slotWithoutTake,
   stepReachable,
   storyMentions,
   STORY_STEPS,
@@ -588,6 +589,36 @@ describe("withTake", () => {
     expect(currentTake(slot)?.assetIds[0]).toBe(
       `asset-${MAX_TAKES_PER_SLOT + 1}`,
     );
+  });
+});
+
+describe("slotWithoutTake", () => {
+  it("drops the named drawing and leaves the rest in the order they were", () => {
+    const held: StorySlot = {
+      takes: [take("asset-a"), take("asset-b"), take("asset-c")],
+      confirmed: true,
+    };
+    const dropped = slotWithoutTake(held, "asset-b");
+    expect(dropped.takes.map((one) => one.assetIds[0])).toEqual([
+      "asset-a",
+      "asset-c",
+    ]);
+    // The place is still agreed to: the agreement is the place's, and the
+    // picture it was given to has not moved.
+    expect(dropped.confirmed).toBe(true);
+  });
+
+  it("does not drop the drawing the place is keeping", () => {
+    const held: StorySlot = {
+      takes: [take("asset-a"), take("asset-b")],
+      confirmed: false,
+    };
+    expect(slotWithoutTake(held, "asset-b")).toBe(held);
+  });
+
+  it("leaves the place alone when it never held that drawing", () => {
+    const held: StorySlot = { takes: [take("asset-a")], confirmed: false };
+    expect(slotWithoutTake(held, "asset-gone")).toBe(held);
   });
 });
 

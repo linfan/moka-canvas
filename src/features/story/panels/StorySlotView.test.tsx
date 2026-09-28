@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "../../../shared/i18n";
@@ -21,6 +27,7 @@ function draw(overrides: Partial<Parameters<typeof StorySlotView>[0]> = {}) {
   const onGenerate = vi.fn();
   const onConfirm = vi.fn();
   const onChoose = vi.fn();
+  const onRemove = vi.fn(async () => undefined);
   render(
     <StorySlotView
       canGenerate
@@ -28,13 +35,14 @@ function draw(overrides: Partial<Parameters<typeof StorySlotView>[0]> = {}) {
       onChoose={onChoose}
       onConfirm={onConfirm}
       onGenerate={onGenerate}
+      onRemove={onRemove}
       ratio="16 / 9"
       slot={slot([])}
       testId="story-slot-main"
       {...overrides}
     />,
   );
-  return { onGenerate, onConfirm, onChoose };
+  return { onGenerate, onConfirm, onChoose, onRemove };
 }
 
 afterEach(() => {
@@ -147,6 +155,76 @@ describe("choosing between what has been drawn", () => {
     fireEvent.click(screen.getByTestId("story-pick-asset-a"));
     expect(onChoose).toHaveBeenCalledWith("asset-a");
     expect(screen.queryByTestId("story-picks")).toBeNull();
+  });
+});
+
+describe("throwing an old drawing away", () => {
+  it("offers the ✕ on every drawing but the one being kept", () => {
+    draw({ slot: slot(["asset-a", "asset-b"]) });
+    fireEvent.click(screen.getByTestId("story-slot-main-pick"));
+
+    expect(screen.getByTestId("story-pick-remove-asset-a")).toBeTruthy();
+    // The drawing in use is not one to throw away: letting it go would leave
+    // the place holding a picture nobody chose.
+    expect(screen.queryByTestId("story-pick-remove-asset-b")).toBeNull();
+  });
+
+  it("asks before it goes, and hands the answer on", async () => {
+    const { onRemove } = draw({ slot: slot(["asset-a", "asset-b"]) });
+    fireEvent.click(screen.getByTestId("story-slot-main-pick"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-asset-a"));
+
+    expect(screen.getByTestId("story-pick-ask")).toBeTruthy();
+    expect(screen.getByTestId("story-pick-asset-a").className).toContain(
+      "is-asking",
+    );
+
+    fireEvent.click(screen.getByTestId("story-pick-remove-confirm"));
+    await waitFor(() => {
+      expect(onRemove).toHaveBeenCalledWith("asset-a");
+    });
+    expect(screen.queryByTestId("story-pick-ask")).toBeNull();
+  });
+
+  it("says what came back, and stays up for the next one", async () => {
+    const onRemove = vi.fn(
+      async () => "The file is still used elsewhere, so it stays on the shelf.",
+    );
+    draw({ slot: slot(["asset-a", "asset-b"]), onRemove });
+    fireEvent.click(screen.getByTestId("story-slot-main-pick"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-asset-a"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("story-pick-notice").textContent).toContain(
+        "still used elsewhere",
+      );
+    });
+    // A reader clearing three old drawings in a row is not sent back into the
+    // list between each of them.
+    expect(screen.getByTestId("story-picks")).toBeTruthy();
+  });
+
+  it("does not ask the file for anything when the reader says no", () => {
+    const { onRemove } = draw({ slot: slot(["asset-a", "asset-b"]) });
+    fireEvent.click(screen.getByTestId("story-slot-main-pick"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-asset-a"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-cancel"));
+
+    expect(onRemove).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("story-pick-ask")).toBeNull();
+    expect(screen.getByTestId("story-picks")).toBeTruthy();
+  });
+
+  it("leaves the ask before it leaves the list", () => {
+    draw({ slot: slot(["asset-a", "asset-b"]) });
+    fireEvent.click(screen.getByTestId("story-slot-main-pick"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-asset-a"));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByTestId("story-pick-ask")).toBeNull();
+    expect(screen.getByTestId("story-picks")).toBeTruthy();
   });
 });
 

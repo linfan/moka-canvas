@@ -6512,6 +6512,12 @@ button > .story-spin {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 }
 
+/* One drawing, and the ✕ that throws it away: two buttons beside each other
+   rather than inside each other, which is why the tile has a wrapper at all. */
+.story-pick-tile {
+  position: relative;
+}
+
 .story-pick {
   background: var(--bg);
   border: 2px solid var(--stroke);
@@ -6524,6 +6530,10 @@ button > .story-spin {
 
 .story-pick.is-current {
   border-color: var(--success);
+}
+
+.story-pick.is-asking {
+  border-color: var(--danger);
 }
 
 .story-pick img {
@@ -6545,6 +6555,47 @@ button > .story-spin {
 
 .story-pick-current {
   color: var(--success);
+}
+
+.story-pick-remove {
+  background: rgb(0 0 0 / 55%);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+}
+
+.story-pick-remove:hover {
+  color: var(--danger);
+}
+
+/* The ask, standing at the bottom of the list it is asked about: the grid
+   scrolls, so a strip left in the flow would answer a click that was made an
+   inch above it. */
+.story-pick-ask {
+  background: var(--surface);
+  border-top: 1px solid var(--stroke);
+  bottom: 0;
+  display: grid;
+  gap: 6px;
+  padding: 10px 0 2px;
+  position: sticky;
+}
+
+.story-pick-ask p {
+  margin: 0;
+}
+
+.story-pick-notice {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
 }
 
 /* The form a hand-typed element is added with, which stands over the step. */

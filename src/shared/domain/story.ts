@@ -654,6 +654,26 @@ export function slotWithCurrent(slot: StorySlot, assetId: string): StorySlot {
   };
 }
 
+/**
+ * A place with one of its drawings thrown away.
+ *
+ * What a reader throws away here is work they no longer need, so the take a
+ * place is keeping is not one of them: letting that one go would leave the
+ * place holding a picture nobody chose, and it is a different act — made by
+ * choosing another take first. A name the place never held, or the one it is
+ * using, leaves the slot exactly as it was.
+ *
+ * The agreement stands whatever is dropped: it is given to the place, and the
+ * picture it was given to stays where it is.
+ */
+export function slotWithoutTake(slot: StorySlot, assetId: string): StorySlot {
+  const current = currentTake(slot);
+  if (current?.assetIds.includes(assetId)) return slot;
+  const takes = slot.takes.filter((take) => !take.assetIds.includes(assetId));
+  if (takes.length === slot.takes.length) return slot;
+  return { ...slot, takes };
+}
+
 /** The element an id names, if the story still holds it. */
 export function elementOf(
   story: StoryDocument,

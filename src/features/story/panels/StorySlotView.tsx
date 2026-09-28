@@ -28,6 +28,7 @@ export function StorySlotView({
   onGenerate,
   onConfirm,
   onChoose,
+  onRemove,
   note,
   testId,
 }: {
@@ -41,6 +42,8 @@ export function StorySlotView({
   onGenerate: () => void;
   onConfirm: () => void;
   onChoose: (assetId: string) => void;
+  /** Throws an old drawing away, and answers the line to say about it. */
+  onRemove: (assetId: string) => Promise<string | undefined>;
   /** A line under the picture, for what the place is waiting on. */
   note?: string;
   testId?: string;
@@ -155,6 +158,7 @@ export function StorySlotView({
           label={label}
           onChoose={choose}
           onClose={() => setPicking(false)}
+          onRemove={onRemove}
           takes={slot.takes}
         />
       )}
