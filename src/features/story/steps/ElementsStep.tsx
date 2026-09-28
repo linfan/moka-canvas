@@ -217,7 +217,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
           </div>
         )}
 
-        <div className="story-elements-bar">
+        <div className="story-step-bar">
           <div
             aria-label={t("story:elements.group")}
             className="story-chips"

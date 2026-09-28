@@ -287,39 +287,6 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
           </div>
         </div>
 
-        <div
-          aria-label={t("story:outline.source")}
-          className="story-chips"
-          role="radiogroup"
-        >
-          <button
-            aria-checked={mode === "expand"}
-            className={`story-choice${mode === "expand" ? " is-on" : ""}`}
-            data-testid="story-outline-mode-expand"
-            onClick={() => setMode("expand")}
-            role="radio"
-            type="button"
-          >
-            {t("story:outline.modeExpand")}
-          </button>
-          <button
-            aria-checked={mode === "split"}
-            className={`story-choice${mode === "split" ? " is-on" : ""}`}
-            data-testid="story-outline-mode-split"
-            disabled={sourceId === undefined}
-            onClick={() => setMode("split")}
-            role="radio"
-            title={
-              sourceId === undefined
-                ? t("story:outline.modeSplitLocked")
-                : undefined
-            }
-            type="button"
-          >
-            {t("story:outline.modeSplit")}
-          </button>
-        </div>
-
         <p className="story-hint" data-testid="story-outline-chapters-hint">
           {headings > 0
             ? t("story:outline.detected", { count: headings })
@@ -331,33 +298,68 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
               })}
         </p>
 
-        <div className="story-step-actions">
-          <span className="story-hint" data-testid="story-outline-will-ask">
-            {t("story:outline.willAsk", { count: wanted })}
-          </span>
-          {totalWaves > 1 && (running !== null || waves.length > 0) && (
-            <span className="story-hint" data-testid="story-outline-wave">
-              {t("story:outline.wave", {
-                at: Math.max(1, totalWaves - waves.length),
-                of: totalWaves,
-              })}
-            </span>
-          )}
-          <button
-            className="primary"
-            data-testid="story-outline-start"
-            disabled={writing !== null || reading}
-            onClick={start}
-            type="button"
+        <div className="story-step-bar">
+          <div
+            aria-label={t("story:outline.source")}
+            className="story-chips"
+            role="radiogroup"
           >
-            {writing !== null
-              ? t("story:jobs.busy", jobProgress(writing))
-              : reading
-                ? t("story:outline.reading")
-                : story.chapters.length > 0
-                  ? t("story:outline.resplit")
-                  : t("story:outline.start")}
-          </button>
+            <button
+              aria-checked={mode === "expand"}
+              className={`story-choice${mode === "expand" ? " is-on" : ""}`}
+              data-testid="story-outline-mode-expand"
+              onClick={() => setMode("expand")}
+              role="radio"
+              type="button"
+            >
+              {t("story:outline.modeExpand")}
+            </button>
+            <button
+              aria-checked={mode === "split"}
+              className={`story-choice${mode === "split" ? " is-on" : ""}`}
+              data-testid="story-outline-mode-split"
+              disabled={sourceId === undefined}
+              onClick={() => setMode("split")}
+              role="radio"
+              title={
+                sourceId === undefined
+                  ? t("story:outline.modeSplitLocked")
+                  : undefined
+              }
+              type="button"
+            >
+              {t("story:outline.modeSplit")}
+            </button>
+          </div>
+
+          <div className="story-step-actions">
+            <span className="story-hint" data-testid="story-outline-will-ask">
+              {t("story:outline.willAsk", { count: wanted })}
+            </span>
+            {totalWaves > 1 && (running !== null || waves.length > 0) && (
+              <span className="story-hint" data-testid="story-outline-wave">
+                {t("story:outline.wave", {
+                  at: Math.max(1, totalWaves - waves.length),
+                  of: totalWaves,
+                })}
+              </span>
+            )}
+            <button
+              className="primary"
+              data-testid="story-outline-start"
+              disabled={writing !== null || reading}
+              onClick={start}
+              type="button"
+            >
+              {writing !== null
+                ? t("story:jobs.busy", jobProgress(writing))
+                : reading
+                  ? t("story:outline.reading")
+                  : story.chapters.length > 0
+                    ? t("story:outline.resplit")
+                    : t("story:outline.start")}
+            </button>
+          </div>
         </div>
 
         {failure !== null && (

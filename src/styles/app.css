@@ -6176,14 +6176,6 @@ body.is-dragging-split {
   width: 100%;
 }
 
-.story-elements-bar {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  justify-content: space-between;
-}
-
 .story-elements {
   display: grid;
   gap: 16px;
@@ -6669,7 +6661,6 @@ button > .story-spin {
 .story-granularity {
   display: inline-flex;
   gap: 4px;
-  margin-left: auto;
 }
 
 .story-board-head {
