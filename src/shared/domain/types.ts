@@ -822,6 +822,50 @@ export type StorySlotTarget =
   /** The music and sound under an act, asked for as one piece. */
   | { kind: "actMusic"; chapterId: string; actId: string };
 
+/**
+ * Something pointing at a file, told apart by what letting the file go would
+ * take.
+ *
+ * A card and a place's old drawing are the two a delete can take out of what
+ * holds them; the drawing a place is using, a clip cut into a timeline, and a
+ * story's manuscript or finished film are the ones it cannot — those are named
+ * to the reader instead, since the way out of them is a change somewhere else.
+ */
+export type AssetHolder =
+  | { kind: "node"; canvasId: CanvasId; nodeId: NodeId }
+  /** A drawing a story place keeps but is not using. */
+  | {
+      kind: "drawing";
+      storyId: string;
+      storyName: string;
+      target: StorySlotTarget;
+    }
+  /** The drawing a story place is using, which cannot be taken from it. */
+  | {
+      kind: "drawingInUse";
+      storyId: string;
+      storyName: string;
+      target: StorySlotTarget;
+    }
+  /** A clip on a timeline reading the file as its material. */
+  | {
+      kind: "clip";
+      timelineId: TimelineId;
+      timelineName: string;
+      clipId: ClipId;
+      clipLabel: string;
+    }
+  /** A story's manuscript, or the film it was rendered into. */
+  | {
+      kind: "storyFile";
+      storyId: string;
+      storyName: string;
+      what: "manuscript" | "film";
+    };
+
+/** A story place keeping a file only as a drawing it is not using. */
+export type AssetDrawing = Extract<AssetHolder, { kind: "drawing" }>;
+
 /** The fields a caller may move on an element, for `updateStoryElement`. */
 export interface StoryElementPatch {
   name?: string;

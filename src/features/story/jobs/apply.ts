@@ -27,6 +27,7 @@ import {
   mergeActs,
   mergeChaptersAt,
   mergeElements,
+  slotAt,
   withTake,
   type ActDraft,
   type ChapterWrite,
@@ -34,10 +35,7 @@ import {
   type StoryElementDraft,
   type StoryGuess,
 } from "../../../shared/domain/story";
-import {
-  chapterTargetMs,
-  emptyStorySlot,
-} from "../../../shared/domain/factories";
+import { chapterTargetMs } from "../../../shared/domain/factories";
 import {
   parseChapter,
   parseElements,
@@ -114,60 +112,6 @@ function slotCommand(
   slot: StorySlot,
 ): DocumentCommand[] {
   return [{ type: "setStorySlot", storyId: story.id, target, slot }];
-}
-
-/** The slot a place holds, so a take can be added to it. */
-function slotAt(
-  story: StoryDocument,
-  target: StorySlotTarget,
-): StorySlot | undefined {
-  switch (target.kind) {
-    case "element": {
-      const element = story.elements.find(
-        (held) => held.id === target.elementId,
-      );
-      if (element === undefined) return undefined;
-      return target.view === "main" ? element.main : element.turnaround;
-    }
-    case "keyframe": {
-      const keyframe = story.chapters
-        .find((chapter) => chapter.id === target.chapterId)
-        ?.acts.find((act) => act.id === target.actId)
-        ?.keyframes.find((held) => held.id === target.keyframeId);
-      return keyframe?.art;
-    }
-    case "actVideo": {
-      const act = story.chapters
-        .find((chapter) => chapter.id === target.chapterId)
-        ?.acts.find((held) => held.id === target.actId);
-      return act?.video;
-    }
-    // The two sound slots are absent on a telling that was never voiced, and
-    // an absent place answers as an empty one: the first take ever made for an
-    // act is written into a slot that was not there, which is what a reader
-    // pressing the button for the first time is asking for.
-    case "actVoice": {
-      const act = story.chapters
-        .find((chapter) => chapter.id === target.chapterId)
-        ?.acts.find((held) => held.id === target.actId);
-      if (act === undefined) return undefined;
-      return act.voice ?? emptyStorySlot();
-    }
-    case "actMusic": {
-      const act = story.chapters
-        .find((chapter) => chapter.id === target.chapterId)
-        ?.acts.find((held) => held.id === target.actId);
-      if (act === undefined) return undefined;
-      return act.music ?? emptyStorySlot();
-    }
-    case "keyframeVideo": {
-      const keyframe = story.chapters
-        .find((chapter) => chapter.id === target.chapterId)
-        ?.acts.find((act) => act.id === target.actId)
-        ?.keyframes.find((held) => held.id === target.keyframeId);
-      return keyframe?.video;
-    }
-  }
 }
 
 /** The place in the story a job target names, in the commands' own words. */

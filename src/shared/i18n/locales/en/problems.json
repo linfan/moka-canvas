@@ -1,5 +1,5 @@
 {
-  "assetInUse": "The asset is referenced by canvas nodes",
+  "assetInUse": "The asset is still in use",
   "assetInvalid": "The file is empty or unreadable",
   "assetMissing": "The asset file is missing",
   "boundsInvalid": "The node's bounds are invalid",

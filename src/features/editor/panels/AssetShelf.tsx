@@ -20,13 +20,13 @@ import {
   ASSET_CATEGORY_LABELS,
   ASSET_KIND_LABELS,
   PROJECT_ASSET_CATEGORIES,
+  assetHolders,
 } from "../../../shared/domain";
 import { i18n } from "../../../shared/i18n";
 import { assetUrl } from "../../../api";
 import { buildIssueIndex, formatBytes } from "../canvas/mediaCards";
 import {
   ASSET_DRAG_MIME,
-  assetReferencingNodeIds,
   editShelfEntry,
   focusAssetUses,
   focusNodes,
@@ -262,7 +262,10 @@ function ResourceRow({
       row.scrollIntoView({ block: "nearest" });
     }
   }, [focused]);
-  const uses = assetReferencingNodeIds(entry.id).length;
+  // Every hold, not only the cards: a file a story keeps as a drawing is used
+  // by the project as much as one a card shows, and a row reading "not used"
+  // over a file the server refuses to delete is a row that lied.
+  const uses = moka === null ? 0 : assetHolders(moka, entry.id).length;
   const maker = makerOf(moka, entry.provenance?.operationNodeId);
   const keeper = entry.favorite === true;
   const thumb = thumbOf(entry);

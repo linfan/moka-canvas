@@ -17,7 +17,10 @@ import {
 import {
   buildGoldenMokaFile,
   buildShelfMokaFile,
+  buildStoryMokaFile,
   goldenNodeIds,
+  storyIds,
+  timelineIds,
 } from "./fixtures";
 import {
   boundsForShape,
@@ -46,6 +49,7 @@ import type {
   WorkflowNode,
 } from "./types";
 import {
+  assetHolders,
   mentionNodeIds,
   modelIdentifierShaped,
   topologicalOrder,
@@ -1151,5 +1155,99 @@ describe("the assets a package would leave behind", () => {
 
   it("has nothing to leave out when every asset is placed", () => {
     expect(unreferencedAssets(buildGoldenMokaFile())).toEqual([]);
+  });
+});
+
+describe("what holds an asset", () => {
+  const WHEN = "2026-01-01T00:00:00.000Z";
+
+  /** The story fixture with the hero redrawn: `heroMain` is now an old picture. */
+  function redrawn(): MokaFile {
+    const moka = buildStoryMokaFile();
+    const hero = moka.stories![0].elements.find(
+      (element) => element.id === storyIds().hero,
+    )!;
+    hero.main.takes.push({
+      assetIds: ["asset-hero-redrawn"],
+      createdAt: WHEN,
+    });
+    return moka;
+  }
+
+  it("tells a card from a story picture and a picture in use", () => {
+    const ids = goldenNodeIds();
+    expect(assetHolders(buildGoldenMokaFile(), ids.assetImage)).toEqual([
+      { kind: "node", canvasId: ids.canvasMain, nodeId: ids.image },
+    ]);
+
+    const moka = redrawn();
+    expect(assetHolders(moka, storyIds().heroMain)).toEqual([
+      {
+        kind: "drawing",
+        storyId: storyIds().story,
+        storyName: "雨夜列车",
+        target: { kind: "element", elementId: storyIds().hero, view: "main" },
+      },
+    ]);
+    // The redraw is the picture the place is using, which no delete may take.
+    expect(assetHolders(moka, "asset-hero-redrawn")).toEqual([
+      {
+        kind: "drawingInUse",
+        storyId: storyIds().story,
+        storyName: "雨夜列车",
+        target: { kind: "element", elementId: storyIds().hero, view: "main" },
+      },
+    ]);
+  });
+
+  it("names the shot a frame belongs to, and the clip that reads a file", () => {
+    const moka = buildStoryMokaFile();
+    expect(assetHolders(moka, storyIds().frameArt)).toEqual([
+      {
+        kind: "drawingInUse",
+        storyId: storyIds().story,
+        storyName: "雨夜列车",
+        target: {
+          kind: "keyframe",
+          chapterId: storyIds().chapterFirst,
+          actId: storyIds().act,
+          keyframeId: storyIds().frameFirst,
+        },
+      },
+    ]);
+    expect(assetHolders(moka, timelineIds().videoAsset)).toEqual([
+      {
+        kind: "clip",
+        timelineId: timelineIds().timeline,
+        timelineName: "Timeline 1",
+        clipId: timelineIds().videoClip,
+        clipLabel: "opening.mp4",
+      },
+    ]);
+  });
+
+  it("keeps a manuscript and a film out of a delete's reach", () => {
+    const moka = buildStoryMokaFile();
+    expect(assetHolders(moka, storyIds().source)).toEqual([
+      {
+        kind: "storyFile",
+        storyId: storyIds().story,
+        storyName: "雨夜列车",
+        what: "manuscript",
+      },
+    ]);
+    moka.stories![0].edit.film = { assetIds: ["asset-film"], createdAt: WHEN };
+    expect(assetHolders(moka, "asset-film")).toEqual([
+      {
+        kind: "storyFile",
+        storyId: storyIds().story,
+        storyName: "雨夜列车",
+        what: "film",
+      },
+    ]);
+  });
+
+  it("holds nothing for a file nothing points at", () => {
+    expect(assetHolders(buildGoldenMokaFile(), "asset-nobody")).toEqual([]);
   });
 });

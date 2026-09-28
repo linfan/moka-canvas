@@ -11,7 +11,10 @@ import App from "../../App";
 import {
   buildGenerationMokaFile,
   buildGoldenMokaFile,
+  buildStoryMokaFile,
   goldenNodeIds,
+  storyIds,
+  timelineIds,
 } from "../../shared/domain/fixtures";
 import type {
   GenerationSpec,
@@ -40,6 +43,7 @@ import {
   requestDeleteAsset,
   resolveInputPick,
 } from "./interactions/actions";
+import { AssetDeleteDialog } from "./components/AssetDeleteDialog";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useHistoryStore } from "./stores/historyStore";
@@ -322,6 +326,38 @@ describe("editTextContent", () => {
 });
 
 describe("asset deletion", () => {
+  const WHEN = "2026-01-01T00:00:00.000Z";
+
+  /** The story fixture with `heroMain` kept only as an old picture. */
+  function redrawnStory(): MokaFile {
+    const moka = buildStoryMokaFile();
+    const hero = moka.stories![0].elements.find(
+      (element) => element.id === storyIds().hero,
+    )!;
+    hero.main.takes.push({ assetIds: ["asset-hero-redrawn"], createdAt: WHEN });
+    return moka;
+  }
+
+  function holding(id: string) {
+    return {
+      id,
+      name: `${id}.png`,
+      path: `assets/images/${id}-00000000.png`,
+      mime: "image/png",
+      bytes: 10,
+      createdAt: WHEN,
+      updatedAt: WHEN,
+    };
+  }
+
+  function deleted(assetId: string) {
+    return fetchMock.mock.calls.some(
+      ([url, init]) =>
+        String(url).includes(`/assets/${assetId}`) &&
+        (init as RequestInit)?.method === "DELETE",
+    );
+  }
+
   it("prompts when nodes still reference the asset", async () => {
     const ids = goldenNodeIds();
     hydrate();
@@ -329,11 +365,113 @@ describe("asset deletion", () => {
     expect(useEditorStore.getState().assetDeletePrompt).toEqual({
       assetId: ids.assetImage,
       nodeIds: [ids.image],
+      drawings: [],
     });
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining("/assets/"),
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+
+  it("asks before a story's old drawing goes, and takes the drawing with the file", async () => {
+    const moka = redrawnStory();
+    moka.resources.images.push(holding(storyIds().heroMain));
+    hydrate(moka);
+    await requestDeleteAsset(storyIds().heroMain);
+    // The ask is about the place, in the place's own words: nothing on a
+    // canvas holds this file, and a card count would have said nothing.
+    expect(useEditorStore.getState().assetDeletePrompt).toEqual({
+      assetId: storyIds().heroMain,
+      nodeIds: [],
+      drawings: [
+        {
+          kind: "drawing",
+          storyId: storyIds().story,
+          storyName: "雨夜列车",
+          target: { kind: "element", elementId: storyIds().hero, view: "main" },
+        },
+      ],
+    });
+    render(<AssetDeleteDialog />);
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.textContent).toContain("林 · Main picture");
+    expect(dialog.textContent).toContain("雨夜列车");
+    expect(deleted(storyIds().heroMain)).toBe(false);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Throw the drawing away and delete",
+      }),
+    );
+    await act(() => Promise.resolve());
+    const after = useProjectStore.getState().moka!;
+    const hero = after.stories![0].elements.find(
+      (element) => element.id === storyIds().hero,
+    )!;
+    expect(hero.main.takes.map((take) => take.assetIds[0])).toEqual([
+      "asset-hero-redrawn",
+    ]);
+    expect(
+      after.resources.images.some((e) => e.id === storyIds().heroMain),
+    ).toBe(false);
+    expect(deleted(storyIds().heroMain)).toBe(true);
+  });
+
+  it("empties a card and an old drawing in one act", async () => {
+    const moka = redrawnStory();
+    const ids = goldenNodeIds();
+    const node = activeCanvasOf(moka).nodes.find(
+      (held) => held.id === ids.image,
+    )!;
+    (node.data as MediaNodeData).assetId = storyIds().heroMain;
+    moka.resources.images.push(holding(storyIds().heroMain));
+    hydrate(moka);
+    await requestDeleteAsset(storyIds().heroMain);
+    expect(useEditorStore.getState().assetDeletePrompt).toEqual({
+      assetId: storyIds().heroMain,
+      nodeIds: [ids.image],
+      drawings: [
+        {
+          kind: "drawing",
+          storyId: storyIds().story,
+          storyName: "雨夜列车",
+          target: { kind: "element", elementId: storyIds().hero, view: "main" },
+        },
+      ],
+    });
+    await confirmDeleteAsset();
+    const after = useProjectStore.getState().moka!;
+    expect(
+      activeCanvasOf(after).nodes.some((held) => held.id === ids.image),
+    ).toBe(false);
+    expect(
+      after
+        .stories![0].elements.find((element) => element.id === storyIds().hero)!
+        .main.takes.map((take) => take.assetIds[0]),
+    ).toEqual(["asset-hero-redrawn"]);
+    expect(deleted(storyIds().heroMain)).toBe(true);
+  });
+
+  it("refuses the drawing a place is using, naming the place", async () => {
+    hydrate(buildStoryMokaFile());
+    await requestDeleteAsset(storyIds().heroMain);
+    expect(useEditorStore.getState().assetDeletePrompt).toBeNull();
+    const toasts = useAppStore.getState().toasts;
+    expect(toasts.at(-1)?.message).toBe(
+      "The asset cannot be deleted: it is the drawing 林 · Main picture in “雨夜列车” is using.",
+    );
+    expect(deleted(storyIds().heroMain)).toBe(false);
+  });
+
+  it("refuses a file a clip reads, naming the clip and its timeline", async () => {
+    hydrate(buildStoryMokaFile());
+    await requestDeleteAsset(timelineIds().videoAsset);
+    expect(useEditorStore.getState().assetDeletePrompt).toBeNull();
+    const toasts = useAppStore.getState().toasts;
+    expect(toasts.at(-1)?.message).toBe(
+      "The asset cannot be deleted: clip “opening.mp4” on the timeline “Timeline 1” is using it.",
+    );
+    expect(deleted(timelineIds().videoAsset)).toBe(false);
   });
 
   it("confirm removes referencing nodes and deletes the file", async () => {

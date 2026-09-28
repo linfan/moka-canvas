@@ -321,6 +321,8 @@
     "theme": "Theme",
     "themeHint": "The colors this machine draws the canvas in",
     "showMinimap": "Show minimap",
+    "usesOne": "{{count}} use",
+    "usesMany": "{{count}} uses",
     "cardsOne": "{{count}} card",
     "cardsMany": "{{count}} cards",
     "selectCardsOne": "Select the 1 card on this canvas using it",
@@ -475,7 +477,11 @@
       "thisAsset": "This asset",
       "usedByOne": "is used by 1 node. Deleting it also removes that node and their connections.",
       "usedByMany": "is used by {{count}} nodes. Deleting it also removes those nodes and their connections.",
-      "removeAndDelete": "Remove nodes and delete"
+      "keepsDrawingOne": "It is also an old drawing of {{place}}; that drawing is thrown away too.",
+      "keepsDrawingMany": "It is also kept as an old drawing in {{count}} places of the story: {{places}}; those drawings are thrown away too.",
+      "removeAndDelete": "Remove nodes and delete",
+      "removeDrawingAndDelete": "Throw the drawing away and delete",
+      "removeBothAndDelete": "Remove and delete"
     },
     "preview": {
       "close": "Close preview"
@@ -690,6 +696,16 @@
     "canvasNotReady": "The canvas is not ready",
     "canvasNotExported": "The canvas could not be exported",
     "playVideo": "Play {{name}}"
+  },
+  "holders": {
+    "stillUsed": "The asset cannot be deleted: {{holders}}.",
+    "join": ", ",
+    "storyPlace": "{{place}} in “{{story}}”",
+    "aPlace": "a place in the story",
+    "drawingInUse": "it is the drawing {{place}} is using",
+    "clip": "clip “{{clip}}” on the timeline “{{timeline}}” is using it",
+    "manuscript": "it is {{story}}'s manuscript",
+    "film": "it is {{story}}'s finished film"
   },
   "interactions": {
     "nothingSelected": "Nothing selected",
