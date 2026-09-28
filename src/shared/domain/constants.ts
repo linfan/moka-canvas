@@ -413,6 +413,13 @@ export const ELEMENT_KIND_LABELS: Record<string, string> = {
   prop: "domain:elementKind.prop",
 };
 
+/** How a drawn frame is used when the act is shot. */
+export const FILM_ROLE_LABELS: Record<string, string> = {
+  reference: "domain:filmRole.reference",
+  firstFrame: "domain:filmRole.firstFrame",
+  firstLastFrame: "domain:filmRole.firstLastFrame",
+};
+
 /**
  * A frame is written with the ratio itself, which cannot be a key of its own:
  * dots and a colon are the catalogue's own punctuation, so each one is filed

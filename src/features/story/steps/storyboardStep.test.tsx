@@ -789,11 +789,81 @@ describe("writing an episode's board", () => {
     expect(item?.params?.seconds).toBe(clampSeconds(5_000));
     expect(item?.prompt).toContain("about 5 seconds");
     expect(item?.params?.ratio).toBe(story().brief.aspect);
-    // First frame, last frame, and nothing in between: two shots, two pictures.
+    // Two shots, two pictures, and neither frame given a shoot role: they
+    // travel as the references the clip is drawn from, and the mode says so.
     expect(item?.inputs?.map((input) => input.role)).toEqual([
-      "firstFrame",
-      "lastFrame",
+      "reference",
+      "reference",
     ]);
+    expect(item?.params?.mode).toBe("reference");
+  });
+
+  it("gives every drawn frame a shoot role, and writes the one the reader picks", async () => {
+    openAtBoard(withEveryFrame());
+    const first = card(0);
+
+    const head = within(first).getByTestId(
+      "story-kf-role-0",
+    ) as HTMLSelectElement;
+    expect(head.value).toBe("reference");
+    expect(head.options.length).toBe(3);
+    expect(head.getAttribute("aria-label")).toContain("Shoot role");
+    // Nothing is drawn after the last frame, so it cannot open a pair; every
+    // frame before it may.
+    const tail = within(first).getByTestId(
+      "story-kf-role-1",
+    ) as HTMLSelectElement;
+    expect([...tail.options].map((option) => option.value)).toEqual([
+      "reference",
+      "firstFrame",
+    ]);
+
+    fireEvent.change(head, { target: { value: "firstLastFrame" } });
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[0]?.filmRole).toBe("firstLastFrame"),
+    );
+  });
+
+  it("takes the closing frame's role away once the frame before it pairs with it", async () => {
+    openAtBoard(withEveryFrame());
+    const first = card(0);
+
+    const tail = () =>
+      within(first).getByTestId("story-kf-role-1") as HTMLSelectElement;
+    expect(tail().disabled).toBe(false);
+
+    fireEvent.change(within(first).getByTestId("story-kf-role-0"), {
+      target: { value: "firstLastFrame" },
+    });
+    await waitFor(() => expect(tail().disabled).toBe(true));
+    expect(tail().getAttribute("title")).toContain("closing frame");
+
+    // Taken back, the closing frame is the reader's again.
+    fireEvent.change(within(first).getByTestId("story-kf-role-0"), {
+      target: { value: "reference" },
+    });
+    await waitFor(() => expect(tail().disabled).toBe(false));
+  });
+
+  it("shows a role the board can no longer offer rather than rewriting it", () => {
+    const moka = withEveryFrame();
+    moka.stories![0].chapters[0]!.acts[0]!.keyframes[1]!.filmRole =
+      "firstLastFrame";
+    openAtBoard(moka);
+
+    const tail = within(card(0)).getByTestId(
+      "story-kf-role-1",
+    ) as HTMLSelectElement;
+    expect(tail.value).toBe("firstLastFrame");
+    expect(
+      [...tail.options].find((option) => option.value === "firstLastFrame")
+        ?.disabled,
+    ).toBe(true);
+  });
+
+  it("offers no shoot role when the story is cut shot by shot", () => {
+    openAtBoard(withFilmedShot());
+    expect(screen.queryByTestId("story-kf-role-0")).toBeNull();
   });
 
   it("asks for the act's clip again from the row that plays it", async () => {
@@ -1081,6 +1151,24 @@ describe("writing an episode's board", () => {
       undo();
     });
     expect(acts()[0]?.keyframes[0]?.id).toBe(ids.frameFirst);
+  });
+
+  it("carries a shot's shoot role with it when the board is reordered", async () => {
+    const moka = withEveryFrame();
+    moka.stories![0].chapters[0]!.acts[0]!.keyframes[1]!.filmRole =
+      "firstFrame";
+    openAtBoard(moka);
+
+    fireEvent.click(screen.getByTestId("story-kf-down-0"));
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[0]?.id).toBe(ids.frameSecond),
+    );
+    // The role belongs to the shot rather than to its place: the shot was
+    // moved rather than written again, so what it is filmed as travels with it.
+    expect(acts()[0]?.keyframes[0]?.filmRole).toBe("firstFrame");
+    expect(
+      (screen.getByTestId("story-kf-role-0") as HTMLSelectElement).value,
+    ).toBe("firstFrame");
   });
 
   it("adds an act at the seam it was asked for, ready to be written into", async () => {

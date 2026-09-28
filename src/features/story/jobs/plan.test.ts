@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { ModelsView } from "../../../api/models";
 import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
-import type { StoryDocument } from "../../../shared/domain/types";
+import type {
+  StoryDocument,
+  StoryFilmRole,
+} from "../../../shared/domain/types";
 import { useModelStore } from "../../settings/modelStore";
 import {
   clampSeconds,
@@ -19,6 +22,7 @@ import {
   planKeyframeVideos,
   planOutline,
   planStoryboard,
+  settledRoleFrames,
 } from "./plan";
 
 const ids = storyIds();
@@ -152,6 +156,49 @@ function drawnStory(): StoryDocument {
               ),
             },
       ),
+    })),
+  };
+}
+
+/**
+ * The drawn board with a shoot role given to the shots this names, and — when
+ * one is handed over — one more drawn shot after the fixture's own, two
+ * seconds long, for a board long enough to have a middle.
+ */
+function roled(
+  roles: Record<string, StoryFilmRole>,
+  extra?: { id: string; assetId: string; content: string },
+): StoryDocument {
+  const held = drawnStory();
+  const act = held.chapters[0].acts[0];
+  const frames = [...act.keyframes];
+  if (extra !== undefined) {
+    frames.push({
+      ...frames[frames.length - 1],
+      id: extra.id,
+      title: "#3",
+      content: extra.content,
+      durationMs: 2_000,
+      art: {
+        takes: [
+          { assetIds: [extra.assetId], createdAt: "2026-01-01T00:00:00Z" },
+        ],
+      },
+    });
+  }
+  const next = {
+    ...act,
+    keyframes: frames.map((frame) =>
+      roles[frame.id] === undefined
+        ? frame
+        : { ...frame, filmRole: roles[frame.id] },
+    ),
+  };
+  return {
+    ...held,
+    chapters: held.chapters.map((chapter) => ({
+      ...chapter,
+      acts: chapter.acts.map((each) => (each.id === act.id ? next : each)),
     })),
   };
 }
@@ -489,18 +536,29 @@ describe("planning the clips", () => {
     expect(items[0].params).toEqual({
       seconds: 5,
       ratio: "16:9",
+      mode: "reference",
       generateAudio: false,
       watermark: false,
     });
+    // No frame has been given a role, which is every frame a reference: the
+    // pictures travel as references and the mode says so, since a machine
+    // whose own taste says otherwise does not decide what the board means.
     expect(items[0].inputs).toEqual([
-      { role: "firstFrame", assetId: ids.frameArt },
-      { role: "lastFrame", assetId: "asset-frame-second" },
+      { role: "reference", assetId: ids.frameArt },
+      { role: "reference", assetId: "asset-frame-second" },
     ]);
     // The shot's words travel as the telling means them: the backticks that
     // marked their mentions are the room's own and are not sent.
     expect(items[0].prompt).toContain("雨中的站台，林立在灯下。");
     expect(items[0].prompt).toContain("周转过身来。");
     expect(items[0].prompt).not.toContain("`");
+    // The pictures are references, and the prompt asks for a shot drawn from
+    // them rather than one moving between frames.
+    expect(items[0].prompt).toContain(
+      "It covers: 雨中的站台，林立在灯下。; 周转过身来。",
+    );
+    expect(items[0].prompt).toContain("references the shots are drawn from");
+    expect(items[0].prompt).not.toContain("frames it moves between");
   });
 
   it("plans no act video while none of its shots is drawn", () => {
@@ -564,6 +622,7 @@ describe("planning the clips", () => {
     expect(items[0].params).toEqual({
       seconds: 10,
       ratio: "16:9",
+      mode: "reference",
       generateAudio: false,
       watermark: false,
     });
@@ -605,10 +664,10 @@ describe("planning the clips", () => {
     expect(items[1].prompt).toContain("part 2 of 2");
     expect(items[0].prompt).toContain("about 9 seconds");
     expect(items[0].inputs).toEqual([
-      { role: "firstFrame", assetId: ids.frameArt },
+      { role: "reference", assetId: ids.frameArt },
     ]);
     expect(items[1].inputs).toEqual([
-      { role: "firstFrame", assetId: "asset-frame-second" },
+      { role: "reference", assetId: "asset-frame-second" },
     ]);
     // Both are the act's: the target is the place the clip lands either way.
     expect(items[0].target).toEqual(items[1].target);
@@ -655,11 +714,140 @@ describe("planning the clips", () => {
     ]);
     expect(items.map((item) => item.params?.seconds)).toEqual([15, 15]);
     expect(items[0].inputs).toEqual([
-      { role: "firstFrame", assetId: ids.frameArt },
+      { role: "reference", assetId: ids.frameArt },
+    ]);
+    expect(items[1].inputs).toEqual([
+      { role: "reference", assetId: "asset-frame-second" },
+    ]);
+  });
+
+  it("opens a piece of its own from a frame marked as a first frame", () => {
+    useModelStore.setState({ view: settingsWithVideoCeiling(15) });
+
+    const items = planActVideos(
+      roled({ [ids.frameSecond]: "firstFrame" }),
+      ids.chapterFirst,
+      [ids.act],
+    );
+    expect(items.map((item) => item.id)).toEqual([
+      `actVideo:${ids.chapterFirst}:${ids.act}:1`,
+      `actVideo:${ids.chapterFirst}:${ids.act}:2`,
+    ]);
+    // The first shot keeps its reference run, the second is filmed from its
+    // own drawn frame: the piece's mode says which of the two it is.
+    expect(items.map((item) => item.params?.mode)).toEqual([
+      "reference",
+      "auto",
+    ]);
+    expect(items[0].inputs).toEqual([
+      { role: "reference", assetId: ids.frameArt },
     ]);
     expect(items[1].inputs).toEqual([
       { role: "firstFrame", assetId: "asset-frame-second" },
     ]);
+    expect(items[1].prompt).toContain("This part opens on: 周转过身来。");
+    expect(items[1].prompt).not.toContain(
+      "references the shots are drawn from",
+    );
+  });
+
+  it("pairs a first-and-last frame with the frame after it, at the act's own end", () => {
+    const items = planActVideos(
+      roled({ [ids.frameFirst]: "firstLastFrame" }),
+      ids.chapterFirst,
+      [ids.act],
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(`actVideo:${ids.chapterFirst}:${ids.act}`);
+    // The pair closes the act, so the second shot's own two seconds ride with
+    // it — nothing opens on that frame, and none of the act is asked twice.
+    expect(items[0].params?.seconds).toBe(5);
+    expect(items[0].params?.mode).toBe("auto");
+    expect(items[0].inputs).toEqual([
+      { role: "firstFrame", assetId: ids.frameArt },
+      { role: "lastFrame", assetId: "asset-frame-second" },
+    ]);
+    expect(items[0].prompt).toContain("It opens on: 雨中的站台，林立在灯下。");
+    expect(items[0].prompt).toContain("It ends on: 周转过身来。");
+    expect(items[0].prompt).not.toContain("passes through");
+  });
+
+  it("closes the act on the pair a settling role makes, with no piece after it", () => {
+    const board = roled(
+      {
+        [ids.frameFirst]: "reference",
+        [ids.frameSecond]: "firstLastFrame",
+      },
+      { id: "frame-third", assetId: "asset-frame-third", content: "灯灭了。" },
+    );
+    expect([...settledRoleFrames(board.chapters[0].acts[0])]).toEqual([
+      "frame-third",
+    ]);
+
+    const items = planActVideos(board, ids.chapterFirst, [ids.act]);
+    expect(items.map((item) => item.id)).toEqual([
+      `actVideo:${ids.chapterFirst}:${ids.act}:1`,
+      `actVideo:${ids.chapterFirst}:${ids.act}:2`,
+    ]);
+    // The first shot is a run of references of its own, and the pair takes the
+    // last frame whole: two seconds for the run, five for the pair.
+    expect(items.map((item) => item.params?.seconds)).toEqual([2, 5]);
+    expect(items.map((item) => item.params?.mode)).toEqual([
+      "reference",
+      "auto",
+    ]);
+    expect(items[1].inputs).toEqual([
+      { role: "firstFrame", assetId: "asset-frame-second" },
+      { role: "lastFrame", assetId: "asset-frame-third" },
+    ]);
+  });
+
+  it("lets a frame close one piece and open the next when the reader says so", () => {
+    const board = roled(
+      {
+        [ids.frameFirst]: "firstLastFrame",
+        [ids.frameSecond]: "firstFrame",
+      },
+      { id: "frame-third", assetId: "asset-frame-third", content: "灯灭了。" },
+    );
+    // The pair's tail is not the act's closing frame, so it goes on to open a
+    // piece of its own: a frame may serve both pieces, which is the reader's
+    // to ask for.
+    expect([...settledRoleFrames(board.chapters[0].acts[0])]).toEqual([]);
+
+    const items = planActVideos(board, ids.chapterFirst, [ids.act]);
+    // Every shot's own length is asked for exactly once, across the three
+    // pieces: the pair opens on the first shot, the third is drawn on its own,
+    // and the shot between them is both the pair's tail and a piece's head.
+    expect(items.map((item) => item.params?.seconds)).toEqual([2, 3, 2]);
+    expect(items.map((item) => item.params?.mode)).toEqual([
+      "auto",
+      "auto",
+      "reference",
+    ]);
+    expect(items[0].inputs).toEqual([
+      { role: "firstFrame", assetId: ids.frameArt },
+      { role: "lastFrame", assetId: "asset-frame-second" },
+    ]);
+    // The second shot is the pair's tail and a first frame at once: the same
+    // picture travels in two pieces.
+    expect(items[1].inputs).toEqual([
+      { role: "firstFrame", assetId: "asset-frame-second" },
+    ]);
+    expect(items[2].inputs).toEqual([
+      { role: "reference", assetId: "asset-frame-third" },
+    ]);
+  });
+
+  it("treats a first-and-last frame with nothing after it as a reference", () => {
+    const items = planActVideos(
+      roled({ [ids.frameSecond]: "firstLastFrame" }),
+      ids.chapterFirst,
+      [ids.act],
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].params?.mode).toBe("reference");
+    expect(items[0].prompt).toContain("It covers:");
   });
 });
 

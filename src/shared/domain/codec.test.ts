@@ -163,6 +163,41 @@ describe("moka codec", () => {
     ).toEqual([one]);
   });
 
+  it("reads a frame's shoot role, and reads the plain use as no word at all", () => {
+    const story = buildStoryMokaFile();
+    story.stories![0].chapters[0].acts[0].keyframes[0].filmRole =
+      "firstLastFrame";
+    const read = decodeMokaFile(encodeMokaFile(story));
+    expect(read.stories![0].chapters[0].acts[0].keyframes[0].filmRole).toBe(
+      "firstLastFrame",
+    );
+    // The frame beside it was never given a role: the plain use is the
+    // absence, and a board that has never heard of roles keeps the shape it
+    // came in with.
+    expect(
+      "filmRole" in read.stories![0].chapters[0].acts[0].keyframes[1],
+    ).toBe(false);
+
+    // A word this build does not read falls back to the plain use, the way
+    // every other word of a board does.
+    const raw = deserialize(
+      Buffer.from(encodeMokaFile(buildStoryMokaFile())).subarray(4),
+    ) as Record<string, unknown>;
+    const storyDoc = (raw.stories as Record<string, unknown>[])[0];
+    const chapters = storyDoc.chapters as Record<string, unknown>[];
+    const acts = chapters[0].acts as Record<string, unknown>[];
+    const frames = acts[0].keyframes as Record<string, unknown>[];
+    frames[0].filmRole = "solo";
+    const bson = serialize(raw);
+    const bytes = new Uint8Array(4 + bson.length);
+    bytes.set(MOKA_MAGIC, 0);
+    bytes.set(bson, 4);
+    expect(
+      decodeMokaFile(bytes).stories![0].chapters[0].acts[0].keyframes[0]
+        .filmRole,
+    ).toBe("reference");
+  });
+
   it("reads a story's reference limit whole, and one beyond the bound as the bound", () => {
     const story = buildStoryMokaFile();
     story.stories![0].maxReferenceImages = 7;

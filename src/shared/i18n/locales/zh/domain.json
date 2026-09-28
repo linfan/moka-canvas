@@ -86,6 +86,11 @@
     "scene": "场景",
     "prop": "物品"
   },
+  "filmRole": {
+    "reference": "参考",
+    "firstFrame": "首帧",
+    "firstLastFrame": "首尾帧"
+  },
   "modelScene": {
     "textToVideo": "文生视频",
     "imageToVideo": "图生视频",

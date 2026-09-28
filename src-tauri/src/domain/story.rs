@@ -147,6 +147,22 @@ word_enum!(StoryShotGranularity, Act, {
     "keyframe" => Keyframe,
 });
 
+word_enum!(StoryFilmRole, Reference, {
+    "reference" => Reference,
+    "firstFrame" => FirstFrame,
+    "firstLastFrame" => FirstLastFrame,
+});
+
+/// A frame nothing has been said about is a reference, the way a frame with no
+/// words is a medium shot: the plain word is what the absence meant anyway.
+fn plain_film_role() -> StoryFilmRole {
+    StoryFilmRole::Reference
+}
+
+fn is_plain_film_role(role: &StoryFilmRole) -> bool {
+    *role == StoryFilmRole::Reference
+}
+
 // -----------------------------------------------------------------------------
 // What a telling is made of
 // -----------------------------------------------------------------------------
@@ -312,6 +328,16 @@ pub struct StoryKeyframe {
     pub camera_move: StoryCameraMove,
     #[serde(deserialize_with = "word")]
     pub angle: StoryCameraAngle,
+    /// How the frame is used when the act is shot: the head of a video of its
+    /// own, the pair of a first-and-last video together with the frame after
+    /// it, or one of the references a video is drawn from. Left off when plain,
+    /// which is what a board that has never heard of roles means.
+    #[serde(
+        default = "plain_film_role",
+        skip_serializing_if = "is_plain_film_role",
+        deserialize_with = "word"
+    )]
+    pub film_role: StoryFilmRole,
     pub content: String,
     pub dialogue: Vec<StoryDialogueLine>,
     pub duration_ms: i64,
@@ -524,6 +550,8 @@ pub struct StoryKeyframePatch {
     pub camera_move: Option<StoryCameraMove>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<StoryCameraAngle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub film_role: Option<StoryFilmRole>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1544,6 +1572,7 @@ pub fn apply_story_command(
                 shot_size: patch.shot_size.map(|_| keyframe.shot_size),
                 camera_move: patch.camera_move.map(|_| keyframe.camera_move),
                 angle: patch.angle.map(|_| keyframe.angle),
+                film_role: patch.film_role.map(|_| keyframe.film_role),
                 content: patch.content.as_ref().map(|_| keyframe.content.clone()),
                 dialogue: patch.dialogue.as_ref().map(|_| keyframe.dialogue.clone()),
                 duration_ms: patch.duration_ms.map(|_| keyframe.duration_ms),
@@ -1572,6 +1601,9 @@ pub fn apply_story_command(
                         }
                         if let Some(angle) = patch.angle {
                             frame.angle = angle;
+                        }
+                        if let Some(film_role) = patch.film_role {
+                            frame.film_role = film_role;
                         }
                         if let Some(content) = &patch.content {
                             frame.content = content.clone();

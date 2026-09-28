@@ -86,6 +86,11 @@
     "scene": "Scene",
     "prop": "Prop"
   },
+  "filmRole": {
+    "reference": "Reference",
+    "firstFrame": "First frame",
+    "firstLastFrame": "First and last frame"
+  },
   "modelScene": {
     "textToVideo": "Text to video",
     "imageToVideo": "Image to video",

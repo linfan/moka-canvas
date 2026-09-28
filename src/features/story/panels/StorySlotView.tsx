@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { assetUrl } from "../../../api/assets";
@@ -29,6 +29,7 @@ export function StorySlotView({
   onChoose,
   onRemove,
   note,
+  actions,
   testId,
 }: {
   slot: StorySlot;
@@ -44,6 +45,8 @@ export function StorySlotView({
   onRemove: (assetId: string) => Promise<string | undefined>;
   /** A line under the picture, for what the place is waiting on. */
   note?: string;
+  /** The card's own controls, in the row under the picture. */
+  actions?: ReactNode;
   testId?: string;
 }) {
   const { t } = useTranslation();
@@ -135,6 +138,7 @@ export function StorySlotView({
               {t("story:panels.pick")}
             </button>
           )}
+          {actions}
           {note !== undefined && <span className="story-hint">{note}</span>}
         </div>
       )}
