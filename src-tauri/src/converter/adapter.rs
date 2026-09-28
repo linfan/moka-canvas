@@ -221,6 +221,7 @@ impl ProviderAdapter for LuaAdapter {
                 protocol: call.protocol.clone(),
                 capability: request.capability,
                 model: call.config_id.clone(),
+                scene: call.scene,
                 created_at: crate::domain::now_iso(),
                 answer: Some(Box::new(SettledAnswer::of(&result))),
             });
@@ -264,6 +265,7 @@ impl ProviderAdapter for LuaAdapter {
             // whatever model that category happens to hold.
             capability: request.capability,
             model: call.config_id.clone(),
+            scene: call.scene,
             created_at: crate::domain::now_iso(),
             answer: None,
         })

@@ -42,7 +42,7 @@ use moka_canvas::domain::{
 };
 use moka_canvas::generate::AsyncTask;
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
-use moka_canvas::metadata::{Defaults, ModelDraft, Protocol};
+use moka_canvas::metadata::{Defaults, ModelDraft, Protocol, Scene, SubModel};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use tokio::sync::Notify;
@@ -162,6 +162,7 @@ impl Harness {
                     model: (*id).into(),
                     display_name: (*id).into(),
                     max_video_seconds: None,
+                    sub_models: Vec::new(),
                     enabled: true,
                     expected_revision: None,
                 })
@@ -186,6 +187,57 @@ impl Harness {
             .set_defaults(&defaults, None)
             .await
             .expect("the defaults are stored");
+    }
+
+    /// The same shot model, routing its scenarios through sub-models: the
+    /// reference scenario is served under a name and an address of its own.
+    async fn configure_routed(&self, base_url: &str) {
+        converters().await;
+        self.state
+            .models
+            .upsert(ModelDraft {
+                id: SHOOTER.into(),
+                category: Capability::Video,
+                protocol: Protocol::new("openaiVideos"),
+                url: format!("{base_url}/v1/videos"),
+                model: "shooter-text".into(),
+                display_name: SHOOTER.into(),
+                max_video_seconds: None,
+                sub_models: vec![
+                    SubModel {
+                        model: "shooter-ref".into(),
+                        url: Some(format!("{base_url}/v1/video-images")),
+                        scenes: vec![Scene::ReferenceToVideo],
+                    },
+                    SubModel {
+                        model: "shooter-text".into(),
+                        url: None,
+                        scenes: vec![
+                            Scene::TextToVideo,
+                            Scene::ImageToVideo,
+                            Scene::FirstLastFrame,
+                        ],
+                    },
+                ],
+                enabled: true,
+                expected_revision: None,
+            })
+            .await
+            .expect("the routed model is stored");
+        self.state
+            .models
+            .set_key(SHOOTER, Some(API_KEY))
+            .await
+            .expect("the credential is stored");
+        let defaults = Defaults {
+            video: Some(SHOOTER.to_string()),
+            ..Defaults::default()
+        };
+        self.state
+            .models
+            .set_defaults(&defaults, None)
+            .await
+            .expect("the default is stored");
     }
 
     /// Creates the project a run happens in, and returns its canvas and the
@@ -738,6 +790,44 @@ fn shooting(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
         )
 }
 
+/// A provider whose shots are served at a sub-model's own address: a look
+/// records which address answered, so a poll that asked the configuration's
+/// address instead is visible rather than a mystery.
+fn shooting_routed(recorded: Recorded, finished: Arc<AtomicBool>) -> Router {
+    let asking = recorded.clone();
+    Router::new()
+        .route(
+            "/v1/video-images",
+            post(move |body: Bytes| {
+                let recorded = recorded.clone();
+                async move {
+                    recorded.note(&body);
+                    Json(json!({ "id": JOB, "status": "queued" }))
+                }
+            }),
+        )
+        .route(
+            "/v1/video-images/{reference}",
+            get(move |Route(reference): Route<String>| {
+                let recorded = asking.clone();
+                let finished = Arc::clone(&finished);
+                async move {
+                    recorded.look(&format!("sub:{reference}"));
+                    let status = if finished.load(Ordering::SeqCst) {
+                        "succeeded"
+                    } else {
+                        "in_progress"
+                    };
+                    Json(json!({ "id": reference, "status": status }))
+                }
+            }),
+        )
+        .route(
+            "/v1/video-images/{reference}/content",
+            get(|| async { ([(header::CONTENT_TYPE, "video/mp4")], SHOT.to_vec()) }),
+        )
+}
+
 /// A node in a canvas as the API reports it.
 fn node_by_id<'a>(nodes: &'a [Value], id: &str) -> &'a Value {
     nodes
@@ -895,6 +985,17 @@ async fn until_placed(harness: &Harness, run_id: &str) -> String {
 /// matters is what the next one makes of what it finds, and this is exactly what
 /// it finds. Returns the run it can be followed by and the job it was waiting on.
 async fn left_behind(harness: &Harness, root: &str, canvas_id: &str) -> (String, String) {
+    left_behind_with(harness, root, canvas_id, None).await
+}
+
+/// The same, with the scenario the job was placed with written on its note:
+/// what a poll reads to ask the sub-model that was asked the first time.
+async fn left_behind_with(
+    harness: &Harness,
+    root: &str,
+    canvas_id: &str,
+    scene: Option<Scene>,
+) -> (String, String) {
     let project_id = harness.document().await["moka"]["metadata"]["id"]
         .as_str()
         .expect("the document names its project")
@@ -940,6 +1041,7 @@ async fn left_behind(harness: &Harness, root: &str, canvas_id: &str) -> (String,
         protocol: Protocol::new("openaiVideos"),
         capability: Capability::Video,
         model: reference(SHOOTER),
+        scene,
         created_at: started,
         answer: None,
     })
@@ -1812,6 +1914,40 @@ async fn a_run_left_waiting_on_a_shot_asks_after_the_same_one_when_the_project_r
         "a job that answered leaves nothing behind to be asked after again"
     );
     assert_eq!(files_in(&root, "videos"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_poll_after_a_restart_asks_the_address_the_scene_was_placed_at() {
+    let harness = harness();
+    let recorded = Recorded::default();
+    let finished = Arc::new(AtomicBool::new(false));
+    let base_url = serve(shooting_routed(recorded.clone(), Arc::clone(&finished))).await;
+    harness.configure_routed(&base_url).await;
+    let (canvas_id, root) = harness.project("Routed").await;
+    harness
+        .apply(json!([
+            { "type": "addNode", "canvasId": canvas_id, "node": asking(
+                "n-shot", NodeKind::Video, "Shot", &reference(SHOOTER),
+                "a lantern drifting over the lake", None) },
+        ]))
+        .await;
+    // The job was placed for the reference scenario, which this configuration
+    // routes through a sub-model at an address of its own.
+    let (run_id, _task_id) =
+        left_behind_with(&harness, &root, &canvas_id, Some(Scene::ReferenceToVideo)).await;
+
+    finished.store(true, Ordering::SeqCst);
+    harness.reopen(&root).await;
+
+    let resumed = harness.settled(&run_id).await;
+    assert_eq!(resumed["status"], "succeeded", "{:?}", resumed["error"]);
+    assert_eq!(recorded.calls(), 0, "nothing was placed again");
+    assert!(recorded.looks() > 0, "the job was asked after");
+    assert_eq!(
+        recorded.last_look(),
+        format!("sub:{JOB}"),
+        "a job placed at a sub-model's address is asked after there, off the note beside the run"
+    );
 }
 
 // ---------------------------------------------------------------- what a run says

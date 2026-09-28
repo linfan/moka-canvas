@@ -1,4 +1,4 @@
-import type { Capability } from "../shared/domain";
+import type { Capability, ModelScene } from "../shared/domain";
 import { http } from "./client";
 
 /**
@@ -10,6 +10,22 @@ export interface ApiKeyView {
   masked: string | null;
   /** When the credential was last replaced; null when none is stored. */
   rotatedAt?: string | null;
+}
+
+/**
+ * One scenario's own model name and address, under a configuration.
+ *
+ * A provider that names a different model — or serves it at a different
+ * address — per scenario is configured this way; a scenario is answered by at
+ * most one sub-model, so which one answers is never a guess.
+ */
+export interface SubModel {
+  /** The model name the provider knows for these scenarios. */
+  model: string;
+  /** The address these scenarios are served at; absent inherits the main URL. */
+  url?: string | null;
+  /** The scenarios this sub-model answers for. */
+  scenes: ModelScene[];
 }
 
 /**
@@ -37,6 +53,8 @@ export interface ModelView {
    * in pieces is cut to this length.
    */
   maxVideoSeconds?: number | null;
+  /** Per-scenario models, where the configuration routes them. */
+  subModels?: SubModel[];
   enabled: boolean;
   apiKey: ApiKeyView;
 }
@@ -137,6 +155,8 @@ export interface ModelDraft {
   displayName: string;
   /** A video model's own clip ceiling; null or omitted means none is kept. */
   maxVideoSeconds?: number | null;
+  /** Per-scenario models; omitted leaves the one model answering everything. */
+  subModels?: SubModel[];
   enabled: boolean;
   expectedRevision?: number | null;
   /**

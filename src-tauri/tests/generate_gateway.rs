@@ -28,7 +28,8 @@ use moka_canvas::generate::{
 };
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
 use moka_canvas::metadata::{
-    self, Defaults, ImagePreferences, MetadataStore, ModelDraft, Preferences, Protocol,
+    self, Defaults, ImagePreferences, MetadataStore, ModelDraft, Preferences, Protocol, Scene,
+    SubModel,
 };
 use moka_canvas::project::store::FsProjectStore;
 use moka_canvas::project::{CreateProject, ProjectStore, StagedAsset};
@@ -107,6 +108,7 @@ impl Rig {
                     model: id.clone(),
                     display_name: id.clone(),
                     max_video_seconds: None,
+                    sub_models: Vec::new(),
                     enabled: true,
                     expected_revision: None,
                 })
@@ -785,6 +787,7 @@ async fn a_model_with_no_stored_key_is_reported_before_anything_is_sent() {
             model: "gpt-5.5".into(),
             display_name: "GPT-5.5".into(),
             max_video_seconds: None,
+            sub_models: Vec::new(),
             enabled: true,
             expected_revision: None,
         })
@@ -1311,6 +1314,145 @@ async fn a_shot_is_started_polled_and_then_the_handle_is_done_with() {
         .await
         .expect_err("the handle is done with");
     assert_eq!(error.code(), "TASK_NOT_FOUND");
+}
+
+/// A provider that films only where a sub-model's own address points: a job
+/// placed or polled at the configuration's address finds nothing there.
+async fn sub_model_provider(watched: Watch) -> String {
+    let started = watched.clone();
+    let polled = watched.clone();
+    let collected = watched.clone();
+    serve(
+        Router::new()
+            .route(
+                "/v1/video-images",
+                post(move |body: Bytes| {
+                    let watched = started.clone();
+                    async move {
+                        watched.note(Some(body));
+                        Json(json!({ "id": "job-sub", "status": "queued" }))
+                    }
+                }),
+            )
+            .route(
+                "/v1/video-images/{id}",
+                get(move || {
+                    let watched = polled.clone();
+                    async move {
+                        watched.note(None);
+                        Json(json!({ "id": "job-sub", "status": "completed" }))
+                    }
+                }),
+            )
+            .route(
+                "/v1/video-images/{id}/content",
+                get(move || {
+                    let watched = collected.clone();
+                    async move {
+                        watched.note(None);
+                        ([(header::CONTENT_TYPE, "video/mp4")], b"mp4-bytes".to_vec())
+                    }
+                }),
+            ),
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_shot_is_placed_with_the_sub_model_its_scene_names() {
+    let watched = Watch::default();
+    let base_url = sub_model_provider(watched.clone()).await;
+
+    let rig = rig().await;
+    rig.serving(&base_url, vec![model("a-video-model", Capability::Video)])
+        .await;
+    rig.default(Capability::Video, "a-video-model").await;
+
+    // The configuration routes one scenario through a sub-model of its own: a
+    // name the provider knows, at an address of its own.
+    let stored = rig
+        .models
+        .model("a-video-model")
+        .await
+        .expect("the configuration is stored");
+    rig.models
+        .upsert(ModelDraft {
+            id: stored.id.clone(),
+            category: Capability::Video,
+            protocol: stored.protocol.clone(),
+            url: stored.url.clone(),
+            model: stored.model.clone(),
+            display_name: stored.display_name.clone(),
+            max_video_seconds: None,
+            sub_models: vec![SubModel {
+                model: "happy-ref".into(),
+                url: Some(format!("{base_url}/v1/video-images")),
+                scenes: vec![Scene::ReferenceToVideo],
+            }],
+            enabled: true,
+            expected_revision: None,
+        })
+        .await
+        .expect("the routing is stored");
+
+    // A shot carrying pictures meant as references is that scenario, and the
+    // job goes to the sub-model's name and address — neither of which the
+    // configuration itself answers at.
+    let picture = rig.upload("cat.png", "image/png", &encoded(4, 3)).await;
+    let mut asked = request(
+        Capability::Video,
+        "a slow pan",
+        json!({ "mode": "reference" }),
+    );
+    asked.inputs = vec![GenerateInput {
+        role: InputRole::Reference,
+        asset_id: picture,
+        window: None,
+    }];
+    let task = rig
+        .gateway
+        .video(asked, &Cancel::new())
+        .await
+        .expect("the job starts at the sub-model's address");
+
+    assert_eq!(task.scene, Some(Scene::ReferenceToVideo));
+    assert_eq!(
+        watched.body(0)["model"],
+        "happy-ref",
+        "the provider is asked for the sub-model's own name"
+    );
+
+    // The poll asks the same address the job was placed at: a job is a
+    // provider's, and only the one that issued the handle can answer for it.
+    match rig
+        .gateway
+        .poll(&task.id, &Cancel::new())
+        .await
+        .expect("the poll finds the job")
+    {
+        TaskState::Succeeded(result) => {
+            assert_eq!(result.items[0].bytes, b"mp4-bytes");
+        }
+        other => panic!("expected the finished shot, got {other:?}"),
+    }
+
+    // A scenario the routing does not answer for is refused before anything is
+    // sent, and the client is told which one to configure.
+    let error = rig
+        .gateway
+        .video(
+            request(Capability::Video, "words alone", json!({})),
+            &Cancel::new(),
+        )
+        .await
+        .expect_err("the text-to-video scene is not routed");
+    assert_eq!(error.code(), "MODEL_SCENE_UNCONFIGURED");
+    let details = error.details().expect("details");
+    assert_eq!(details["scene"], "textToVideo");
+    assert_eq!(
+        details["reference"], "a-video-model",
+        "the fix is in this configuration's settings"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

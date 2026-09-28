@@ -1,4 +1,5 @@
 import { i18n } from ".";
+import { MODEL_SCENE_LABELS, isModelScene } from "../domain/constants";
 
 /**
  * The values a Chinese problem message is written with.
@@ -40,6 +41,22 @@ function filledIn(values: ProblemValues | undefined): ProblemValues {
 }
 
 /**
+ * A scenario detail as the reader's words for it.
+ *
+ * The server names a scenario by its wire word — `referenceToVideo` — because
+ * it has no language of its own, and a sentence reading that word back would
+ * name something the settings form never shows. A word this build does not
+ * know is left as it arrived: it is still the truest thing that can be said.
+ */
+function sceneWords(values: ProblemValues): ProblemValues {
+  const scene = values.scene;
+  if (typeof scene === "string" && isModelScene(scene)) {
+    values.scene = i18n.t(MODEL_SCENE_LABELS[scene]);
+  }
+  return values;
+}
+
+/**
  * The words to show for a problem: the Chinese catalogue's when the interface
  * is Chinese and it knows the code, and the server's own English message
  * otherwise.
@@ -62,7 +79,11 @@ export function problemMessage(
   if (i18n.resolvedLanguage !== "zh") return fallback;
   const key = `${NAMESPACE}:${problemKey(code)}`;
   if (!i18n.exists(key)) return fallback;
-  const said = i18n.t(key, { code, message: fallback, ...filledIn(values) });
+  const said = i18n.t(key, {
+    code,
+    message: fallback,
+    ...sceneWords(filledIn(values)),
+  });
   return UNFILLED.test(said) ? fallback : said;
 }
 

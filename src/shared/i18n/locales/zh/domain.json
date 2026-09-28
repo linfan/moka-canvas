@@ -86,6 +86,14 @@
     "scene": "场景",
     "prop": "物品"
   },
+  "modelScene": {
+    "textToVideo": "文生视频",
+    "imageToVideo": "图生视频",
+    "firstLastFrame": "首尾帧",
+    "referenceToVideo": "参考图生视频",
+    "textToImage": "文生图",
+    "imageEdit": "图像编辑（图生图）"
+  },
   "storyStep": {
     "idea": "创意",
     "outline": "大纲",

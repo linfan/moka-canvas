@@ -119,6 +119,7 @@ mod tests {
             protocol: Protocol::from_wire_name("openaiVideos"),
             capability: Capability::Video,
             model: "a-video-model".into(),
+            scene: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             answer: None,
         }

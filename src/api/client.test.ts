@@ -93,6 +93,9 @@ describe("what a reader repairs in settings", () => {
     expect(isConfigurationTrouble(thrown("MODEL_CAPABILITY_MISMATCH"))).toBe(
       true,
     );
+    expect(isConfigurationTrouble(thrown("MODEL_SCENE_UNCONFIGURED"))).toBe(
+      true,
+    );
   });
 
   it("leaves a trouble that time or a second ask might fix alone", () => {

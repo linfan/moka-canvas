@@ -14,7 +14,7 @@ use crate::config::GenerateConfig;
 use crate::converter;
 use crate::converter::registry::AuthSpec;
 use crate::domain::Capability;
-use crate::metadata::Protocol;
+use crate::metadata::{Protocol, Scene};
 
 use super::debug::{self, Kind};
 use super::error::ProviderError;
@@ -61,6 +61,9 @@ pub struct ModelCall {
     pub protocol: Protocol,
     /// The complete endpoint address the configured calls are sent to.
     pub url: String,
+    /// The scenario this call was placed for, kept so a job started here can
+    /// be polled at the same address it was started at.
+    pub scene: Option<Scene>,
     pub api_key: String,
     pub budgets: GenerateConfig,
     client: reqwest::Client,
@@ -78,6 +81,7 @@ impl ModelCall {
             display_name: resolved.display_name.clone(),
             protocol: resolved.protocol.clone(),
             url: resolved.url.clone(),
+            scene: resolved.scene,
             api_key,
             budgets,
             client: build_client()?,

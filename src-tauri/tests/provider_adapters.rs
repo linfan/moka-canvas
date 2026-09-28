@@ -157,6 +157,7 @@ fn at(
         category: capability,
         protocol: Protocol::from_wire_name(protocol),
         url: format!("{base_url}{path}"),
+        scene: None,
     };
     ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
         .expect("a client builds")
@@ -208,6 +209,7 @@ fn bailian_text_at(base_url: &str, model_id: &str, service: &str) -> ModelCall {
         category: Capability::Text,
         protocol: Protocol::from_wire_name("bailianText"),
         url: format!("{base_url}/api/v1/services/aigc/{service}/generation"),
+        scene: None,
     };
     ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
         .expect("a client builds")
@@ -1041,6 +1043,7 @@ async fn a_job_the_provider_has_forgotten_ends_the_polling() {
         protocol: Protocol::new("openaiVideos"),
         capability: Capability::Video,
         model: "a-video-model".into(),
+        scene: None,
         created_at: "2026-01-01T00:00:00Z".into(),
         answer: None,
     };
@@ -1078,6 +1081,7 @@ async fn a_job_that_failed_reports_the_providers_explanation() {
         protocol: Protocol::new("openaiVideos"),
         capability: Capability::Video,
         model: "a-video-model".into(),
+        scene: None,
         created_at: "2026-01-01T00:00:00Z".into(),
         answer: None,
     };
@@ -1158,6 +1162,7 @@ async fn a_handle_whose_answer_was_dropped_will_not_answer_again() {
         protocol: Protocol::new("openaiImages"),
         capability: Capability::Image,
         model: "gpt-image-2".into(),
+        scene: None,
         created_at: "2026-01-01T00:00:00Z".into(),
         answer: None,
     };
@@ -3028,6 +3033,7 @@ async fn a_volcengine_job_that_failed_reports_the_platforms_explanation() {
         protocol: Protocol::new("volcengineVideo"),
         capability: Capability::Video,
         model: "doubao-seedance-1-0-pro".into(),
+        scene: None,
         created_at: "2026-01-01T00:00:00Z".into(),
         answer: None,
     };
@@ -3061,6 +3067,7 @@ async fn a_volcengine_job_that_was_cancelled_ends_as_a_failure() {
         protocol: Protocol::new("volcengineVideo"),
         capability: Capability::Video,
         model: "doubao-seedance-1-0-pro".into(),
+        scene: None,
         created_at: "2026-01-01T00:00:00Z".into(),
         answer: None,
     };
@@ -3742,6 +3749,7 @@ async fn a_minimax_job_that_failed_reports_the_platforms_explanation() {
         protocol: Protocol::new("minimaxVideo"),
         capability: Capability::Video,
         model: "MiniMax-Hailuo-2.3".into(),
+        scene: None,
         created_at: "2026-01-01T00:00:00Z".into(),
         answer: None,
     };

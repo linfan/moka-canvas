@@ -28,9 +28,9 @@ use thiserror::Error;
 pub use types::{
     Defaults, DocumentInfo, ImagePreferences, MetadataInfo, MetadataStoreKind, ModelConfig,
     ModelDraft, ModelRecord, ModelsSnapshot, MusicPreferences, Preferences, PromptItem, PromptPage,
-    PromptQuery, PromptSource, Protocol, RecentProject, SecretInfo, SecretStorage,
-    SpeechPreferences, StoryPreferences, VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE, MAX_RECENT,
-    MAX_SEARCH_PAGE_SIZE,
+    PromptQuery, PromptSource, Protocol, RecentProject, Scene, SecretInfo, SecretStorage,
+    SpeechPreferences, StoryPreferences, SubModel, VideoPreferences, MAX_PROMPT_ITEMS_PER_SOURCE,
+    MAX_RECENT, MAX_SEARCH_PAGE_SIZE,
 };
 
 use crate::config::{MetadataConfig, RuntimeMode};

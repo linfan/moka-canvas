@@ -49,6 +49,7 @@ fn channel(base_url: &str) -> ModelCall {
         category: Capability::Text,
         protocol: Protocol::new("openaiResponses"),
         url: format!("{base_url}/v1/responses"),
+        scene: None,
     };
     ModelCall::new(&resolved, API_KEY.to_string(), GenerateConfig::default())
         .expect("a client builds")
@@ -227,6 +228,7 @@ async fn a_call_that_really_went_out_is_written_down_whole() {
             category: Capability::Speech,
             protocol: Protocol::new("openaiSpeech"),
             url: format!("{base_url}/v1/audio/speech"),
+            scene: None,
         },
         API_KEY.to_string(),
         GenerateConfig::default(),
