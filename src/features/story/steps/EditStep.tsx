@@ -163,7 +163,6 @@ export function EditStep({ story }: { story: StoryDocument }) {
           <p className="story-step-lead">{t("story:edit.lead")}</p>
           <StoryImportButton story={story} target="timeline" />
         </div>
-        <StepConfirm step="edit" story={story} />
 
         <section className="story-assembly" data-testid="story-assembly">
           <h3>{t("story:edit.assemble")}</h3>
@@ -240,6 +239,7 @@ export function EditStep({ story }: { story: StoryDocument }) {
                 ? t("story:edit.assemble")
                 : t("story:edit.reassemble")}
             </button>
+            <StepConfirm step="edit" story={story} />
           </div>
         </section>
 

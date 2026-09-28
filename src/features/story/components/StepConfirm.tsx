@@ -19,10 +19,13 @@ import { useStoryStore } from "../stores/storyStore";
  * The one thing every step has instead of a confirmation per piece: a press
  * that reads the step whole.
  *
- * Pressing it settles the step — what opens the step after it, and the only
- * thing that does — and takes the reader there. A step that is not finished
- * yet says what is missing rather than refusing in silence, so the press is
- * also how a reader finds out what is left to do at this stage.
+ * It stands at the far end of the row the step's own buttons are in, set apart
+ * from them, since it settles the step rather than asking for one of the
+ * things the step is worked with. Pressing it settles the step — what opens
+ * the step after it, and the only thing that does — and takes the reader
+ * there. A step that is not finished yet says what is missing rather than
+ * refusing in silence, so the press is also how a reader finds out what is
+ * left to do at this stage.
  *
  * The check is the domain's own reading of the document, and the interface
  * only words it: what a gap is called in the reader's language belongs here,
@@ -78,16 +81,9 @@ export function StepConfirm({
   };
 
   return (
-    <div className="story-confirm">
-      <span className="story-hint" data-testid={`story-confirm-state-${step}`}>
-        {settled
-          ? last
-            ? t("story:confirm.finished")
-            : t("story:confirm.settled")
-          : t("story:confirm.hint")}
-      </span>
+    <>
       <button
-        className={settled ? undefined : "primary"}
+        className="story-confirm-button"
         data-testid={`story-confirm-${step}`}
         disabled={settled && last}
         onClick={press}
@@ -108,7 +104,7 @@ export function StepConfirm({
           </ul>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

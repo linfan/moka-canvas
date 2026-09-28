@@ -200,7 +200,6 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
           <p className="story-step-lead">{t("story:elements.lead")}</p>
           <StoryImportButton story={story} target="canvas" />
         </div>
-        <StepConfirm step="elements" story={story} />
         <StoryModelPicks places={["text", "image"]} />
 
         {warnings.length > 0 && (
@@ -320,6 +319,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
                   ? t("story:elements.recognise")
                   : t("story:elements.recogniseAgain")}
             </button>
+            <StepConfirm step="elements" story={story} />
           </div>
         </div>
 

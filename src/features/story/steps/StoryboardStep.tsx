@@ -231,7 +231,6 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           <p className="story-step-lead">{t("story:storyboard.lead")}</p>
           <StoryImportButton story={story} target="canvas" />
         </div>
-        <StepConfirm step="storyboard" story={story} />
         <div className="story-step-bar">
           <StoryModelPicks
             places={["text", "image", "video", "audio", "music"]}
@@ -311,6 +310,7 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
                   : "story:storyboard.generate",
               )}
             </button>
+            <StepConfirm step="storyboard" story={story} />
           </div>
         </div>
 

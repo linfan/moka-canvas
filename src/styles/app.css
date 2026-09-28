@@ -5937,25 +5937,21 @@ body.is-dragging-split {
 .story-step-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: flex-end;
   padding-top: 4px;
 }
 
-/* The one press a step has, under the words that say what the step is for:
-   what settles the step and opens the next. What is missing, when something
-   is, is listed under it rather than said in a passing toast. */
-.story-confirm {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.story-confirm > .story-hint {
-  flex: 1;
-  min-width: 0;
+/* The press that settles a step: last in the row the step's own buttons are
+   in, and set apart from them — filled where they are outlined, since it is
+   the one thing a step does not move past. What is missing, when something
+   is, is listed under the row rather than said in a passing toast. */
+.story-confirm-button {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
 }
 
 .story-confirm-gaps {

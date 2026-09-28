@@ -247,8 +247,6 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
           <p className="story-step-lead">{t("story:outline.lead")}</p>
           <StoryImportButton story={story} target="canvas" />
         </div>
-        <StepConfirm step="outline" story={story} />
-
         <div className="story-step-bar">
           <StoryModelPicks places={["text"]} />
           <div className="story-outline-count">
@@ -359,6 +357,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
                     ? t("story:outline.resplit")
                     : t("story:outline.start")}
             </button>
+            <StepConfirm step="outline" story={story} />
           </div>
         </div>
 
