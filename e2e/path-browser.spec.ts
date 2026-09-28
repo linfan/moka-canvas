@@ -1,9 +1,10 @@
 import { basename, join } from "node:path";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
   backToLauncher,
   createProject,
+  forgetHome,
   forgetProjects,
   projectHome,
 } from "./helpers";
@@ -79,5 +80,5 @@ test("a project is opened through the file dialog the web runtime draws", async 
     page.getByRole("banner").getByText("Browsed", { exact: true }),
   ).toBeVisible({ timeout: 10_000 });
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

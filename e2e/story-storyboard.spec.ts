@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   configureTheWholeStudio,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openStoryRoom,
@@ -198,6 +198,6 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     expect(board.frames).toBe(3);
     expect(board.drawn).toBe(2);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });

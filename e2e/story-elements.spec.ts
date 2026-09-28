@@ -1,10 +1,10 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   backToLauncher,
   configureWordsAndPictures,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openRecent,
@@ -138,7 +138,7 @@ test("the chapters are read for their cast, drawn, and agreed to", async ({
         { name: "Old ticket", described: true, drawn: true },
       ]);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });
 
@@ -244,6 +244,6 @@ test("the cast a reading left, and what the reader said since, outlast the room"
         { name: "Waiting room", described: false, drawn: false },
       ]);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });

@@ -1,8 +1,8 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -77,7 +77,7 @@ test("the cut draws a ruler over a canvas, and the view group zooms it", async (
   expect(fitted).toBeLessThan(60);
   await expect(zoomOut).toBeEnabled();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the ruler places the playhead, and the wheel moves the view under it", async ({
@@ -134,7 +134,7 @@ test("the ruler places the playhead, and the wheel moves the view under it", asy
     )
     .toBeGreaterThan(60);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("each timeline keeps its own view, and the machine keeps them across a reload", async ({
@@ -169,5 +169,5 @@ test("each timeline keeps its own view, and the machine keeps them across a relo
     "true",
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

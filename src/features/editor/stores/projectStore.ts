@@ -50,7 +50,18 @@ interface ProjectState {
     name?: string,
     onProgress?: (fraction: number) => void,
   ) => Promise<SelfCheckReport>;
-  reload: () => Promise<void>;
+  /**
+   * Reads the stored document back in, in place of what this window holds.
+   *
+   * Work still waiting goes out first: the stored document takes the place of
+   * the held one whole, and a change that was never sent would be replaced
+   * with it — gone, though nobody asked to give it up. So the answer is
+   * whether the stored document was taken: what cannot land keeps its place,
+   * and the caller says why nothing was read in. `discardPending` is the one
+   * reader who did ask to give waiting work up — the way out of a conflict,
+   * where the server will never take the change.
+   */
+  reload: (options?: { discardPending?: boolean }) => Promise<boolean>;
   /**
    * Settles once a read of the document that has started has landed.
    *
@@ -84,7 +95,7 @@ let flushInFlight: Promise<void> | null = null;
 // The read of the document that is on its way, if one is. Held so that what a
 // record says about a run that just ended can be written after the document it
 // is about to describe has landed, rather than on the one being replaced.
-let readInFlight: Promise<void> | null = null;
+let readInFlight: Promise<boolean> | null = null;
 
 function activeCanvasOf(moka: MokaFile, activeCanvasId: CanvasId | null) {
   return (
@@ -176,14 +187,23 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
       );
     },
 
-    async reload() {
+    async reload(options) {
+      const mayAdopt = () =>
+        options?.discardPending === true || get().pending.length === 0;
       const reading = (async () => {
+        await get().flush();
+        if (!mayAdopt()) return false;
         const opened = await projectsApi.current();
+        // A change made while the document was being read is waiting too, and
+        // is newer than what came back: read in over it, it would be lost the
+        // same way as one that never went out.
+        if (!mayAdopt()) return false;
         get().hydrate(opened);
+        return true;
       })();
       readInFlight = reading;
       try {
-        await reading;
+        return await reading;
       } finally {
         if (readInFlight === reading) readInFlight = null;
       }
@@ -192,7 +212,9 @@ export const useProjectStore = create<ProjectState>()((set, get) => {
     untilAdopted() {
       // A read that came to nothing has still replaced the display as far as
       // anything waiting on it is concerned, so the trouble is not passed on.
-      return readInFlight ? readInFlight.catch(() => {}) : Promise.resolve();
+      return readInFlight
+        ? readInFlight.then(() => {}).catch(() => {})
+        : Promise.resolve();
     },
 
     close() {

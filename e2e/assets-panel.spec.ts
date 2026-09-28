@@ -1,8 +1,8 @@
 import { join } from "node:path";
-import { rmSync } from "node:fs";
 import { expect, test, type Locator } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   projectHome,
   showAssets,
@@ -81,5 +81,5 @@ test("the shelf leaves its leftover room blank below the last file", async ({
     expect(await heightOf(row)).toBeLessThan(90);
   }
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

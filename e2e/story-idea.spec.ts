@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   contrastOf,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openStoryRoom,
@@ -136,7 +136,7 @@ test("a premise, a running time and a frame are written down, and the outline fo
       })
       .toEqual([180_000, "9:16"]);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });
 
@@ -178,6 +178,6 @@ test("a manuscript is handed in, and the document keeps where it lies", async ({
       "末班列车停在一个不该停的站台。",
     );
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });

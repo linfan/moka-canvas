@@ -1,8 +1,8 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -66,7 +66,7 @@ test("a project without timelines opens onto the first-run question", async ({
   await expect(page.locator("canvas.clip-preview-canvas")).toBeVisible();
   await expect(page.getByTestId("preview-timecode")).toHaveText("00:00:00:00");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a second timeline joins the strip, and the machine remembers the one being read", async ({
@@ -117,7 +117,7 @@ test("a second timeline joins the strip, and the machine remembers the one being
     strip(page).getByRole("tab", { name: "Timeline 1" }),
   ).toHaveAttribute("aria-selected", "false");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a timeline is taken off the strip, and the room asks again when none is left", async ({
@@ -141,7 +141,7 @@ test("a timeline is taken off the strip, and the room asks again when none is le
   await expect(strip(page).getByRole("tab")).toHaveCount(0);
   await expect(page.getByText("No timelines yet")).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a timeline holding work is deleted only after a question that stands inside the window", async ({
@@ -203,7 +203,7 @@ test("a timeline holding work is deleted only after a question that stands insid
   await expect(strip(page).getByRole("tab")).toHaveCount(0);
   await expect(page.getByText("No timelines yet")).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a recent project opens straight into the room its row was asked for", async ({
@@ -226,7 +226,7 @@ test("a recent project opens straight into the room its row was asked for", asyn
     strip(page).getByRole("tab", { name: "Timeline 1" }),
   ).toHaveAttribute("aria-selected", "true");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the corner menu marks the cutting room, and the board is one step beside it", async ({
@@ -260,7 +260,7 @@ test("the corner menu marks the cutting room, and the board is one step beside i
     strip(page).getByRole("tab", { name: "Timeline 1" }),
   ).toHaveAttribute("aria-selected", "true");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a new timeline reaches the project on its own, and the badge says so", async ({
@@ -278,5 +278,5 @@ test("a new timeline reaches the project on its own, and the badge says so", asy
     timeout: 10_000,
   });
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

@@ -84,14 +84,23 @@ export function EditStep({ story }: { story: StoryDocument }) {
       // material they are made of is filed there rather than here: what is
       // still in this window goes out first, and only then is the document read
       // back — reading it first would throw the waiting work away.
-      if (!(await saveEverything())) {
+      const sayBlocked = () => {
         const blocked = saveTrouble();
         useAppStore
           .getState()
           .pushToast("error", blocked.message, undefined, blocked.detail);
+      };
+      if (!(await saveEverything())) {
+        sayBlocked();
         return;
       }
-      await useProjectStore.getState().reload();
+      // A change made between the save settling and the read keeps the
+      // document: a plan drawn on one a step behind would lay the clips out
+      // twice, so nothing is assembled until the reader asks again.
+      if (!(await useProjectStore.getState().reload())) {
+        sayBlocked();
+        return;
+      }
       const held = useProjectStore.getState().moka;
       const current =
         held === null

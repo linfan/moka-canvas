@@ -1,10 +1,10 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   configureTextModel,
   configureTextModelWithoutKey,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openStoryRoom,
@@ -62,6 +62,6 @@ test("a model with no key is named, and its key's place offered", async ({
     // One server answers the whole suite, so the model is handed its key back
     // before the specs that come after.
     await configureTextModel(STORYTELLER);
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });

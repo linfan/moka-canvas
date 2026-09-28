@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -18,6 +18,23 @@ export const APP = `http://127.0.0.1:${process.env.MOKA_E2E_PORT ?? 8971}`;
 
 export function projectHome(name: string) {
   return mkdtempSync(join(tmpdir(), `moka-e2e-${name}-`));
+}
+
+/**
+ * Takes a scratch home away once a test is done with it.
+ *
+ * A room's autosave can still be landing when its test ends, and a directory
+ * removed under a write that is on its way is refused with ENOTEMPTY on macOS —
+ * a teardown error over work that was done correctly. The retries are
+ * `rmSync`'s own, for exactly that kind of refusal.
+ */
+export function forgetHome(home: string): void {
+  rmSync(home, {
+    recursive: true,
+    force: true,
+    maxRetries: 8,
+    retryDelay: 150,
+  });
 }
 
 /** Forget every project this server boot has opened.

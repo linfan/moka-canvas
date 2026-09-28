@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   configureTextModel,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openStoryRoom,
@@ -85,6 +85,6 @@ test("a premise becomes the chapters the reader counted", async ({ page }) => {
       .poll(async () => persistedChapterTitles(page))
       .toEqual(["Chapter 1", "Chapter 2", "Chapter 3"]);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });

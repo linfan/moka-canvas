@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   contrastOf,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openRecent,
@@ -60,7 +60,7 @@ test("the corner menu leads to the story room, above the board", async ({
   await openStoryRoom(page);
   await expect(page.getByTestId("story-empty")).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a story is begun under a name and stood on at its first step", async ({
@@ -109,7 +109,7 @@ test("a story is begun under a name and stood on at its first step", async ({
   await openStoryRoom(page);
   await expect(page.locator(".story-head-name")).toHaveText("Rain at Night");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a story is renamed in place, and the rename can be undone", async ({
@@ -133,7 +133,7 @@ test("a story is renamed in place, and the rename can be undone", async ({
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.locator(".story-row-name")).toHaveText("Rain at Night");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a second story gets a tab, and the tab turns the room over", async ({
@@ -157,7 +157,7 @@ test("a second story gets a tab, and the tab turns the room over", async ({
     "Rain at Night",
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a narrow window keeps the stage and folds the column away", async ({
@@ -176,5 +176,5 @@ test("a narrow window keeps the stage and folds the column away", async ({
   await expect(page.locator(".story-stage")).toBeVisible();
   await expect(page.getByTestId("story-step-idea")).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

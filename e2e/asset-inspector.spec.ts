@@ -1,8 +1,8 @@
 import { join } from "node:path";
-import { rmSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   projectHome,
   showAssets,
@@ -95,7 +95,7 @@ test("a file clicked on the shelf is read in the column beside the canvas", asyn
       .getByRole("button", { name: "Focus cards" }),
   ).toBeDisabled();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the way to the cards is offered where this board holds one", async ({
@@ -136,7 +136,7 @@ test("the way to the cards is offered where this board holds one", async ({
   await expect(row).not.toHaveClass(/is-inspected/);
   await expect(page.locator(".inspector-asset")).toHaveCount(0);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a file of words is previewed out of the file itself", async ({
@@ -162,5 +162,5 @@ test("a file of words is previewed out of the file itself", async ({
   await expect(inspector).toContainText("text/plain");
   await expect(inspector).toContainText("Texts · Text");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

@@ -1,10 +1,11 @@
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { parseSrt } from "../src/features/clip/subtitles/srt";
 import { frameAligned } from "../src/features/clip/timeline/timecode";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -239,12 +240,7 @@ test("Add at the playhead lands a text clip on the frame clock, and the cue list
   // The words are spent on the clip; the composer is empty for the next line.
   await expect(panel(page).getByTestId("clip-text-content")).toHaveValue("");
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 test("a cue row chooses its clip and takes the playhead to its words", async ({
@@ -270,12 +266,7 @@ test("a cue row chooses its clip and takes the playhead to its words", async ({
     inspectorFields(page).getByTestId("clip-text-content"),
   ).toHaveValue("Jump to me");
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 test("a red plate at centre shows through the preview's middle", async ({
@@ -304,12 +295,7 @@ test("a red plate at centre shows through the preview's middle", async ({
     )
     .toBe(true);
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 test("typing in the inspector commits once, and one undo puts the words back", async ({
@@ -334,12 +320,7 @@ test("typing in the inspector commits once, and one undo puts the words back", a
     inspectorFields(page).getByTestId("clip-text-content"),
   ).toHaveValue("First cut line");
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 test("Import .srt lands every cue in one step, and a row jumps to its time", async ({
@@ -366,12 +347,7 @@ test("Import .srt lands every cue in one step, and a row jumps to its time", asy
   await expect.poll(() => playheadMs(page)).toBe(4_000);
   await expect.poll(() => selectedIds(page)).toEqual([landed[1].id]);
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 test("an .srt that runs into itself, or into the row, is refused whole", async ({
@@ -395,12 +371,7 @@ test("an .srt that runs into itself, or into the row, is refused whole", async (
   );
   await expect(cueRows(page)).toHaveCount(1);
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 test("Export .srt writes the cues back out, and they read again", async ({
@@ -431,12 +402,7 @@ test("Export .srt writes the cues back out, and they read again", async ({
     [4_000, 6_500],
   ]);
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 test("a stroke width and colour are one command each, and survive the save", async ({
@@ -477,12 +443,7 @@ test("a stroke width and colour are one command each, and survive the save", asy
     .toBe("#000000");
   expect((await persistedTextStyle(page))?.strokeWidth).toBe(4);
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });
 
 /** A playable WAV of a few seconds, so the shelf takes it as a real sound. */
@@ -554,10 +515,5 @@ test("auto subtitles read the sound on the cut, and a missing model is a place t
     dialog.getByRole("tab", { name: "Speech recognition" }),
   ).toHaveAttribute("aria-selected", "true");
 
-  rmSync(home, {
-    force: true,
-    maxRetries: 5,
-    recursive: true,
-    retryDelay: 100,
-  });
+  forgetHome(home);
 });

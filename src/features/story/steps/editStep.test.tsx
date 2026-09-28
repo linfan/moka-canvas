@@ -364,6 +364,80 @@ describe("the film of a telling", () => {
     );
   });
 
+  it("says why a finished film is not written down when a change will not save", async () => {
+    openAtEdit(filmed());
+    fireEvent.click(screen.getByTestId("story-assemble"));
+    await waitFor(() => expect(story().edit.timelineId).toBeDefined());
+
+    fireEvent.click(screen.getByTestId("story-film-export"));
+    await waitFor(() => expect(asked).toHaveLength(1));
+
+    // A change of the reader's the server will not take, still in this window.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(
+            new Response(JSON.stringify(payload), {
+              status,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        if (init?.method === "POST" && url.includes("/commands")) {
+          return json(
+            { code: "INTERNAL", message: "io error: disk full" },
+            500,
+          );
+        }
+        if (url.includes("/api/v1/projects/current")) {
+          return json({
+            root: "/tmp/moka-edit-test",
+            moka: withTheFilm(filmed()),
+            selfCheck: { ok: true, issues: [] },
+          });
+        }
+        return json([]);
+      }),
+    );
+    act(() => {
+      useProjectStore.getState().applyLocal([
+        {
+          type: "setStoryEdit",
+          storyId: story().id,
+          patch: { timelineId: story().edit.timelineId ?? null },
+        },
+      ]);
+    });
+    await act(async () => {
+      await useProjectStore.getState().flush();
+    });
+    // What the reader changed has not landed, and is still waiting here.
+    expect(useProjectStore.getState().pending.length).toBeGreaterThan(0);
+
+    // The render comes home, but the stored document cannot be read in over
+    // the waiting change — so the film is not written down here, and that is
+    // said rather than left as a film that silently is not on the page.
+    renders = [
+      {
+        ...renders[0]!,
+        status: "done",
+        progress01: 1,
+        assetId: "asset-film",
+      },
+    ];
+    useAppStore.setState({ toasts: [] });
+    await act(async () => {
+      await useStoryExportStore.getState().setTask(renders[0]! as never);
+    });
+
+    await waitFor(() => {
+      const said = useAppStore.getState().toasts.at(-1);
+      expect(said?.message).toBe("io error: disk full");
+    });
+    expect(story().edit.film).toBeUndefined();
+  });
+
   it("says a machine without a renderer cannot render, rather than failing", async () => {
     canRender = false;
     openAtEdit(filmed());

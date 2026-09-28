@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   backToLauncher,
   createProject,
+  forgetHome,
   forgetProjects,
   openRecent,
   projectHome,
@@ -87,5 +87,5 @@ test("the project tab writes down what the project is called and what it is abou
     "A launch teaser",
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
