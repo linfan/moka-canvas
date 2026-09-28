@@ -497,8 +497,6 @@
     "previewHint": "此节点运行时实际会提交的内容",
     "close": "关闭生成面板",
     "starting": "启动中…",
-    "foldAway": "收起提示词，改为采用连线提供的内容",
-    "unfold": "展开提示词，用文字说明提供什么",
     "noModel": "还没有配置{{kind}}模型",
     "noModelPeriod": "还没有配置{{kind}}模型。",
     "configureModels": "配置模型",
@@ -547,7 +545,9 @@
     "gone": "一个已不存在的节点",
     "fieldGrip": "拖动以调整提示词输入框的宽高",
     "mayMention": "此提示词可提及的内容",
-    "noAnswer": "此画布上没有匹配的内容。"
+    "noAnswer": "此画布上没有匹配的内容。",
+    "referenced": "此提示词引用的素材",
+    "playAudio": "播放 {{name}}"
   },
   "inputPreview": {
     "aria": "此节点将提交的内容",
@@ -688,7 +688,8 @@
     "encodeFailed": "浏览器无法编码该图片",
     "canvasImageExported": "已导出画布图片",
     "canvasNotReady": "画布尚未就绪",
-    "canvasNotExported": "无法导出画布"
+    "canvasNotExported": "无法导出画布",
+    "playVideo": "播放 {{name}}"
   },
   "interactions": {
     "nothingSelected": "未选中任何内容",

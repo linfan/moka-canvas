@@ -2749,8 +2749,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .prompt-panel-modes button,
-.prompt-panel-close,
-.prompt-panel-fold {
+.prompt-panel-close {
   border-radius: 6px;
   font-size: 11px;
   padding: 4px 7px;
@@ -2758,18 +2757,6 @@ button.danger:hover:not(:disabled) {
 
 .prompt-panel-modes button {
   flex: 1;
-}
-
-/* The one control left in the prompt page: the words behind it are either out
-   or folded away, and where the ask takes what it is given from follows. */
-.prompt-panel-fold {
-  color: var(--muted);
-  flex: none;
-  text-align: left;
-}
-
-.prompt-panel-fold[aria-expanded="true"] {
-  color: inherit;
 }
 
 .prompt-panel-close {
@@ -3106,7 +3093,14 @@ button.danger:hover:not(:disabled) {
   color: var(--danger);
 }
 
-.mention-chip-glyph {
+.mention-chip-name {
+  font-size: 11px;
+}
+
+/* The ticks a mention is written between, which are how the line reads as a
+   reference rather than as one more word of prose. */
+.mention-chip-tick {
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -3130,6 +3124,7 @@ button.danger:hover:not(:disabled) {
 .mention-look-picture {
   border-radius: 6px;
   display: block;
+  justify-self: start;
   max-height: 160px;
   max-width: 100%;
   object-fit: contain;
@@ -3152,6 +3147,74 @@ button.danger:hover:not(:disabled) {
   color: var(--muted);
   font-size: 10px;
   margin: 0;
+}
+
+/* An audio has nothing to look at, so what a hover summons is the file
+   itself, playing. */
+.mention-look-audio {
+  max-width: 100%;
+}
+
+/* A look hung from the strip rather than from a chip: it holds the whole of
+   what the reference is — a page of words, a picture large enough to read —
+   and stands on the page, where the panel's own scrolling cannot cut it. */
+.mention-look.is-wide {
+  width: 336px;
+}
+
+/* Hung from a thumbnail: measured against the window, not against a panel. */
+.mention-look.is-floating {
+  position: fixed;
+}
+
+.mention-look.is-wide .mention-look-picture {
+  max-height: 240px;
+}
+
+/* What the prompt points at, under the words that point at it: one thumbnail
+   per card named, the picture for what has one and the mark of the kind for a
+   text or an audio, which have neither. */
+.mention-strip-wrap {
+  position: relative;
+}
+
+.mention-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mention-strip-item {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: flex;
+  height: 46px;
+  justify-content: center;
+  overflow: hidden;
+  width: 64px;
+}
+
+.mention-strip-item.is-gone {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.mention-strip-thumb {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.mention-strip-icon {
+  color: var(--muted);
+  font-size: 16px;
 }
 
 .assistant-panel > h2 {
@@ -3567,6 +3630,65 @@ button.danger:hover:not(:disabled) {
   font-size: 11px;
   max-width: 280px;
   padding: 4px 6px;
+}
+
+/* A video node's own face, over the card it belongs to: the first frame the
+   browser draws once it has read the file's header, and the button that starts
+   it. Only the button and a playing file take the pointer — the rest lets a
+   press through, so the card underneath is still dragged, selected, and wired
+   by its picture. Under the rows anchored to nodes, which belong in front. */
+.video-card {
+  border-radius: 8px;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  z-index: 5;
+}
+
+.video-card video {
+  background: #000;
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  width: 100%;
+}
+
+.video-card.is-playing video {
+  pointer-events: auto;
+}
+
+.video-card-play {
+  align-items: center;
+  background: rgb(0 0 0 / 55%);
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  height: 42px;
+  justify-content: center;
+  left: 50%;
+  padding-left: 3px;
+  pointer-events: auto;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 42px;
+}
+
+.video-card-play:hover {
+  background: rgb(0 0 0 / 75%);
+}
+
+.video-card-label {
+  bottom: 4px;
+  color: #fff;
+  font-size: 11px;
+  left: 8px;
+  position: absolute;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
 }
 
 /* Wider than a dialog that only asks a question: this one holds a picture. */

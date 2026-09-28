@@ -22,8 +22,10 @@ import { useEditorStore } from "../stores/editorStore";
 /**
  * Where an ask takes what it is given from.
  *
- * No longer a choice on the bar: the fold beside the prompt decides it, and the
- * bar only shows what the decision means for what will be sent.
+ * No longer a choice on the bar: the words and the graph decide it — a prompt
+ * that names cards takes those, a list kept by hand takes itself, and the
+ * wiring speaks where there is neither — and the bar only shows what the
+ * decision means for what will be sent.
  */
 
 /** One edge arriving at this node, which is one thing it is being given. */
