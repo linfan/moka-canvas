@@ -232,9 +232,12 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           <StoryImportButton story={story} target="canvas" />
         </div>
         <StepConfirm step="storyboard" story={story} />
-        <StoryModelPicks places={["text", "image", "video", "audio", "music"]}>
+        <div className="story-step-bar">
+          <StoryModelPicks
+            places={["text", "image", "video", "audio", "music"]}
+          />
           <ReferenceLimitField story={story} />
-        </StoryModelPicks>
+        </div>
 
         <div className="story-chapter-strip" role="tablist">
           {story.chapters.map((held, at) => {

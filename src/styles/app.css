@@ -5666,9 +5666,9 @@ body.is-dragging-split {
   color: var(--ink);
 }
 
-/* The models a step's buttons will ask, under the words that say what the step
-   is for. A row rather than a panel: it is read on the way to the button, and
-   each picker is as wide as the name of the model chosen in it. */
+/* The models a step's buttons will ask: one picker per kind of work, each as
+   wide as the name of the model chosen in it, standing on the band under the
+   words that say what the step is for. */
 .story-models {
   align-items: end;
   display: flex;
@@ -5965,14 +5965,6 @@ body.is-dragging-split {
 /* ---------------------------------------------------------------------------
    Step two: the outline
    --------------------------------------------------------------------------- */
-
-.story-outline-bar {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  justify-content: space-between;
-}
 
 .story-outline-count {
   align-items: center;

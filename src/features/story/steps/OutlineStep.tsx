@@ -248,42 +248,9 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
           <StoryImportButton story={story} target="canvas" />
         </div>
         <StepConfirm step="outline" story={story} />
-        <StoryModelPicks places={["text"]} />
 
-        <div className="story-outline-bar">
-          <div
-            aria-label={t("story:outline.source")}
-            className="story-chips"
-            role="radiogroup"
-          >
-            <button
-              aria-checked={mode === "expand"}
-              className={`story-choice${mode === "expand" ? " is-on" : ""}`}
-              data-testid="story-outline-mode-expand"
-              onClick={() => setMode("expand")}
-              role="radio"
-              type="button"
-            >
-              {t("story:outline.modeExpand")}
-            </button>
-            <button
-              aria-checked={mode === "split"}
-              className={`story-choice${mode === "split" ? " is-on" : ""}`}
-              data-testid="story-outline-mode-split"
-              disabled={sourceId === undefined}
-              onClick={() => setMode("split")}
-              role="radio"
-              title={
-                sourceId === undefined
-                  ? t("story:outline.modeSplitLocked")
-                  : undefined
-              }
-              type="button"
-            >
-              {t("story:outline.modeSplit")}
-            </button>
-          </div>
-
+        <div className="story-step-bar">
+          <StoryModelPicks places={["text"]} />
           <div className="story-outline-count">
             <span className="story-field-label">
               {t("story:outline.chapters")}
@@ -318,6 +285,39 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
               +
             </button>
           </div>
+        </div>
+
+        <div
+          aria-label={t("story:outline.source")}
+          className="story-chips"
+          role="radiogroup"
+        >
+          <button
+            aria-checked={mode === "expand"}
+            className={`story-choice${mode === "expand" ? " is-on" : ""}`}
+            data-testid="story-outline-mode-expand"
+            onClick={() => setMode("expand")}
+            role="radio"
+            type="button"
+          >
+            {t("story:outline.modeExpand")}
+          </button>
+          <button
+            aria-checked={mode === "split"}
+            className={`story-choice${mode === "split" ? " is-on" : ""}`}
+            data-testid="story-outline-mode-split"
+            disabled={sourceId === undefined}
+            onClick={() => setMode("split")}
+            role="radio"
+            title={
+              sourceId === undefined
+                ? t("story:outline.modeSplitLocked")
+                : undefined
+            }
+            type="button"
+          >
+            {t("story:outline.modeSplit")}
+          </button>
         </div>
 
         <p className="story-hint" data-testid="story-outline-chapters-hint">
