@@ -20,6 +20,7 @@ import { createAct } from "../../../shared/domain/factories";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { RunningBar } from "../components/RunningBar";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
@@ -28,22 +29,18 @@ import { writeActs } from "../panels/writeBoard";
 import { chapterGuesses } from "../jobs/apply";
 import { jobKey, planKeyframeArt, planStoryboard } from "../jobs/plan";
 import {
-  jobProgress,
+  actRuns,
+  boardRuns,
   kindRunning,
-  useRunningJob,
   useStoryJobs,
   useStoryJobStore,
   useStoryRun,
 } from "../stores/storyJobStore";
 import { useStoryStore } from "../stores/storyStore";
 import { useField } from "../panels/useField";
-import { useElapsed } from "./useElapsed";
 
 /** How many episodes one batch is asked to board at once. */
 const BOARDS_PER_ASK = 8;
-
-/** How long a written ask runs before the reader is told it may be a while. */
-const STORY_SLOW_MS = 90_000;
 
 /**
  * The fourth step: every episode's board — its acts, their shots, and the
@@ -58,15 +55,16 @@ const STORY_SLOW_MS = 90_000;
  * Every picture and every clip is an ask of its own: a shot whose painter is
  * working says so and is not asked for twice, while the shots beside it go on
  * being drawable — and what a batch is making elsewhere in the story does not
- * hold the rest of the board back. The one thing that waits on the whole
- * episode is the board itself, which rewrites the acts every drawing stands in.
+ * hold the rest of the board back. Each act says what it is waiting on from its
+ * own head, one bar per batch, so two things being made at once are two bars
+ * and neither is written over by the other. The one thing that waits on the
+ * whole episode is the board itself, which rewrites the acts every drawing
+ * stands in — and its bar stands over them rather than in any one of them.
  */
 export function StoryboardStep({ story }: { story: StoryDocument }) {
   const { t } = useTranslation();
   const jobs = useStoryJobs(story.id);
-  const running = useRunningJob(story.id);
   const failure = useStoryJobStore((state) => state.error);
-  const elapsed = useElapsed(running?.createdAt);
   const run = useStoryRun();
   const openChapterId = useStoryStore((state) => state.openChapterId);
   const [asking, setAsking] = useState(false);
@@ -81,6 +79,10 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
     story.chapters.findIndex((held) => held.id === openChapterId),
   );
   const chapter: StoryChapter | undefined = story.chapters[index];
+  // The episode's own ask, which is the one thing on this page that waits on
+  // the whole board: what the acts are having made is each act's own, and is
+  // read off the acts themselves.
+  const board = chapter === undefined ? [] : boardRuns(jobs, chapter.id);
   // Every place this page asks about is read off one set: what a batch out for
   // this story is making right now, by the name the place is known by.
   const keys = busyKeys(jobs);
@@ -364,17 +366,12 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
         </div>
 
         <div className="story-step-actions">
-          {totalWaves > 1 && (running !== null || waves.length > 0) && (
+          {totalWaves > 1 && (board.length > 0 || waves.length > 0) && (
             <span className="story-hint" data-testid="story-board-wave">
               {t("story:outline.wave", {
                 at: Math.max(1, totalWaves - waves.length),
                 of: totalWaves,
               })}
-            </span>
-          )}
-          {running !== null && (
-            <span className="story-hint" data-testid="story-board-progress">
-              {t("story:jobs.busy", jobProgress(running))}
             </span>
           )}
         </div>
@@ -385,33 +382,17 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           </p>
         )}
 
-        {running !== null && (
-          <div
-            className="story-running"
-            data-testid="story-board-running"
-            role="status"
-          >
-            <span>
-              {t(
-                running.kind === "storyboard"
-                  ? "story:storyboard.writing"
-                  : "story:jobs.generating",
-              )}{" "}
-              · {formatDuration(elapsed)}
-            </span>
-            {elapsed >= STORY_SLOW_MS && (
-              <span className="story-hint">{t("story:outline.slow")}</span>
-            )}
-            <button
-              className="link"
-              data-testid="story-board-cancel"
-              onClick={() =>
-                void useStoryJobStore.getState().cancel(running.id)
-              }
-              type="button"
-            >
-              {t("story:outline.cancel")}
-            </button>
+        {board.length > 0 && (
+          <div className="story-runs">
+            {board.map((job) => (
+              <RunningBar
+                job={job}
+                key={job.id}
+                label={t("story:storyboard.writing")}
+                pieces={job.items}
+                testId="story-board-running"
+              />
+            ))}
           </div>
         )}
 
@@ -458,6 +439,7 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
                     index={at}
                     last={at === chapter.acts.length - 1}
                     musicBusy={busy.music}
+                    runs={actRuns(jobs, chapter.id, act.id)}
                     story={story}
                     videoBusy={busy.video}
                     voiceBusy={busy.voice}

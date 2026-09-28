@@ -19,9 +19,11 @@ import { create } from "zustand";
 
 import {
   storyApi,
+  type StoryJobItem,
   type StoryJobItemDraft,
   type StoryJobKind,
   type StoryJobRecord,
+  type StoryTarget,
 } from "../../../api/story";
 import {
   errorText,
@@ -679,13 +681,21 @@ export async function redoTarget(
 // What the room reads off the batches
 // -----------------------------------------------------------------------------
 
-/** How far along a batch is, counted in pieces. */
+/** How far along a set of pieces is, counted in pieces. */
+export function piecesProgress(items: StoryJobItem[]): {
+  done: number;
+  total: number;
+} {
+  const done = items.filter((item) => !isRunning(item.status)).length;
+  return { done, total: items.length };
+}
+
+/** The same, for a whole batch. */
 export function jobProgress(job: StoryJobRecord): {
   done: number;
   total: number;
 } {
-  const done = job.items.filter((item) => !isRunning(item.status)).length;
-  return { done, total: job.items.length };
+  return piecesProgress(job.items);
 }
 
 /** The batch of this one kind a story has out just now, if it has one. */
@@ -787,6 +797,76 @@ export function targetRunning(
 export function pieceRunning(jobs: StoryJobRecord[], id: string): boolean {
   return jobs.some((job) =>
     job.items.some((item) => item.id === id && isRunning(item.status)),
+  );
+}
+
+/** Whether a place a piece is being made for stands inside one act. */
+function inAct(target: StoryTarget, chapterId: string, actId: string): boolean {
+  return (
+    (target.kind === "keyframeArt" ||
+      target.kind === "keyframeVideo" ||
+      target.kind === "actVideo" ||
+      target.kind === "voice" ||
+      target.kind === "music") &&
+    target.chapterId === chapterId &&
+    target.actId === actId
+  );
+}
+
+/** One batch working inside an act, with the pieces of it that stand there. */
+export interface ActRun {
+  job: StoryJobRecord;
+  items: StoryJobItem[];
+}
+
+/**
+ * The batches working inside one act just now, each with the pieces of it that
+ * stand there: a shot being drawn or filmed, the act's own clip, its lines, its
+ * score.
+ *
+ * A batch stands in the act while any of its pieces there is still out, and in
+ * the act beside it just the same, since one ask may reach across a board.
+ * Nothing is folded together: two batches working in one act are two things the
+ * reader is waiting on, each with a clock of its own.
+ */
+export function actRuns(
+  jobs: StoryJobRecord[],
+  chapterId: string,
+  actId: string,
+): ActRun[] {
+  const runs: ActRun[] = [];
+  for (const job of jobs) {
+    if (!isRunning(job.status)) continue;
+    const items = job.items.filter((item) =>
+      inAct(item.target, chapterId, actId),
+    );
+    if (!items.some((item) => isRunning(item.status))) continue;
+    runs.push({ job, items });
+  }
+  return runs;
+}
+
+/**
+ * The batches writing one episode's own board just now.
+ *
+ * A board is one numbered piece per episode, so a batch stands here while that
+ * episode's piece is still out — and the bar belongs to the episode rather than
+ * to anything inside it, which is why it is read apart from the acts.
+ */
+export function boardRuns(
+  jobs: StoryJobRecord[],
+  chapterId: string,
+): StoryJobRecord[] {
+  return jobs.filter(
+    (job) =>
+      job.kind === "storyboard" &&
+      isRunning(job.status) &&
+      job.items.some(
+        (item) =>
+          item.target.kind === "storyboard" &&
+          item.target.chapterId === chapterId &&
+          isRunning(item.status),
+      ),
   );
 }
 

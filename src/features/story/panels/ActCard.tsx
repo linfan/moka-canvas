@@ -21,6 +21,7 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { RunningBar } from "../components/RunningBar";
 import {
   actClipPieces,
   planActMusic,
@@ -29,7 +30,7 @@ import {
   planKeyframeArt,
   videoCeiling,
 } from "../jobs/plan";
-import { useStoryRun } from "../stores/storyJobStore";
+import { useStoryRun, type ActRun } from "../stores/storyJobStore";
 import { KeyframeTable } from "./KeyframeTable";
 import { RefPicker } from "./RefPicker";
 import { StoryLightbox } from "./StoryLightbox";
@@ -52,7 +53,9 @@ const ACT_TITLE_MAX = 40;
  *
  * Every picture is an ask of its own: what this card's own painter is working
  * on is asked for once and says so, while the rest of the card — and the acts
- * beside it — go on being askable.
+ * beside it — go on being askable. Everything out for the act stands at its
+ * head, a bar per batch: two things being made at once are two bars, each
+ * counting its own time.
  */
 export function ActCard({
   story,
@@ -66,6 +69,7 @@ export function ActCard({
   videoBusy,
   voiceBusy,
   musicBusy,
+  runs,
 }: {
   story: StoryDocument;
   chapterId: string;
@@ -85,6 +89,8 @@ export function ActCard({
   /** Whether this act's lines, or its score, are being made just now. */
   voiceBusy: boolean;
   musicBusy: boolean;
+  /** The batches working in this act just now, each with its own clock. */
+  runs: ActRun[];
 }) {
   const { t } = useTranslation();
   const run = useStoryRun();
@@ -280,6 +286,25 @@ export function ActCard({
           </button>
         </span>
       </div>
+
+      {/*
+        What the act is waiting on, one bar per batch: a batch drawing its
+        shots and one making its clip are two waits, and neither bar stands
+        for the other.
+      */}
+      {runs.length > 0 && (
+        <div className="story-runs">
+          {runs.map(({ job, items }) => (
+            <RunningBar
+              job={job}
+              key={job.id}
+              label={t("story:jobs.generating")}
+              pieces={items}
+              testId="story-act-running"
+            />
+          ))}
+        </div>
+      )}
 
       <div className="story-refs-row">
         <RefPicker

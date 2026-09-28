@@ -6014,6 +6014,15 @@ body.is-dragging-split {
   padding: 8px 12px;
 }
 
+/*
+  What is being made where, one bar per batch: several stand together when
+  several batches are out for the same act, and each keeps its own time.
+*/
+.story-runs {
+  display: grid;
+  gap: 6px;
+}
+
 .story-chapters {
   display: grid;
   gap: 12px;

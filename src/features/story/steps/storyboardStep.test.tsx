@@ -1243,3 +1243,94 @@ describe("a telling at every ceiling", () => {
     expect(document.querySelectorAll("body *").length).toBeLessThan(shots * 80);
   });
 });
+
+describe("the clock each act keeps", () => {
+  /** Sets a batch's own clock, so a bar can be read without waiting a minute. */
+  function startedAgo(jobId: string, seconds: number): void {
+    const at = new Date(Date.now() - seconds * 1000).toISOString();
+    useStoryJobStore.setState({
+      jobs: useStoryJobStore
+        .getState()
+        .jobs.map((job) =>
+          job.id === jobId ? { ...job, createdAt: at } : job,
+        ),
+    });
+  }
+
+  /** The bars standing in one act, which is what that act is waiting on. */
+  function barsIn(index: number): HTMLElement[] {
+    return within(card(index)).queryAllByTestId("story-act-running");
+  }
+
+  it("stands a batch's bar in the act it works in, and leaves the acts beside it alone", async () => {
+    openAtBoard(withASecondAct());
+    fireEvent.click(screen.getByTestId("story-act-draw-0"));
+    await waitFor(() => expect(barsIn(0)).toHaveLength(1));
+    // A bar is one act's own: the act beside it, whose shot nobody is drawing,
+    // has nothing to say.
+    expect(barsIn(1)).toHaveLength(0);
+    // And what it says is that act's own work, counted in pieces and from the
+    // batch's clock: three shots out, none of them home.
+    startedAgo("job-1", 180);
+    await waitFor(() => expect(barsIn(0)[0]!.textContent).toMatch(/03:0\d/));
+    expect(barsIn(0)[0]!.textContent).toContain("0/3…");
+
+    // A second ask, this time for the other act's shot: it gets a bar of its
+    // own, and the first act's bar is not written over by it.
+    fireEvent.click(screen.getByTestId("story-act-draw-1"));
+    await waitFor(() => expect(barsIn(1)).toHaveLength(1));
+    startedAgo("job-2", 60);
+    await waitFor(() => expect(barsIn(1)[0]!.textContent).toMatch(/01:0\d/));
+    expect(barsIn(0)).toHaveLength(1);
+    expect(barsIn(0)[0]!.textContent).toMatch(/03:0\d/);
+  });
+
+  it("keeps one bar per batch when one act has two things out at once", async () => {
+    openAtBoard(withUndrawnFrames());
+    const first = card(0);
+    // Two asks of the same act: its two shots drawn, and its lines read aloud.
+    // Neither is the newer word on the other — they are two waits.
+    fireEvent.click(within(first).getByTestId("story-act-draw-0"));
+    await waitFor(() => expect(barsIn(0)).toHaveLength(1));
+    fireEvent.click(within(first).getByTestId("story-act-voice-go-0"));
+    await waitFor(() => expect(barsIn(0)).toHaveLength(2));
+
+    startedAgo("job-1", 300);
+    startedAgo("job-2", 60);
+    await waitFor(() => {
+      const said = barsIn(0).map((bar) => bar.textContent ?? "");
+      expect(said.some((text) => /05:0\d/.test(text))).toBe(true);
+      expect(said.some((text) => /01:0\d/.test(text))).toBe(true);
+    });
+
+    // The batch of two pictures counts its pieces; a one-voice ask has no
+    // count to give.
+    expect(barsIn(0).some((bar) => bar.textContent?.includes("0/2…"))).toBe(
+      true,
+    );
+  });
+
+  it("keeps an episode's board bar over its acts, and off the episode beside it", async () => {
+    // The second episode has no board: the header's ask writes one straight
+    // away, and the bar it puts up belongs to the episode rather than to any
+    // act inside it.
+    openAtBoard(boarded(), 1);
+    fireEvent.click(screen.getByTestId("story-board-generate"));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("story-board-running")).toHaveLength(1),
+    );
+    const bar = screen.getByTestId("story-board-running");
+    expect(bar.textContent).toContain("Writing");
+    startedAgo("job-1", 120);
+    await waitFor(() => expect(bar.textContent).toMatch(/02:0\d/));
+
+    // The episode beside it is not being written and does not say it is: a
+    // board's bar stands over the board it is writing, and what the acts there
+    // are having made is each act's own bar.
+    fireEvent.click(screen.getByTestId("story-board-chapter-0"));
+    expect(screen.queryAllByTestId("story-board-running")).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("story-act-draw-0"));
+    await waitFor(() => expect(barsIn(0)).toHaveLength(1));
+    expect(screen.queryAllByTestId("story-board-running")).toHaveLength(0);
+  });
+});
