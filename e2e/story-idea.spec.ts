@@ -63,14 +63,13 @@ test("a premise, a running time and a frame are written down, and the outline fo
 }) => {
   const home = await storyAtItsFirstStep(page, "Story Idea");
   try {
-    // Nothing to go on yet: the step says what it is waiting for rather than
+    // Nothing to go on yet: the press says what it is waiting for rather than
     // walking on into an outline written from nothing.
-    const next = page.getByTestId("story-idea-next");
-    await expect(next).toBeDisabled();
-    await expect(next).toHaveAttribute(
-      "title",
-      "Write a premise, or upload a manuscript.",
+    await page.getByTestId("story-confirm-idea").click();
+    await expect(page.getByTestId("story-confirm-gaps-idea")).toContainText(
+      "The premise is not written yet",
     );
+    await expect(page.getByTestId("story-step-outline")).toBeDisabled();
 
     await page
       .getByTestId("story-idea-input")
@@ -117,8 +116,7 @@ test("a premise, a running time and a frame are written down, and the outline fo
     await expect(chips.nth(0)).toHaveText("03:00");
     await expect(chips.nth(1)).toHaveText("9:16 vertical");
 
-    await expect(next).toBeEnabled();
-    await next.click();
+    await page.getByTestId("story-confirm-idea").click();
 
     // The second step is standing, and the first is no longer shut: a story
     // with a premise has earned its outline.

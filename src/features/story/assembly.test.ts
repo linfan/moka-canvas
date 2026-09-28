@@ -61,9 +61,7 @@ function actFor(
   }
   act.video = {
     takes: [{ assetIds: [videoId], createdAt: T0 }],
-    confirmed: true,
   };
-  act.videoConfirmed = true;
   return act;
 }
 
@@ -130,7 +128,6 @@ describe("planAssembly", () => {
           createdAt: T0,
         },
       ],
-      confirmed: true,
     };
     const plan = planAssembly(held, moka);
     expect(plan.units.map((unit) => unit.assetId)).toEqual([
@@ -150,7 +147,6 @@ describe("planAssembly", () => {
     const act = held.chapters[0]!.acts[0]!;
     act.keyframes[0]!.video = {
       takes: [{ assetIds: [ids.actVideo], createdAt: T0 }],
-      confirmed: true,
     };
     const plan = planAssembly(held, moka);
     expect(plan.units.map((unit) => unit.keyframeId)).toEqual([ids.frameFirst]);
@@ -183,16 +179,13 @@ describe("planAssembly", () => {
     ]);
   });
 
-  it("keeps an unmeasured clip out of nothing, and says it is unmeasured", () => {
+  it("lays a clip that was never agreed to down all the same", () => {
+    // What a reader settles is the step, not one clip at a time: a clip that
+    // is on file is laid down whether or not anybody pressed anything.
     const moka = filmed();
-    const act = story(moka).chapters[0]!.acts[0]!;
-    act.video = { takes: act.video.takes, confirmed: false };
-    act.videoConfirmed = false;
     const plan = planAssembly(story(moka), moka);
     expect(plan.units).toHaveLength(1);
-    expect(plan.warnings.map((warning) => warning.kind)).toEqual([
-      "unconfirmed",
-    ]);
+    expect(plan.warnings).toEqual([]);
   });
 
   it("leaves out a clip whose material has left the project", () => {
@@ -396,11 +389,9 @@ function sounded(): MokaFile {
   const act = story(moka).chapters[0]!.acts[0]!;
   act.voice = {
     takes: [{ assetIds: ["asset-act-voice"], createdAt: T0 }],
-    confirmed: true,
   };
   act.music = {
     takes: [{ assetIds: ["asset-act-music"], createdAt: T0 }],
-    confirmed: false,
   };
   return moka;
 }

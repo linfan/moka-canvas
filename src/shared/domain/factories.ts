@@ -554,7 +554,7 @@ export function createNode(
 
 /** A place nothing has been drawn for yet. */
 export function emptyStorySlot(): StorySlot {
-  return { takes: [], confirmed: false };
+  return { takes: [] };
 }
 
 export function createStoryBrief(patch: Partial<StoryBrief> = {}): StoryBrief {
@@ -589,6 +589,7 @@ export function createStory(
     elements: [],
     shotGranularity: "act",
     maxReferenceImages: REFERENCE_IMAGES_DEFAULT,
+    confirmedSteps: [],
     edit: {},
     createdAt: now,
     updatedAt: now,
@@ -609,7 +610,6 @@ export function createChapter(title: string, synopsis = ""): StoryChapter {
     id: newId(),
     title,
     synopsis,
-    synopsisConfirmed: false,
     targetDurationMs: 0,
     acts: [],
   };
@@ -627,7 +627,6 @@ export function createElement(
     kind,
     name,
     description,
-    descriptionConfirmed: false,
     chapterIds,
     main: emptyStorySlot(),
     ...(kind === "character" ? { turnaround: emptyStorySlot() } : {}),
@@ -644,10 +643,7 @@ export function createAct(title: string, summary = ""): StoryAct {
     propIds: [],
     sound: { music: "", sfx: "" },
     keyframes: [],
-    keysConfirmed: false,
-    imagesConfirmed: false,
     video: emptyStorySlot(),
-    videoConfirmed: false,
   };
 }
 

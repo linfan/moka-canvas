@@ -124,33 +124,38 @@ describe("writing a premise", () => {
     expect(ideaBox().maxLength).toBe(STORY_IDEA_MAX);
   });
 
-  it("keeps the next step out of reach until there is a premise", () => {
+  it("keeps the next step out of reach until the premise is settled", () => {
     openRoom(buildEmptyStory("空故事"));
 
-    const next = screen.getByTestId("story-idea-next") as HTMLButtonElement;
-    expect(next.disabled).toBe(true);
-    expect(next.title).toBe("Write a premise, or upload a manuscript.");
+    // Nothing written yet: the press says what is missing and stays put.
+    fireEvent.click(screen.getByTestId("story-confirm-idea"));
+    expect(screen.getByTestId("story-confirm-gaps-idea").textContent).toContain(
+      "The premise is not written yet",
+    );
+    expect(useStoryStore.getState().step).toBe("idea");
+    expect(story().confirmedSteps).toEqual([]);
 
     writePremise("末班列车上，两个陌生人交换了各自要说的话。");
-    const ready = screen.getByTestId("story-idea-next") as HTMLButtonElement;
-    expect(ready.disabled).toBe(false);
-    fireEvent.click(ready);
+    fireEvent.click(screen.getByTestId("story-confirm-idea"));
+    expect(screen.queryByTestId("story-confirm-gaps-idea")).toBeNull();
+    expect(story().confirmedSteps).toEqual(["idea"]);
     expect(useStoryStore.getState().step).toBe("outline");
   });
 
-  it("writes the words down before stepping away", () => {
-    // A reader who types and presses next without clicking elsewhere has not
-    // blurred the box; the premise still has to make it into the document.
+  it("writes the words down before the press reads them", () => {
+    // A reader who types and presses confirm without clicking elsewhere has
+    // not blurred the box; the premise still has to make it into the document.
     openRoom(buildEmptyStory("空故事"));
 
     fireEvent.change(ideaBox(), {
       target: { value: "末班列车上，两个陌生人交换了各自要说的话。" },
     });
-    fireEvent.click(screen.getByTestId("story-idea-next"));
+    fireEvent.click(screen.getByTestId("story-confirm-idea"));
 
     expect(story().brief.idea).toBe(
       "末班列车上，两个陌生人交换了各自要说的话。",
     );
+    expect(useStoryStore.getState().step).toBe("outline");
   });
 });
 
@@ -216,10 +221,12 @@ describe("uploading a manuscript", () => {
     });
 
     await waitFor(() => {
-      expect(
-        (screen.getByTestId("story-idea-next") as HTMLButtonElement).disabled,
-      ).toBe(false);
+      expect(story().brief.sourceAssetId).toBe("asset-novel");
     });
+    // A manuscript is a premise of its own: the press settles the step.
+    fireEvent.click(screen.getByTestId("story-confirm-idea"));
+    expect(story().confirmedSteps).toEqual(["idea"]);
+    expect(useStoryStore.getState().step).toBe("outline");
   });
 
   it("files what is waiting first, and rests on the revision the filing answers with", async () => {

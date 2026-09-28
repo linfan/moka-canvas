@@ -64,9 +64,7 @@ function filmedAct(id: string, videoId: string, summary: string): StoryAct {
   act.keyframes = [shot];
   act.video = {
     takes: [{ assetIds: [videoId], createdAt: T0 }],
-    confirmed: true,
   };
-  act.videoConfirmed = true;
   return act;
 }
 
@@ -80,11 +78,9 @@ function told(): MokaFile {
   const first = filmedAct("first", ids.actVideo, "站台上的灯亮起来。");
   first.voice = {
     takes: [{ assetIds: ["asset-voice"], createdAt: T0 }],
-    confirmed: true,
   };
   first.music = {
     takes: [{ assetIds: ["asset-music"], createdAt: T0 }],
-    confirmed: true,
   };
   story.chapters[0] = { ...story.chapters[0], acts: [first] };
   story.chapters[1] = {
@@ -128,7 +124,6 @@ function crowded(): MokaFile {
         const assetId = `asset-${chapter}-${actAt}-${shotAt}`;
         shot.video = {
           takes: [{ assetIds: [assetId], createdAt: T0 }],
-          confirmed: true,
         };
         moka.resources.videos.push(video(assetId, 1_000));
         filmed += 1;

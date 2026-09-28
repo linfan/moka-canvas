@@ -6,19 +6,20 @@ import {
   STORY_NAME_MAX,
   chapterWaves,
   currentTake,
+  elementDescribed,
   targetKey,
   type StoryDocument,
   type StoryElement,
   type StoryElementKind,
 } from "../../../shared/domain";
 import { MAX_ELEMENTS_PER_STORY } from "../../../shared/domain/constants";
-import type { DocumentCommand } from "../../../shared/domain/types";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { SHELF_PAGE } from "../../editor/panels/shelfFilter";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
+import { StepConfirm } from "../components/StepConfirm";
 import { StepHeading } from "../components/StepHeading";
 import { ElementCard } from "../panels/ElementCard";
 import { readElementsAnswer } from "../jobs/apply";
@@ -36,16 +37,16 @@ import {
 /** The kinds of element, in the order the room shows them. */
 const KINDS: StoryElementKind[] = ["character", "scene", "prop"];
 
-const EMPTY = { takes: [], confirmed: false };
+const EMPTY = { takes: [] };
 
 /**
  * The third step: who and what the telling is made of.
  *
  * The chapters are read once for the characters, places and things they hold;
- * each of them is then described, drawn and agreed to. Nothing is asked for in
- * bulk without saying how many pieces it is — a shelf of drawings is minutes of
- * a provider's time — and a description is agreed to before the pictures of it
- * are drawn, since the words are what every one of them is made from.
+ * each of them is then described and drawn, and the descriptions stay the
+ * reader's to rewrite for as long as the telling is being worked on. Nothing is
+ * asked for in bulk without saying how many pieces it is — a shelf of drawings
+ * is minutes of a provider's time.
  *
  * Every picture is an ask of its own: a card whose painter is working says so
  * and is not asked for twice, while the cards beside it go on being drawable.
@@ -115,8 +116,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   const viewable = viewsMissing.filter(
     (element) => !drawing(element, "turnaround"),
   );
-  const everyDrawn = story.elements.length > 0 && undrawn.length === 0;
-  const spoken = story.elements.some((element) => element.descriptionConfirmed);
+  const spoken = story.elements.some(elementDescribed);
   // The reading itself, rather than one of the drawings that follow it: a
   // chapter's worth of words takes a while, and the button that asked for it
   // is where a reader looks to see that it is still going.
@@ -202,6 +202,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
           step="elements"
         />
         <p className="story-step-lead">{t("story:elements.lead")}</p>
+        <StepConfirm step="elements" story={story} />
         <StoryModelPicks places={["text", "image"]} />
 
         {warnings.length > 0 && (
@@ -292,23 +293,6 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
                 type="button"
               >
                 {t("story:elements.viewsAll", { count: viewable.length })}
-              </button>
-            )}
-            {story.elements.length > 0 && (
-              <button
-                data-testid="story-elements-confirm-all"
-                disabled={!everyDrawn}
-                onClick={() => confirmAll(story)}
-                title={
-                  everyDrawn
-                    ? undefined
-                    : t("story:elements.waitingForArt", {
-                        count: undrawn.length,
-                      })
-                }
-                type="button"
-              >
-                {t("story:elements.confirmAll")}
               </button>
             )}
             <button
@@ -452,41 +436,6 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   );
 }
 
-/**
- * Agrees to everything at once: every description, every picture.
- *
- * One command per answer rather than a whole-cast write, because the cast
- * command is how a reading replaces the words — it keeps the answers that are
- * already on file, which is exactly what is being given here.
- */
-function confirmAll(story: StoryDocument): void {
-  const commands: DocumentCommand[] = [];
-  for (const element of story.elements) {
-    if (!element.descriptionConfirmed) {
-      commands.push({
-        type: "updateStoryElement",
-        storyId: story.id,
-        elementId: element.id,
-        patch: { descriptionConfirmed: true },
-      });
-    }
-    for (const view of ["main", "turnaround"] as const) {
-      const slot = view === "main" ? element.main : element.turnaround;
-      if (slot === undefined || slot.confirmed || slot.takes.length === 0) {
-        continue;
-      }
-      commands.push({
-        type: "setStorySlot",
-        storyId: story.id,
-        target: { kind: "element", elementId: element.id, view },
-        slot: { ...slot, confirmed: true },
-      });
-    }
-  }
-  if (commands.length === 0) return;
-  execute(i18n.t("story:history.elements"), commands);
-}
-
 /** An element the reader typed in themselves. */
 function addElement(
   story: StoryDocument,
@@ -497,12 +446,9 @@ function addElement(
     kind: draft.kind,
     name: draft.name,
     description: draft.description,
-    descriptionConfirmed: false,
     chapterIds: [],
-    main: { takes: [], confirmed: false },
-    ...(draft.kind === "character"
-      ? { turnaround: { takes: [], confirmed: false } }
-      : {}),
+    main: { takes: [] },
+    ...(draft.kind === "character" ? { turnaround: { takes: [] } } : {}),
   };
   execute(i18n.t("story:history.elements"), [
     {

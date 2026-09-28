@@ -24,6 +24,7 @@ import {
   STORY_SHOT_SIZES,
 } from "./types";
 import { reconcilePorts } from "./factories";
+import { STORY_STEPS, type StoryStep } from "./story";
 import type {
   AssistantFailure,
   AssistantMessage,
@@ -405,7 +406,6 @@ function encodeStoryTake(take: StoryTake): Record<string, unknown> {
 function encodeStorySlot(slot: StorySlot): Record<string, unknown> {
   return {
     takes: slot.takes.map(encodeStoryTake),
-    confirmed: slot.confirmed,
   };
 }
 
@@ -449,10 +449,7 @@ function encodeStoryAct(act: StoryAct): Record<string, unknown> {
         : {}),
     },
     keyframes: act.keyframes.map(encodeStoryKeyframe),
-    keysConfirmed: act.keysConfirmed,
-    imagesConfirmed: act.imagesConfirmed,
     video: encodeStorySlot(act.video),
-    videoConfirmed: act.videoConfirmed,
   };
   if (act.sceneId !== undefined) doc.sceneId = act.sceneId;
   // A slot that was never made is left out rather than written back empty:
@@ -467,7 +464,6 @@ function encodeStoryChapter(chapter: StoryChapter): Record<string, unknown> {
     id: chapter.id,
     title: chapter.title,
     synopsis: chapter.synopsis,
-    synopsisConfirmed: chapter.synopsisConfirmed,
     targetDurationMs: asLong(chapter.targetDurationMs),
     acts: chapter.acts.map(encodeStoryAct),
   };
@@ -479,7 +475,6 @@ function encodeStoryElement(element: StoryElement): Record<string, unknown> {
     kind: element.kind,
     name: element.name,
     description: element.description,
-    descriptionConfirmed: element.descriptionConfirmed,
     chapterIds: [...element.chapterIds],
     main: encodeStorySlot(element.main),
   };
@@ -528,6 +523,7 @@ function encodeStory(story: StoryDocument): Record<string, unknown> {
     elements: story.elements.map(encodeStoryElement),
     shotGranularity: story.shotGranularity,
     maxReferenceImages: story.maxReferenceImages,
+    confirmedSteps: [...story.confirmedSteps],
     edit: encodeStoryEdit(story.edit),
     createdAt: story.createdAt,
     updatedAt: story.updatedAt,
@@ -1241,7 +1237,6 @@ function decodeStorySlot(value: unknown): StorySlot {
   const doc = asRecord(value, "stories[].slots[]");
   return {
     takes: asArray(doc.takes, "slots[].takes").map(decodeStoryTake),
-    confirmed: Boolean(doc.confirmed),
   };
 }
 
@@ -1301,10 +1296,7 @@ function decodeStoryAct(value: unknown): StoryAct {
     keyframes: asArray(doc.keyframes ?? [], "acts[].keyframes").map(
       decodeStoryKeyframe,
     ),
-    keysConfirmed: Boolean(doc.keysConfirmed),
-    imagesConfirmed: Boolean(doc.imagesConfirmed),
     video: decodeStorySlot(doc.video),
-    videoConfirmed: Boolean(doc.videoConfirmed),
   };
   if (doc.sceneId !== undefined) act.sceneId = optionalString(doc.sceneId);
   if (doc.voice !== undefined) act.voice = decodeStorySlot(doc.voice);
@@ -1318,7 +1310,6 @@ function decodeStoryChapter(value: unknown): StoryChapter {
     id: asString(doc.id, "chapters[].id"),
     title: asString(doc.title, "chapters[].title"),
     synopsis: asString(doc.synopsis, "chapters[].synopsis"),
-    synopsisConfirmed: Boolean(doc.synopsisConfirmed),
     targetDurationMs: requireField(
       decodeLongField(doc.targetDurationMs),
       "chapters[].targetDurationMs",
@@ -1334,7 +1325,6 @@ function decodeStoryElement(value: unknown): StoryElement {
     kind: fallbackOneOf(STORY_ELEMENT_KINDS, doc.kind, "prop"),
     name: asString(doc.name, "elements[].name"),
     description: asString(doc.description, "elements[].description"),
-    descriptionConfirmed: Boolean(doc.descriptionConfirmed),
     chapterIds: asArray(doc.chapterIds ?? [], "elements[].chapterIds").map(
       (id) => asString(id, "elements[].chapterIds[]"),
     ),
@@ -1387,6 +1377,77 @@ function decodeStoryEdit(value: unknown): StoryEdit {
   return edit;
 }
 
+/**
+ * The steps an older document had settled, read from the answers it kept.
+ *
+ * A story written before the room confirmed whole steps said the same thing
+ * one place at a time: a chapter agreed to, a description agreed to, a clip
+ * agreed to. Reading those back is what keeps a telling someone had finished
+ * standing where they left it rather than at the first step of five.
+ */
+function decodeSteps(
+  value: unknown,
+  doc: Record<string, unknown>,
+): StoryStep[] {
+  if (value !== undefined) {
+    return STORY_STEPS.filter((step) =>
+      asArray(value, "stories[].confirmedSteps").some((held) => held === step),
+    );
+  }
+  const steps: StoryStep[] = [];
+  const brief = asRecord(doc.brief ?? {}, "stories[].brief");
+  if (
+    String(brief.idea ?? "").trim() !== "" ||
+    brief.sourceAssetId !== undefined
+  ) {
+    steps.push("idea");
+  }
+  const chapters = asArray(doc.chapters ?? [], "stories[].chapters");
+  if (
+    chapters.length > 0 &&
+    chapters.every((held) =>
+      Boolean(asRecord(held, "chapters[]").synopsisConfirmed),
+    )
+  ) {
+    steps.push("outline");
+  }
+  const elements = asArray(doc.elements ?? [], "stories[].elements");
+  if (
+    elements.length > 0 &&
+    elements.every((held) => {
+      const element = asRecord(held, "elements[]");
+      if (!element.descriptionConfirmed) return false;
+      if (!asRecord(element.main ?? {}, "elements[].main").confirmed)
+        return false;
+      return (
+        element.turnaround === undefined ||
+        Boolean(asRecord(element.turnaround, "elements[].turnaround").confirmed)
+      );
+    })
+  ) {
+    steps.push("elements");
+  }
+  const acts = chapters.flatMap((held) =>
+    asArray(asRecord(held, "chapters[]").acts ?? [], "chapters[].acts"),
+  );
+  if (
+    acts.length > 0 &&
+    acts.every((held) => {
+      const act = asRecord(held, "acts[]");
+      const files = asArray(
+        asRecord(act.video ?? {}, "acts[].video").takes ?? [],
+        "acts[].video.takes",
+      );
+      return Boolean(act.videoConfirmed) && files.length > 0;
+    })
+  ) {
+    steps.push("storyboard");
+  }
+  if (asRecord(doc.edit ?? {}, "stories[].edit").film !== undefined)
+    steps.push("edit");
+  return steps;
+}
+
 function decodeStory(value: unknown): StoryDocument {
   const doc = asRecord(value, "stories[]");
   const schemaVersion = Math.trunc(
@@ -1415,6 +1476,7 @@ function decodeStory(value: unknown): StoryDocument {
       "act",
     ),
     maxReferenceImages: decodeReferenceImages(doc.maxReferenceImages),
+    confirmedSteps: decodeSteps(doc.confirmedSteps, doc),
     edit: decodeStoryEdit(doc.edit),
     createdAt: asString(doc.createdAt, "stories[].createdAt"),
     updatedAt: asString(doc.updatedAt, "stories[].updatedAt"),

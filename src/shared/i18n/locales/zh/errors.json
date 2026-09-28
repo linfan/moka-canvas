@@ -96,6 +96,7 @@
     "storyDurationOutOfRange": "总时长超出允许范围",
     "storyAspectUnknown": "画幅不在可选范围内",
     "storyGranularityUnknown": "视频粒度不是两种之一",
+    "storyStepUnknown": "确认的不是故事里的步骤",
     "storyReferenceLimitInvalid": "参考图数量上限超出允许范围",
     "storyElementKindUnknown": "元素种类不是三种之一",
     "storyDescriptionTooLong": "描述过长",

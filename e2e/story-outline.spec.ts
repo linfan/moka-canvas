@@ -51,7 +51,7 @@ test("a premise becomes the chapters the reader counted", async ({ page }) => {
     await page.getByTestId("story-idea-tab-upload").click();
     await page.getByTestId("story-idea-tab-write").click();
     await page.getByTestId("story-idea-duration-3").click();
-    await page.getByTestId("story-idea-next").click();
+    await page.getByTestId("story-confirm-idea").click();
 
     await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
     await expect(page.getByTestId("story-outline-chapters")).toHaveValue("3");
@@ -68,16 +68,11 @@ test("a premise becomes the chapters the reader counted", async ({ page }) => {
     await expect(page.getByTestId("story-chapter-title-0")).toHaveValue(
       "Chapter 1",
     );
-    await expect(page.getByTestId("story-chapter-state-2")).toHaveText(
-      "not confirmed",
-    );
 
-    // Confirming them all is one step of the history, and it opens step three.
+    // Nothing of the outline is agreed to chapter by chapter: the step's own
+    // press reads the whole of it, and that is what opens step three.
     await expect(page.getByTestId("story-step-elements")).toBeDisabled();
-    await page.getByTestId("story-outline-confirm-all").click();
-    await expect(page.getByTestId("story-chapter-state-0")).toHaveText(
-      "confirmed ✓",
-    );
+    await page.getByTestId("story-confirm-outline").click();
     await expect(page.getByTestId("story-step-elements")).toBeEnabled();
 
     // The chapters are the document's, and reach the server on the autosave.

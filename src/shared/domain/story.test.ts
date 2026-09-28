@@ -41,6 +41,8 @@ import {
   mergeChapters,
   mergeChaptersAt,
   mergeElements,
+  stepComplete,
+  stepGaps,
   stepReachable,
   storyMentions,
   STORY_STEPS,
@@ -119,183 +121,259 @@ describe("storyProgress", () => {
       total: 1,
     });
     const told = createStory("新的故事", { idea: "一个人等一班停运的车。" });
-    expect(storyProgress(told).idea.state).toBe("confirmed");
+    expect(storyProgress(told).idea.state).toBe("ready");
     expect(storyProgress(told).idea.done).toBe(1);
+
+    // Settled is the reader's word: a step that is complete is not yet a step
+    // that was confirmed.
+    told.confirmedSteps = ["idea"];
+    expect(storyProgress(told).idea.state).toBe("confirmed");
   });
 
-  it("calls an outline working until every chapter is confirmed, then ready until every one is boarded", () => {
+  it("calls an outline working until every chapter is written, then ready until the reader settles it", () => {
     const story = createStory("新的故事", { idea: "一句话" });
-    story.chapters = [
-      { ...createChapter("一"), synopsisConfirmed: true },
-      createChapter("二"),
-    ];
+    story.chapters = [createChapter("一", "他等车。"), createChapter("二")];
     expect(storyProgress(story).outline).toMatchObject({
       state: "working",
       done: 1,
       total: 2,
     });
 
-    story.chapters = story.chapters.map((chapter) => ({
-      ...chapter,
-      synopsisConfirmed: true,
-    }));
+    story.chapters = [
+      createChapter("一", "他等车。"),
+      createChapter("二", "车没有来。"),
+    ];
     expect(storyProgress(story).outline.state).toBe("ready");
 
-    story.chapters = story.chapters.map((chapter) => ({
-      ...chapter,
-      acts: [createActFor(chapter.id)],
-    }));
+    story.confirmedSteps = ["idea", "outline"];
     expect(storyProgress(story).outline.state).toBe("confirmed");
-  });
 
-  it("counts an element only when its words and its drawings are both agreed to", () => {
-    const story = createStory("新的故事", { idea: "一句话" });
-    story.elements = [
-      {
-        ...element(ids.hero, "character"),
-        descriptionConfirmed: true,
-        main: { takes: [take(ids.heroMain)], confirmed: true },
-        turnaround: { takes: [take(ids.heroSheet)], confirmed: true },
-      },
-      {
-        ...element(ids.prop, "prop"),
-        descriptionConfirmed: true,
-        main: { takes: [take(ids.sceneMain)], confirmed: false },
-      },
-    ];
-    // Everything is drawn, and one of the two is not yet agreed to.
-    expect(storyProgress(story).elements).toMatchObject({
-      state: "ready",
+    // A chapter re-written afterwards leaves the outline settled: only the
+    // count of what is finished moves.
+    story.chapters = [createChapter("一", "他等车。"), createChapter("二")];
+    expect(storyProgress(story).outline).toMatchObject({
+      state: "confirmed",
       done: 1,
       total: 2,
     });
   });
 
-  it("calls the characters drawn when both drawings are there, even before anyone agrees", () => {
+  it("counts an element only when its words and its drawings are both there", () => {
     const story = createStory("新的故事", { idea: "一句话" });
     story.elements = [
       {
         ...element(ids.hero, "character"),
-        main: { takes: [take(ids.heroMain)], confirmed: false },
-        turnaround: { takes: [take(ids.heroSheet)], confirmed: false },
+        description: "四十岁上下。",
+        main: { takes: [take(ids.heroMain)] },
+        turnaround: { takes: [take(ids.heroSheet)] },
+      },
+      {
+        ...element(ids.prop, "prop"),
+        description: "一张车票。",
+        main: { takes: [] },
       },
     ];
+    expect(storyProgress(story).elements).toMatchObject({
+      state: "working",
+      done: 1,
+      total: 2,
+    });
+
+    story.elements = story.elements.map((held) => ({
+      ...held,
+      main: { takes: [take(ids.sceneMain)] },
+    }));
     expect(storyProgress(story).elements.state).toBe("ready");
   });
 
-  it("counts an act as settled only when its clip is made and agreed to", () => {
+  it("counts a character as drawn only when both of its drawings are there", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    story.elements = [
+      {
+        ...element(ids.hero, "character"),
+        description: "四十岁上下。",
+        main: { takes: [take(ids.heroMain)] },
+        turnaround: { takes: [] },
+      },
+    ];
+    expect(storyProgress(story).elements.state).toBe("working");
+    story.elements[0].turnaround = { takes: [take(ids.heroSheet)] };
+    expect(storyProgress(story).elements.state).toBe("ready");
+  });
+
+  it("counts an act as finished only when it is boarded, drawn and filmed", () => {
     const story = createStory("新的故事", { idea: "一句话" });
     const act = createActFor(ids.chapterFirst);
     const frame = createKeyframe(0);
-    frame.art = { takes: [take(ids.frameArt)], confirmed: true };
+    frame.art = { takes: [take(ids.frameArt)] };
     act.keyframes = [frame];
-    act.video = { takes: [take(ids.actVideo)], confirmed: true };
-    act.videoConfirmed = true;
     story.chapters = [{ ...createChapter("一"), acts: [act] }];
     expect(storyProgress(story).storyboard).toMatchObject({
-      state: "confirmed",
-      done: 1,
+      state: "working",
+      done: 0,
       total: 1,
     });
 
-    act.videoConfirmed = false;
+    // Drawn through, and still no clip: the step is not finished yet.
+    act.video = { takes: [take(ids.actVideo)] };
     expect(storyProgress(story).storyboard).toMatchObject({
       state: "ready",
-      done: 0,
+      done: 1,
     });
   });
 
   it("reads a shot-at-a-time telling as filmed only when every shot has a clip", () => {
-    const story = createStory("新的故事", {
-      idea: "一句话",
-    });
+    const story = createStory("新的故事", { idea: "一句话" });
     story.shotGranularity = "keyframe";
     const act = createActFor(ids.chapterFirst);
     const first = createKeyframe(0);
     const second = createKeyframe(1);
-    first.video = { takes: [take(ids.actVideo)], confirmed: false };
+    first.art = { takes: [take(ids.frameArt)] };
+    second.art = { takes: [take(ids.sceneMain)] };
+    first.video = { takes: [take(ids.actVideo)] };
     act.keyframes = [first, second];
-    act.videoConfirmed = true;
     story.chapters = [{ ...createChapter("一"), acts: [act] }];
     expect(storyProgress(story).storyboard.done).toBe(0);
 
-    second.video = { takes: [take(ids.actVideo)], confirmed: false };
+    second.video = { takes: [take(ids.actVideo)] };
     expect(storyProgress(story).storyboard.done).toBe(1);
   });
 
-  it("reads the assembly as ready once a timeline is named, and done once the film is filed", () => {
+  it("reads the assembly as working once a timeline is named, and ready once the film is filed", () => {
     const story = createStory("新的故事", { idea: "一句话" });
     expect(storyProgress(story).edit.state).toBe("empty");
     story.edit = { timelineId: "timeline-1" };
-    expect(storyProgress(story).edit.state).toBe("ready");
+    expect(storyProgress(story).edit.state).toBe("working");
     story.edit = { timelineId: "timeline-1", film: take(ids.actVideo) };
+    expect(storyProgress(story).edit.state).toBe("ready");
+
+    story.confirmedSteps = ["edit"];
     expect(storyProgress(story).edit.state).toBe("confirmed");
+  });
+});
+
+describe("what a step is still waiting for", () => {
+  const ids = storyIds();
+
+  it("says what step one is missing, and nothing once the premise is written", () => {
+    const story = createStory("新的故事");
+    expect(stepGaps(story, "idea")).toEqual([{ kind: "ideaMissing" }]);
+    story.brief.idea = "一个人等一班停运的车。";
+    expect(stepGaps(story, "idea")).toEqual([]);
+    expect(stepComplete(story, "idea")).toBe(true);
+  });
+
+  it("names the chapters of an outline that are not written yet", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    expect(stepGaps(story, "outline")).toEqual([{ kind: "noChapters" }]);
+    story.chapters = [
+      createChapter("一", "他等车。"),
+      createChapter("二"),
+      createChapter("", "没有标题。"),
+    ];
+    expect(stepGaps(story, "outline")).toEqual([
+      { kind: "chaptersUnwritten", numbers: [2, 3] },
+    ]);
+  });
+
+  it("lists the elements that have no words, and those that have no drawing", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    expect(stepGaps(story, "elements")).toEqual([{ kind: "noElements" }]);
+    story.elements = [
+      { ...element(ids.hero, "character"), name: "林", description: "" },
+      {
+        ...element(ids.prop, "prop"),
+        name: "旧车票",
+        description: "一张车票。",
+        main: { takes: [] },
+      },
+    ];
+    expect(stepGaps(story, "elements")).toEqual([
+      { kind: "elementsUndescribed", names: ["林"] },
+      { kind: "elementsUndrawn", names: ["旧车票"] },
+    ]);
+  });
+
+  it("counts the acts with nothing in them, the frames missing and the clips missing", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    expect(stepGaps(story, "storyboard")).toEqual([{ kind: "noActs" }]);
+    const bare = createActFor(ids.chapterFirst);
+    const shot = createActFor(ids.chapterSecond);
+    shot.keyframes = [createKeyframe(0)];
+    shot.video = { takes: [take(ids.actVideo)] };
+    story.chapters = [
+      { ...createChapter("一"), acts: [bare] },
+      { ...createChapter("二"), acts: [shot] },
+    ];
+    expect(stepGaps(story, "storyboard")).toEqual([
+      { kind: "actsWithoutShots", count: 1 },
+      { kind: "framesMissing", count: 1 },
+      { kind: "clipsMissing", count: 1 },
+    ]);
+  });
+
+  it("asks for the timeline first, and the film after it", () => {
+    const story = createStory("新的故事", { idea: "一句话" });
+    expect(stepGaps(story, "edit")).toEqual([{ kind: "noTimeline" }]);
+    story.edit = { timelineId: "timeline-1" };
+    expect(stepGaps(story, "edit")).toEqual([{ kind: "noFilm" }]);
+    story.edit = { timelineId: "timeline-1", film: take(ids.actVideo) };
+    expect(stepGaps(story, "edit")).toEqual([]);
   });
 });
 
 describe("which step a reader can walk to", () => {
   const ids = storyIds();
 
-  it("lets step two open on a premise, and no sooner", () => {
+  it("lets step two open on a premise the reader has settled, and no sooner", () => {
     const story = createStory("新的故事");
     expect(stepReachable(storyProgress(story), "outline")).toBe(false);
     story.brief.idea = "一个人等一班停运的车。";
+    // Written, and not yet settled: a door opens on the reader's word.
+    expect(stepReachable(storyProgress(story), "outline")).toBe(false);
+    story.confirmedSteps = ["idea"];
     expect(stepReachable(storyProgress(story), "outline")).toBe(true);
   });
 
-  it("opens the elements on chapters that are all confirmed, boarded or not", () => {
+  it("opens the elements on an outline that has been settled", () => {
     const story = createStory("新的故事", { idea: "一句话" });
-    story.chapters = [{ ...createChapter("一"), synopsisConfirmed: true }];
-    // One of two confirmed: the elements are not yet a door.
-    story.chapters.push(createChapter("二"));
+    story.confirmedSteps = ["idea"];
+    story.chapters = [createChapter("一", "他等车。")];
     expect(stepReachable(storyProgress(story), "elements")).toBe(false);
 
-    story.chapters = story.chapters.map((chapter) => ({
-      ...chapter,
-      synopsisConfirmed: true,
-    }));
-    // Confirmed all through, and not one board between them: the boards are
-    // what step four is for, and step three is where they are drawn from.
-    expect(storyProgress(story).outline.state).toBe("ready");
+    // Settled, and not one board between them: the boards are what step four
+    // is for, and step three is where they are drawn from.
+    story.confirmedSteps = ["idea", "outline"];
+    expect(storyProgress(story).outline.state).toBe("confirmed");
     expect(stepReachable(storyProgress(story), "elements")).toBe(true);
   });
 
-  it("opens the board on elements that are described and drawn, all of them", () => {
+  it("opens the board on elements that have been settled", () => {
     const story = createStory("新的故事", { idea: "一句话" });
-    story.chapters = [{ ...createChapter("一"), synopsisConfirmed: true }];
+    story.chapters = [createChapter("一", "他等车。")];
+    story.confirmedSteps = ["idea", "outline"];
     story.elements = [
       {
         ...element(ids.hero, "character"),
-        descriptionConfirmed: true,
-        main: { takes: [take(ids.heroMain)], confirmed: true },
-        turnaround: { takes: [take(ids.heroSheet)], confirmed: true },
-      },
-      {
-        ...element(ids.prop, "prop"),
-        descriptionConfirmed: true,
-        main: { takes: [take(ids.sceneMain)], confirmed: false },
+        main: { takes: [take(ids.heroMain)] },
+        turnaround: { takes: [take(ids.heroSheet)] },
       },
     ];
+    // Drawn through, and not yet settled.
     expect(stepReachable(storyProgress(story), "storyboard")).toBe(false);
-
-    story.elements = story.elements.map((held) => ({
-      ...held,
-      main: { ...held.main, confirmed: true },
-    }));
+    story.confirmedSteps = ["idea", "outline", "elements"];
     expect(stepReachable(storyProgress(story), "storyboard")).toBe(true);
   });
 
-  it("opens the cutting room on the first clip that is settled", () => {
+  it("opens the cutting room on a board that has been settled", () => {
     const story = createStory("新的故事", { idea: "一句话" });
     const act = createActFor(ids.chapterFirst);
-    act.video = { takes: [take(ids.actVideo)], confirmed: true };
-    act.videoConfirmed = true;
+    act.video = { takes: [take(ids.actVideo)] };
     story.chapters = [{ ...createChapter("一"), acts: [act] }];
-    expect(stepReachable(storyProgress(story), "edit")).toBe(true);
-
-    // A story with nothing filmed is not a cutting room yet.
-    act.videoConfirmed = false;
+    story.confirmedSteps = ["idea", "outline", "elements"];
     expect(stepReachable(storyProgress(story), "edit")).toBe(false);
+    story.confirmedSteps = ["idea", "outline", "elements", "storyboard"];
+    expect(stepReachable(storyProgress(story), "edit")).toBe(true);
   });
 
   it("always offers the first step, and keeps the other four in order", () => {
@@ -414,9 +492,8 @@ describe("mergeElements", () => {
     ...element("element-hero", "character"),
     name: "林",
     description: "旧描述",
-    descriptionConfirmed: true,
-    main: { takes: [take("asset-hero-main")], confirmed: true },
-    turnaround: { takes: [take("asset-hero-sheet")], confirmed: true },
+    main: { takes: [take("asset-hero-main")] },
+    turnaround: { takes: [take("asset-hero-sheet")] },
   };
 
   it("matches a character by kind and name however the airs around the name move", () => {
@@ -426,7 +503,7 @@ describe("mergeElements", () => {
     const merged = mergeElements([hero], identified, [createChapter("一")]);
     expect(merged[0].id).toBe(hero.id);
     expect(merged[0].description).toBe("新描述");
-    expect(merged[0].descriptionConfirmed).toBe(true);
+    expect(merged[0].main.takes).toHaveLength(1);
     expect(merged[0].main.takes[0].assetIds[0]).toBe("asset-hero-main");
     expect(merged[0].turnaround?.takes).toHaveLength(1);
   });
@@ -523,11 +600,10 @@ describe("mergeActs", () => {
   it("keeps the frames and the clip of an act that stands where it stood", () => {
     const held = createActFor("chapter-1");
     const frame = createKeyframe(0);
-    frame.art = { takes: [take("asset-frame-art")], confirmed: true };
-    frame.video = { takes: [take("asset-frame-video")], confirmed: true };
+    frame.art = { takes: [take("asset-frame-art")] };
+    frame.video = { takes: [take("asset-frame-video")] };
     held.keyframes = [frame];
-    held.video = { takes: [take("asset-act-video")], confirmed: true };
-    held.videoConfirmed = true;
+    held.video = { takes: [take("asset-act-video")] };
 
     const draft: ActDraft = {
       title: "新标题",
@@ -551,7 +627,7 @@ describe("mergeActs", () => {
     const merged = mergeActs([held], [draft]);
     expect(merged[0].id).toBe(held.id);
     expect(merged[0].title).toBe("新标题");
-    expect(merged[0].videoConfirmed).toBe(true);
+    expect(merged[0].video.takes).toHaveLength(1);
     expect(merged[0].video.takes).toHaveLength(1);
     expect(merged[0].keyframes[0].id).toBe(frame.id);
     expect(merged[0].keyframes[0].art.takes).toHaveLength(1);
@@ -639,7 +715,7 @@ describe("the sound of an act", () => {
       type: "setStorySlot",
       storyId: story.id,
       target,
-      slot: { takes: [take("asset-act-voice")], confirmed: false },
+      slot: { takes: [take("asset-act-voice")] },
     });
     expect(
       storyOfFile(next).chapters[0].acts[0].voice?.takes[0]?.assetIds[0],
@@ -650,10 +726,10 @@ describe("the sound of an act", () => {
       type: "setStorySlot",
       storyId: story.id,
       target: { ...target, kind: "actMusic" },
-      slot: { takes: [take("asset-act-music")], confirmed: true },
+      slot: { takes: [take("asset-act-music")] },
     });
     const act = storyOfFile(scored).chapters[0].acts[0];
-    expect(act.music?.confirmed).toBe(true);
+    expect(act.music?.takes).toHaveLength(1);
     expect(act.voice).toBeUndefined();
   });
 
@@ -667,9 +743,8 @@ describe("the sound of an act", () => {
     const story = storyOfFile(moka);
     story.chapters[0].acts[0].voice = {
       takes: [take("asset-act-voice")],
-      confirmed: true,
     };
-    story.chapters[0].acts[0].music = { takes: [], confirmed: false };
+    story.chapters[0].acts[0].music = { takes: [] };
     const read = decodeMokaFile(encodeMokaFile(moka));
     expect(storyOfFile(read).chapters[0].acts[0].voice?.takes).toHaveLength(1);
     expect(storyOfFile(read).chapters[0].acts[0].music?.takes).toEqual([]);
@@ -679,8 +754,8 @@ describe("the sound of an act", () => {
     const moka = buildStoryMokaFile();
     const story = storyOfFile(moka);
     const act = story.chapters[0].acts[0];
-    act.voice = { takes: [take("asset-act-voice")], confirmed: true };
-    act.music = { takes: [take("asset-act-music")], confirmed: false };
+    act.voice = { takes: [take("asset-act-voice")] };
+    act.music = { takes: [take("asset-act-music")] };
 
     const refs = collectAssetReferences(moka);
     expect(refs.get("asset-act-voice")).toEqual([act.id]);
@@ -710,10 +785,7 @@ function createActFor(chapterId: string): StoryAct {
     propIds: [],
     sound: { music: "", sfx: "" },
     keyframes: [],
-    keysConfirmed: false,
-    imagesConfirmed: false,
     video: emptyStorySlot(),
-    videoConfirmed: false,
   };
 }
 
@@ -723,7 +795,6 @@ function element(id: string, kind: StoryElement["kind"]): StoryElement {
     kind,
     name: id,
     description: "",
-    descriptionConfirmed: false,
     chapterIds: [],
     main: emptyStorySlot(),
     ...(kind === "character" ? { turnaround: emptyStorySlot() } : {}),
@@ -827,6 +898,66 @@ describe("story lifecycle commands", () => {
       name: "站台与车厢",
     });
     expect(storyOfFile(renamed).name).toBe("站台与车厢");
+  });
+
+  it("settles a step, keeps the steps in telling order, and unsettles one on undo", () => {
+    const moka = buildStoryMokaFile();
+    const ids = storyIds();
+    const settled = expectRoundTrip(moka, {
+      type: "confirmStoryStep",
+      storyId: ids.story,
+      step: "storyboard",
+      confirmed: true,
+    });
+    expect(storyOfFile(settled).confirmedSteps).toEqual([
+      "idea",
+      "outline",
+      "elements",
+      "storyboard",
+    ]);
+
+    // A step settled out of order is written into its place in the telling.
+    const outOfOrder = expectRoundTrip(
+      { ...moka, stories: [{ ...storyOfFile(moka), confirmedSteps: [] }] },
+      {
+        type: "confirmStoryStep",
+        storyId: ids.story,
+        step: "edit",
+        confirmed: true,
+      },
+      {
+        type: "confirmStoryStep",
+        storyId: ids.story,
+        step: "idea",
+        confirmed: true,
+      },
+    );
+    expect(storyOfFile(outOfOrder).confirmedSteps).toEqual(["idea", "edit"]);
+
+    // Settling a step it is already standing on changes nothing to put back.
+    const again = apply(settled, {
+      type: "confirmStoryStep",
+      storyId: ids.story,
+      step: "storyboard",
+      confirmed: true,
+    });
+    expect(storyOfFile(again.next).confirmedSteps).toEqual(
+      storyOfFile(settled).confirmedSteps,
+    );
+  });
+
+  it("refuses a step that is not one of the telling's own", () => {
+    const moka = buildStoryMokaFile();
+    expect(
+      codeOf(() =>
+        apply(moka, {
+          type: "confirmStoryStep",
+          storyId: storyIds().story,
+          step: "polish" as never,
+          confirmed: true,
+        }),
+      ),
+    ).toBe("VALIDATION_FAILED");
   });
 
   it("moves only the fields a brief patch names", () => {
@@ -970,7 +1101,6 @@ describe("the elements commands", () => {
     });
     const hero = storyOfFile(next).elements[0];
     expect(hero.description).toBe("重写的描述");
-    expect(hero.descriptionConfirmed).toBe(true);
     expect(hero.main.takes).toHaveLength(1);
     expect(hero.turnaround?.takes).toHaveLength(1);
   });
@@ -998,13 +1128,13 @@ describe("the elements commands", () => {
       type: "updateStoryElement",
       storyId: storyIds().story,
       elementId: storyIds().hero,
-      patch: { descriptionConfirmed: false },
+      patch: { description: "换了件衣服。" },
     });
     const hero = storyOfFile(next).elements.find(
       (e) => e.id === storyIds().hero,
     )!;
-    expect(hero.descriptionConfirmed).toBe(false);
-    expect(hero.description).toBe("四十岁上下，深色大衣，说话很慢。");
+    expect(hero.description).toBe("换了件衣服。");
+    expect(hero.name).toBe("林");
   });
 
   it("names the chapters an element was seen in, and refuses one the story has not", () => {
@@ -1050,7 +1180,6 @@ describe("the board commands", () => {
     expect(acts).toHaveLength(2);
     expect(acts[0].title).toBe("第 1 幕 站台的灯");
     expect(acts[0].video.takes).toHaveLength(1);
-    expect(acts[0].videoConfirmed).toBe(true);
     expect(acts[0].keyframes[0].art.takes).toHaveLength(1);
     expect(acts[1].video.takes).toEqual([]);
   });
@@ -1113,11 +1242,10 @@ describe("the board commands", () => {
       storyId: ids.story,
       chapterId: ids.chapterFirst,
       actId: ids.act,
-      patch: { sound: { music: "大提琴", sfx: "" }, imagesConfirmed: true },
+      patch: { sound: { music: "大提琴", sfx: "" } },
     });
     const act = storyOfFile(next).chapters[0].acts[0];
     expect(act.sound).toEqual({ music: "大提琴", sfx: "" });
-    expect(act.imagesConfirmed).toBe(true);
     expect(act.title).toBe("第 1 幕 空站台");
   });
 
@@ -1163,7 +1291,6 @@ describe("filing a drawing at a place", () => {
     const ids = storyIds();
     const slot: StorySlot = {
       takes: [{ assetIds: ["asset-new"], createdAt: NOW }],
-      confirmed: true,
     };
     const next = expectRoundTrip(moka, {
       type: "setStorySlot",
@@ -1192,7 +1319,7 @@ describe("filing a drawing at a place", () => {
       type: "setStorySlot",
       storyId: ids.story,
       target: { kind: "element", elementId: ids.prop, view: "main" },
-      slot: { takes, confirmed: false },
+      slot: { takes },
     }).next;
     const prop = storyOfFile(next).elements.find((e) => e.id === ids.prop)!;
     expect(prop.main.takes).toHaveLength(MAX_TAKES_PER_SLOT);
@@ -1207,7 +1334,7 @@ describe("filing a drawing at a place", () => {
           type: "setStorySlot",
           storyId: storyIds().story,
           target: { kind: "element", elementId: "gone", view: "main" },
-          slot: { takes: [], confirmed: false },
+          slot: { takes: [] },
         }),
       ),
     ).toBe("STORY_TARGET_INVALID");
@@ -1221,7 +1348,7 @@ describe("filing a drawing at a place", () => {
             elementId: storyIds().scene,
             view: "turnaround",
           },
-          slot: { takes: [], confirmed: false },
+          slot: { takes: [] },
         }),
       ),
     ).toBe("STORY_TARGET_INVALID");
@@ -1234,7 +1361,7 @@ describe("filing a drawing at a place", () => {
       type: "setStorySlot",
       storyId: ids.story,
       target: { kind: "actVideo", chapterId: ids.chapterFirst, actId: ids.act },
-      slot: { takes: [take("asset-second-take")], confirmed: false },
+      slot: { takes: [take("asset-second-take")] },
     }).next;
     expect(storyOfFile(withAct).chapters[0].acts[0].video.takes).toEqual([
       take("asset-second-take"),
@@ -1249,7 +1376,7 @@ describe("filing a drawing at a place", () => {
         actId: ids.act,
         keyframeId: ids.frameSecond,
       },
-      slot: { takes: [take("asset-shot")], confirmed: true },
+      slot: { takes: [take("asset-shot")] },
     }).next;
     expect(
       storyOfFile(withShot).chapters[0].acts[0].keyframes[1].video.takes,
@@ -1595,7 +1722,6 @@ describe("actsRegenerationCost", () => {
     act.video = emptyStorySlot();
     act.keyframes[1]!.art = {
       takes: [{ assetIds: ["asset-other-frame"], createdAt: NOW }],
-      confirmed: false,
     };
     expect(actsRegenerationCost(chapter)).toEqual({
       acts: 1,

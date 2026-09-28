@@ -208,8 +208,7 @@ describe("assembling a telling", () => {
       acts: [{ ...moka.stories![0].chapters[0]!.acts[0]!, id: "act-2" }],
     };
     const held = moka.stories![0].chapters[1]!.acts[0]!;
-    held.video = { takes: [], confirmed: false };
-    held.videoConfirmed = false;
+    held.video = { takes: [] };
     openAtEdit(moka);
 
     const warnings = screen.getByTestId("story-assembly-warnings");

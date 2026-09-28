@@ -10,13 +10,17 @@ import {
   projectHome,
 } from "./helpers";
 
+// The whole telling is walked in one test — five steps, every ask through a
+// stand-in — which needs longer than the suite's own budget for one case.
+test.describe.configure({ timeout: 60_000 });
+
 /**
  * The fifth step: a telling's clips laid end to end as one timeline.
  *
- * The whole telling is taken there — premise, chapters, cast, board, one filmed
- * act, and then the act's sound — and assembled: what the step is for is that
- * the shots a reader has agreed to one at a time come out as one cut, on a
- * timeline of its own that the cutting room can go on working on. The sound is
+ * The whole telling is taken there — premise, chapters, cast, board, both acts
+ * framed and filmed, and the first act's sound — and assembled: what the step
+ * is for is that the acts a reader has drawn and filmed come out as one cut, on
+ * a timeline of its own that the cutting room can go on working on. The sound is
  * the part of the step that may be skipped (a telling with no score is still a
  * telling); it is walked here because a track nothing ever asks for is a track
  * nobody has seen work.
@@ -68,18 +72,18 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     await openStoryRoom(page);
     await newStory(page, "Rain at Night");
 
-    // Steps one to four: a premise, chapters, a cast, a board, one shot filmed.
+    // Steps one to four: a premise, chapters, a cast, a board, both acts filmed.
     await page
       .getByTestId("story-idea-input")
       .fill("Eleven at night, and the last train stops where it should not.");
     await page.getByTestId("story-idea-duration-3").click();
-    await page.getByTestId("story-idea-next").click();
+    await page.getByTestId("story-confirm-idea").click();
     await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
     await page.getByTestId("story-outline-start").click();
     await expect(page.locator(".story-chapter")).toHaveCount(3, {
       timeout: 30_000,
     });
-    await page.getByTestId("story-outline-confirm-all").click();
+    await page.getByTestId("story-confirm-outline").click();
 
     await page.getByTestId("story-step-elements").click();
     await page.getByTestId("story-elements-recognise").click();
@@ -91,17 +95,16 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
       timeout: 60_000,
     });
     await page.getByTestId("story-elements-views-all").click();
-    // The four views have to be back before anything is agreed to: an element
-    // agreed to while its sheet is still being drawn is one whose sheet is not
-    // part of the answer, and the board would stay shut.
+    // The four views have to be back before the step settles: an element drawn
+    // only halfway is an element whose views are not part of the answer, and
+    // the press reads the document rather than the spinners.
     await expect(
       page
         .getByTestId("story-element-character-Keeper")
         .getByTestId("story-slot-turnaround")
         .locator("img"),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId("story-elements-confirm-all")).toBeEnabled();
-    await page.getByTestId("story-elements-confirm-all").click();
+    await page.getByTestId("story-confirm-elements").click();
     await expect(page.getByTestId("story-step-storyboard")).toBeEnabled({
       timeout: 30_000,
     });
@@ -112,26 +115,19 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     await expect(firstAct.getByTestId("story-table")).toBeVisible({
       timeout: 30_000,
     });
-    await firstAct.getByTestId("story-act-keys-0").click();
+    // Every frame of the act is drawn, and a clip is made once they are: the
+    // pictures are what the clip waits on, and nothing is agreed to per piece.
     await firstAct.getByTestId("story-act-draw-0").click();
-    await expect(firstAct.getByTestId("story-kf-slot-0-confirm")).toBeVisible({
-      timeout: 60_000,
-    });
-    await firstAct.getByTestId("story-kf-slot-0-confirm").click();
-    await expect(firstAct.getByTestId("story-kf-slot-1-confirm")).toBeVisible({
-      timeout: 60_000,
-    });
-    await firstAct.getByTestId("story-kf-slot-1-confirm").click();
-    // The last frame agreed to by hand is the act agreed to: the row says the
-    // pictures are settled without the act's own button being pressed.
-    await expect(
-      firstAct.getByTestId("story-act-images-unconfirm-0"),
-    ).toBeVisible();
+    await expect(firstAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
+      { timeout: 60_000 },
+    );
+    await expect(firstAct.getByTestId("story-kf-slot-1").locator("img")).toBeVisible(
+      { timeout: 60_000 },
+    );
     await firstAct.getByTestId("story-act-video-go-0").click();
     await expect(firstAct.getByTestId("story-act-video-0")).toBeVisible({
       timeout: 60_000,
     });
-    await firstAct.getByTestId("story-act-video-confirm-0").click();
 
     // The sound of the act, asked for as two pieces of the whole act: the lines
     // read aloud, and the music and sound under them.
@@ -139,17 +135,29 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     await expect(firstAct.getByTestId("story-act-voice-0")).toBeVisible({
       timeout: 60_000,
     });
-    await firstAct.getByTestId("story-act-voice-confirm-0").click();
     await firstAct.getByTestId("story-act-music-go-0").click();
     await expect(firstAct.getByTestId("story-act-music-0")).toBeVisible({
       timeout: 60_000,
     });
-    await firstAct.getByTestId("story-act-music-confirm-0").click();
 
-    // Step five: the filmed act is laid down as a timeline of the telling's own.
+    // The second act is framed and filmed too, which is what the step's own
+    // press reads before it opens step five.
+    const secondAct = page.getByTestId("story-act-1");
+    await secondAct.getByTestId("story-act-draw-1").click();
+    await expect(secondAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
+      { timeout: 60_000 },
+    );
+    await secondAct.getByTestId("story-act-video-go-1").click();
+    await expect(secondAct.getByTestId("story-act-video-1")).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.getByTestId("story-confirm-storyboard").click();
+    await expect(page.getByTestId("story-step-body-edit")).toBeVisible();
+
+    // Step five: the filmed acts are laid down as a timeline of the telling's own.
     await page.getByTestId("story-step-edit").click();
     await expect(page.getByTestId("story-step-edit-body")).toBeVisible();
-    await expect(page.getByTestId("story-assembly-summary")).toContainText("1");
+    await expect(page.getByTestId("story-assembly-summary")).toContainText("2");
     await expect(page.getByTestId("story-assembly-sound")).toBeVisible();
     await page.getByTestId("story-assemble").click();
 
@@ -160,10 +168,11 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
       .toContain("Rain at Night");
     const timeline = await persistedTimeline(page);
     expect(timeline.isTheStories).toBe(true);
-    // The clip of the act, the voice and the score under it, then the words
-    // said in it — laid down from zero, the lengths coming from the material
-    // the stand-in handed back.
+    // The clip of each act in telling order, the voice and the score under the
+    // first of them, then the words said in it — laid down from zero, the
+    // lengths coming from the material the stand-in handed back.
     expect(timeline.clips.map((clip) => clip.kind)).toEqual([
+      "video",
       "video",
       "audio",
       "audio",
@@ -171,10 +180,12 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     ]);
     expect(timeline.clips[0]?.startMs).toBe(0);
     expect(timeline.clips[0]?.durationMs).toBe(1_000);
-    expect(timeline.clips[1]?.startMs).toBe(0);
+    expect(timeline.clips[1]?.startMs).toBe(1_000);
     expect(timeline.clips[1]?.durationMs).toBe(1_000);
     expect(timeline.clips[2]?.startMs).toBe(0);
+    expect(timeline.clips[2]?.durationMs).toBe(1_000);
     expect(timeline.clips[3]?.startMs).toBe(0);
+    expect(timeline.clips[4]?.startMs).toBe(0);
 
     // The e2e harness points MOKA_FFMPEG at a path that is never there, so
     // this is every machine at once: the film card reads once what the

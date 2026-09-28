@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { assetsApi } from "../../../api";
@@ -11,7 +11,6 @@ import {
   STORY_SOURCE_TEXT_MAX,
   defaultChapterCount,
   formatDuration,
-  ideaReady,
   timelineSizeForAspect,
   type StoryAspect,
   type StoryBriefPatch,
@@ -21,8 +20,8 @@ import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
 import { saveTrouble, useProjectStore } from "../../editor/stores/projectStore";
+import { StepConfirm } from "../components/StepConfirm";
 import { readTextAsset } from "../readText";
-import { useStoryStore } from "../stores/storyStore";
 
 /** What a manuscript may be, and how big it may be. */
 const ACCEPTED_TEXT = /\.(txt|md|markdown)$/i;
@@ -82,13 +81,6 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
   const sourceEntry = useProjectStore((state) =>
     (state.moka?.resources.texts ?? []).find((entry) => entry.id === sourceId),
   );
-  // Readiness is judged on the words in the box rather than the words in the
-  // document: a reader who has typed a premise has one, whether or not they
-  // have looked away from it yet.
-  const ready = ideaReady({
-    ...story,
-    brief: { ...brief, idea: draft },
-  });
   const size = timelineSizeForAspect(brief.aspect);
 
   const writeBrief = (patch: Parameters<typeof patchBrief>[1]) => {
@@ -160,16 +152,12 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
     }
   };
 
-  const next = () => {
-    commit();
-    useStoryStore.getState().goStep("outline");
-  };
-
   return (
     <div className="story-step-scroll" data-testid="story-step-idea-body">
       <div className="story-step-narrow">
         <h2>{t("story:step.idea")}</h2>
         <p className="story-step-lead">{t("story:idea.lead")}</p>
+        <StepConfirm prepare={commit} step="idea" story={story} />
 
         <div
           aria-label={t("story:idea.tabs")}
@@ -364,16 +352,6 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
               ? t("story:idea.styleHintMissing")
               : ""}
           </span>
-          <button
-            className="primary"
-            data-testid="story-idea-next"
-            disabled={!ready}
-            onClick={next}
-            title={ready ? undefined : t("story:idea.needsIdea")}
-            type="button"
-          >
-            {t("story:idea.next")}
-          </button>
         </div>
       </div>
     </div>

@@ -1566,6 +1566,16 @@ pub enum DocumentCommand {
         target: StorySlotTarget,
         slot: StorySlot,
     },
+    /// A step of the telling settled, or taken back. The reader's own word
+    /// about a step rather than a reading of the content: what a step still
+    /// needs is derived from the document, and this is the one thing that
+    /// opens the step after it.
+    #[serde(rename_all = "camelCase")]
+    ConfirmStoryStep {
+        story_id: String,
+        step: story::StoryStep,
+        confirmed: bool,
+    },
     /// What the story was assembled into, whole.
     #[serde(rename_all = "camelCase")]
     SetStoryEdit {

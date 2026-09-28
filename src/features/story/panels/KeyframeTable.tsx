@@ -15,7 +15,6 @@ import {
   type StoryGuess,
 } from "../../../shared/domain";
 import type {
-  DocumentCommand,
   StoryAct,
   StoryDialogueLine,
   StoryDocument,
@@ -47,10 +46,10 @@ const SHOT_MAX_S = 60;
  * One act's shots, as the table a board is: framing, movement, what is shown,
  * what is said, how long it runs, and the frame drawn for it.
  *
- * A confirmed board is the reader's, so the whole table goes read-only until it
- * is unlocked again — the frames and the clips are made from what is written
- * here, and a framing quietly edited afterwards would be a board nobody agreed
- * to.
+ * The table is the reader's to write in for as long as the telling is being
+ * worked on: nothing here is sealed once the pictures have been asked for, so
+ * a shot discovered to be framed wrongly is corrected where it stands — and
+ * the frames and the clips are made again from what it says now.
  *
  * The table is only how a board is read and edited: what a cell writes goes
  * through the command pipeline like everything else, so a shot that was
@@ -76,7 +75,6 @@ export function KeyframeTable({
 }) {
   const { t } = useTranslation();
   const [dialogueAt, setDialogueAt] = useState<string | null>(null);
-  const locked = act.keysConfirmed;
   const perShot = story.shotGranularity === "keyframe";
 
   const addShot = () => {
@@ -115,7 +113,6 @@ export function KeyframeTable({
               index={index}
               key={keyframe.id}
               keyframe={keyframe}
-              locked={locked}
               onDialogue={() =>
                 setDialogueAt(dialogueAt === keyframe.id ? null : keyframe.id)
               }
@@ -124,22 +121,20 @@ export function KeyframeTable({
             />
           ))}
         </tbody>
-        {!locked && (
-          <tfoot>
-            <tr>
-              <td colSpan={perShot ? 10 : 9}>
-                <button
-                  className="link"
-                  data-testid="story-kf-add"
-                  onClick={addShot}
-                  type="button"
-                >
-                  {t("story:storyboard.addShot")}
-                </button>
-              </td>
-            </tr>
-          </tfoot>
-        )}
+        <tfoot>
+          <tr>
+            <td colSpan={perShot ? 10 : 9}>
+              <button
+                className="link"
+                data-testid="story-kf-add"
+                onClick={addShot}
+                type="button"
+              >
+                {t("story:storyboard.addShot")}
+              </button>
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
@@ -153,7 +148,6 @@ function KeyframeRow({
   keyframe,
   index,
   guesses,
-  locked,
   perShot,
   busy,
   clipBusy,
@@ -166,7 +160,6 @@ function KeyframeRow({
   keyframe: StoryKeyframe;
   index: number;
   guesses: StoryGuess[];
-  locked: boolean;
   perShot: boolean;
   busy: boolean;
   /** Whether this shot's own clip is being made just now. */
@@ -205,6 +198,11 @@ function KeyframeRow({
       act.keyframes.filter((each) => each.id !== keyframe.id),
     );
 
+  // A shot is filmed from its own picture: what a clip of a shot nobody has
+  // drawn would be made from is the words alone, which is not what the board
+  // says the shot looks like.
+  const filmed = keyframe.art.takes.length > 0;
+
   return (
     <>
       <tr data-testid={`story-kf-${index}`}>
@@ -213,7 +211,6 @@ function KeyframeRow({
           <select
             aria-label={cell(t("story:storyboard.shotSize"))}
             data-testid={`story-kf-size-${index}`}
-            disabled={locked}
             onChange={(event) =>
               write({
                 shotSize: event.target.value as StoryKeyframe["shotSize"],
@@ -232,7 +229,6 @@ function KeyframeRow({
           <select
             aria-label={cell(t("story:storyboard.cameraMove"))}
             data-testid={`story-kf-move-${index}`}
-            disabled={locked}
             onChange={(event) =>
               write({
                 cameraMove: event.target.value as StoryKeyframe["cameraMove"],
@@ -251,7 +247,6 @@ function KeyframeRow({
           <select
             aria-label={cell(t("story:storyboard.angle"))}
             data-testid={`story-kf-angle-${index}`}
-            disabled={locked}
             onChange={(event) =>
               write({ angle: event.target.value as StoryKeyframe["angle"] })
             }
@@ -270,7 +265,6 @@ function KeyframeRow({
             chapterId={chapterId}
             index={index}
             keyframe={keyframe}
-            locked={locked}
             story={story}
             write={write}
           />
@@ -281,7 +275,6 @@ function KeyframeRow({
             aria-label={cell(t("story:storyboard.dialogue"))}
             className="story-dialogue-toggle"
             data-testid={`story-kf-dialogue-${index}`}
-            disabled={locked}
             onClick={onDialogue}
             type="button"
           >
@@ -297,7 +290,6 @@ function KeyframeRow({
             aria-label={cell(t("story:storyboard.duration"))}
             className="story-kf-seconds"
             data-testid={`story-kf-seconds-${index}`}
-            disabled={locked}
             max={SHOT_MAX_S}
             min={SHOT_MIN_S}
             onChange={(event) => {
@@ -316,17 +308,11 @@ function KeyframeRow({
         <td className="story-col-frame">
           <StorySlotView
             busy={busy}
-            canGenerate={act.keysConfirmed}
-            disabledReason={
-              act.keysConfirmed
-                ? undefined
-                : t("story:storyboard.confirmTableFirst")
-            }
+            canGenerate
             label={t("story:storyboard.frame")}
             onChoose={(assetId) =>
               keepFrame(story, chapterId, act, keyframe, assetId)
             }
-            onConfirm={() => agreeToFrame(story, chapterId, act, keyframe)}
             onGenerate={draw}
             ratio={frameRatio(story)}
             slot={keyframe.art}
@@ -339,12 +325,10 @@ function KeyframeRow({
               <button
                 className="link"
                 data-testid={`story-kf-video-${index}`}
-                disabled={!act.imagesConfirmed || clipBusy}
+                disabled={!filmed || clipBusy}
                 onClick={film}
                 title={
-                  act.imagesConfirmed
-                    ? undefined
-                    : t("story:storyboard.confirmImagesFirst")
+                  filmed ? undefined : t("story:storyboard.drawFrameFirst")
                 }
                 type="button"
               >
@@ -366,34 +350,13 @@ function KeyframeRow({
                 <button
                   className="link"
                   data-testid={`story-kf-video-again-${index}`}
-                  disabled={!act.imagesConfirmed || clipBusy}
+                  disabled={clipBusy}
                   onClick={film}
-                  title={
-                    act.imagesConfirmed
-                      ? undefined
-                      : t("story:storyboard.confirmImagesFirst")
-                  }
                   type="button"
                 >
                   {clipBusy
                     ? t("story:panels.drawing")
                     : t("story:voice.again")}
-                </button>
-                <button
-                  aria-pressed={keyframe.video.confirmed}
-                  className="link"
-                  data-testid={`story-kf-video-confirm-${index}`}
-                  onClick={() =>
-                    writeClip(story, chapterId, act, keyframe, {
-                      ...keyframe.video,
-                      confirmed: !keyframe.video.confirmed,
-                    })
-                  }
-                  type="button"
-                >
-                  {keyframe.video.confirmed
-                    ? t("story:panels.confirmed")
-                    : t("story:panels.confirm")}
                 </button>
               </span>
             )}
@@ -404,7 +367,6 @@ function KeyframeRow({
             aria-label={cell(t("story:storyboard.removeShot"))}
             className="story-kf-remove"
             data-testid={`story-kf-remove-${index}`}
-            disabled={locked}
             onClick={remove}
             type="button"
           >
@@ -417,7 +379,6 @@ function KeyframeRow({
           <td colSpan={perShot ? 10 : 9}>
             <DialogueEditor
               lines={keyframe.dialogue}
-              locked={locked}
               onDone={(dialogue) => {
                 onDialogue();
                 write({ dialogue });
@@ -446,7 +407,6 @@ function KeyframePromptCell({
   chapterId,
   act,
   keyframe,
-  locked,
   index,
   write,
 }: {
@@ -454,7 +414,6 @@ function KeyframePromptCell({
   chapterId: string;
   act: StoryAct;
   keyframe: StoryKeyframe;
-  locked: boolean;
   index: number;
   write: (patch: StoryKeyframePatch) => void;
 }) {
@@ -495,7 +454,6 @@ function KeyframePromptCell({
         <KeyframeContentField
           kinds={mentionKinds(story, cast, content.value)}
           label={t("story:storyboard.content")}
-          locked={locked}
           onChange={content.set}
           onCommit={content.commit}
           testId={`story-kf-content-${index}`}
@@ -619,11 +577,9 @@ function Cell({
  */
 function DialogueEditor({
   lines,
-  locked,
   onDone,
 }: {
   lines: StoryDialogueLine[];
-  locked: boolean;
   onDone: (lines: StoryDialogueLine[]) => void;
 }) {
   const { t } = useTranslation();
@@ -639,7 +595,6 @@ function DialogueEditor({
           <input
             aria-label={t("story:storyboard.speaker")}
             data-testid={`story-line-speaker-${index}`}
-            disabled={locked}
             maxLength={40}
             onChange={(event) =>
               setDraft(
@@ -656,7 +611,6 @@ function DialogueEditor({
           <input
             aria-label={t("story:storyboard.line")}
             data-testid={`story-line-text-${index}`}
-            disabled={locked}
             maxLength={500}
             onChange={(event) =>
               setDraft(
@@ -670,7 +624,6 @@ function DialogueEditor({
           <input
             aria-label={t("story:storyboard.tone")}
             data-testid={`story-line-tone-${index}`}
-            disabled={locked}
             maxLength={60}
             onChange={(event) =>
               setDraft(
@@ -685,7 +638,6 @@ function DialogueEditor({
             aria-label={t("story:storyboard.removeLine")}
             className="link"
             data-testid={`story-line-remove-${index}`}
-            disabled={locked}
             onClick={() => setDraft(draft.filter((_held, at) => at !== index))}
             type="button"
           >
@@ -697,7 +649,6 @@ function DialogueEditor({
         <button
           className="link"
           data-testid="story-line-add"
-          disabled={locked}
           onClick={() => setDraft([...draft, { speaker: "", text: "" }])}
           type="button"
         >
@@ -756,58 +707,6 @@ function writeActs(
   ]);
 }
 
-/**
- * One frame agreed to, or the agreement taken back.
- *
- * An act's frames are agreed to as a set, and the act itself goes with them:
- * the frame that completes the set agrees to the act, and a frame taken back
- * takes the act's agreement away. Confirming the frames one by one therefore
- * reaches the same place as the act's own button reaches in one press.
- */
-function agreeToFrame(
-  story: StoryDocument,
-  chapterId: string,
-  act: StoryAct,
-  keyframe: StoryKeyframe,
-): void {
-  const confirmed = !keyframe.art.confirmed;
-  const commands: DocumentCommand[] = [
-    {
-      type: "setStorySlot",
-      storyId: story.id,
-      target: {
-        kind: "keyframe",
-        chapterId,
-        actId: act.id,
-        keyframeId: keyframe.id,
-      },
-      slot: { ...keyframe.art, confirmed },
-    },
-  ];
-  const everyOtherFrameConfirmed = act.keyframes.every(
-    (held) => held.id === keyframe.id || held.art.confirmed,
-  );
-  if (confirmed && everyOtherFrameConfirmed && !act.imagesConfirmed) {
-    commands.push({
-      type: "updateStoryAct",
-      storyId: story.id,
-      chapterId,
-      actId: act.id,
-      patch: { imagesConfirmed: true },
-    });
-  }
-  if (!confirmed && act.imagesConfirmed) {
-    commands.push({
-      type: "updateStoryAct",
-      storyId: story.id,
-      chapterId,
-      actId: act.id,
-      patch: { imagesConfirmed: false },
-    });
-  }
-  execute(i18n.t("story:history.storyboard"), commands);
-}
-
 /** One shot's frame, whole, as the reader leaves it. */
 function writeFrame(
   story: StoryDocument,
@@ -822,29 +721,6 @@ function writeFrame(
       storyId: story.id,
       target: {
         kind: "keyframe",
-        chapterId,
-        actId: act.id,
-        keyframeId: keyframe.id,
-      },
-      slot,
-    },
-  ]);
-}
-
-/** One shot's own clip, whole, as the reader leaves it. */
-function writeClip(
-  story: StoryDocument,
-  chapterId: string,
-  act: StoryAct,
-  keyframe: StoryKeyframe,
-  slot: StorySlot,
-): void {
-  execute(i18n.t("story:history.storyboard"), [
-    {
-      type: "setStorySlot",
-      storyId: story.id,
-      target: {
-        kind: "keyframeVideo",
         chapterId,
         actId: act.id,
         keyframeId: keyframe.id,

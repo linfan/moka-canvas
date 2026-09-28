@@ -1320,6 +1320,7 @@ fn apply_one(
         | DocumentCommand::UpdateStoryAct { .. }
         | DocumentCommand::UpdateStoryKeyframe { .. }
         | DocumentCommand::SetStorySlot { .. }
+        | DocumentCommand::ConfirmStoryStep { .. }
         | DocumentCommand::SetStoryEdit { .. }) => story::apply_story_command(moka, command),
         command @ (DocumentCommand::AddTimeline { .. }
         | DocumentCommand::RemoveTimeline { .. }

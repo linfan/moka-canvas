@@ -35,7 +35,7 @@ test("a model with no key is named, and its key's place offered", async ({
     await page
       .getByTestId("story-idea-input")
       .fill("Eleven at night, and the last train stops where it should not.");
-    await page.getByTestId("story-idea-next").click();
+    await page.getByTestId("story-confirm-idea").click();
     await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
     await page.getByTestId("story-outline-start").click();
 

@@ -10,7 +10,6 @@ import {
   type StoryGuess,
 } from "../../../shared/domain";
 import type {
-  DocumentCommand,
   MokaFile,
   StoryAct,
   StoryActPatch,
@@ -42,11 +41,12 @@ const ACT_TITLE_MAX = 40;
  * One act of a board: who is in it, what happens, how it sounds, and the shots
  * it is made of, one row each.
  *
- * The card is where a board is agreed to. Everything under the table — the
- * frames and the clip — is made from what is written above it, so the table is
- * read-only once the reader has confirmed it, and the pictures are not asked for
- * until it has been. Agreeing to it, and the pictures it leads to, are one row
- * of actions under the table, in the order they are wanted.
+ * The card is where a board is edited and where its pictures and clip are
+ * asked for: everything under the table — the frames and the clip — is made
+ * from what is written above it, and what is written above it stays editable
+ * afterwards, since a board is argued with rather than sealed. A picture is
+ * only asked for once its own shot is written, and a clip once every shot has
+ * its picture, because those are what the ask is made of.
  *
  * Every picture is an ask of its own: what this card's own painter is working
  * on is asked for once and says so, while the rest of the card — and the acts
@@ -58,7 +58,6 @@ export function ActCard({
   act,
   index,
   guesses,
-  boardBusy,
   busyKeyframes,
   busyClips,
   videoBusy,
@@ -72,8 +71,6 @@ export function ActCard({
   index: number;
   /** The cells of this act's board the reading chose rather than read. */
   guesses: StoryGuess[];
-  /** Whether this act's own table is being written just now. */
-  boardBusy: boolean;
   /** The shots of this act being drawn just now, by the shot's own name. */
   busyKeyframes: Set<string>;
   /** The shots of this act being filmed just now. */
@@ -90,7 +87,6 @@ export function ActCard({
   const [playing, setPlaying] = useState(false);
   const [sound, setSound] = useState<StoryActSound>(act.sound);
   const perShot = story.shotGranularity === "keyframe";
-  const locked = act.keysConfirmed;
   const clip = currentTake(act.video);
   const voice = act.voice === undefined ? undefined : currentTake(act.voice);
   const music = act.music === undefined ? undefined : currentTake(act.music);
@@ -109,6 +105,7 @@ export function ActCard({
 
   const write = (patch: StoryActPatch) =>
     writeAct(story, chapterId, act, patch);
+
   const title = useField(act.title, (value) => {
     const name = value.trim();
     if (name !== "" && name !== act.title) write({ title: name });
@@ -138,18 +135,13 @@ export function ActCard({
     (keyframe) => !busyKeyframes.has(keyframe.id),
   );
   const drawn = act.keyframes.length - missing.length;
-  // The frames of an act are agreed to in one press, so what that press waits
-  // on is every picture being there — not every picture having been agreed to
-  // one by one first.
+  // A clip is made from the pictures of the act: every shot of it is drawn
+  // first, since what a clip of half-drawn shots would be made from is the
+  // words alone. Whether those pictures are liked is not for the room to ask.
   const everyFrameDrawn = act.keyframes.length > 0 && missing.length === 0;
   const filmed = act.keyframes.filter(
     (keyframe) => keyframe.video.takes.length > 0,
   ).length;
-  const everyShotFilmed =
-    act.keyframes.length > 0 && filmed === act.keyframes.length;
-  const everyShotConfirmed =
-    everyShotFilmed &&
-    act.keyframes.every((keyframe) => keyframe.video.confirmed);
 
   const drawMissing = () => {
     const items = planKeyframeArt(
@@ -186,20 +178,6 @@ export function ActCard({
     void run(story.id, "music", items);
   };
 
-  /** Marks the take the reader is listening to as the one they settled on. */
-  const confirmSound = (kind: "actVoice" | "actMusic", confirmed: boolean) => {
-    const held = kind === "actVoice" ? act.voice : act.music;
-    if (held === undefined) return;
-    execute(i18n.t("story:history.sound"), [
-      {
-        type: "setStorySlot",
-        storyId: story.id,
-        target: { kind, chapterId, actId: act.id },
-        slot: { ...held, confirmed },
-      },
-    ]);
-  };
-
   return (
     <li className="story-act" data-testid={`story-act-${index}`}>
       <div className="story-act-head">
@@ -210,7 +188,6 @@ export function ActCard({
           aria-label={t("story:storyboard.actTitle")}
           className="story-act-title"
           data-testid={`story-act-title-${index}`}
-          disabled={locked}
           maxLength={ACT_TITLE_MAX}
           onBlur={title.commit}
           onChange={(event) => title.set(event.target.value)}
@@ -247,7 +224,6 @@ export function ActCard({
       <div className="story-refs-row">
         <RefPicker
           chosen={act.characterIds}
-          disabled={locked}
           elements={story.elements}
           kind="character"
           label={t("story:storyboard.characters")}
@@ -256,7 +232,6 @@ export function ActCard({
         />
         <RefPicker
           chosen={act.sceneId === undefined ? [] : [act.sceneId]}
-          disabled={locked}
           elements={story.elements}
           kind="scene"
           label={t("story:storyboard.scene")}
@@ -265,7 +240,6 @@ export function ActCard({
         />
         <RefPicker
           chosen={act.propIds}
-          disabled={locked}
           elements={story.elements}
           kind="prop"
           label={t("story:storyboard.props")}
@@ -330,57 +304,14 @@ export function ActCard({
           })}
           {" · "}
           {perShot
-            ? everyShotConfirmed
-              ? t("story:storyboard.clipConfirmed")
-              : t("story:storyboard.shotsFilmed", {
-                  filmed,
-                  total: act.keyframes.length,
-                })
+            ? t("story:storyboard.shotsFilmed", {
+                filmed,
+                total: act.keyframes.length,
+              })
             : clip === undefined
               ? t("story:storyboard.noClip")
-              : act.videoConfirmed
-                ? t("story:storyboard.clipConfirmed")
-                : t("story:storyboard.clipWaiting")}
+              : t("story:storyboard.clipReady")}
         </span>
-
-        {/*
-          Agreeing to the table, and the way back to it: the one thing every
-          picture and every clip on this card is made from, so it is stated
-          where the work that follows it is asked for.
-        */}
-        {locked ? (
-          <>
-            <span
-              className="story-chip is-on"
-              data-testid={`story-act-keys-on-${index}`}
-            >
-              {t("story:storyboard.keysConfirmed")}
-            </span>
-            <button
-              className="link"
-              data-testid={`story-act-unlock-${index}`}
-              onClick={() => write({ keysConfirmed: false })}
-              type="button"
-            >
-              {t("story:storyboard.unconfirmTable")}
-            </button>
-          </>
-        ) : (
-          <button
-            className="story-act-confirm"
-            data-testid={`story-act-keys-${index}`}
-            disabled={act.keyframes.length === 0 || boardBusy}
-            onClick={() => write({ keysConfirmed: true })}
-            title={
-              act.keyframes.length === 0
-                ? t("story:storyboard.noShots")
-                : undefined
-            }
-            type="button"
-          >
-            {t("story:storyboard.confirmTable")}
-          </button>
-        )}
 
         {undrawn.length > 0 && (
           <span
@@ -400,56 +331,26 @@ export function ActCard({
           <button
             className="primary"
             data-testid={`story-act-draw-${index}`}
-            disabled={!locked}
+            disabled={act.keyframes.length === 0}
             onClick={drawMissing}
-            title={locked ? undefined : t("story:storyboard.confirmTableFirst")}
+            title={
+              act.keyframes.length === 0
+                ? t("story:storyboard.noShots")
+                : undefined
+            }
             type="button"
           >
             {t("story:storyboard.drawMissing", { count: drawable.length })}
           </button>
         )}
 
-        {act.imagesConfirmed ? (
-          <>
-            <span className="story-chip is-on">
-              {t("story:storyboard.imagesConfirmed")}
-            </span>
-            <button
-              className="link"
-              data-testid={`story-act-images-unconfirm-${index}`}
-              onClick={() => write({ imagesConfirmed: false })}
-              type="button"
-            >
-              {t("story:storyboard.unconfirmImages")}
-            </button>
-          </>
-        ) : (
-          <button
-            data-testid={`story-act-images-confirm-${index}`}
-            disabled={!everyFrameDrawn}
-            onClick={() => confirmFrames(story, chapterId, act)}
-            title={
-              act.keyframes.length === 0
-                ? t("story:storyboard.noShots")
-                : everyFrameDrawn
-                  ? undefined
-                  : t("story:storyboard.drawEveryFrame")
-            }
-            type="button"
-          >
-            {t("story:storyboard.confirmImages")}
-          </button>
-        )}
-
         {!perShot && clip === undefined && (
           <button
             data-testid={`story-act-video-go-${index}`}
-            disabled={!act.imagesConfirmed || videoBusy}
+            disabled={!everyFrameDrawn || videoBusy}
             onClick={filmAct}
             title={
-              act.imagesConfirmed
-                ? undefined
-                : t("story:storyboard.confirmImagesFirst")
+              everyFrameDrawn ? undefined : t("story:storyboard.drawEveryFrame")
             }
             type="button"
           >
@@ -475,40 +376,20 @@ export function ActCard({
               />
             </button>
             {!perShot && (
-              <>
-                {/*
-                  A clip already made is not the end of the ask that made it:
-                  the row that plays it keeps the ask beside it, the way an
-                  act's lines and score stand beside their own takes.
-                */}
-                <button
-                  className="link"
-                  data-testid={`story-act-video-again-${index}`}
-                  disabled={!act.imagesConfirmed || videoBusy}
-                  onClick={filmAct}
-                  title={
-                    act.imagesConfirmed
-                      ? undefined
-                      : t("story:storyboard.confirmImagesFirst")
-                  }
-                  type="button"
-                >
-                  {videoBusy
-                    ? t("story:panels.drawing")
-                    : t("story:voice.again")}
-                </button>
-                <button
-                  aria-pressed={act.videoConfirmed}
-                  className="link"
-                  data-testid={`story-act-video-confirm-${index}`}
-                  onClick={() => write({ videoConfirmed: !act.videoConfirmed })}
-                  type="button"
-                >
-                  {act.videoConfirmed
-                    ? t("story:panels.confirmed")
-                    : t("story:panels.confirm")}
-                </button>
-              </>
+              /*
+                A clip already made is not the end of the ask that made it:
+                the row that plays it keeps the ask beside it, so a take the
+                reader does not like is asked over from where it stands.
+              */
+              <button
+                className="link"
+                data-testid={`story-act-video-again-${index}`}
+                disabled={videoBusy}
+                onClick={filmAct}
+                type="button"
+              >
+                {videoBusy ? t("story:panels.drawing") : t("story:voice.again")}
+              </button>
             )}
           </span>
         )}
@@ -557,19 +438,6 @@ export function ActCard({
               >
                 {t("story:voice.again")}
               </button>
-              <button
-                aria-pressed={act.voice?.confirmed ?? false}
-                className="link"
-                data-testid={`story-act-voice-confirm-${index}`}
-                onClick={() =>
-                  confirmSound("actVoice", !(act.voice?.confirmed ?? false))
-                }
-                type="button"
-              >
-                {act.voice?.confirmed
-                  ? t("story:panels.confirmed")
-                  : t("story:panels.confirm")}
-              </button>
             </>
           )}
         </span>
@@ -606,19 +474,6 @@ export function ActCard({
               >
                 {t("story:voice.again")}
               </button>
-              <button
-                aria-pressed={act.music?.confirmed ?? false}
-                className="link"
-                data-testid={`story-act-music-confirm-${index}`}
-                onClick={() =>
-                  confirmSound("actMusic", !(act.music?.confirmed ?? false))
-                }
-                type="button"
-              >
-                {act.music?.confirmed
-                  ? t("story:panels.confirmed")
-                  : t("story:panels.confirm")}
-              </button>
             </>
           )}
         </span>
@@ -651,42 +506,8 @@ function secondsOf(moka: MokaFile | null, assetId: string): string {
 }
 
 /**
- * Agrees to every picture of the act at once, and to the act with them.
- *
- * One press rather than one per shot, as one step of the history: agreeing to
- * the frames by hand, one confirmation after another, lands at the same place.
+ * One act's field, as the reader leaves it.
  */
-function confirmFrames(
-  story: StoryDocument,
-  chapterId: string,
-  act: StoryAct,
-): void {
-  const commands: DocumentCommand[] = [];
-  for (const keyframe of act.keyframes) {
-    if (keyframe.art.confirmed) continue;
-    commands.push({
-      type: "setStorySlot",
-      storyId: story.id,
-      target: {
-        kind: "keyframe",
-        chapterId,
-        actId: act.id,
-        keyframeId: keyframe.id,
-      },
-      slot: { ...keyframe.art, confirmed: true },
-    });
-  }
-  commands.push({
-    type: "updateStoryAct",
-    storyId: story.id,
-    chapterId,
-    actId: act.id,
-    patch: { imagesConfirmed: true },
-  });
-  execute(i18n.t("story:history.storyboard"), commands);
-}
-
-/** One act's field, as the reader leaves it. */
 function writeAct(
   story: StoryDocument,
   chapterId: string,

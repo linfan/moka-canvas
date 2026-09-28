@@ -303,7 +303,14 @@ describe("finding the cast in the chapters", () => {
       "末班车车厢",
     ]);
     expect(slotOf("林", "main")?.takes[0]?.assetIds[0]).toBe(ids.heroMain);
-    expect(element("林")?.descriptionConfirmed).toBe(true);
+    // What the reading wrote is the element's own words, and the box they are
+    // written in stays open: a reading coming home is not an agreement that
+    // the reader gave.
+    const box = screen.getByTestId(
+      "story-element-description-林",
+    ) as HTMLTextAreaElement;
+    expect(box.value).toBe("灰呢大衣，说话很慢。");
+    expect(box.readOnly).toBe(false);
     expect(starts[0]?.kind).toBe("elements");
     expect(starts[0]?.items[0]?.capability).toBe("text");
   });
@@ -693,61 +700,42 @@ describe("the model a reading is asked of", () => {
   });
 });
 
-describe("agreeing to a description", () => {
-  it("locks the words once they are agreed to, and takes it back on undo", () => {
+describe("a description the reader rewrites", () => {
+  it("is the reader's to rewrite whenever they like, with nothing to agree to", () => {
     openAtElements(buildStoryMokaFile());
     const box = screen.getByTestId(
       "story-element-description-旧车票",
     ) as HTMLTextAreaElement;
+    expect(box.value).toBe("边角磨圆的硬纸车票。");
     expect(box.readOnly).toBe(false);
 
-    fireEvent.click(screen.getByTestId("story-element-confirm-旧车票"));
-
-    expect(element("旧车票")?.descriptionConfirmed).toBe(true);
-    expect(
-      (
-        screen.getByTestId(
-          "story-element-description-旧车票",
-        ) as HTMLTextAreaElement
-      ).readOnly,
-    ).toBe(true);
-    expect(screen.getByTestId("story-element-state-旧车票").textContent).toBe(
-      "Description agreed to",
-    );
-
-    act(() => {
-      undo();
-    });
-    expect(element("旧车票")?.descriptionConfirmed).toBe(false);
+    // The step is settled by its own press: there is no agreement to give on
+    // a card, and none to take back.
+    expect(screen.queryByTestId("story-element-confirm-旧车票")).toBeNull();
+    expect(screen.queryByTestId("story-element-unconfirm-旧车票")).toBeNull();
+    expect(screen.queryByTestId("story-element-state-旧车票")).toBeNull();
   });
 
-  it("unsays the words for a change, and agrees to them again when it is made", async () => {
+  it("is written down as one step of the history, and given back whole on undo", async () => {
     openAtElements(buildStoryMokaFile());
     const before = useHistoryStore.getState().undoStack.length;
     const box = () =>
       screen.getByTestId("story-element-description-林") as HTMLTextAreaElement;
-    // Agreed to already, so the words are the document's and the box is shut:
-    // there is no rewriting them in passing.
-    expect(box().readOnly).toBe(true);
-
-    fireEvent.click(screen.getByTestId("story-element-unconfirm-林"));
-    expect(element("林")?.descriptionConfirmed).toBe(false);
-    expect(box().readOnly).toBe(false);
 
     fireEvent.change(box(), { target: { value: "灰呢大衣，说话很慢。" } });
     fireEvent.blur(box());
     await waitFor(() => {
       expect(element("林")?.description).toBe("灰呢大衣，说话很慢。");
     });
+    // Typed, then written down once: a paragraph is one step to take back,
+    // not one per letter — and the words stay open to the next change.
+    expect(useHistoryStore.getState().undoStack).toHaveLength(before + 1);
+    expect(box().readOnly).toBe(false);
 
-    // Made, so it is agreed to again — and shut until it is unsaid once more.
-    fireEvent.click(screen.getByTestId("story-element-confirm-林"));
-    expect(element("林")?.descriptionConfirmed).toBe(true);
-    expect(box().readOnly).toBe(true);
-
-    // Unsaid, rewritten, agreed to: three steps of the history, each one the
-    // reader's to take back on its own.
-    expect(useHistoryStore.getState().undoStack).toHaveLength(before + 3);
+    act(() => {
+      undo();
+    });
+    expect(element("林")?.description).toBe("四十岁上下，深色大衣，说话很慢。");
   });
 
   it("names the chapters an element stands in", () => {
@@ -806,7 +794,7 @@ describe("the pictures of an element", () => {
     const moka = buildStoryMokaFile();
     const last = moka.stories![0].elements[3]!;
     last.kind = "character";
-    last.turnaround = { takes: [], confirmed: false };
+    last.turnaround = { takes: [] };
     openAtElements(moka);
 
     const waiting = within(
@@ -962,36 +950,59 @@ describe("the pictures of an element", () => {
     expect(starts[0]?.items).toHaveLength(1);
   });
 
-  it("agrees to everything only once every element has a picture", async () => {
-    openAtElements(buildStoryMokaFile());
-    const all = screen.getByTestId("story-elements-confirm-all");
-    expect((all as HTMLButtonElement).disabled).toBe(true);
-    expect(all.getAttribute("title")).toBe("1 elements have no picture yet");
+  it("settles the step once every element has a picture, and says what is missing until then", async () => {
+    const moka = buildStoryMokaFile();
+    // The third step unsettled, which is how it stands while the cast is
+    // still being drawn.
+    openAtElements({
+      ...moka,
+      stories: moka.stories!.map((held) => ({
+        ...held,
+        confirmedSteps: held.confirmedSteps.filter(
+          (step) => step !== "elements",
+        ),
+      })),
+    });
+
+    // Two things are still to come — the prop has no picture of its own and 周
+    // has nothing drawn of their four views — and the press says so rather
+    // than letting the reader on.
+    fireEvent.click(screen.getByTestId("story-confirm-elements"));
+    expect(
+      screen.getByTestId("story-confirm-gaps-elements").textContent,
+    ).toContain("2 elements have no picture: 周,旧车票");
+    expect(story().confirmedSteps).not.toContain("elements");
+    expect(useStoryStore.getState().step).toBe("elements");
 
     fireEvent.click(screen.getByTestId("story-elements-draw-all"));
     await waitFor(() => {
       expect(starts).toHaveLength(1);
     });
-    await waitFor(() => {
-      expect(starts).toHaveLength(1);
-    });
     pictures[`element:main:${ids.prop}`] = ["asset-ticket-main"];
     await comesBack();
-
     await waitFor(() => {
-      expect(
-        (screen.getByTestId("story-elements-confirm-all") as HTMLButtonElement)
-          .disabled,
-      ).toBe(false);
+      expect(slotOf("旧车票", "main")?.takes).toHaveLength(1);
     });
-    fireEvent.click(screen.getByTestId("story-elements-confirm-all"));
 
+    // The views the characters are still missing are asked for in their own
+    // batch, and the press reads the document as it stands after it.
+    fireEvent.click(screen.getByTestId("story-elements-views-all"));
     await waitFor(() => {
-      expect(story().elements.every((each) => each.descriptionConfirmed)).toBe(
-        true,
-      );
+      expect(starts).toHaveLength(2);
     });
-    expect(slotOf("旧车票", "main")?.confirmed).toBe(true);
+    pictures[`element:turnaround:${ids.partner}`] = ["asset-partner-sheet"];
+    await comesBack();
+    await waitFor(() => {
+      expect(slotOf("周", "turnaround")?.takes).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByTestId("story-confirm-elements"));
+
+    expect(screen.queryByTestId("story-confirm-gaps-elements")).toBeNull();
+    expect(story().confirmedSteps).toContain("elements");
+    // Settled, the reader is taken on to the boarding, and the press is one
+    // step of the history like any other write.
+    expect(useStoryStore.getState().step).toBe("storyboard");
     expect(useHistoryStore.getState().undoStack.length).toBeGreaterThan(0);
   });
 });
@@ -1051,9 +1062,8 @@ describe("a cast too long to show at once", () => {
       kind: "prop" as const,
       name: `道具 ${at + 1}`,
       description: "一件东西。",
-      descriptionConfirmed: true,
       chapterIds: [],
-      main: { takes: [], confirmed: false },
+      main: { takes: [] },
     }));
     openAtElements(moka);
 

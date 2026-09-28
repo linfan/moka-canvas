@@ -7,26 +7,23 @@ import { slotWithCurrent } from "../../../shared/domain/story";
 import type { StorySlot } from "../../../shared/domain/types";
 import { StorySlotView } from "./StorySlotView";
 
-function slot(takes: string[], confirmed = false): StorySlot {
+function slot(takes: string[]): StorySlot {
   return {
     takes: takes.map((assetId, at) => ({
       assetIds: [assetId],
       createdAt: `2026-01-0${at + 1}T00:00:00Z`,
     })),
-    confirmed,
   };
 }
 
 function draw(overrides: Partial<Parameters<typeof StorySlotView>[0]> = {}) {
   const onGenerate = vi.fn();
-  const onConfirm = vi.fn();
   const onChoose = vi.fn();
   render(
     <StorySlotView
       canGenerate
       label="Main picture"
       onChoose={onChoose}
-      onConfirm={onConfirm}
       onGenerate={onGenerate}
       ratio="16 / 9"
       slot={slot([])}
@@ -34,7 +31,7 @@ function draw(overrides: Partial<Parameters<typeof StorySlotView>[0]> = {}) {
       {...overrides}
     />,
   );
-  return { onGenerate, onConfirm, onChoose };
+  return { onGenerate, onChoose };
 }
 
 afterEach(() => {
@@ -73,19 +70,14 @@ describe("a place being drawn", () => {
 });
 
 describe("a place with a picture", () => {
-  it("shows it, agreement to be given and taken, and a way to ask again", () => {
-    const { onConfirm, onGenerate } = draw({ slot: slot(["asset-one"]) });
+  it("shows it, with a way to ask for another and to pick between them", () => {
+    const { onGenerate } = draw({ slot: slot(["asset-one"]) });
     expect(
       screen
         .getByTestId("story-slot-main")
         .querySelector("img")
         ?.getAttribute("src"),
     ).toBe("/api/v1/projects/current/assets/asset-one");
-
-    const stamp = screen.getByTestId("story-slot-main-confirm");
-    expect(stamp.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(stamp);
-    expect(onConfirm).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId("story-slot-main-again"));
     expect(onGenerate).toHaveBeenCalledTimes(1);
@@ -94,13 +86,9 @@ describe("a place with a picture", () => {
     expect(screen.queryByTestId("story-slot-main-pick")).toBeNull();
   });
 
-  it("marks the picture the story is keeping", () => {
-    draw({ slot: slot(["asset-one"], true) });
-    expect(
-      screen
-        .getByTestId("story-slot-main-confirm")
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
+  it("has nothing to agree to one picture at a time", () => {
+    draw({ slot: slot(["asset-one"]) });
+    expect(screen.queryByTestId("story-slot-main-confirm")).toBeNull();
   });
 
   it("says over the old picture that it is being drawn again", () => {

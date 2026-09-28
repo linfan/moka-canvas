@@ -512,7 +512,7 @@ describe("planning the clips", () => {
           ...act,
           keyframes: act.keyframes.map((keyframe) => ({
             ...keyframe,
-            art: { takes: [], confirmed: false },
+            art: { takes: [] },
           })),
         })),
       })),

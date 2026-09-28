@@ -12,11 +12,11 @@ import { StoryPicks } from "./StoryPicks";
  * shot's frame.
  *
  * Every place in the room is one of these, so the pictures of step three and
- * step four look and behave the same — empty, being drawn, drawn, agreed to —
- * and a reader learns the actions once. The card around it decides what the
- * place is called and what it is drawn from; this decides what may be done to
- * it, and nothing here writes to the document: the card hands over what an
- * action means for its own place.
+ * step four look and behave the same — empty, being drawn, drawn — and a
+ * reader learns the actions once. The card around it decides what the place is
+ * called and what it is drawn from; this decides what may be done to it, and
+ * nothing here writes to the document: the card hands over what an action
+ * means for its own place.
  */
 export function StorySlotView({
   slot,
@@ -26,7 +26,6 @@ export function StorySlotView({
   canGenerate,
   disabledReason,
   onGenerate,
-  onConfirm,
   onChoose,
   note,
   testId,
@@ -39,7 +38,6 @@ export function StorySlotView({
   canGenerate: boolean;
   disabledReason?: string;
   onGenerate: () => void;
-  onConfirm: () => void;
   onChoose: (assetId: string) => void;
   /** A line under the picture, for what the place is waiting on. */
   note?: string;
@@ -106,17 +104,6 @@ export function StorySlotView({
               {t("story:panels.drawing")}
             </span>
           )}
-          <button
-            aria-pressed={slot.confirmed}
-            className={`story-slot-stamp${slot.confirmed ? " is-on" : ""}`}
-            data-testid={testId === undefined ? undefined : `${testId}-confirm`}
-            onClick={onConfirm}
-            type="button"
-          >
-            {slot.confirmed
-              ? t("story:panels.confirmed")
-              : t("story:panels.confirm")}
-          </button>
         </div>
       )}
 

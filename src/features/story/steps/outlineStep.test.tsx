@@ -15,6 +15,7 @@ import type {
   StoryJobRecord,
 } from "../../../api/story";
 import type { MokaFile } from "../../../shared/domain";
+import { createChapter } from "../../../shared/domain/factories";
 import {
   buildEmptyStory,
   buildStoryMokaFile,
@@ -175,6 +176,16 @@ function atTheOutline(): MokaFile {
   return moka;
 }
 
+/** A telling with two chapters, one of which has nothing written into it. */
+function withChapters(): MokaFile {
+  const moka = atTheOutline();
+  moka.stories![0].chapters = [
+    createChapter("第一章 站台", "他在站台上等车。"),
+    createChapter("第二章 车厢"),
+  ];
+  return moka;
+}
+
 /** The same telling with a manuscript on the shelf. */
 function withManuscript(chapterCount: number): MokaFile {
   const moka = atTheOutline();
@@ -217,6 +228,18 @@ function openRoom(moka: MokaFile): void {
 /** The room as a reader reaches step two: the page, standing on the outline. */
 function openAtOutline(moka: MokaFile): void {
   openRoom(moka);
+  if (useStoryStore.getState().step === "idea") {
+    // Step two opens on a premise the reader has settled, the way it does for
+    // a telling that has only been named.
+    const box = screen.getByTestId("story-idea-input") as HTMLTextAreaElement;
+    if (box.value.trim() === "") {
+      fireEvent.change(box, {
+        target: { value: "末班列车上，两个陌生人交换了各自要说的话。" },
+      });
+    }
+    fireEvent.click(screen.getByTestId("story-confirm-idea"));
+    return;
+  }
   fireEvent.click(screen.getByTestId("story-step-outline"));
 }
 
@@ -351,17 +374,30 @@ describe("writing a premise into chapters", () => {
     expect(chapters()[0]?.targetDurationMs).toBe(60_000);
   });
 
-  it("confirms a chapter as one step of the history, and takes it back", () => {
-    openAtOutline(buildStoryMokaFile());
-    expect(chapters()[0]?.synopsisConfirmed).toBe(true);
+  it("settles the outline once every chapter is written, and says what is missing otherwise", () => {
+    openAtOutline(withChapters());
+    expect(chapters()).toHaveLength(2);
 
-    fireEvent.click(screen.getByTestId("story-chapter-confirm-0"));
-    expect(chapters()[0]?.synopsisConfirmed).toBe(false);
+    fireEvent.click(screen.getByTestId("story-confirm-outline"));
+    expect(
+      screen.getByTestId("story-confirm-gaps-outline").textContent,
+    ).toContain("1 chapters still have no title or synopsis (chapter 2)");
+    expect(story().confirmedSteps).not.toContain("outline");
+
+    // Written through, and the press settles it as one step of the history.
+    fireEvent.change(screen.getByTestId("story-chapter-synopsis-1"), {
+      target: { value: "车厢里只有两个人。" },
+    });
+    fireEvent.blur(screen.getByTestId("story-chapter-synopsis-1"));
+    fireEvent.click(screen.getByTestId("story-confirm-outline"));
+
+    expect(screen.queryByTestId("story-confirm-gaps-outline")).toBeNull();
+    expect(story().confirmedSteps).toContain("outline");
 
     act(() => {
       undo();
     });
-    expect(chapters()[0]?.synopsisConfirmed).toBe(true);
+    expect(story().confirmedSteps).not.toContain("outline");
   });
 
   it("writes the words of a chapter when the reader looks away from them", () => {
@@ -606,7 +642,7 @@ describe("what the table waits on", () => {
     expect(
       (screen.getByTestId("story-outline-start") as HTMLButtonElement).disabled,
     ).toBe(false);
-    expect(screen.getByTestId("story-outline-confirm-all")).toBeTruthy();
+    expect(screen.getByTestId("story-confirm-outline")).toBeTruthy();
     expect(
       (screen.getByTestId("story-chapter-redo-0") as HTMLButtonElement)
         .disabled,

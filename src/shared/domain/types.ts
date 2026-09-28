@@ -6,6 +6,7 @@ import type {
   ProblemCode,
   TransitionKind,
 } from "./constants";
+import type { StoryStep } from "./story";
 
 export type ProjectId = string;
 export type CanvasId = string;
@@ -553,7 +554,7 @@ export interface MokaFile {
 // The story room: a premise told, chapter by chapter, into a finished film.
 //
 // The five steps are one document: the brief the whole of it rests on, the
-// chapters a reader confirmed, the elements every picture is drawn from, the
+// chapters it was divided into, the elements every picture is drawn from, the
 // boards that name each shot, and the timeline the whole was assembled into.
 // A step's own working state — which job is running, which item failed — is
 // not here: this is what was decided, not what is being tried.
@@ -586,17 +587,15 @@ export const STORY_ELEMENT_KINDS = ["character", "scene", "prop"] as const;
 export type StoryElementKind = (typeof STORY_ELEMENT_KINDS)[number];
 
 /**
- * Every take a place in the story has been given, and whether one was settled
- * on.
+ * Every take a place in the story has been given.
  *
  * A place is redrawn rather than overwritten: the earlier takes stay, the
  * newest is the one in use, and a reader who liked the third better than the
- * fourth can say so by keeping it. Confirmation is the reader's word, not the
- * machine's — a picture that exists is not a picture that was agreed to.
+ * fourth can say so by keeping it. Nothing here is agreed to one place at a
+ * time — what a reader settles is the step the place stands in, whole.
  */
 export interface StorySlot {
   takes: StoryTake[];
-  confirmed: boolean;
 }
 
 /**
@@ -701,9 +700,9 @@ export interface StoryActSound {
 /**
  * An act: one stretch of story, and the unit a clip is made of.
  *
- * The three flags are the reader's three answers, in the order they can be
- * given: the board is right, the frames are right, the clip is right. Each
- * step's work is offered only after the answer before it.
+ * Everything in it stays the reader's to edit for as long as the telling is
+ * being worked on: a board is argued with rather than sealed, and what a
+ * picture or a clip was made from is allowed to move on afterwards.
  */
 export interface StoryAct {
   id: string;
@@ -715,11 +714,8 @@ export interface StoryAct {
   propIds: string[];
   sound: StoryActSound;
   keyframes: StoryKeyframe[];
-  keysConfirmed: boolean;
-  imagesConfirmed: boolean;
   /** The act's whole clip, when the story is boarded an act at a time. */
   video: StorySlot;
-  videoConfirmed: boolean;
   /**
    * The lines of this act read aloud, in one voice, and the music and sound
    * under it. Optional because a telling made before either was asked for is
@@ -734,7 +730,6 @@ export interface StoryChapter {
   id: string;
   title: string;
   synopsis: string;
-  synopsisConfirmed: boolean;
   /** What this episode is meant to run for; the brief's total shares out evenly. */
   targetDurationMs: number;
   /** The board for this episode, made in step four. */
@@ -747,7 +742,6 @@ export interface StoryElement {
   kind: StoryElementKind;
   name: string;
   description: string;
-  descriptionConfirmed: boolean;
   /** The chapters this was noticed in; empty when the outline did not say. */
   chapterIds: string[];
   main: StorySlot;
@@ -791,6 +785,15 @@ export interface StoryDocument {
    * ask, past which the rest are left to the words.
    */
   maxReferenceImages: number;
+  /**
+   * The steps of the telling that have been settled, in telling order.
+   *
+   * A step is settled when the reader presses its own confirm and the step has
+   * everything it needs — every chapter written, every element drawn, every act
+   * filmed. This is the whole of the room's gatekeeping: the step after a
+   * settled one is open, and nothing else opens it.
+   */
+  confirmedSteps: StoryStep[];
   edit: StoryEdit;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
@@ -827,7 +830,6 @@ export interface StoryElementPatch {
   name?: string;
   kind?: StoryElementKind;
   description?: string;
-  descriptionConfirmed?: boolean;
   /** The chapters it was noticed in, whole; a chapter the story has not got is refused. */
   chapterIds?: string[];
 }
@@ -848,9 +850,6 @@ export interface StoryActPatch {
   sceneId?: string | null;
   propIds?: string[];
   sound?: StoryActSound;
-  keysConfirmed?: boolean;
-  imagesConfirmed?: boolean;
-  videoConfirmed?: boolean;
 }
 
 /** The fields a caller may move on a shot, for `updateStoryKeyframe`. */
@@ -1172,6 +1171,21 @@ export type DocumentCommand =
       type: "updateStoryReferenceLimit";
       storyId: string;
       maxReferenceImages: number;
+    }
+  /**
+   * One step of the telling, settled.
+   *
+   * Pressing a step's own confirm is what opens the step after it, and taking
+   * the confirmation back is what the undo of that press writes. What a step
+   * needs before it may be settled is the room's own reading of the document
+   * and is not repeated here: this records the reader's word, not the check
+   * behind it.
+   */
+  | {
+      type: "confirmStoryStep";
+      storyId: string;
+      step: StoryStep;
+      confirmed: boolean;
     }
   /**
    * The outline, whole.

@@ -17,6 +17,7 @@ import {
 } from "../assembly";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryImportButton } from "../components/StoryImportButton";
+import { StepConfirm } from "../components/StepConfirm";
 import { StepHeading } from "../components/StepHeading";
 import { FilmCard } from "../panels/FilmCard";
 import { useStoryStore } from "../stores/storyStore";
@@ -164,6 +165,7 @@ export function EditStep({ story }: { story: StoryDocument }) {
           step="edit"
         />
         <p className="story-step-lead">{t("story:edit.lead")}</p>
+        <StepConfirm step="edit" story={story} />
 
         <section className="story-assembly" data-testid="story-assembly">
           <h3>{t("story:edit.assemble")}</h3>
@@ -273,9 +275,6 @@ export function EditStep({ story }: { story: StoryDocument }) {
                 </span>
                 <span className="story-count">
                   {(unit.durationMs / 1000).toFixed(1)}s
-                </span>
-                <span className="story-hint">
-                  {unit.confirmed ? "✓" : t("story:edit.unconfirmedShort")}
                 </span>
               </li>
             ))}

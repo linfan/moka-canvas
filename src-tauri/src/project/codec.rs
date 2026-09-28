@@ -63,7 +63,10 @@ pub fn decode_moka_file(bytes: &[u8]) -> Result<MokaFile, CodecError> {
     if bytes[..4] != MOKA_MAGIC {
         return Err(CodecError::MagicInvalid);
     }
-    let mut moka: MokaFile = bson::deserialize_from_slice(&bytes[4..])
+    let mut document: bson::Document = bson::deserialize_from_slice(&bytes[4..])
+        .map_err(|error| CodecError::BsonInvalid(error.to_string()))?;
+    settle_steps(&mut document);
+    let mut moka: MokaFile = bson::deserialize_from_document(document)
         .map_err(|error| CodecError::BsonInvalid(error.to_string()))?;
 
     if moka.version.is_empty() {
@@ -101,6 +104,114 @@ pub fn decode_moka_file(bytes: &[u8]) -> Result<MokaFile, CodecError> {
         }
     }
     Ok(moka)
+}
+
+/// The steps an older document had settled, written into the field that holds
+/// them now.
+///
+/// A story written before the room confirmed whole steps said the same thing
+/// one place at a time: a chapter agreed to, a description agreed to, a clip
+/// agreed to. Reading those back is what keeps a telling someone had finished
+/// standing where they left it rather than at the first step of five — and it
+/// is read here rather than in the client because what the server holds in
+/// memory is what the client is shown. The same reading stands in
+/// `src/shared/domain/codec.ts`, which is where it is written when a file is
+/// read outside the server.
+fn settle_steps(moka: &mut bson::Document) {
+    let Some(bson::Bson::Array(stories)) = moka.get_mut("stories") else {
+        return;
+    };
+    for story in stories.iter_mut() {
+        let bson::Bson::Document(story) = story else {
+            continue;
+        };
+        // A document that says which steps were settled is read as it stands.
+        if story.contains_key("confirmedSteps") {
+            continue;
+        }
+        let chapters = rows(story.get("chapters"));
+        let elements = rows(story.get("elements"));
+        let acts: Vec<&bson::Bson> = chapters
+            .iter()
+            .flat_map(|chapter| rows(record(Some(chapter)).and_then(|held| held.get("acts"))))
+            .collect();
+        let mut steps: Vec<&str> = Vec::new();
+        if record(story.get("brief")).is_some_and(|brief| {
+            matches!(brief.get("idea"), Some(bson::Bson::String(words)) if !words.trim().is_empty())
+                || brief.contains_key("sourceAssetId")
+        }) {
+            steps.push("idea");
+        }
+        if !chapters.is_empty()
+            && chapters
+                .iter()
+                .all(|chapter| said(record(Some(chapter)), "synopsisConfirmed"))
+        {
+            steps.push("outline");
+        }
+        if !elements.is_empty()
+            && elements.iter().all(|element| {
+                let held = record(Some(element));
+                said(held, "descriptionConfirmed")
+                    && said(record(held.and_then(|each| each.get("main"))), "confirmed")
+                    && match held.and_then(|each| each.get("turnaround")) {
+                        None | Some(bson::Bson::Null) => true,
+                        other => said(record(other), "confirmed"),
+                    }
+            })
+        {
+            steps.push("elements");
+        }
+        if !acts.is_empty()
+            && acts.iter().all(|act| {
+                let held = record(Some(act));
+                said(held, "videoConfirmed")
+                    && !rows(
+                        record(held.and_then(|each| each.get("video")))
+                            .and_then(|video| video.get("takes")),
+                    )
+                    .is_empty()
+            })
+        {
+            steps.push("storyboard");
+        }
+        if record(story.get("edit"))
+            .and_then(|edit| edit.get("film"))
+            .is_some_and(|film| !matches!(film, bson::Bson::Null))
+        {
+            steps.push("edit");
+        }
+        story.insert(
+            "confirmedSteps",
+            bson::Bson::Array(
+                steps
+                    .into_iter()
+                    .map(|step| bson::Bson::String(step.into()))
+                    .collect(),
+            ),
+        );
+    }
+}
+
+/// A record, where the value is one.
+fn record(value: Option<&bson::Bson>) -> Option<&bson::Document> {
+    match value {
+        Some(bson::Bson::Document(held)) => Some(held),
+        _ => None,
+    }
+}
+
+/// The entries of an array, where the value is one; nothing otherwise.
+fn rows(value: Option<&bson::Bson>) -> Vec<&bson::Bson> {
+    match value {
+        Some(bson::Bson::Array(held)) => held.iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether a record says true of a field: the old documents' way of agreeing.
+fn said(held: Option<&bson::Document>, key: &str) -> bool {
+    held.is_some_and(|held| matches!(held.get(key), Some(bson::Bson::Boolean(true))))
 }
 
 #[cfg(test)]

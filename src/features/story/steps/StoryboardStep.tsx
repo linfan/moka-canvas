@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { StoryJobRecord } from "../../../api/story";
 import {
-  actVideoSettled,
+  actComplete,
   actsRegenerationCost,
   chunkWaves,
   formatDuration,
@@ -21,6 +21,7 @@ import { execute } from "../../editor/commands/execute";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
+import { StepConfirm } from "../components/StepConfirm";
 import { StepHeading } from "../components/StepHeading";
 import { ActCard } from "../panels/ActCard";
 import { chapterGuesses } from "../jobs/apply";
@@ -49,9 +50,9 @@ const STORY_SLOW_MS = 90_000;
  *
  * One episode is boarded at a time, because a board is the thing a reader
  * argues with: acts, framing, what is said, and how long each shot runs. The
- * table is agreed to before anything is drawn from it and the frames are agreed
- * to before anything is filmed, since each is made from the one before it — and
- * nothing is asked for in bulk without saying how many pieces it is.
+ * board stays the reader's after it has been read, and a clip is made once
+ * every frame of its act is drawn, since the pictures are what it is made from
+ * — and nothing is asked for in bulk without saying how many pieces it is.
  *
  * Every picture and every clip is an ask of its own: a shot whose painter is
  * working says so and is not asked for twice, while the shots beside it go on
@@ -105,32 +106,32 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
     (sum, held) => sum + held.acts.length,
     0,
   );
-  // Frames are only made from a table the reader has agreed to, so the count
-  // of what is missing counts only the acts whose tables are settled — and
-  // leaves out the frames already on their way, since asking for a place twice
-  // pays for it twice.
+  // Frames are asked for from the board as it stands: a shot with no picture
+  // is the work there is, and the count leaves out the frames already on their
+  // way, since asking for a place twice pays for it twice.
   const missingFrames = story.chapters.flatMap((held) =>
-    held.acts
-      .filter((act) => act.keysConfirmed)
-      .flatMap((act) =>
-        act.keyframes
-          .filter(
-            (keyframe) =>
-              keyframe.art.takes.length === 0 &&
-              !drawing({
-                chapterId: held.id,
-                actId: act.id,
-                keyframeId: keyframe.id,
-              }),
-          )
-          .map((keyframe) => ({
-            chapterId: held.id,
-            actId: act.id,
-            keyframeId: keyframe.id,
-          })),
-      ),
+    held.acts.flatMap((act) =>
+      act.keyframes
+        .filter(
+          (keyframe) =>
+            keyframe.art.takes.length === 0 &&
+            !drawing({
+              chapterId: held.id,
+              actId: act.id,
+              keyframeId: keyframe.id,
+            }),
+        )
+        .map((keyframe) => ({
+          chapterId: held.id,
+          actId: act.id,
+          keyframeId: keyframe.id,
+        })),
+    ),
   );
   const videos = countVideos(story);
+  const completeActs = story.chapters
+    .flatMap((held) => held.acts)
+    .filter((act) => actComplete(act, story.shotGranularity)).length;
 
   // A telling longer than one batch is boarded in waves, the next one
   // beginning when the one before it is over rather than when the reader
@@ -224,6 +225,7 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           step="storyboard"
         />
         <p className="story-step-lead">{t("story:storyboard.lead")}</p>
+        <StepConfirm step="storyboard" story={story} />
         <StoryModelPicks places={["text", "image", "video", "audio", "music"]}>
           <ReferenceLimitField story={story} />
         </StoryModelPicks>
@@ -283,10 +285,7 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           </span>
           <span className="story-hint" data-testid="story-board-settled">
             {t("story:storyboard.settled", {
-              done: story.chapters
-                .flatMap((held) => held.acts)
-                .filter((act) => actVideoSettled(act, story.shotGranularity))
-                .length,
+              done: completeActs,
               total: actsTotal,
             })}
           </span>
@@ -415,7 +414,6 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
               return (
                 <ActCard
                   act={act}
-                  boardBusy={boarding(chapter.id)}
                   busyKeyframes={busy.frames}
                   busyClips={busy.clips}
                   chapterId={chapter.id}
@@ -528,7 +526,7 @@ function boardState(
   granularity: StoryShotGranularity,
 ): { key: string; values?: Record<string, number> } {
   if (chapter.acts.length === 0) return { key: "story:storyboard.chipEmpty" };
-  if (chapter.acts.every((act) => actVideoSettled(act, granularity))) {
+  if (chapter.acts.every((act) => actComplete(act, granularity))) {
     return { key: "story:storyboard.chipFilmed" };
   }
   const drawn = chapter.acts.reduce(

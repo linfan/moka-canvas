@@ -331,7 +331,7 @@ describe("writing a batch's answers into the story", () => {
     expect(chapter?.acts[0].keyframes[0].content).toBe("周抬起头。");
   });
 
-  it("files a clip where its act is, without confirming it for the reader", () => {
+  it("files a clip where its act is, writing nothing down on the reader's behalf", () => {
     const report = applyJobResults(
       record("actVideo", [
         item({
@@ -353,8 +353,9 @@ describe("writing a batch's answers into the story", () => {
       ids.actVideo,
       "asset-new-act",
     ]);
-    // Which take is the right one is the reader's word, not the batch's.
-    expect(act.videoConfirmed).toBe(true);
+    // Nothing about the filing is the reader's word: a batch writes its
+    // answers down and nothing else.
+    expect(act.video.takes).toHaveLength(2);
   });
 
   it("files a voice and a score in the two places an act keeps them", () => {
@@ -397,8 +398,9 @@ describe("writing a batch's answers into the story", () => {
     expect(act.music?.takes.map((take) => take.assetIds[0])).toEqual([
       "asset-new-music",
     ]);
-    // Nothing is confirmed on the reader's behalf.
-    expect(act.voice?.confirmed).toBe(false);
+    // Both places hold what came back and nothing else.
+    expect(act.voice?.takes).toHaveLength(1);
+    expect(act.music?.takes).toHaveLength(1);
   });
 });
 

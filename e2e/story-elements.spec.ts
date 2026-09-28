@@ -15,9 +15,9 @@ import {
 /**
  * The third step: who and what the telling is made of.
  *
- * The chapters are read once for the cast they hold; each of them is drawn and
- * agreed to, and the board behind them — step four — is not a door until every
- * one of them has a picture the reader has settled on.
+ * The chapters are read once for the cast they hold; each of them is described
+ * and drawn, and the step's own press — the only agreement the step has — is
+ * what opens the board behind it, once every one of them has a picture.
  */
 
 /** The elements the server has written into the first story. */
@@ -31,7 +31,7 @@ async function persistedElements(
         stories?: {
           elements?: {
             name?: string;
-            descriptionConfirmed?: boolean;
+            description?: string;
             main?: { takes?: unknown[] };
           }[];
         }[];
@@ -39,7 +39,7 @@ async function persistedElements(
     };
     return (body.moka?.stories?.[0]?.elements ?? []).map((element) => ({
       name: element.name ?? "",
-      described: element.descriptionConfirmed === true,
+      described: (element.description ?? "") !== "",
       drawn: (element.main?.takes ?? []).length > 0,
     }));
   });
@@ -50,7 +50,7 @@ function card(page: Page, kind: string, name: string): Locator {
   return page.getByTestId(`story-element-${kind}-${name}`);
 }
 
-test("the chapters are read for their cast, drawn, and agreed to", async ({
+test("the chapters are read for their cast, drawn, and the step confirmed", async ({
   page,
 }) => {
   const home = projectHome("story-elements");
@@ -67,13 +67,13 @@ test("the chapters are read for their cast, drawn, and agreed to", async ({
       .getByTestId("story-idea-input")
       .fill("Eleven at night, and the last train stops where it should not.");
     await page.getByTestId("story-idea-duration-3").click();
-    await page.getByTestId("story-idea-next").click();
+    await page.getByTestId("story-confirm-idea").click();
     await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
     await page.getByTestId("story-outline-start").click();
     await expect(page.locator(".story-chapter")).toHaveCount(3, {
       timeout: 30_000,
     });
-    await page.getByTestId("story-outline-confirm-all").click();
+    await page.getByTestId("story-confirm-outline").click();
 
     // Step three: the cast is read out of the chapters, by the model the room
     // is set to — the deployment's default until a reader picks another.
@@ -94,11 +94,16 @@ test("the chapters are read for their cast, drawn, and agreed to", async ({
         "story-element-description-Keeper",
       ),
     ).toHaveValue(/grey coat/);
-    // Nobody has a picture yet, so nothing can be agreed to in bulk.
+    // Nobody has a picture yet, so the step's press says what it is missing
+    // rather than opening the board: there is no agreement per element to give.
     await expect(page.getByTestId("story-elements-draw-all")).toHaveText(
       "Draw every missing picture (4)",
     );
-    await expect(page.getByTestId("story-elements-confirm-all")).toBeDisabled();
+    await page.getByTestId("story-confirm-elements").click();
+    await expect(
+      page.getByTestId("story-confirm-gaps-elements"),
+    ).toContainText("4 elements have no picture");
+    await expect(page.getByTestId("story-step-storyboard")).toBeDisabled();
 
     // Drawing them all is four asks of the painter, said out loud.
     await page.getByTestId("story-elements-draw-all").click();
@@ -118,15 +123,10 @@ test("the chapters are read for their cast, drawn, and agreed to", async ({
         .locator("img"),
     ).toBeVisible({ timeout: 60_000 });
 
-    await expect(page.getByTestId("story-elements-confirm-all")).toBeEnabled();
-    await page.getByTestId("story-elements-confirm-all").click();
-    await expect(
-      card(page, "character", "Keeper").getByTestId(
-        "story-element-state-Keeper",
-      ),
-    ).toHaveText("Description agreed to");
-
-    // Every element described and drawn: the board is now a door.
+    // Every element described and drawn: the press settles the step and takes
+    // the reader on to the board, which is now a door.
+    await page.getByTestId("story-confirm-elements").click();
+    await expect(page.getByTestId("story-step-body-storyboard")).toBeVisible();
     await expect(page.getByTestId("story-step-storyboard")).toBeEnabled();
 
     await expect
@@ -157,13 +157,13 @@ test("the cast a reading left, and what the reader said since, outlast the room"
       .getByTestId("story-idea-input")
       .fill("Eleven at night, and the last train stops where it should not.");
     await page.getByTestId("story-idea-duration-3").click();
-    await page.getByTestId("story-idea-next").click();
+    await page.getByTestId("story-confirm-idea").click();
     await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
     await page.getByTestId("story-outline-start").click();
     await expect(page.locator(".story-chapter")).toHaveCount(3, {
       timeout: 30_000,
     });
-    await page.getByTestId("story-outline-confirm-all").click();
+    await page.getByTestId("story-confirm-outline").click();
 
     // The cast, and a picture drawn for one of them.
     await page.getByTestId("story-step-elements").click();
@@ -194,17 +194,12 @@ test("the cast a reading left, and what the reader said since, outlast the room"
     await card(page, "character", "Keeper")
       .getByTestId("story-element-description-Keeper")
       .fill("A woman in a long grey coat, slow to speak.");
-    // The click that leaves the field is the write: what is agreed to after it
-    // is the reader's words and not the reading's.
+    // The click that leaves the field is the write, and there is nothing else
+    // for the reader to say about it: no element is agreed to one at a time.
     await page.getByTestId("story-elements-group-all").click();
-    await card(page, "character", "Keeper")
-      .getByTestId("story-element-confirm-Keeper")
-      .click();
-    await expect(
-      card(page, "character", "Keeper").getByTestId(
-        "story-element-state-Keeper",
-      ),
-    ).toHaveText("Description agreed to");
+    await expect
+      .poll(async () => (await persistedElements(page))[0])
+      .toEqual({ name: "Keeper", described: true, drawn: true });
 
     // Home and back in, which reads the same batches into the story a second
     // time: every one of them says its answer is already in, so none of it is
@@ -239,9 +234,9 @@ test("the cast a reading left, and what the reader said since, outlast the room"
       .poll(async () => persistedElements(page))
       .toEqual([
         { name: "Keeper", described: true, drawn: true },
-        { name: "Traveller", described: false, drawn: false },
-        { name: "Last carriage", described: false, drawn: false },
-        { name: "Waiting room", described: false, drawn: false },
+        { name: "Traveller", described: true, drawn: false },
+        { name: "Last carriage", described: true, drawn: false },
+        { name: "Waiting room", described: true, drawn: false },
       ]);
   } finally {
     forgetHome(home);

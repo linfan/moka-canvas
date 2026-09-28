@@ -288,7 +288,6 @@ impl<'de> Deserialize<'de> for StoryTake {
 #[serde(rename_all = "camelCase")]
 pub struct StorySlot {
     pub takes: Vec<StoryTake>,
-    pub confirmed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -341,10 +340,7 @@ pub struct StoryAct {
     pub prop_ids: Vec<String>,
     pub sound: StoryActSound,
     pub keyframes: Vec<StoryKeyframe>,
-    pub keys_confirmed: bool,
-    pub images_confirmed: bool,
     pub video: StorySlot,
-    pub video_confirmed: bool,
     /// The lines read aloud, and the music under them. Absent rather than
     /// empty on a telling that was never voiced: the two say different things,
     /// and only one of them is a reader who has not asked yet.
@@ -360,7 +356,6 @@ pub struct StoryChapter {
     pub id: String,
     pub title: String,
     pub synopsis: String,
-    pub synopsis_confirmed: bool,
     pub target_duration_ms: i64,
     pub acts: Vec<StoryAct>,
 }
@@ -373,7 +368,6 @@ pub struct StoryElement {
     pub kind: StoryElementKind,
     pub name: String,
     pub description: String,
-    pub description_confirmed: bool,
     pub chapter_ids: Vec<String>,
     pub main: StorySlot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -416,10 +410,26 @@ pub struct StoryDocument {
     /// a document written before the limit existed carries the default.
     #[serde(default = "default_max_reference_images")]
     pub max_reference_images: u32,
+    /// Which steps of the telling the reader has settled, in telling order.
+    /// The one thing a step's own press writes; everything else about a step's
+    /// completeness is read off the content itself.
+    #[serde(default)]
+    pub confirmed_steps: Vec<StoryStep>,
     #[serde(default)]
     pub edit: StoryEdit,
     pub created_at: IsoTimestamp,
     pub updated_at: IsoTimestamp,
+}
+
+/// The five steps of a telling, in the order they are told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StoryStep {
+    Idea,
+    Outline,
+    Elements,
+    Storyboard,
+    Edit,
 }
 
 fn default_max_reference_images() -> u32 {
@@ -473,8 +483,6 @@ pub struct StoryElementPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description_confirmed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chapter_ids: Option<Vec<String>>,
 }
 
@@ -502,12 +510,6 @@ pub struct StoryActPatch {
     pub prop_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sound: Option<StoryActSound>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keys_confirmed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub images_confirmed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub video_confirmed: Option<bool>,
 }
 
 /// The fields a caller may move on a shot, for `updateStoryKeyframe`.
@@ -784,7 +786,7 @@ fn story_target_invalid() -> CommandError {
 /// take ever made for an act has to put the document back the way it was —
 /// which is without the slot, not with an empty one.
 fn kept_sound_slot(slot: StorySlot) -> Option<StorySlot> {
-    if slot.takes.is_empty() && !slot.confirmed {
+    if slot.takes.is_empty() {
         None
     } else {
         Some(slot)
@@ -1027,10 +1029,7 @@ fn check_slot(slot: StorySlot) -> StorySlot {
     } else {
         takes
     };
-    StorySlot {
-        takes,
-        confirmed: slot.confirmed,
-    }
+    StorySlot { takes }
 }
 
 fn check_dialogue(lines: &[StoryDialogueLine]) -> Result<(), CommandError> {
@@ -1272,13 +1271,12 @@ pub fn apply_story_command(
                 .iter()
                 .map(|element| (element.id.as_str(), element))
                 .collect();
-            // The drawings and the reader's answers stay with the element they
-            // were made for; what a new reading brings is its words.
+            // The drawings stay with the element they were made for; what a
+            // new reading brings is its words.
             let merged: Vec<StoryElement> = elements
                 .iter()
                 .map(|element| match held.get(element.id.as_str()) {
                     Some(before) => StoryElement {
-                        description_confirmed: before.description_confirmed,
                         main: before.main.clone(),
                         turnaround: before.turnaround.clone(),
                         ..element.clone()
@@ -1343,9 +1341,6 @@ pub fn apply_story_command(
                     .description
                     .as_ref()
                     .map(|_| element.description.clone()),
-                description_confirmed: patch
-                    .description_confirmed
-                    .map(|_| element.description_confirmed),
                 chapter_ids: patch
                     .chapter_ids
                     .as_ref()
@@ -1364,9 +1359,6 @@ pub fn apply_story_command(
                 }
                 if let Some(description) = &patch.description {
                     held.description = description.clone();
-                }
-                if let Some(confirmed) = patch.description_confirmed {
-                    held.description_confirmed = confirmed;
                 }
                 if let Some(chapter_ids) = &patch.chapter_ids {
                     held.chapter_ids = chapter_ids.clone();
@@ -1441,10 +1433,7 @@ pub fn apply_story_command(
                         })
                         .collect();
                     StoryAct {
-                        keys_confirmed: before.keys_confirmed,
-                        images_confirmed: before.images_confirmed,
                         video: before.video.clone(),
-                        video_confirmed: before.video_confirmed,
                         keyframes,
                         ..cleaned
                     }
@@ -1483,9 +1472,6 @@ pub fn apply_story_command(
                 scene_id: patch.scene_id.as_ref().map(|_| act.scene_id.clone()),
                 prop_ids: patch.prop_ids.as_ref().map(|_| act.prop_ids.clone()),
                 sound: patch.sound.as_ref().map(|_| act.sound.clone()),
-                keys_confirmed: patch.keys_confirmed.map(|_| act.keys_confirmed),
-                images_confirmed: patch.images_confirmed.map(|_| act.images_confirmed),
-                video_confirmed: patch.video_confirmed.map(|_| act.video_confirmed),
             };
             let mut next = story.clone();
             for chapter in next.chapters.iter_mut() {
@@ -1513,15 +1499,6 @@ pub fn apply_story_command(
                     }
                     if let Some(sound) = &patch.sound {
                         held.sound = sound.clone();
-                    }
-                    if let Some(confirmed) = patch.keys_confirmed {
-                        held.keys_confirmed = confirmed;
-                    }
-                    if let Some(confirmed) = patch.images_confirmed {
-                        held.images_confirmed = confirmed;
-                    }
-                    if let Some(confirmed) = patch.video_confirmed {
-                        held.video_confirmed = confirmed;
                     }
                 }
             }
@@ -1633,6 +1610,35 @@ pub fn apply_story_command(
                     story_id: story_id.clone(),
                     target: target.clone(),
                     slot: previous,
+                }],
+            ))
+        }
+        DocumentCommand::ConfirmStoryStep {
+            story_id,
+            step,
+            confirmed,
+        } => {
+            let story = story_of(moka, story_id)?;
+            let mut steps = story.confirmed_steps.clone();
+            if *confirmed {
+                if !steps.contains(step) {
+                    steps.push(*step);
+                }
+            } else {
+                steps.retain(|held| held != step);
+            }
+            // Kept in telling order rather than in the order the presses came,
+            // so a document confirmed step by step reads as the telling does.
+            steps.sort();
+            steps.dedup();
+            let mut next = story.clone();
+            next.confirmed_steps = steps;
+            Ok((
+                replace_story(moka, next),
+                vec![DocumentCommand::ConfirmStoryStep {
+                    story_id: story_id.clone(),
+                    step: *step,
+                    confirmed: !*confirmed,
                 }],
             ))
         }

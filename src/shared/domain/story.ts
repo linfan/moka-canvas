@@ -68,7 +68,7 @@ export interface StoryStepProgress {
 
 /**
  * How far a step has got, from three answers about it: is there anything at
- * all, is all of it made, has the reader agreed to all of it.
+ * all, is all of it made, has the reader pressed its own confirm.
  *
  * A step with some of its work done and some still to do is `working`, which
  * is also what a step whose work is out with a model says: the document can
@@ -79,8 +79,8 @@ function stepState(
   ready: boolean,
   confirmed: boolean,
 ): StoryStepState {
-  if (empty) return "empty";
   if (confirmed) return "confirmed";
+  if (empty) return "empty";
   return ready ? "ready" : "working";
 }
 
@@ -94,24 +94,17 @@ export function actPlannedMs(act: StoryAct): number {
   return act.keyframes.reduce((sum, keyframe) => sum + keyframe.durationMs, 0);
 }
 
-/** Whether every shot in an episode has its own clip. */
-export function chapterHasAllKeyframeVideos(chapter: StoryChapter): boolean {
-  return (
-    chapter.acts.length > 0 &&
-    chapter.acts.every(
-      (act) =>
-        act.keyframes.length > 0 &&
-        act.keyframes.every((keyframe) => keyframe.video.takes.length > 0),
-    )
-  );
-}
-
 /** Whether every shot in an act has a frame drawn for it. */
 export function actHasAllArt(act: StoryAct): boolean {
   return (
     act.keyframes.length > 0 &&
     act.keyframes.every((keyframe) => keyframe.art.takes.length > 0)
   );
+}
+
+/** Whether an act has a board at all: shots for a clip to be made of. */
+export function actHasShots(act: StoryAct): boolean {
+  return act.keyframes.length > 0;
 }
 
 /** Whether an act's clip has been made, at whichever granularity is in force. */
@@ -123,12 +116,17 @@ export function actHasVideo(
   return act.video.takes.length > 0;
 }
 
-/** Whether an act's clip is made and agreed to, at whichever granularity. */
-export function actVideoSettled(
+/**
+ * Whether an act is finished: a board, a picture for every shot, and a clip.
+ *
+ * This is what step four settles, and nothing about it is agreed to one shot
+ * at a time — an act is done when there is nothing left of it to make.
+ */
+export function actComplete(
   act: StoryAct,
   granularity: StoryDocument["shotGranularity"],
 ): boolean {
-  return actHasVideo(act, granularity) && act.videoConfirmed;
+  return actHasShots(act) && actHasAllArt(act) && actHasVideo(act, granularity);
 }
 
 /** Whether every shot of an act has been filmed, which is how a clip is made. */
@@ -139,18 +137,27 @@ function chapterClipMade(act: StoryAct): boolean {
   );
 }
 
+/** Whether an episode has the words step two settles: a title and a synopsis. */
+export function chapterWritten(chapter: StoryChapter): boolean {
+  return chapter.title.trim() !== "" && chapter.synopsis.trim() !== "";
+}
+
+/** Whether an element has the words every picture of it is made from. */
+export function elementDescribed(element: StoryElement): boolean {
+  return element.name.trim() !== "" && element.description.trim() !== "";
+}
+
 /** Whether a character has both drawings a character is drawn with. */
-function elementDrawn(element: StoryElement): boolean {
+export function elementDrawn(element: StoryElement): boolean {
   if (element.main.takes.length === 0) return false;
   return (
     element.kind !== "character" || (element.turnaround?.takes.length ?? 0) > 0
   );
 }
 
-/** Whether a character's drawings are the ones the reader agreed to. */
-function elementAgreed(element: StoryElement): boolean {
-  if (!element.descriptionConfirmed || !element.main.confirmed) return false;
-  return element.kind !== "character" || element.turnaround?.confirmed === true;
+/** Whether an element is finished: described, and drawn. */
+export function elementComplete(element: StoryElement): boolean {
+  return elementDescribed(element) && elementDrawn(element);
 }
 
 /**
@@ -159,6 +166,12 @@ function elementAgreed(element: StoryElement): boolean {
  * A step that is waiting on a job is not something a document can say — what
  * is being tried is not what was settled — so the room lays its own failures
  * and spinners over these answers rather than asking for them here.
+ *
+ * A step the reader has settled stays settled: what is confirmed is the
+ * reader's word about the step, and a chapter re-written afterwards does not
+ * take a door away that somebody has already walked through. The count under
+ * the step says what of it is finished just now, so a step being worked on
+ * again reads as a step being worked on.
  */
 export function storyProgress(
   story: StoryDocument,
@@ -166,31 +179,28 @@ export function storyProgress(
   const chapters = story.chapters;
   const acts = chapters.flatMap((chapter) => chapter.acts);
   const granularity = story.shotGranularity;
+  const settled = (step: StoryStep) => story.confirmedSteps.includes(step);
 
-  const ideaDone = story.brief.idea.trim().length > 0;
+  const ideaDone = ideaReady(story);
 
-  const confirmedChapters = chapters.filter(
-    (chapter) => chapter.synopsisConfirmed,
-  ).length;
-  const everyChapterConfirmed =
-    chapters.length > 0 && confirmedChapters === chapters.length;
-  const everyChapterBoarded =
-    everyChapterConfirmed &&
-    chapters.every((chapter) => chapter.acts.length > 0);
+  const writtenChapters = chapters.filter(chapterWritten).length;
+  const everyChapterWritten =
+    chapters.length > 0 && writtenChapters === chapters.length;
 
   const elements = story.elements;
-  const settledElements = elements.filter(elementAgreed).length;
-  const everyElementDrawn = elements.length > 0 && elements.every(elementDrawn);
+  const completeElements = elements.filter(elementComplete).length;
+  const everyElementComplete =
+    elements.length > 0 && completeElements === elements.length;
 
-  const settledActs = acts.filter((act) =>
-    actVideoSettled(act, granularity),
+  const completeActs = acts.filter((act) =>
+    actComplete(act, granularity),
   ).length;
-  const everyActBoarded = acts.length > 0 && acts.every(actHasAllArt);
+  const everyActComplete = acts.length > 0 && completeActs === acts.length;
 
   return {
     idea: {
       step: "idea",
-      state: ideaDone ? "confirmed" : "empty",
+      state: stepState(!ideaDone, ideaDone, settled("idea")),
       done: ideaDone ? 1 : 0,
       total: 1,
     },
@@ -198,43 +208,149 @@ export function storyProgress(
       step: "outline",
       state: stepState(
         chapters.length === 0,
-        everyChapterConfirmed,
-        everyChapterConfirmed && everyChapterBoarded,
+        everyChapterWritten,
+        settled("outline"),
       ),
-      done: confirmedChapters,
+      done: writtenChapters,
       total: chapters.length,
     },
     elements: {
       step: "elements",
       state: stepState(
         elements.length === 0,
-        everyElementDrawn,
-        elements.length > 0 && settledElements === elements.length,
+        everyElementComplete,
+        settled("elements"),
       ),
-      done: settledElements,
+      done: completeElements,
       total: elements.length,
     },
     storyboard: {
       step: "storyboard",
       state: stepState(
         acts.length === 0,
-        everyActBoarded,
-        acts.length > 0 && settledActs === acts.length,
+        everyActComplete,
+        settled("storyboard"),
       ),
-      done: settledActs,
+      done: completeActs,
       total: acts.length,
     },
     edit: {
       step: "edit",
-      state: story.edit.film
-        ? "confirmed"
-        : story.edit.timelineId
-          ? "ready"
-          : "empty",
+      state: stepState(
+        story.edit.timelineId === undefined && story.edit.film === undefined,
+        story.edit.film !== undefined,
+        settled("edit"),
+      ),
       done: story.edit.film ? 1 : 0,
       total: 1,
     },
   };
+}
+
+// -----------------------------------------------------------------------------
+// What a step is still waiting for
+// -----------------------------------------------------------------------------
+
+/**
+ * One thing a step has not got yet, as the room reads the document.
+ *
+ * The kinds are the shapes of the gaps rather than sentences about them: what
+ * a reader is told is the interface's business, and it has the reader's
+ * language. The pieces a gap names — chapters by their number, elements and
+ * acts by their name — are the telling's own words and are handed over as they
+ * are written.
+ */
+export type StoryStepGap =
+  | { kind: "ideaMissing" }
+  | { kind: "noChapters" }
+  | { kind: "chaptersUnwritten"; numbers: number[] }
+  | { kind: "noElements" }
+  | { kind: "elementsUndescribed"; names: string[] }
+  | { kind: "elementsUndrawn"; names: string[] }
+  | { kind: "noActs" }
+  | { kind: "actsWithoutShots"; count: number }
+  | { kind: "framesMissing"; count: number }
+  | { kind: "clipsMissing"; count: number }
+  | { kind: "noTimeline" }
+  | { kind: "noFilm" };
+
+/**
+ * What a step would still need before it could be settled.
+ *
+ * An empty list is the whole of the check a step's confirm makes: the room
+ * presses the same reading twice — once to decide, once to say why not — so
+ * what a reader is told and what the press acts on cannot drift apart.
+ */
+export function stepGaps(
+  story: StoryDocument,
+  step: StoryStep,
+): StoryStepGap[] {
+  const granularity = story.shotGranularity;
+  const acts = story.chapters.flatMap((chapter) => chapter.acts);
+  switch (step) {
+    case "idea":
+      return ideaReady(story) ? [] : [{ kind: "ideaMissing" }];
+    case "outline": {
+      if (story.chapters.length === 0) return [{ kind: "noChapters" }];
+      const numbers = story.chapters.flatMap((chapter, at) =>
+        chapterWritten(chapter) ? [] : [at + 1],
+      );
+      return numbers.length === 0
+        ? []
+        : [{ kind: "chaptersUnwritten", numbers }];
+    }
+    case "elements": {
+      if (story.elements.length === 0) return [{ kind: "noElements" }];
+      const gaps: StoryStepGap[] = [];
+      const undescribed = story.elements.filter(
+        (element) => !elementDescribed(element),
+      );
+      if (undescribed.length > 0) {
+        gaps.push({
+          kind: "elementsUndescribed",
+          names: undescribed.map((element) => element.name),
+        });
+      }
+      const undrawn = story.elements.filter(
+        (element) => elementDescribed(element) && !elementDrawn(element),
+      );
+      if (undrawn.length > 0) {
+        gaps.push({
+          kind: "elementsUndrawn",
+          names: undrawn.map((element) => element.name),
+        });
+      }
+      return gaps;
+    }
+    case "storyboard": {
+      if (acts.length === 0) return [{ kind: "noActs" }];
+      const gaps: StoryStepGap[] = [];
+      const bare = acts.filter((act) => !actHasShots(act));
+      if (bare.length > 0) {
+        gaps.push({ kind: "actsWithoutShots", count: bare.length });
+      }
+      const frames = acts.reduce(
+        (sum, act) =>
+          sum +
+          act.keyframes.filter((keyframe) => keyframe.art.takes.length === 0)
+            .length,
+        0,
+      );
+      if (frames > 0) gaps.push({ kind: "framesMissing", count: frames });
+      const clips = acts.filter((act) => !actHasVideo(act, granularity)).length;
+      if (clips > 0) gaps.push({ kind: "clipsMissing", count: clips });
+      return gaps;
+    }
+    case "edit": {
+      if (story.edit.timelineId === undefined) return [{ kind: "noTimeline" }];
+      return story.edit.film === undefined ? [{ kind: "noFilm" }] : [];
+    }
+  }
+}
+
+/** Whether a step has everything it needs to be settled. */
+export function stepComplete(story: StoryDocument, step: StoryStep): boolean {
+  return stepGaps(story, step).length === 0;
 }
 
 // -----------------------------------------------------------------------------
@@ -805,13 +921,11 @@ export function storyCurrentStep(
 }
 
 /**
- * What the step before it has to have settled, read off that step's count.
+ * What the step before it has to have settled, read off that step's state.
  *
- * Settled is not the same as the step's dot being confirmed: the outline's dot
- * is confirmed only once every chapter also has a board, and boards are what
- * step four is for — a door waiting on that would be one that never opens. So
- * each step asks the one before it for the thing it actually needs, which is
- * the count that step keeps.
+ * A step opens on the step before it being settled — that is what pressing a
+ * step's confirm is for, and the only thing that opens a door. A step that is
+ * merely complete is not a door yet: the reader has to have said so.
  */
 const STEP_OPENS_AFTER: Record<
   StoryStep,
@@ -819,15 +933,10 @@ const STEP_OPENS_AFTER: Record<
 > = {
   /** The first step is always reachable: a premise can always be re-written. */
   idea: () => true,
-  /** A premise to tell. */
-  outline: (idea) => idea.done > 0,
-  /** Chapters, every one of them agreed to. */
-  elements: (outline) => outline.total > 0 && outline.done === outline.total,
-  /** Elements, every one of them described and drawn. */
-  storyboard: (elements) =>
-    elements.total > 0 && elements.done === elements.total,
-  /** An act with a clip the reader has settled on. */
-  edit: (storyboard) => storyboard.done > 0,
+  outline: (idea) => idea.state === "confirmed",
+  elements: (outline) => outline.state === "confirmed",
+  storyboard: (elements) => elements.state === "confirmed",
+  edit: (storyboard) => storyboard.state === "confirmed",
 };
 
 /** Whether a step can be walked to yet. */

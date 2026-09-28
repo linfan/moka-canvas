@@ -100,6 +100,7 @@ import {
   transitionsOfSeams,
 } from "./timeline";
 import { emptyStorySlot } from "./factories";
+import { STORY_STEPS } from "./story";
 import { findNode, validateBounds, validateEdgeCandidate } from "./validate";
 import { i18n } from "../i18n";
 
@@ -2065,6 +2066,32 @@ function applyOne(
       };
     }
 
+    case "confirmStoryStep": {
+      const story = storyOf(moka, command.storyId);
+      if (!STORY_STEPS.includes(command.step))
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.storyStepUnknown"),
+        );
+      const held = new Set(story.confirmedSteps);
+      if (command.confirmed) held.add(command.step);
+      else held.delete(command.step);
+      // Kept in telling order rather than in the order the presses came, so a
+      // document that was confirmed step by step reads as the telling does.
+      const confirmedSteps = STORY_STEPS.filter((step) => held.has(step));
+      return {
+        next: replaceStory(moka, { ...story, confirmedSteps }),
+        inverse: [
+          {
+            type: "confirmStoryStep",
+            storyId: command.storyId,
+            step: command.step,
+            confirmed: !command.confirmed,
+          },
+        ],
+      };
+    }
+
     case "setStoryChapters": {
       const story = storyOf(moka, command.storyId);
       if (command.chapters.length > MAX_CHAPTERS_PER_STORY)
@@ -2105,14 +2132,13 @@ function applyOne(
       const held = new Map(
         story.elements.map((element) => [element.id, element]),
       );
-      // The drawings and the reader's answers to them stay with the element
-      // they were made for; what a new reading brings is its words.
+      // The drawings stay with the element they were made for; what a new
+      // reading brings is its words.
       const elements: StoryElement[] = command.elements.map((element) => {
         const before = held.get(element.id);
         if (!before) return element;
         return {
           ...element,
-          descriptionConfirmed: before.descriptionConfirmed,
           main: before.main,
           ...(before.turnaround !== undefined
             ? { turnaround: before.turnaround }
@@ -2228,10 +2254,7 @@ function applyOne(
         );
         return {
           ...cleaned,
-          keysConfirmed: before.keysConfirmed,
-          imagesConfirmed: before.imagesConfirmed,
           video: before.video,
-          videoConfirmed: before.videoConfirmed,
           keyframes: cleaned.keyframes.map((keyframe) => {
             const frame = heldFrames.get(keyframe.id);
             if (!frame) return keyframe;
@@ -2289,12 +2312,6 @@ function applyOne(
                   next.propIds = command.patch.propIds;
                 if (command.patch.sound !== undefined)
                   next.sound = command.patch.sound;
-                if (command.patch.keysConfirmed !== undefined)
-                  next.keysConfirmed = command.patch.keysConfirmed;
-                if (command.patch.imagesConfirmed !== undefined)
-                  next.imagesConfirmed = command.patch.imagesConfirmed;
-                if (command.patch.videoConfirmed !== undefined)
-                  next.videoConfirmed = command.patch.videoConfirmed;
                 return next;
               }),
             }
@@ -2663,7 +2680,7 @@ function withSoundSlot(
   field: "voice" | "music",
   slot: StorySlot,
 ): StoryAct {
-  if (slot.takes.length === 0 && !slot.confirmed) {
+  if (slot.takes.length === 0) {
     const kept: StoryAct = { ...act };
     delete kept[field];
     return kept;
@@ -2690,7 +2707,6 @@ function checkStorySlot(slot: StorySlot): StorySlot {
       takes.length > MAX_TAKES_PER_SLOT
         ? takes.slice(takes.length - MAX_TAKES_PER_SLOT)
         : takes,
-    confirmed: slot.confirmed,
   };
 }
 

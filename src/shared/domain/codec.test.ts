@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CANVAS_SCHEMA_VERSION, REFERENCE_IMAGES_MAX } from "./constants";
+import { deserialize, serialize } from "bson";
+import {
+  CANVAS_SCHEMA_VERSION,
+  MOKA_MAGIC,
+  REFERENCE_IMAGES_MAX,
+} from "./constants";
 import {
   buildConversationMokaFile,
   buildCutMokaFile,
@@ -11,6 +16,7 @@ import {
   buildShelfMokaFile,
   buildStoryMokaFile,
   buildTreeMokaFile,
+  storyIds,
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 import { derivePorts } from "./factories";
@@ -171,6 +177,65 @@ describe("moka codec", () => {
     expect(
       decodeMokaFile(encodeMokaFile(beyond)).stories![0].maxReferenceImages,
     ).toBe(REFERENCE_IMAGES_MAX);
+  });
+
+  it("reads the steps a document settled one place at a time as settled steps", () => {
+    // A story written before the room confirmed whole steps said the same
+    // thing a piece at a time: this is that document, put back on the wire.
+    const moka = buildStoryMokaFile();
+    const raw = deserialize(
+      Buffer.from(encodeMokaFile(moka)).subarray(4),
+    ) as Record<string, unknown>;
+    const story = (raw.stories as Record<string, unknown>[])[0];
+    delete story.confirmedSteps;
+    for (const chapter of story.chapters as Record<string, unknown>[]) {
+      chapter.synopsisConfirmed = true;
+      for (const act of chapter.acts as Record<string, unknown>[]) {
+        (act.video as Record<string, unknown>).confirmed = true;
+        act.videoConfirmed = true;
+        for (const frame of act.keyframes as Record<string, unknown>[]) {
+          (frame.art as Record<string, unknown>).confirmed = true;
+          (frame.video as Record<string, unknown>).confirmed = true;
+        }
+      }
+    }
+    for (const element of story.elements as Record<string, unknown>[]) {
+      element.descriptionConfirmed = true;
+      (element.main as Record<string, unknown>).confirmed = true;
+      const turnaround = element.turnaround as
+        Record<string, unknown> | undefined;
+      if (turnaround !== undefined) turnaround.confirmed = true;
+    }
+    // The fifth step was settled by the film being filed.
+    (story.edit as Record<string, unknown>).film = {
+      assetIds: [storyIds().actVideo],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const bson = serialize(raw);
+    const bytes = new Uint8Array(4 + bson.length);
+    bytes.set(MOKA_MAGIC, 0);
+    bytes.set(bson, 4);
+
+    const read = decodeMokaFile(bytes);
+    expect(read.stories![0].confirmedSteps).toEqual([
+      "idea",
+      "outline",
+      "elements",
+      "storyboard",
+      "edit",
+    ]);
+    // And the answers themselves are not carried on: what a step keeps is
+    // whether it was settled, not how many pieces it was settled in.
+    expect("confirmed" in read.stories![0].elements[0].main).toBe(false);
+    expect("synopsisConfirmed" in read.stories![0].chapters[0]).toBe(false);
+  });
+
+  it("reads a story's steps as settled only when it says so", () => {
+    const moka = buildStoryMokaFile();
+    moka.stories![0].confirmedSteps = [];
+    expect(
+      decodeMokaFile(encodeMokaFile(moka)).stories![0].confirmedSteps,
+    ).toEqual([]);
   });
 
   /**

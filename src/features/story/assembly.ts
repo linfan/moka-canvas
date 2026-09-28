@@ -65,13 +65,11 @@ export interface AssemblyUnit {
   assetId: AssetId;
   /** What the shot was planned to run for, which is what its captions share. */
   plannedMs: number;
-  /** Whether the reader agreed to this clip, which does not decide inclusion. */
-  confirmed: boolean;
 }
 
 /** Something about the telling that the reader should know before assembling. */
 export interface AssemblyWarning {
-  kind: "noVideo" | "unconfirmed" | "assetMissing" | "noDuration";
+  kind: "noVideo" | "assetMissing" | "noDuration";
   chapterId: string;
   actId: string;
   keyframeId?: string;
@@ -96,7 +94,6 @@ interface ShotSlot {
    */
   assetIds: AssetId[];
   plannedMs: number;
-  confirmed: boolean;
 }
 
 /**
@@ -116,7 +113,6 @@ function shotsOf(story: StoryDocument, act: StoryAct): ShotSlot[] {
         keyframe,
         assetIds: file === undefined ? [] : [file],
         plannedMs: keyframe.durationMs,
-        confirmed: keyframe.video.confirmed,
       };
     });
   }
@@ -125,7 +121,6 @@ function shotsOf(story: StoryDocument, act: StoryAct): ShotSlot[] {
     {
       assetIds: take?.assetIds ?? [],
       plannedMs: actPlannedMs(act),
-      confirmed: act.videoConfirmed,
     },
   ];
 }
@@ -228,9 +223,7 @@ function soundRows(
  *
  * The order is the telling's own: episode, then act, then shot. A shot with no
  * clip is named in the warnings rather than passed over in silence — a reader
- * being shown a film with a hole in it wants to know where the hole is — and a
- * clip the reader has not agreed to is laid down all the same, since agreeing
- * to a clip is saying they like it, not saying it may be shown.
+ * being shown a film with a hole in it wants to know where the hole is.
  */
 export function planAssembly(
   story: StoryDocument,
@@ -259,7 +252,6 @@ export function planAssembly(
           warnings.push({ kind: "noVideo", ...where });
           continue;
         }
-        if (!shot.confirmed) warnings.push({ kind: "unconfirmed", ...where });
         // A piece with no measured length stands in at its even share of the
         // act's plan, which is only ever read when the probe said nothing.
         const share = Math.round(shot.plannedMs / shot.assetIds.length);
@@ -287,7 +279,6 @@ export function planAssembly(
             durationMs,
             assetId,
             plannedMs: share,
-            confirmed: shot.confirmed,
           });
           at += durationMs;
         }

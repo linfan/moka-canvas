@@ -10,6 +10,10 @@ import {
   projectHome,
 } from "./helpers";
 
+// The whole telling is walked in one test — five steps, every ask through a
+// stand-in — which needs longer than the suite's own budget for one case.
+test.describe.configure({ timeout: 60_000 });
+
 /**
  * Taking a telling into the other two rooms.
  *
@@ -115,13 +119,13 @@ test("a telling is imported into a board, and into a cut of its own", async ({
       .getByTestId("story-idea-input")
       .fill("Eleven at night, and the last train stops where it should not.");
     await page.getByTestId("story-idea-duration-3").click();
-    await page.getByTestId("story-idea-next").click();
+    await page.getByTestId("story-confirm-idea").click();
     await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
     await page.getByTestId("story-outline-start").click();
     await expect(page.locator(".story-chapter")).toHaveCount(3, {
       timeout: 30_000,
     });
-    await page.getByTestId("story-outline-confirm-all").click();
+    await page.getByTestId("story-confirm-outline").click();
 
     await page.getByTestId("story-step-elements").click();
     await page.getByTestId("story-elements-recognise").click();
@@ -139,50 +143,56 @@ test("a telling is imported into a board, and into a cut of its own", async ({
         .getByTestId("story-slot-turnaround")
         .locator("img"),
     ).toBeVisible({ timeout: 60_000 });
-    await page.getByTestId("story-elements-confirm-all").click();
+    await page.getByTestId("story-confirm-elements").click();
     await expect(page.getByTestId("story-step-storyboard")).toBeEnabled({
       timeout: 30_000,
     });
 
-    // One episode is boarded, framed, filmed, voiced and scored.
+    // One episode is boarded, framed and filmed; the first act is voiced and
+    // scored as well, and the second act is framed and filmed so that the step
+    // settles and the fifth step's own import stands open.
     await page.getByTestId("story-step-storyboard").click();
     await page.getByTestId("story-board-generate").click();
     const firstAct = page.getByTestId("story-act-0");
     await expect(firstAct.getByTestId("story-table")).toBeVisible({
       timeout: 30_000,
     });
-    await firstAct.getByTestId("story-act-keys-0").click();
     await firstAct.getByTestId("story-act-draw-0").click();
-    await expect(firstAct.getByTestId("story-kf-slot-0-confirm")).toBeVisible({
-      timeout: 60_000,
-    });
-    await firstAct.getByTestId("story-kf-slot-0-confirm").click();
-    await expect(firstAct.getByTestId("story-kf-slot-1-confirm")).toBeVisible({
-      timeout: 60_000,
-    });
-    await firstAct.getByTestId("story-kf-slot-1-confirm").click();
-    // The last frame agreed to by hand is the act agreed to: the row says the
-    // pictures are settled without the act's own button being pressed.
-    await expect(
-      firstAct.getByTestId("story-act-images-unconfirm-0"),
-    ).toBeVisible();
+    await expect(firstAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
+      { timeout: 60_000 },
+    );
+    await expect(firstAct.getByTestId("story-kf-slot-1").locator("img")).toBeVisible(
+      { timeout: 60_000 },
+    );
     await firstAct.getByTestId("story-act-video-go-0").click();
     await expect(firstAct.getByTestId("story-act-video-0")).toBeVisible({
       timeout: 60_000,
     });
-    await firstAct.getByTestId("story-act-video-confirm-0").click();
     await firstAct.getByTestId("story-act-voice-go-0").click();
     await expect(firstAct.getByTestId("story-act-voice-0")).toBeVisible({
       timeout: 60_000,
     });
-    await firstAct.getByTestId("story-act-voice-confirm-0").click();
     await firstAct.getByTestId("story-act-music-go-0").click();
     await expect(firstAct.getByTestId("story-act-music-0")).toBeVisible({
       timeout: 60_000,
     });
-    await firstAct.getByTestId("story-act-music-confirm-0").click();
 
-    // Step four's own button takes the telling into a board of its own.
+    const secondAct = page.getByTestId("story-act-1");
+    await secondAct.getByTestId("story-act-draw-1").click();
+    await expect(secondAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
+      { timeout: 60_000 },
+    );
+    await secondAct.getByTestId("story-act-video-go-1").click();
+    await expect(secondAct.getByTestId("story-act-video-1")).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.getByTestId("story-confirm-storyboard").click();
+    await expect(page.getByTestId("story-step-body-edit")).toBeVisible();
+
+    // Step four's own button takes the telling into a board of its own, and it
+    // stands on the board's own step: the press that settled the step walked
+    // the reader on to the fifth.
+    await page.getByTestId("story-step-storyboard").click();
     const before = await persistedBoard(page);
     await page.getByTestId("story-import-canvas").click();
     const ask = page.getByTestId("story-import-canvas-dialog");
@@ -250,14 +260,17 @@ test("a telling is imported into a board, and into a cut of its own", async ({
       .poll(async () => (await persistedCut(page)).names, { timeout: 30_000 })
       .toEqual(["Rain at Night · cut"]);
     const handed = await persistedCut(page);
-    // The clip of the act and the two pieces of sound under it — and no
+    // The clip of each act and the two pieces of sound under the first — and no
     // captions: the lines are the cutting room's to place.
     expect(handed.clips.map((clip) => clip.kind)).toEqual([
+      "video",
       "video",
       "audio",
       "audio",
     ]);
-    expect(handed.clips.every((clip) => clip.startMs === 0)).toBe(true);
+    expect(handed.clips.map((clip) => clip.startMs)).toEqual([
+      0, 1_000, 0, 0,
+    ]);
     // The telling itself assembled nothing: this cut is the reader's own.
     expect(handed.assembled).toBeUndefined();
   } finally {

@@ -8,6 +8,7 @@ import {
   MAX_TOTAL_DURATION_MS,
   MIN_TOTAL_DURATION_MS,
   chapterRegenerationCost,
+  chapterWritten,
   chunkWaves,
   defaultChapterCount,
   formatDuration,
@@ -25,6 +26,7 @@ import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
+import { StepConfirm } from "../components/StepConfirm";
 import { StepHeading } from "../components/StepHeading";
 import { applyFixedOutline, readOutlineAnswer } from "../jobs/apply";
 import { planOutline, storySplitChars } from "../jobs/plan";
@@ -107,7 +109,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
 
   const wanted = clampChapters(chapters);
   const cost = chapterRegenerationCost(story, wanted);
-  const spoken = story.chapters.some((chapter) => chapter.synopsisConfirmed);
+  const spoken = story.chapters.some(chapterWritten);
   const drawn = story.chapters.some((chapter) => chapter.acts.length > 0);
 
   /** The manuscript, read once for this telling and kept for the session. */
@@ -247,6 +249,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
           step="outline"
         />
         <p className="story-step-lead">{t("story:outline.lead")}</p>
+        <StepConfirm step="outline" story={story} />
         <StoryModelPicks places={["text"]} />
 
         <div className="story-outline-bar">
@@ -342,17 +345,6 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
               })}
             </span>
           )}
-          {!writing &&
-            story.chapters.some((chapter) => !chapter.synopsisConfirmed) && (
-              <button
-                className="link"
-                data-testid="story-outline-confirm-all"
-                onClick={() => writeAll(story, true)}
-                type="button"
-              >
-                {t("story:outline.confirmAll")}
-              </button>
-            )}
           <button
             className="primary"
             data-testid="story-outline-start"
@@ -459,18 +451,6 @@ function clampChapters(value: number): number {
   return Math.min(MAX_CHAPTERS_PER_STORY, Math.max(1, Math.round(value)));
 }
 
-/** Everything that has chapters is written in one step, so it undoes as one. */
-function writeAll(story: StoryDocument, confirmed: boolean): void {
-  const chapters = story.chapters.map((chapter) =>
-    chapter.synopsis.trim() === "" || chapter.synopsisConfirmed === confirmed
-      ? chapter
-      : { ...chapter, synopsisConfirmed: confirmed },
-  );
-  execute(i18n.t("story:history.chapters"), [
-    { type: "setStoryChapters", storyId: story.id, chapters },
-  ]);
-}
-
 /** One episode, as the reader writes it. */
 function ChapterCard({
   story,
@@ -505,10 +485,7 @@ function ChapterCard({
   const minutes = Math.round((chapter.targetDurationMs / 60_000) * 10) / 10;
 
   return (
-    <li
-      className={`story-chapter${chapter.synopsisConfirmed ? " is-confirmed" : ""}`}
-      data-testid={`story-chapter-${index}`}
-    >
+    <li className="story-chapter" data-testid={`story-chapter-${index}`}>
       <div className="story-chapter-head">
         <span className="story-chapter-index">{index + 1}</span>
         <input
@@ -526,14 +503,6 @@ function ChapterCard({
           }}
           value={title.value}
         />
-        <span
-          className={`story-chapter-state${chapter.synopsisConfirmed ? " is-on" : ""}`}
-          data-testid={`story-chapter-state-${index}`}
-        >
-          {chapter.synopsisConfirmed
-            ? t("story:outline.confirmed")
-            : t("story:outline.unconfirmed")}
-        </span>
         {chapter.acts.length > 0 && (
           <button
             className="story-chapter-acts"
@@ -610,20 +579,8 @@ function ChapterCard({
         {chapter.acts.length > 0 && (
           <span className="story-hint">{t("story:outline.durationBoard")}</span>
         )}
-        <span className="story-chapter-actions">
-          <button
-            className="link"
-            data-testid={`story-chapter-confirm-${index}`}
-            onClick={() =>
-              write({ synopsisConfirmed: !chapter.synopsisConfirmed })
-            }
-            type="button"
-          >
-            {chapter.synopsisConfirmed
-              ? t("story:outline.unconfirm")
-              : t("story:outline.confirm")}
-          </button>
-          {offerRedo && (
+        {offerRedo && (
+          <span className="story-chapter-actions">
             <button
               className="link"
               data-testid={`story-chapter-redo-${index}`}
@@ -633,8 +590,8 @@ function ChapterCard({
             >
               {t("story:outline.redo")}
             </button>
-          )}
-        </span>
+          </span>
+        )}
       </div>
     </li>
   );

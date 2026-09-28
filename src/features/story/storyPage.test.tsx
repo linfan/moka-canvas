@@ -211,14 +211,16 @@ describe("the five steps", () => {
       );
     });
 
-    openRoom(buildStoryMokaFile());
+    // A story settled only through the outline: the board is still behind the
+    // elements, and a step that cannot be walked to says that first.
+    const moka = buildStoryMokaFile();
+    moka.stories![0].confirmedSteps = ["idea", "outline"];
+    openRoom(moka);
 
     const badge = await screen.findByTestId("story-step-failed-storyboard");
     expect(badge.textContent).toBe("1");
     const button = screen.getByTestId("story-step-storyboard");
     expect(button.className).toContain("is-failed");
-    // The step is still behind the elements, and a step that cannot be walked
-    // to says that first: the failure is on the badge beside it.
     expect(button.getAttribute("title")).toBe("Elements comes first.");
     // The step with nothing wrong with it carries no mark.
     expect(screen.queryByTestId("story-step-failed-outline")).toBeNull();
@@ -292,13 +294,15 @@ describe("the five steps", () => {
     expect(useStoryStore.getState().step).toBe("outline");
     expect(screen.getByTestId("story-step-body-outline")).toBeTruthy();
 
-    // The remaining steps are behind the elements, which the fixture has
-    // described but not finished drawing.
-    const storyboard = screen.getByTestId(
-      "story-step-storyboard",
-    ) as HTMLButtonElement;
-    expect(storyboard.disabled).toBe(true);
-    expect(storyboard.title).toBe("Elements comes first.");
+    // The board is earned — the fixture is settled through the elements — and
+    // the last step is not: nothing settles the board yet.
+    expect(
+      (screen.getByTestId("story-step-storyboard") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    const edit = screen.getByTestId("story-step-edit") as HTMLButtonElement;
+    expect(edit.disabled).toBe(true);
+    expect(edit.title).toBe("Storyboard comes first.");
   });
 });
 

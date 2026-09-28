@@ -23,7 +23,7 @@ import { StorySlotView } from "./StorySlotView";
 import { useField } from "./useField";
 
 /** A place with nothing in it, for a slot a character has not been given yet. */
-const EMPTY_SLOT: StorySlot = { takes: [], confirmed: false };
+const EMPTY_SLOT: StorySlot = { takes: [] };
 
 /**
  * One character, a place or a thing, as the room holds it.
@@ -31,9 +31,9 @@ const EMPTY_SLOT: StorySlot = { takes: [], confirmed: false };
  * The card is a container: everything about the pictures belongs to the slot
  * views above the words, and what is written here is the element's own — its
  * name, the chapters it stands in, and the description every drawing of it is
- * made from. A description that has been agreed to is read-only until it is
- * unsaid, since it is the words everything else about this element is judged
- * against.
+ * made from. The words stay the reader's to rewrite for as long as the telling
+ * is being worked on; what settles the step is its own confirm, not a press
+ * per element.
  */
 export function ElementCard({
   story,
@@ -54,11 +54,6 @@ export function ElementCard({
   const run = useStoryRun();
   const main = currentTake(element.main);
   const character = element.kind === "character";
-  // Agreed to: the words are the document's until they are unsaid. What is
-  // agreed to is not rewritten in passing — a description is what every
-  // picture of this element is made from, so changing it is a step of its
-  // own, taken on purpose.
-  const locked = element.descriptionConfirmed;
   const description = useField(element.description, (value) => {
     if (value !== element.description)
       write(story, element, { description: value });
@@ -78,7 +73,7 @@ export function ElementCard({
 
   return (
     <li
-      className={`story-element${element.descriptionConfirmed ? " is-confirmed" : ""}`}
+      className="story-element"
       data-testid={`story-element-${element.kind}-${element.name}`}
     >
       <div className="story-element-pictures">
@@ -87,12 +82,6 @@ export function ElementCard({
           canGenerate
           label={t("story:elements.main")}
           onChoose={(assetId) => choose(story, element, "main", assetId)}
-          onConfirm={() =>
-            writeSlot(story, element, "main", {
-              ...element.main,
-              confirmed: !element.main.confirmed,
-            })
-          }
           onGenerate={() => generate("main")}
           ratio={ratio}
           slot={element.main}
@@ -110,13 +99,6 @@ export function ElementCard({
             onChoose={(assetId) =>
               choose(story, element, "turnaround", assetId)
             }
-            onConfirm={() => {
-              if (element.turnaround === undefined) return;
-              writeSlot(story, element, "turnaround", {
-                ...element.turnaround,
-                confirmed: !element.turnaround.confirmed,
-              });
-            }}
             onGenerate={() => generate("turnaround")}
             ratio="1 / 1"
             slot={element.turnaround ?? EMPTY_SLOT}
@@ -165,54 +147,16 @@ export function ElementCard({
 
       <textarea
         aria-label={t("story:elements.description")}
-        className={`story-element-description${locked ? " is-locked" : ""}`}
+        className="story-element-description"
         data-testid={`story-element-description-${element.name}`}
         maxLength={2000}
         onBlur={description.commit}
         onChange={(event) => description.set(event.target.value)}
-        readOnly={locked}
         rows={4}
         value={description.value}
       />
 
       <div className="story-element-actions">
-        {element.descriptionConfirmed ? (
-          <>
-            <span
-              className="story-element-state"
-              data-testid={`story-element-state-${element.name}`}
-            >
-              {t("story:elements.descriptionConfirmed")}
-            </span>
-            <button
-              className="link"
-              data-testid={`story-element-unconfirm-${element.name}`}
-              onClick={() => {
-                description.commit();
-                write(story, element, { descriptionConfirmed: false });
-              }}
-              type="button"
-            >
-              {t("story:elements.unconfirm")}
-            </button>
-          </>
-        ) : (
-          <button
-            className="link"
-            data-testid={`story-element-confirm-${element.name}`}
-            disabled={description.value.trim() === ""}
-            onClick={() => {
-              description.commit();
-              write(story, element, {
-                description: description.value,
-                descriptionConfirmed: true,
-              });
-            }}
-            type="button"
-          >
-            {t("story:elements.confirmDescription")}
-          </button>
-        )}
         <span className="story-hint">{t("story:elements.rewriteText")}</span>
       </div>
 

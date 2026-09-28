@@ -54,14 +54,13 @@ function plannedShape(): MokaFile {
     content: "画面",
     dialogue: [],
     durationMs: 1_000,
-    art: { takes: [], confirmed: false },
-    video: { takes: [], confirmed: false },
+    art: { takes: [] },
+    video: { takes: [] },
   });
   story.chapters = Array.from({ length: PLANNED_CHAPTERS }, (_, c) => ({
     id: `chapter-${c}`,
     title: `第 ${c + 1} 章`,
     synopsis: "梗概",
-    synopsisConfirmed: true,
     targetDurationMs: 60_000,
     acts: Array.from({ length: PLANNED_ACTS }, (_, a) => ({
       id: `act-${c}-${a}`,
@@ -71,10 +70,7 @@ function plannedShape(): MokaFile {
       propIds: [],
       sound: { music: "", sfx: "" },
       keyframes: Array.from({ length: PLANNED_SHOTS }, (_, k) => shot(c, a, k)),
-      keysConfirmed: false,
-      imagesConfirmed: false,
-      video: { takes: [], confirmed: false },
-      videoConfirmed: false,
+      video: { takes: [] },
     })),
   }));
   return everyShotSays(moka, PLANNED_LINES);

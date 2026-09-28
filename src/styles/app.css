@@ -5819,6 +5819,26 @@ body.is-dragging-split {
   padding-top: 4px;
 }
 
+/* The one press a step has, under the words that say what the step is for:
+   what settles the step and opens the next. What is missing, when something
+   is, is listed under it rather than said in a passing toast. */
+.story-confirm {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.story-confirm > .story-hint {
+  flex: 1;
+  min-width: 0;
+}
+
+.story-confirm-gaps {
+  flex-basis: 100%;
+}
+
 /* ---------------------------------------------------------------------------
    Step two: the outline
    --------------------------------------------------------------------------- */

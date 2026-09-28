@@ -10,12 +10,16 @@ import {
   projectHome,
 } from "./helpers";
 
+// The whole telling is walked in one test — five steps, every ask through a
+// stand-in — which needs longer than the suite's own budget for one case.
+test.describe.configure({ timeout: 60_000 });
+
 /**
  * The fourth step: one episode's board, its frames and its clip.
  *
  * A whole telling is taken as far as the board the last step needs: the premise
- * becomes chapters, the chapters become a cast, the cast is drawn and agreed
- * to, and then one episode is boarded, framed, and filmed.
+ * becomes chapters, the chapters become a cast, the cast is drawn and the step
+ * confirmed, and then one episode is boarded, framed, and filmed.
  */
 
 /** What the server holds of the first story's first act. */
@@ -53,28 +57,34 @@ async function persistedBoard(page: Page): Promise<{
   });
 }
 
-test("an episode is boarded, framed, and filmed", async ({ page }) => {
-  const home = projectHome("story-storyboard");
-  await forgetProjects();
-  await configureTheWholeStudio();
-  try {
-    await page.goto("/");
-    await createProject(page, join(home, "project"), "Story Board");
-    await openStoryRoom(page);
-    await newStory(page, "Rain at Night");
+/**
+ * The telling walked as far as its first episode's board: the premise, the
+ * chapters it is told in, the cast drawn and the step confirmed, and then the
+ * board written.
+ */
+async function toTheBoard(
+  page: Page,
+  home: string,
+  name: string,
+): Promise<void> {
+  await page.goto("/");
+  await createProject(page, join(home, "project"), name);
+  await openStoryRoom(page);
+  await newStory(page, "Rain at Night");
 
+  {
     // A premise, the chapters it is told in, and the cast they hold.
     await page
       .getByTestId("story-idea-input")
       .fill("Eleven at night, and the last train stops where it should not.");
     await page.getByTestId("story-idea-duration-3").click();
-    await page.getByTestId("story-idea-next").click();
+    await page.getByTestId("story-confirm-idea").click();
     await expect(page.getByTestId("story-step-body-outline")).toBeVisible();
     await page.getByTestId("story-outline-start").click();
     await expect(page.locator(".story-chapter")).toHaveCount(3, {
       timeout: 30_000,
     });
-    await page.getByTestId("story-outline-confirm-all").click();
+    await page.getByTestId("story-confirm-outline").click();
 
     await page.getByTestId("story-step-elements").click();
     await page.getByTestId("story-elements-recognise").click();
@@ -86,17 +96,16 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
       timeout: 60_000,
     });
     await page.getByTestId("story-elements-views-all").click();
-    // The four views have to be back before anything is agreed to: an element
-    // agreed to while its sheet is still being drawn is one whose sheet is not
-    // part of the answer, and the board would stay shut.
+    // The four views have to be back before the step settles: an element drawn
+    // only halfway is an element whose views are not part of the answer, and
+    // the press reads the document rather than the spinners.
     await expect(
       page
         .getByTestId("story-element-character-Keeper")
         .getByTestId("story-slot-turnaround")
         .locator("img"),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId("story-elements-confirm-all")).toBeEnabled();
-    await page.getByTestId("story-elements-confirm-all").click();
+    await page.getByTestId("story-confirm-elements").click();
     await expect(page.getByTestId("story-step-storyboard")).toBeEnabled({
       timeout: 30_000,
     });
@@ -106,6 +115,15 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await expect(page.getByTestId("story-step-body-storyboard")).toBeVisible();
     await expect(page.getByTestId("story-board-empty")).toBeVisible();
     await page.getByTestId("story-board-generate").click();
+  }
+}
+
+test("an episode is boarded, framed, and filmed", async ({ page }) => {
+  const home = projectHome("story-storyboard");
+  await forgetProjects();
+  await configureTheWholeStudio();
+  try {
+    await toTheBoard(page, home, "Story Board");
 
     // Every act of the board stands on the page at once, and a row's name is
     // its place within its own act — so each card is looked at on its own.
@@ -123,31 +141,12 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     ).toHaveText("Keeper");
     await expect(firstAct.getByTestId("story-kf-ref-0-0")).toBeVisible();
 
-    // Nothing is drawn until the table has been agreed to, and the button that
-    // agrees to it stands with the pictures' own asks, under the table: a board
-    // nobody agreed to has no way on from it.
-    await expect(firstAct.getByTestId("story-act-draw-0")).toBeDisabled();
-    await expect(firstAct.getByTestId("story-act-draw-0")).toHaveAttribute(
-      "title",
-      "Agree to the table first",
-    );
-    await firstAct.getByTestId("story-act-keys-0").click();
-    await expect(firstAct.getByTestId("story-act-draw-0")).toBeEnabled();
-    await expect(firstAct.getByTestId("story-act-keys-on-0")).toHaveText(
-      "Table agreed to ✓",
-    );
-
-    // Taking it back is the reader's own step, and taking it back is said in
-    // plain words rather than by a button called "change it": the words of the
-    // table are the reader's again until it is agreed to once more.
-    await expect(firstAct.getByTestId("story-act-unlock-0")).toHaveText(
-      "Unconfirm",
-    );
-    await firstAct.getByTestId("story-act-unlock-0").click();
+    // Nothing about a board is sealed: the table is editable from the moment
+    // it is written, and a picture is one press away — there is no agreement
+    // on the table to give first.
     await expect(firstAct.getByTestId("story-kf-size-0")).toBeEnabled();
-    await expect(firstAct.getByTestId("story-act-draw-0")).toBeDisabled();
-    await firstAct.getByTestId("story-act-keys-0").click();
-    await expect(firstAct.getByTestId("story-kf-size-0")).toBeDisabled();
+    await expect(firstAct.getByTestId("story-kf-move-0")).toBeEnabled();
+    await expect(firstAct.getByTestId("story-act-draw-0")).toBeEnabled();
 
     /** How wide a cell of the framing row stands, in whole pixels. */
     const widthOf = async (testId: string) => {
@@ -158,9 +157,9 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     // One frame of the act, drawn from the cast step three settled on, while
     // its own ask is the only thing that waits on it.
     await firstAct.getByTestId("story-kf-slot-0-generate").click();
-    await expect(firstAct.getByTestId("story-kf-slot-0-confirm")).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(
+      firstAct.getByTestId("story-kf-slot-0").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
 
     // A drawn frame's own size must not push the framing columns aside: with
     // the picture in place the selects still hold their words whole, and the
@@ -172,33 +171,21 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await expect(
       firstAct.getByTestId("story-kf-slot-1-generate"),
     ).toBeEnabled();
-    await firstAct.getByTestId("story-kf-slot-0-confirm").click();
 
-    // The rest of the act at once, and then the act's own button: one press
-    // agrees to every frame of the act, with the second frame never agreed to
-    // by hand — the pictures have to be there, not their agreements.
+    // The rest of the act at once: with every frame drawn, the act's clip is
+    // one press away — the pictures are what the clip waits on, not their
+    // agreements, and there is nothing per frame to agree to.
     await firstAct.getByTestId("story-act-draw-0").click();
-    await expect(firstAct.getByTestId("story-kf-slot-1-confirm")).toBeVisible({
-      timeout: 60_000,
-    });
     await expect(
-      firstAct.getByTestId("story-act-images-confirm-0"),
-    ).toBeEnabled();
-    await firstAct.getByTestId("story-act-images-confirm-0").click();
-    await expect(
-      firstAct.getByTestId("story-act-images-unconfirm-0"),
-    ).toBeVisible();
+      firstAct.getByTestId("story-kf-slot-1").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(firstAct.getByTestId("story-act-video-go-0")).toBeEnabled();
 
     // And the clip itself, which the stand-in's job hands back at once.
-    await expect(firstAct.getByTestId("story-act-video-go-0")).toBeEnabled();
     await firstAct.getByTestId("story-act-video-go-0").click();
     await expect(firstAct.getByTestId("story-act-video-0")).toBeVisible({
       timeout: 60_000,
     });
-
-    // The fifth step's door waits on that clip being agreed to.
-    await firstAct.getByTestId("story-act-video-confirm-0").click();
-    await expect(page.getByTestId("story-step-edit")).toBeEnabled();
 
     // A clip is not the last word: the ask that made it stands beside the
     // take, and asking again plays a fresh one in its place.
@@ -211,13 +198,36 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     await expect.poll(() => played.getAttribute("src")).not.toBe(wasPlaying);
     await expect(firstAct.getByTestId("story-act-video-again-0")).toBeEnabled();
 
+    // The fifth step's door waits on the board being finished — every act
+    // framed and filmed — and the step's own press is what says what is left
+    // and, once there is nothing left, what opens it.
+    const secondAct = page.getByTestId("story-act-1");
+    await page.getByTestId("story-confirm-storyboard").click();
+    await expect(
+      page.getByTestId("story-confirm-gaps-storyboard"),
+    ).toContainText("1 acts have no clip yet");
+    await expect(page.getByTestId("story-step-edit")).toBeDisabled();
+
+    await secondAct.getByTestId("story-act-draw-1").click();
+    await expect(
+      secondAct.getByTestId("story-kf-slot-0").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
+    await secondAct.getByTestId("story-act-video-go-1").click();
+    await expect(secondAct.getByTestId("story-act-video-1")).toBeVisible({
+      timeout: 60_000,
+    });
+
+    await page.getByTestId("story-confirm-storyboard").click();
+    await expect(page.getByTestId("story-step-body-edit")).toBeVisible();
+    await expect(page.getByTestId("story-step-edit")).toBeEnabled();
+
     // The document is read back off the server, which is a flush behind the
     // window: what is asserted is what the server ends up holding.
-    await expect.poll(async () => (await persistedBoard(page)).clips).toBe(1);
+    await expect.poll(async () => (await persistedBoard(page)).clips).toBe(2);
     const board = await persistedBoard(page);
     expect(board.acts).toBe(2);
     expect(board.frames).toBe(3);
-    expect(board.drawn).toBe(2);
+    expect(board.drawn).toBe(3);
   } finally {
     forgetHome(home);
   }

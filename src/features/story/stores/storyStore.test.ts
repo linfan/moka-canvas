@@ -50,10 +50,10 @@ beforeEach(() => {
 describe("where the room is standing", () => {
   it("opens a project onto its first story, at the step the work has reached", () => {
     store().adopt(buildStoryMokaFile());
-    // The fixture's second episode is agreed but has no acts written into it
-    // yet, so the outline is the work that is wanted next.
+    // The fixture is settled through the elements, so the board is the work
+    // that is wanted next.
     expect(store().storyId).toBe(storyIds().story);
-    expect(store().step).toBe("outline");
+    expect(store().step).toBe("storyboard");
   });
 
   it("stands on no story at all when the project tells none", () => {
@@ -67,12 +67,12 @@ describe("where the room is standing", () => {
     const moka = project("p1");
     open(moka);
     store().adopt(moka);
-    store().goStep("edit");
+    store().goStep("outline");
 
     store().forget();
     store().adopt(moka);
     expect(store().storyId).toBe(storyIds().story);
-    expect(store().step).toBe("edit");
+    expect(store().step).toBe("outline");
   });
 
   it("stands beside the story that was taken away", () => {
@@ -107,7 +107,7 @@ describe("where the room is standing", () => {
     localStorage.setItem(PLACE + "p1", "{ this is not json");
     store().adopt(moka);
     expect(store().storyId).toBe(storyIds().story);
-    expect(store().step).toBe("outline");
+    expect(store().step).toBe("storyboard");
 
     store().forget();
     localStorage.setItem(
@@ -116,7 +116,7 @@ describe("where the room is standing", () => {
     );
     store().adopt(moka);
     expect(store().storyId).toBe(storyIds().story);
-    expect(store().step).toBe("outline");
+    expect(store().step).toBe("storyboard");
   });
 
   it("keeps one project's place out of another's", () => {

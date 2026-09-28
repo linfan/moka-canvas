@@ -1046,7 +1046,6 @@ export function buildStoryMokaFile(): MokaFile {
           id: ids.chapterFirst,
           title: "第一章 站台",
           synopsis: "他在站台上等一班已经停运的列车。",
-          synopsisConfirmed: true,
           targetDurationMs: 60_000,
           acts: [
             {
@@ -1088,9 +1087,8 @@ export function buildStoryMokaFile(): MokaFile {
                         createdAt: T0,
                       },
                     ],
-                    confirmed: true,
                   },
-                  video: { takes: [], confirmed: false },
+                  video: { takes: [] },
                 },
                 {
                   id: ids.frameSecond,
@@ -1101,12 +1099,10 @@ export function buildStoryMokaFile(): MokaFile {
                   content: "`周`转过身来。",
                   dialogue: [],
                   durationMs: 3_000,
-                  art: { takes: [], confirmed: false },
-                  video: { takes: [], confirmed: false },
+                  art: { takes: [] },
+                  video: { takes: [] },
                 },
               ],
-              keysConfirmed: true,
-              imagesConfirmed: false,
               video: {
                 takes: [
                   {
@@ -1117,9 +1113,7 @@ export function buildStoryMokaFile(): MokaFile {
                     createdAt: T0,
                   },
                 ],
-                confirmed: true,
               },
-              videoConfirmed: true,
             },
           ],
         },
@@ -1127,7 +1121,6 @@ export function buildStoryMokaFile(): MokaFile {
           id: ids.chapterSecond,
           title: "第二章 车厢",
           synopsis: "车厢比站台更暗。",
-          synopsisConfirmed: true,
           targetDurationMs: 60_000,
           acts: [],
         },
@@ -1138,15 +1131,12 @@ export function buildStoryMokaFile(): MokaFile {
           kind: "character",
           name: "林",
           description: "四十岁上下，深色大衣，说话很慢。",
-          descriptionConfirmed: true,
           chapterIds: [ids.chapterFirst],
           main: {
             takes: [{ assetIds: [ids.heroMain], createdAt: T0 }],
-            confirmed: true,
           },
           turnaround: {
             takes: [{ assetIds: [ids.heroSheet], createdAt: T0 }],
-            confirmed: true,
           },
         },
         {
@@ -1154,24 +1144,20 @@ export function buildStoryMokaFile(): MokaFile {
           kind: "character",
           name: "周",
           description: "年轻，背着旧书包。",
-          descriptionConfirmed: true,
           chapterIds: [ids.chapterFirst],
           main: {
             takes: [{ assetIds: [ids.partnerMain], createdAt: T0 }],
-            confirmed: true,
           },
-          turnaround: { takes: [], confirmed: false },
+          turnaround: { takes: [] },
         },
         {
           id: ids.scene,
           kind: "scene",
           name: "末班车车厢",
           description: "空车厢，灯管忽明忽暗。",
-          descriptionConfirmed: true,
           chapterIds: [ids.chapterFirst],
           main: {
             takes: [{ assetIds: [ids.sceneMain], createdAt: T0 }],
-            confirmed: true,
           },
         },
         {
@@ -1179,13 +1165,15 @@ export function buildStoryMokaFile(): MokaFile {
           kind: "prop",
           name: "旧车票",
           description: "边角磨圆的硬纸车票。",
-          descriptionConfirmed: false,
           chapterIds: [],
-          main: { takes: [], confirmed: false },
+          main: { takes: [] },
         },
       ],
       shotGranularity: "act",
       maxReferenceImages: REFERENCE_IMAGES_DEFAULT,
+      // Settled through the third step: the telling is being boarded, and the
+      // prop's drawing and the second episode's board are still to come.
+      confirmedSteps: ["idea", "outline", "elements"],
       edit: {
         timelineId: timelineIds().timeline,
         clipByAct: [
@@ -1221,7 +1209,6 @@ export function buildLongStory(): MokaFile {
     id: `chapter-${c}`,
     title: `第 ${c + 1} 章`,
     synopsis: "梗概",
-    synopsisConfirmed: true,
     targetDurationMs: 60_000,
     acts: Array.from({ length: MAX_ACTS_PER_CHAPTER }, (_, a) => ({
       id: `act-${c}-${a}`,
@@ -1239,13 +1226,10 @@ export function buildLongStory(): MokaFile {
         content: "画面",
         dialogue: [],
         durationMs: 1_000,
-        art: { takes: [], confirmed: false },
-        video: { takes: [], confirmed: false },
+        art: { takes: [] },
+        video: { takes: [] },
       })),
-      keysConfirmed: false,
-      imagesConfirmed: false,
-      video: { takes: [], confirmed: false },
-      videoConfirmed: false,
+      video: { takes: [] },
     })),
   }));
   return moka;

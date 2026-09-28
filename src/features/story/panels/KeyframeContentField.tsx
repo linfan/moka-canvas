@@ -211,7 +211,6 @@ export function KeyframeContentField({
   value,
   kinds,
   label,
-  locked,
   testId,
   onChange,
   onCommit,
@@ -220,7 +219,6 @@ export function KeyframeContentField({
   /** How each mentioned name stands, by the name it is mentioned with. */
   kinds: Record<string, MentionKind>;
   label: string;
-  locked: boolean;
   testId?: string;
   onChange: (next: string) => void;
   onCommit: () => void;
@@ -229,8 +227,8 @@ export function KeyframeContentField({
   const areaRef = useRef<HTMLDivElement>(null);
   const drawn = useRef<string | null>(null);
   // What the handlers read without being rebuilt on every keystroke.
-  const held = useRef({ value, kinds, t, locked });
-  held.current = { value, kinds, t, locked };
+  const held = useRef({ value, kinds, t });
+  held.current = { value, kinds, t };
 
   const titleOf = (name: string, kind: MentionKind): string => {
     switch (kind) {
@@ -344,7 +342,7 @@ export function KeyframeContentField({
       aria-label={label}
       aria-multiline="true"
       className="story-prompt-field"
-      contentEditable={!locked}
+      contentEditable
       data-testid={testId}
       onBlur={() => onCommit()}
       onInput={emit}

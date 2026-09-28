@@ -1008,7 +1008,6 @@ describe("asking again for what did not come back", () => {
           createdAt: "2026-01-01T00:00:00Z",
         },
       ],
-      confirmed: true,
     };
     // Two shots of four hundred seconds are over the thirteen minutes a clip
     // may run, so the act is asked for as two pieces.
