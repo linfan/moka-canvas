@@ -5623,12 +5623,14 @@ body.is-dragging-split {
 }
 
 /* One column, read top to bottom: a step is a thing done in order, and a
-   second column beside it would be a second place to look. */
-.story-step-narrow {
+   second column beside it would be a second place to look. Every step is
+   given the same column, so walking the five steps does not move the page's
+   margins under the reader. */
+.story-step-wide {
   display: grid;
   gap: 22px;
   margin: 0 auto;
-  max-width: 720px;
+  max-width: 1100px;
   padding-bottom: 24px;
   width: 100%;
 }
@@ -6162,15 +6164,6 @@ body.is-dragging-split {
 /* ---------------------------------------------------------------------------
    Step three: the elements, and the places their pictures live in
    --------------------------------------------------------------------------- */
-
-.story-step-wide {
-  display: grid;
-  gap: 22px;
-  margin: 0 auto;
-  max-width: 1100px;
-  padding-bottom: 24px;
-  width: 100%;
-}
 
 .story-elements {
   display: grid;

@@ -242,7 +242,7 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
 
   return (
     <div className="story-step-scroll" data-testid="story-step-outline-body">
-      <div className="story-step-narrow">
+      <div className="story-step-wide">
         <div className="story-step-bar">
           <p className="story-step-lead">{t("story:outline.lead")}</p>
           <StoryImportButton story={story} target="canvas" />
