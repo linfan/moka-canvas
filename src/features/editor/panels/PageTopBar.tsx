@@ -93,7 +93,9 @@ export function PageTopBar({
       </span>
       {saveStatus === "conflicted" && (
         <button
-          onClick={() => void useProjectStore.getState().reload()}
+          onClick={() =>
+            void useProjectStore.getState().reload({ discardPending: true })
+          }
           type="button"
         >
           {t("editor:topBar.reload")}

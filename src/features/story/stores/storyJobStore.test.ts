@@ -563,6 +563,7 @@ describe("a batch coming back", () => {
       .spyOn(useProjectStore.getState(), "reload")
       .mockImplementation(async () => {
         order.push("reload");
+        return true;
       });
     const apply = vi
       .spyOn(useProjectStore.getState(), "applyLocal")

@@ -190,6 +190,135 @@ describe("command pipeline", () => {
   });
 });
 
+describe("reading the stored document back in", () => {
+  const opened = (moka: MokaFile) => ({
+    root: "/tmp/moka-test",
+    moka,
+    selfCheck: { ok: true, issues: [] },
+  });
+
+  it("lands what is waiting before the stored document replaces it", async () => {
+    hydrate();
+    const canvasId = goldenNodeIds().canvasMain;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/commands")) {
+        return jsonResponse(200, {
+          revision: 9,
+          updatedAt: "2026-01-01T00:00:03.000Z",
+        });
+      }
+      const stored = buildGoldenMokaFile();
+      stored.canvas[0].name = "Storyboard";
+      stored.metadata.revision = 9;
+      return jsonResponse(200, opened(stored));
+    });
+
+    execute("Rename canvas", [
+      { type: "renameCanvas", canvasId, name: "Storyboard" },
+    ]);
+    const adopted = await useProjectStore.getState().reload();
+
+    // The waiting rename went out first: were the stored document read over
+    // it, the reader's change would be gone without their asking.
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/v1/projects/current/commands",
+      "/api/v1/projects/current",
+    ]);
+    expect(adopted).toBe(true);
+    const state = useProjectStore.getState();
+    expect(state.pending).toHaveLength(0);
+    expect(state.moka?.canvas[0].name).toBe("Storyboard");
+    expect(state.moka?.metadata.revision).toBe(9);
+  });
+
+  it("keeps the held document when waiting work cannot land", async () => {
+    hydrate();
+    const canvasId = goldenNodeIds().canvasMain;
+    fetchMock.mockResolvedValue(
+      jsonResponse(500, {
+        code: "INTERNAL",
+        message: "io error: disk full",
+        status: 500,
+      }),
+    );
+
+    execute("Rename canvas", [
+      { type: "renameCanvas", canvasId, name: "Storyboard" },
+    ]);
+    const adopted = await useProjectStore.getState().reload();
+
+    expect(adopted).toBe(false);
+    const state = useProjectStore.getState();
+    expect(state.pending).toHaveLength(1);
+    expect(state.moka?.canvas[0].name).toBe("Storyboard");
+    // The document that was not read in was not even asked for.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a change made while the document was being read", async () => {
+    hydrate();
+    const canvasId = goldenNodeIds().canvasMain;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/current")) {
+        // The reader types in the moment the read is on its way back.
+        execute("Rename during read", [
+          { type: "renameCanvas", canvasId, name: "Later" },
+        ]);
+        return jsonResponse(200, opened(buildGoldenMokaFile()));
+      }
+      return jsonResponse(200, {
+        revision: 3,
+        updatedAt: "2026-01-01T00:00:03.000Z",
+      });
+    });
+
+    execute("Rename canvas", [
+      { type: "renameCanvas", canvasId, name: "Storyboard" },
+    ]);
+    const adopted = await useProjectStore.getState().reload();
+
+    expect(adopted).toBe(false);
+    const state = useProjectStore.getState();
+    expect(state.pending).toHaveLength(1);
+    expect(state.moka?.canvas[0].name).toBe("Later");
+  });
+
+  it("takes the stored document when the reader gives their changes up", async () => {
+    hydrate();
+    const canvasId = goldenNodeIds().canvasMain;
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, {
+        code: "REVISION_CONFLICT",
+        message: "The project changed on disk",
+        status: 409,
+      }),
+    );
+    execute("Rename canvas", [
+      { type: "renameCanvas", canvasId, name: "Storyboard" },
+    ]);
+    await useProjectStore.getState().flush();
+    expect(useProjectStore.getState().saveStatus).toBe("conflicted");
+
+    const stored = buildGoldenMokaFile();
+    stored.metadata.revision = 7;
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, opened(stored)));
+    const adopted = await useProjectStore
+      .getState()
+      .reload({ discardPending: true });
+
+    // The way out of a conflict: the change the server will never take is
+    // given up, which is what the reader pressed the button to do.
+    expect(adopted).toBe(true);
+    const state = useProjectStore.getState();
+    expect(state.pending).toHaveLength(0);
+    expect(state.saveStatus).toBe("saved");
+    expect(state.moka?.metadata.revision).toBe(7);
+    expect(state.moka?.canvas[0].name).toBe(stored.canvas[0].name);
+  });
+});
+
 describe("asset registry integration", () => {
   const entry = {
     id: "asset-1",

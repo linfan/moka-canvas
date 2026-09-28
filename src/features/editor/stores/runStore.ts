@@ -139,8 +139,12 @@ function stopListening() {
 /**
  * The server wrote run results into the document; adopt them when idle, and hand
  * back the reading so that whatever waits on the new assets can wait for it.
+ *
+ * A read that was not taken — something was typed while the document was being
+ * read, and kept its place rather than the server's copy taking it — leaves the
+ * resync standing: the subscription below asks again once that has gone out.
  */
-function adoptServerState(): Promise<void> | null {
+function adoptServerState(): Promise<boolean> | null {
   const project = useProjectStore.getState();
   if (!project.moka) return null;
   if (project.pending.length > 0 || project.saveStatus === "conflicted") {
@@ -148,7 +152,10 @@ function adoptServerState(): Promise<void> | null {
     return null;
   }
   resyncNeeded = false;
-  return project.reload();
+  return project.reload().then((adopted) => {
+    if (!adopted) resyncNeeded = true;
+    return adopted;
+  });
 }
 
 /**
@@ -160,7 +167,10 @@ function adoptServerState(): Promise<void> | null {
  * answer lands in its node rather than among the assets, and naming a shelf it
  * was not put on would send a reader looking.
  */
-async function announceFiling(run: RunRecord, adopted: Promise<void> | null) {
+async function announceFiling(
+  run: RunRecord,
+  adopted: Promise<boolean> | null,
+) {
   if (adopted) await adopted;
   const registry = useProjectStore.getState().moka?.resources;
   const filed = registry
@@ -231,7 +241,7 @@ export const useRunStore = create<RunState>()((set, get) => {
     }));
     const succeeded: RunRecord[] = [];
     const failed: RunRecord[] = [];
-    let adopted: Promise<void> | null = null;
+    let adopted: Promise<boolean> | null = null;
     for (const run of fresh) {
       const before = previous.get(run.id);
       if (!before || !isActive(before) || isActive(run.status)) continue;
@@ -457,7 +467,9 @@ useProjectStore.subscribe((state) => {
   if (!resyncNeeded || !state.moka) return;
   if (state.pending.length > 0 || state.saveStatus === "conflicted") return;
   resyncNeeded = false;
-  void state.reload();
+  void state.reload().then((adopted) => {
+    if (!adopted) resyncNeeded = true;
+  });
 });
 
 export function useSelectedRun(): RunRecord | null {

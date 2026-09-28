@@ -237,11 +237,15 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let lookTrouble: string | null = null;
 
 /** Says why a look failed, once per reason, and never twice in a row. */
-function sayLookTrouble(problem: unknown): void {
-  const said = errorText(problem).message;
-  if (said === lookTrouble) return;
-  lookTrouble = said;
-  toast("error", i18n.t("story:jobs.lookFailed", { reason: said }));
+function sayLookTrouble(reason: string): void {
+  if (reason === lookTrouble) return;
+  lookTrouble = reason;
+  toast("error", i18n.t("story:jobs.lookFailed", { reason }));
+}
+
+/** The same, for a failure in words of its own. */
+function sayLookProblem(problem: unknown): void {
+  sayLookTrouble(errorText(problem).message);
 }
 
 export const useStoryJobStore = create<StoryJobState>()((set, get) => {
@@ -299,14 +303,20 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       // rather than losing the reader's work to read them in.
       if (!(await saveEverything())) return;
       try {
-        await useProjectStore.getState().reload();
+        if (!(await useProjectStore.getState().reload())) {
+          // A change made between the save settling and the read keeps the
+          // document. The answers are on the records and are read in by the
+          // next look, once what is waiting has gone out.
+          sayLookTrouble(saveTrouble().message);
+          return;
+        }
         lookTrouble = null;
       } catch (problem) {
         // The project could not be read again, so nothing can be written into
         // it just now. The answers are on the records and are read in by the
         // next look — and by the room the next time it stands up. Said once,
         // because the next look is a second and a half away.
-        sayLookTrouble(problem);
+        sayLookProblem(problem);
         return;
       }
     }
@@ -418,7 +428,7 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
         // Said again by the next look, which is where the note is retried —
         // and said out loud the first time it fails, since a note that does
         // not land is a batch the room will read into the story a second time.
-        sayLookTrouble(problem);
+        sayLookProblem(problem);
       }
     }
   };
@@ -446,7 +456,7 @@ export const useStoryJobStore = create<StoryJobState>()((set, get) => {
       // has been closed has stopped asking anyway. What it is not is silent: a
       // process that has gone away would otherwise leave the room waiting for
       // answers that are never coming.
-      sayLookTrouble(problem);
+      sayLookProblem(problem);
     }
     if (!get().jobs.some((job) => isRunning(job.status))) stopPolling();
   };

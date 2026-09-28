@@ -13,7 +13,7 @@ import { errorText } from "../../../api/client";
 import { formatDuration } from "../../../shared/domain/story";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
-import { useProjectStore } from "../../editor/stores/projectStore";
+import { saveTrouble, useProjectStore } from "../../editor/stores/projectStore";
 import { clipApi, type ClipCapabilities } from "../../clip/api";
 import { useClipStore } from "../../clip/stores/clipStore";
 import { useExportStore } from "../../clip/stores/exportStore";
@@ -81,8 +81,18 @@ export function FilmCard({
     void useProjectStore
       .getState()
       .reload()
-      .then(() => {
+      .then((adopted) => {
         if (!alive) return;
+        if (!adopted) {
+          // The same as the catch below, with the work still on its way as
+          // the reason: the film is made and filed, but the shelf was not
+          // read back, so it is not written down here yet.
+          const blocked = saveTrouble();
+          useAppStore
+            .getState()
+            .pushToast("error", blocked.message, undefined, blocked.detail);
+          return;
+        }
         const assetId = done.assetId;
         if (assetId === undefined) return;
         const held = useProjectStore.getState().moka;

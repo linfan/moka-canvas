@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { assetsApi } from "../../../api/assets";
 import { findResource, type TimelineDocument } from "../../../shared/domain";
 import { formatBytes, formatDuration } from "../../editor/canvas/mediaCards";
-import { useProjectStore } from "../../editor/stores/projectStore";
+import { useProjectStore, saveTrouble } from "../../editor/stores/projectStore";
+import { useAppStore } from "../../editor/stores/appStore";
 import { i18n } from "../../../shared/i18n";
 import { clipApi } from "../api";
 import type { ClipCapabilities } from "../api";
@@ -102,7 +103,21 @@ export function ExportDialog() {
   // also what puts it on the shelf behind this dialog.
   const assetId = task?.status === "done" ? task.assetId : undefined;
   useEffect(() => {
-    if (assetId) void useProjectStore.getState().reload();
+    if (!assetId) return;
+    void useProjectStore
+      .getState()
+      .reload()
+      .then((adopted) => {
+        if (adopted) return;
+        // The render is filed on the server, but a change of the reader's
+        // would not save, so the stored document was not read back over it
+        // and the artifact is not on the shelf here yet. Said rather than
+        // passed over: a reader who sees nothing will look in the wrong place.
+        const blocked = saveTrouble();
+        useAppStore
+          .getState()
+          .pushToast("error", blocked.message, undefined, blocked.detail);
+      });
   }, [assetId]);
   const artifact = assetId && moka ? findResource(moka, assetId) : undefined;
 
