@@ -27,7 +27,6 @@ import { useAppStore } from "../../editor/stores/appStore";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
-import { StepHeading } from "../components/StepHeading";
 import { applyFixedOutline, readOutlineAnswer } from "../jobs/apply";
 import { planOutline, storySplitChars } from "../jobs/plan";
 import { readTextAsset } from "../readText";
@@ -244,11 +243,10 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-outline-body">
       <div className="story-step-narrow">
-        <StepHeading
-          action={<StoryImportButton story={story} target="canvas" />}
-          step="outline"
-        />
-        <p className="story-step-lead">{t("story:outline.lead")}</p>
+        <div className="story-step-bar">
+          <p className="story-step-lead">{t("story:outline.lead")}</p>
+          <StoryImportButton story={story} target="canvas" />
+        </div>
         <StepConfirm step="outline" story={story} />
         <StoryModelPicks places={["text"]} />
 

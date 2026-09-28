@@ -5633,19 +5633,20 @@ body.is-dragging-split {
   width: 100%;
 }
 
-.story-step-lead {
-  color: var(--muted);
-  margin: -12px 0 0;
-}
-
-/* A step's name, and the things that act on the whole step beside it: a step
-   is read top to bottom, so what belongs to all of it stands on its own line
-   rather than among the controls of one of its parts. */
-.story-step-heading {
+/* A band of a step's head: what it says on the left, what it is read against
+   on the right — the step's words and the way out of it, the models and the
+   numbers they are asked with, the step's own choices and its buttons. */
+.story-step-bar {
   align-items: center;
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   justify-content: space-between;
+}
+
+.story-step-lead {
+  color: var(--muted);
+  margin: 0;
 }
 
 /* Taking the telling into another room: a way out of the step rather than a

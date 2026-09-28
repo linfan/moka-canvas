@@ -20,7 +20,6 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
-import { StepHeading } from "../components/StepHeading";
 import { ElementCard } from "../panels/ElementCard";
 import { readElementsAnswer } from "../jobs/apply";
 import { planElementArt, planElements, storyReadChars } from "../jobs/plan";
@@ -197,11 +196,10 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-elements-body">
       <div className="story-step-wide">
-        <StepHeading
-          action={<StoryImportButton story={story} target="canvas" />}
-          step="elements"
-        />
-        <p className="story-step-lead">{t("story:elements.lead")}</p>
+        <div className="story-step-bar">
+          <p className="story-step-lead">{t("story:elements.lead")}</p>
+          <StoryImportButton story={story} target="canvas" />
+        </div>
         <StepConfirm step="elements" story={story} />
         <StoryModelPicks places={["text", "image"]} />
 

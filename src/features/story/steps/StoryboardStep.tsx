@@ -23,7 +23,6 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
-import { StepHeading } from "../components/StepHeading";
 import { ActCard } from "../panels/ActCard";
 import { writeActs } from "../panels/writeBoard";
 import { chapterGuesses } from "../jobs/apply";
@@ -204,7 +203,6 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           className="clip-empty clip-empty-first"
           data-testid="story-board-nochapters"
         >
-          <h2>{t("story:step.storyboard")}</h2>
           <p>{t("story:storyboard.noChapters")}</p>
           <button
             className="primary"
@@ -229,11 +227,10 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-storyboard-body">
       <div className="story-step-wide">
-        <StepHeading
-          action={<StoryImportButton story={story} target="canvas" />}
-          step="storyboard"
-        />
-        <p className="story-step-lead">{t("story:storyboard.lead")}</p>
+        <div className="story-step-bar">
+          <p className="story-step-lead">{t("story:storyboard.lead")}</p>
+          <StoryImportButton story={story} target="canvas" />
+        </div>
         <StepConfirm step="storyboard" story={story} />
         <StoryModelPicks places={["text", "image", "video", "audio", "music"]}>
           <ReferenceLimitField story={story} />

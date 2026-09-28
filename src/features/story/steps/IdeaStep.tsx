@@ -155,7 +155,6 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-idea-body">
       <div className="story-step-narrow">
-        <h2>{t("story:step.idea")}</h2>
         <p className="story-step-lead">{t("story:idea.lead")}</p>
         <StepConfirm prepare={commit} step="idea" story={story} />
 
