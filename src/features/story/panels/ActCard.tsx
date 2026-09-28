@@ -20,6 +20,7 @@ import { assetUrl } from "../../../api/assets";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useProjectStore } from "../../editor/stores/projectStore";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   actClipPieces,
   planActMusic,
@@ -33,6 +34,7 @@ import { KeyframeTable } from "./KeyframeTable";
 import { RefPicker } from "./RefPicker";
 import { StoryLightbox } from "./StoryLightbox";
 import { useField } from "./useField";
+import { moved, writeActs } from "./writeBoard";
 
 /** The longest an act and a shot may be edited to, in seconds. */
 const ACT_TITLE_MAX = 40;
@@ -57,6 +59,7 @@ export function ActCard({
   chapterId,
   act,
   index,
+  last,
   guesses,
   busyKeyframes,
   busyClips,
@@ -69,6 +72,8 @@ export function ActCard({
   act: StoryAct;
   /** Which act of the chapter this is, counted from zero as the room counts. */
   index: number;
+  /** Whether this is the chapter's last act, which has nowhere to move down. */
+  last: boolean;
   /** The cells of this act's board the reading chose rather than read. */
   guesses: StoryGuess[];
   /** The shots of this act being drawn just now, by the shot's own name. */
@@ -85,6 +90,7 @@ export function ActCard({
   const run = useStoryRun();
   const moka = useProjectStore((state) => state.moka);
   const [playing, setPlaying] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [sound, setSound] = useState<StoryActSound>(act.sound);
   const perShot = story.shotGranularity === "keyframe";
   const clip = currentTake(act.video);
@@ -105,6 +111,24 @@ export function ActCard({
 
   const write = (patch: StoryActPatch) =>
     writeAct(story, chapterId, act, patch);
+  // An act found to be in the wrong place is moved, and everything it is made
+  // of — its shots, its frames, its clip — travels with it, since the write
+  // says where the acts stand rather than what they hold.
+  const move = (by: number) => {
+    const chapter = story.chapters.find((held) => held.id === chapterId);
+    const acts = chapter?.acts ?? [];
+    const to = index + by;
+    if (to < 0 || to >= acts.length) return;
+    writeActs(story, chapterId, moved(acts, index, to));
+  };
+  const removeAct = () => {
+    const chapter = story.chapters.find((held) => held.id === chapterId);
+    writeActs(
+      story,
+      chapterId,
+      (chapter?.acts ?? []).filter((held) => held.id !== act.id),
+    );
+  };
 
   const title = useField(act.title, (value) => {
     const name = value.trim();
@@ -219,6 +243,42 @@ export function ActCard({
             {t("story:storyboard.clamped", { seconds: askedSeconds })}
           </span>
         )}
+        {/* Where the act stands in the episode, and how it leaves: the board
+            is the reader's to reorder and to cut down, not only to fill in. */}
+        <span className="story-act-tools">
+          <button
+            aria-label={t("story:storyboard.moveActUp", { name: act.title })}
+            className="story-act-tool"
+            data-testid={`story-act-up-${index}`}
+            disabled={index === 0}
+            onClick={() => move(-1)}
+            title={t("story:storyboard.moveActUp", { name: act.title })}
+            type="button"
+          >
+            ↑
+          </button>
+          <button
+            aria-label={t("story:storyboard.moveActDown", { name: act.title })}
+            className="story-act-tool"
+            data-testid={`story-act-down-${index}`}
+            disabled={last}
+            onClick={() => move(1)}
+            title={t("story:storyboard.moveActDown", { name: act.title })}
+            type="button"
+          >
+            ↓
+          </button>
+          <button
+            aria-label={t("story:storyboard.removeAct", { name: act.title })}
+            className="story-act-tool is-remove"
+            data-testid={`story-act-remove-${index}`}
+            onClick={() => setRemoving(true)}
+            title={t("story:storyboard.removeAct", { name: act.title })}
+            type="button"
+          >
+            ✕
+          </button>
+        </span>
       </div>
 
       <div className="story-refs-row">
@@ -485,6 +545,24 @@ export function ActCard({
           label={t("story:storyboard.playClip")}
           onClose={() => setPlaying(false)}
           video
+        />
+      )}
+
+      {removing && (
+        <ConfirmDialog
+          body={t("story:storyboard.removeActBody", {
+            name: act.title,
+            count: act.keyframes.length,
+          })}
+          confirm={t("story:storyboard.removeActConfirm")}
+          note={t("story:storyboard.removeActNote")}
+          onCancel={() => setRemoving(false)}
+          onConfirm={() => {
+            setRemoving(false);
+            removeAct();
+          }}
+          testId="remove-act"
+          title={t("story:storyboard.removeActTitle", { name: act.title })}
         />
       )}
     </li>

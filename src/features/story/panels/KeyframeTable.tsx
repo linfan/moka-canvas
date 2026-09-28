@@ -37,6 +37,7 @@ import { frameRatio } from "./ratios";
 import { StoryLightbox } from "./StoryLightbox";
 import { StorySlotView } from "./StorySlotView";
 import { useField } from "./useField";
+import { moved, writeKeyframes } from "./writeBoard";
 
 /** The longest and shortest a shot may be, in seconds. */
 const SHOT_MIN_S = 0.4;
@@ -78,7 +79,7 @@ export function KeyframeTable({
   const perShot = story.shotGranularity === "keyframe";
 
   const addShot = () => {
-    writeActs(story, chapterId, act.id, [
+    writeKeyframes(story, chapterId, act, [
       ...act.keyframes,
       createKeyframe(act.keyframes.length),
     ]);
@@ -191,12 +192,28 @@ function KeyframeRow({
   };
 
   const remove = () =>
-    writeActs(
+    writeKeyframes(
       story,
       chapterId,
-      act.id,
+      act,
       act.keyframes.filter((each) => each.id !== keyframe.id),
     );
+
+  // A shot discovered to be in the wrong place is moved rather than written
+  // again: the row keeps everything that makes it this shot — its words, its
+  // picture, its clip — and only the place in the list changes.
+  const insertAbove = () => {
+    const next = [...act.keyframes];
+    next.splice(index, 0, createKeyframe(index));
+    writeKeyframes(story, chapterId, act, next);
+  };
+  const move = (by: number) => {
+    const to = index + by;
+    if (to < 0 || to >= act.keyframes.length) return;
+    writeKeyframes(story, chapterId, act, moved(act.keyframes, index, to));
+  };
+  const first = index === 0;
+  const last = index === act.keyframes.length - 1;
 
   // A shot is filmed from its own picture: what a clip of a shot nobody has
   // drawn would be made from is the words alone, which is not what the board
@@ -206,7 +223,24 @@ function KeyframeRow({
   return (
     <>
       <tr data-testid={`story-kf-${index}`}>
-        <td className="story-col-index">{at}</td>
+        <td className="story-col-index">
+          {/*
+            A shot is inserted where the reader is looking rather than only at
+            the end of the list: the button stands in the row it would go above,
+            so a board being reworked grows where the work is.
+          */}
+          <button
+            aria-label={cell(t("story:storyboard.insertShot"))}
+            className="story-kf-insert"
+            data-testid={`story-kf-insert-${index}`}
+            onClick={insertAbove}
+            title={t("story:storyboard.insertShotHere")}
+            type="button"
+          >
+            ＋
+          </button>
+          <span className="story-kf-number">{at}</span>
+        </td>
         <Cell guessed={given("shotSize")} index={index} testId="size">
           <select
             aria-label={cell(t("story:storyboard.shotSize"))}
@@ -363,15 +397,39 @@ function KeyframeRow({
           </td>
         )}
         <td>
-          <button
-            aria-label={cell(t("story:storyboard.removeShot"))}
-            className="story-kf-remove"
-            data-testid={`story-kf-remove-${index}`}
-            onClick={remove}
-            type="button"
-          >
-            ✕
-          </button>
+          <span className="story-kf-tools">
+            <button
+              aria-label={cell(t("story:storyboard.moveShotUp"))}
+              className="story-kf-move"
+              data-testid={`story-kf-up-${index}`}
+              disabled={first}
+              onClick={() => move(-1)}
+              title={t("story:storyboard.moveShotUp")}
+              type="button"
+            >
+              ↑
+            </button>
+            <button
+              aria-label={cell(t("story:storyboard.moveShotDown"))}
+              className="story-kf-move"
+              data-testid={`story-kf-down-${index}`}
+              disabled={last}
+              onClick={() => move(1)}
+              title={t("story:storyboard.moveShotDown")}
+              type="button"
+            >
+              ↓
+            </button>
+            <button
+              aria-label={cell(t("story:storyboard.removeShot"))}
+              className="story-kf-remove"
+              data-testid={`story-kf-remove-${index}`}
+              onClick={remove}
+              type="button"
+            >
+              ✕
+            </button>
+          </span>
         </td>
       </tr>
       {dialogueOpen && (
@@ -683,26 +741,6 @@ function writeKeyframe(
       actId: act.id,
       keyframeId,
       patch,
-    },
-  ]);
-}
-
-/** An act's shots, whole — how a shot is added to a board or taken off it. */
-function writeActs(
-  story: StoryDocument,
-  chapterId: string,
-  actId: string,
-  keyframes: StoryKeyframe[],
-): void {
-  const chapter = story.chapters.find((held) => held.id === chapterId);
-  execute(i18n.t("story:history.storyboard"), [
-    {
-      type: "setStoryActs",
-      storyId: story.id,
-      chapterId,
-      acts: (chapter?.acts ?? []).map((held) =>
-        held.id === actId ? { ...held, keyframes } : held,
-      ),
     },
   ]);
 }

@@ -343,6 +343,15 @@
     "empty": "这一集还没有分镜。",
     "actIndex": "幕 {{index}}",
     "actTitle": "这一幕的名字",
+    "insertAct": "在此处加一幕",
+    "newAct": "第 {{at}} 幕",
+    "moveActUp": "上移「{{name}}」",
+    "moveActDown": "下移「{{name}}」",
+    "removeAct": "删掉「{{name}}」",
+    "removeActTitle": "删掉「{{name}}」？",
+    "removeActBody": "「{{name}}」及其 {{count}} 格分镜将离开分镜脚本；已经生成的图片和片段仍留在素材架上。",
+    "removeActNote": "下次合成将不再包含这一幕；它留在时间线上的片段会在下次合成时随之取下。",
+    "removeActConfirm": "删掉这一幕",
     "plan": "计划 {{seconds}} 秒",
     "clamped": "将按 {{seconds}} 秒生成",
     "split": "将分 {{count}} 段生成，每段最长 {{max}} 秒",
@@ -400,7 +409,11 @@
     "undrawnHint": "没有图的元素不进参考图：先在第三步把它画出来，画面才认得住它",
     "clipReady": "片段已生成",
     "drawFrameFirst": "先给这一格出图",
-    "drawEveryFrame": "先给每一格出图，片段由这些图生成"
+    "drawEveryFrame": "先给每一格出图，片段由这些图生成",
+    "insertShot": "在这一格上方插入分镜",
+    "insertShotHere": "在这一格上方插入分镜",
+    "moveShotUp": "上移",
+    "moveShotDown": "下移"
   },
   "edit": {
     "lead": "把各幕拼成一条时间线，渲染成完整成片，再交给剪辑室精修。",

@@ -343,6 +343,15 @@
     "empty": "This episode has no board yet.",
     "actIndex": "Act {{index}}",
     "actTitle": "What this act is called",
+    "insertAct": "Add an act here",
+    "newAct": "Act {{at}}",
+    "moveActUp": "Move “{{name}}” up",
+    "moveActDown": "Move “{{name}}” down",
+    "removeAct": "Remove “{{name}}”",
+    "removeActTitle": "Remove “{{name}}”?",
+    "removeActBody": "“{{name}}” and its {{count}} shots leave the board. The pictures and clips already made stay on the shelf.",
+    "removeActNote": "The telling is put together without it next time; a clip it left on a timeline comes off at the next assembly.",
+    "removeActConfirm": "Remove the act",
     "plan": "Planned {{seconds}}s",
     "clamped": "Will be made at {{seconds}}s",
     "split": "Will be filmed in {{count}} pieces, {{max}}s at most each",
@@ -400,7 +409,11 @@
     "undrawnHint": "An element with no picture is not among the references: draw it in step three and the frame will hold to it",
     "clipReady": "clip made",
     "drawFrameFirst": "Draw this shot's frame first",
-    "drawEveryFrame": "Draw every frame first — a clip is made from the pictures"
+    "drawEveryFrame": "Draw every frame first — a clip is made from the pictures",
+    "insertShot": "Insert a shot above",
+    "insertShotHere": "Insert a shot above this one",
+    "moveShotUp": "Move up",
+    "moveShotDown": "Move down"
   },
   "edit": {
     "lead": "Lay the acts end to end as one timeline, render it whole, and hand it to the cutting room.",

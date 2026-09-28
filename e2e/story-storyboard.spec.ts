@@ -25,7 +25,9 @@ test.describe.configure({ timeout: 60_000 });
 /** What the server holds of the first story's first act. */
 async function persistedBoard(page: Page): Promise<{
   acts: number;
+  titles: string[];
   frames: number;
+  contents: string[];
   drawn: number;
   clips: number;
 }> {
@@ -36,7 +38,8 @@ async function persistedBoard(page: Page): Promise<{
         stories?: {
           chapters?: {
             acts?: {
-              keyframes?: { art?: { takes?: unknown[] } }[];
+              title?: string;
+              keyframes?: { content?: string; art?: { takes?: unknown[] } }[];
               video?: { takes?: unknown[] };
             }[];
           }[];
@@ -48,7 +51,11 @@ async function persistedBoard(page: Page): Promise<{
     );
     return {
       acts: acts.length,
+      titles: acts.map((act) => act.title ?? ""),
       frames: acts.flatMap((act) => act.keyframes ?? []).length,
+      contents: acts.flatMap((act) =>
+        (act.keyframes ?? []).map((keyframe) => keyframe.content ?? ""),
+      ),
       drawn: acts
         .flatMap((act) => act.keyframes ?? [])
         .filter((keyframe) => (keyframe.art?.takes ?? []).length > 0).length,
@@ -228,6 +235,80 @@ test("an episode is boarded, framed, and filmed", async ({ page }) => {
     expect(board.acts).toBe(2);
     expect(board.frames).toBe(3);
     expect(board.drawn).toBe(3);
+  } finally {
+    forgetHome(home);
+  }
+});
+
+test("an episode's board is rearranged by hand", async ({ page }) => {
+  const home = projectHome("story-board-edit");
+  await forgetProjects();
+  await configureTheWholeStudio();
+  try {
+    await toTheBoard(page, home, "Story Board Edit");
+
+    // An act goes in at the seam the reader pointed at — above "The last
+    // carriage", the act that stood second — and the room names it by the
+    // place it took, with the act it pushed down keeping its own name.
+    await expect(page.getByTestId("story-act-1")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      page.getByTestId("story-act-1").getByTestId("story-act-title-1"),
+    ).toHaveValue("The last carriage");
+    await page.getByTestId("story-act-insert-1").click();
+    await expect(page.getByTestId("story-act-2")).toBeVisible();
+    await expect(
+      page.getByTestId("story-act-1").getByTestId("story-act-title-1"),
+    ).toHaveValue("Act 2");
+    await expect(
+      page.getByTestId("story-act-2").getByTestId("story-act-title-2"),
+    ).toHaveValue("The last carriage");
+    await expect.poll(async () => (await persistedBoard(page)).acts).toBe(3);
+
+    // Moved up, the new act stands first, and the acts it passed are whole
+    // where they were rather than read again.
+    await page.getByTestId("story-act-up-1").click();
+    await expect(
+      page.getByTestId("story-act-0").getByTestId("story-act-title-0"),
+    ).toHaveValue("Act 2");
+    await expect(
+      page.getByTestId("story-act-1").getByTestId("story-act-title-1"),
+    ).toHaveValue("The platform");
+
+    // Taken out again, once the reader has answered the question: what leaves
+    // is the act, and the acts around it close up.
+    await page.getByTestId("story-act-remove-0").click();
+    const asked = page.getByTestId("remove-act");
+    await expect(asked).toContainText("Act 2");
+    await page.getByTestId("remove-act-confirm").click();
+    await expect(page.getByTestId("story-act-1")).toBeVisible();
+    await expect(page.getByTestId("story-act-2")).toHaveCount(0);
+
+    // A shot is inserted above the row it belongs above and then moved: the
+    // board is the reader's to order, not only to fill in.
+    const firstAct = page.getByTestId("story-act-0");
+    await firstAct.getByTestId("story-kf-insert-0").click();
+    await expect.poll(async () => (await persistedBoard(page)).frames).toBe(4);
+    // The shot nobody has written into yet is the one that moved: the shot it
+    // was inserted above is the act's first again, and its words are its own.
+    await firstAct.getByTestId("story-kf-down-0").click();
+    await expect
+      .poll(async () => (await persistedBoard(page)).contents)
+      .toEqual([
+        "Rain over the platform, `Keeper` under the lamp.",
+        "",
+        "`Traveller` turns.",
+        "The `Old ticket` is held up to the light.",
+      ]);
+
+    // What the server ends up holding: two acts, four shots, none of them
+    // drawn — nobody asked for a picture in any of this.
+    const board = await persistedBoard(page);
+    expect(board.acts).toBe(2);
+    expect(board.titles).toEqual(["The platform", "The last carriage"]);
+    expect(board.frames).toBe(4);
+    expect(board.drawn).toBe(0);
   } finally {
     forgetHome(home);
   }

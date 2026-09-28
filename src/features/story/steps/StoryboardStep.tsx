@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { StoryJobRecord } from "../../../api/story";
@@ -16,6 +16,7 @@ import {
   type StoryShotGranularity,
 } from "../../../shared/domain";
 import { REFERENCE_IMAGES_MAX } from "../../../shared/domain/constants";
+import { createAct } from "../../../shared/domain/factories";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -24,6 +25,7 @@ import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
 import { StepHeading } from "../components/StepHeading";
 import { ActCard } from "../panels/ActCard";
+import { writeActs } from "../panels/writeBoard";
 import { chapterGuesses } from "../jobs/apply";
 import { jobKey, planKeyframeArt, planStoryboard } from "../jobs/plan";
 import {
@@ -162,6 +164,13 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
         shotGranularity: granularity,
       },
     ]);
+  };
+
+  /** An act the reader asked for, standing where they asked for it. */
+  const insertAct = (at: number) => {
+    const acts = [...(chapter?.acts ?? [])];
+    acts.splice(at, 0, createAct(t("story:storyboard.newAct", { at: at + 1 })));
+    if (chapter !== undefined) writeActs(story, chapter.id, acts);
   };
 
   const chooseGranularity = (next: StoryShotGranularity) => {
@@ -406,27 +415,62 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
         {chapter.acts.length === 0 ? (
           <div className="clip-empty" data-testid="story-board-empty">
             <p>{t("story:storyboard.empty")}</p>
+            <div className="story-step-actions">
+              <button
+                data-testid="story-act-insert-0"
+                onClick={() => insertAct(0)}
+                type="button"
+              >
+                {t("story:storyboard.insertAct")}
+              </button>
+            </div>
           </div>
         ) : (
           <ol className="story-acts">
             {chapter.acts.map((act, at) => {
               const busy = busyIn(keys, chapter.id, act);
               return (
-                <ActCard
-                  act={act}
-                  busyKeyframes={busy.frames}
-                  busyClips={busy.clips}
-                  chapterId={chapter.id}
-                  guesses={marks.get(act.id) ?? []}
-                  index={at}
-                  key={act.id}
-                  musicBusy={busy.music}
-                  story={story}
-                  videoBusy={busy.video}
-                  voiceBusy={busy.voice}
-                />
+                <Fragment key={act.id}>
+                  {/*
+                    An act goes where the reader points rather than only after
+                    the last one: a row stands above every act — and one under
+                    them all — so an episode being reworked grows at the seam
+                    the new act belongs to.
+                  */}
+                  <li className="story-insert">
+                    <button
+                      data-testid={`story-act-insert-${at}`}
+                      onClick={() => insertAct(at)}
+                      type="button"
+                    >
+                      {t("story:storyboard.insertAct")}
+                    </button>
+                  </li>
+                  <ActCard
+                    act={act}
+                    busyKeyframes={busy.frames}
+                    busyClips={busy.clips}
+                    chapterId={chapter.id}
+                    guesses={marks.get(act.id) ?? []}
+                    index={at}
+                    last={at === chapter.acts.length - 1}
+                    musicBusy={busy.music}
+                    story={story}
+                    videoBusy={busy.video}
+                    voiceBusy={busy.voice}
+                  />
+                </Fragment>
               );
             })}
+            <li className="story-insert">
+              <button
+                data-testid={`story-act-insert-${chapter.acts.length}`}
+                onClick={() => insertAct(chapter.acts.length)}
+                type="button"
+              >
+                {t("story:storyboard.insertAct")}
+              </button>
+            </li>
           </ol>
         )}
       </div>

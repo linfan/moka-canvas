@@ -24,6 +24,7 @@ import {
 import { createAct, createKeyframe } from "../../../shared/domain/factories";
 import { currentTake } from "../../../shared/domain/story";
 import { clampSeconds } from "../jobs/plan";
+import { undo } from "../../editor/commands/execute";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { useModelStore } from "../../settings/modelStore";
@@ -1024,6 +1025,130 @@ describe("writing an episode's board", () => {
     fireEvent.click(screen.getByTestId("story-kf-remove-1"));
     await waitFor(() => expect(acts()[0]?.keyframes).toHaveLength(2));
     expect(acts()[0]?.keyframes[0]?.id).toBe(ids.frameFirst);
+  });
+
+  it("inserts a shot above the row it was asked for, and the rest keep their places", async () => {
+    openAtBoard(boarded());
+    fireEvent.click(screen.getByTestId("story-kf-insert-1"));
+    await waitFor(() => expect(acts()[0]?.keyframes).toHaveLength(3));
+
+    const frames = acts()[0]!.keyframes;
+    expect(frames[0]?.id).toBe(ids.frameFirst);
+    expect(frames[2]?.id).toBe(ids.frameSecond);
+    expect(frames[1]?.content).toBe("");
+    expect(frames[1]?.art.takes).toHaveLength(0);
+    // The rows are the shots in their order: the third row is the one that
+    // stood second, drawn for as long as its own picture is there.
+    expect(
+      (screen.getByTestId("story-kf-size-2") as HTMLSelectElement).value,
+    ).toBe("close");
+    expect(
+      screen.getByTestId("story-kf-slot-2").querySelector("img"),
+    ).toBeNull();
+
+    act(() => {
+      undo();
+    });
+    expect(acts()[0]?.keyframes).toHaveLength(2);
+  });
+
+  it("moves a shot up and down the act, and the ends say so", async () => {
+    openAtBoard(boarded());
+    const first = acts()[0]!.keyframes[0]!;
+    expect(
+      (screen.getByTestId("story-kf-up-0") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("story-kf-down-1") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByTestId("story-kf-down-0"));
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[0]?.id).toBe(ids.frameSecond),
+    );
+    // The picture drawn for the shot travels with it: what moved is the place
+    // in the list rather than the shot, so nothing is asked for again.
+    expect(acts()[0]?.keyframes[1]?.id).toBe(ids.frameFirst);
+    expect(acts()[0]?.keyframes[1]?.art.takes[0]?.assetIds[0]).toBe(
+      first.art.takes[0]?.assetIds[0],
+    );
+    // And the rows read the document: the first row is the shot that moved up.
+    expect(
+      (screen.getByTestId("story-kf-size-0") as HTMLSelectElement).value,
+    ).toBe("close");
+
+    act(() => {
+      undo();
+    });
+    expect(acts()[0]?.keyframes[0]?.id).toBe(ids.frameFirst);
+  });
+
+  it("adds an act at the seam it was asked for, ready to be written into", async () => {
+    openAtBoard(boarded());
+    fireEvent.click(screen.getByTestId("story-act-insert-1"));
+    await waitFor(() => expect(acts()).toHaveLength(2));
+
+    // The act that was there stays whole, with its shots where they stood; the
+    // new one is named by its place and is nobody's work yet.
+    expect(acts()[0]?.id).toBe(ids.act);
+    expect(acts()[0]?.keyframes).toHaveLength(2);
+    expect(acts()[1]?.title).toBe("Act 2");
+    expect(acts()[1]?.keyframes).toHaveLength(0);
+    expect(screen.getByTestId("story-act-insert-0")).toBeDefined();
+    expect(screen.getByTestId("story-act-insert-2")).toBeDefined();
+
+    act(() => {
+      undo();
+    });
+    expect(acts()).toHaveLength(1);
+  });
+
+  it("moves an act up and down the episode, everything it holds travelling with it", async () => {
+    openAtBoard(withASecondAct());
+    const [first, second] = acts();
+    expect(
+      (screen.getByTestId("story-act-up-0") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("story-act-down-1") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByTestId("story-act-down-0"));
+    await waitFor(() => expect(acts()[0]?.id).toBe(second!.id));
+    // The act is moved rather than written again: its shots and the frames in
+    // them are the ones it had.
+    expect(acts()[1]?.id).toBe(first!.id);
+    expect(acts()[0]?.keyframes).toHaveLength(1);
+    expect(acts()[1]?.keyframes).toHaveLength(3);
+
+    act(() => {
+      undo();
+    });
+    expect(acts()[0]?.id).toBe(first!.id);
+  });
+
+  it("takes an act out whole once the reader has said so", async () => {
+    openAtBoard(withASecondAct());
+    const held = acts()[0]!;
+    fireEvent.click(screen.getByTestId("story-act-remove-0"));
+    const asked = screen.getByTestId("remove-act");
+    expect(asked.textContent).toContain(held.title);
+    expect(asked.textContent).toContain("3 shots");
+
+    fireEvent.click(screen.getByTestId("remove-act-cancel"));
+    expect(acts()).toHaveLength(2);
+
+    fireEvent.click(screen.getByTestId("story-act-remove-0"));
+    fireEvent.click(screen.getByTestId("remove-act-confirm"));
+    await waitFor(() => expect(acts()).toHaveLength(1));
+    expect(acts()[0]?.id).not.toBe(held.id);
+
+    // Its shots go with it, and the whole of it comes back on undo.
+    act(() => {
+      undo();
+    });
+    expect(acts()).toHaveLength(2);
+    expect(acts()[0]?.keyframes).toHaveLength(3);
   });
 
   it("reads an act's lines aloud as one ask, and shows the take that comes back", async () => {
