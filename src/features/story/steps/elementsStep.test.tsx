@@ -755,7 +755,10 @@ describe("a description the reader rewrites", () => {
     });
     // Typed, then written down once: a paragraph is one step to take back,
     // not one per letter — and the words stay open to the next change.
-    expect(useHistoryStore.getState().undoStack).toHaveLength(before + 1);
+    const steps = useHistoryStore.getState().undoStack;
+    expect(steps).toHaveLength(before + 1);
+    // The step is named in the reader's own words rather than by its key.
+    expect(steps.at(-1)?.label).toBe("Write the elements");
     expect(box().readOnly).toBe(false);
 
     act(() => {
