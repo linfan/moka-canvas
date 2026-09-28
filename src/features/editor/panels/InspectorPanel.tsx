@@ -199,9 +199,9 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
             : ""}
         </p>
       )}
-      {media?.state === "ready" && media.url && entry && (
+      {media?.state === "ready" && entry && (
         <>
-          {node.kind === "image" && (
+          {node.kind === "image" && media.url && (
             <button
               aria-label={t("editor:inspector.openFullPreview")}
               className="inspector-preview"
@@ -211,11 +211,11 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
               <img alt={entry.name} src={media.url} />
             </button>
           )}
-          {node.kind === "audio" && (
+          {node.kind === "audio" && media.url && (
             <audio controls preload="metadata" src={media.url} />
           )}
-          {node.kind === "video" && (
-            <video controls preload="metadata" src={media.url} />
+          {node.kind === "video" && media.playable && (
+            <video controls preload="metadata" src={media.playable} />
           )}
         </>
       )}

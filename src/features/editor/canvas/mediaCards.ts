@@ -13,8 +13,14 @@ export type MediaState = "ready" | "missing" | "changed" | "empty";
 
 export interface MediaCardInfo {
   state: MediaState;
-  /** Thumbnail/preview URL (the asset itself, or its poster for video). */
+  /**
+   * The picture to show: the asset itself, or a video's poster when one has
+   * been made. A video without a poster has none — its own file is not a
+   * picture, and handing it to an image is a decode nobody gets back.
+   */
   url?: string;
+  /** The file a video plays from. Videos only. */
+  playable?: string;
   /** Compact label for the card body: dimensions, duration, sample rate. */
   label: string;
   entry?: ResourceEntry;
@@ -102,7 +108,7 @@ export function generationSummary(node: WorkflowNode): string {
 /** Change signature for a node's media card; compared by renderer and scene differ. */
 export function mediaSignature(media: MediaCardInfo | null): string {
   if (!media) return "";
-  return `${media.state}|${media.url ?? ""}|${media.label}`;
+  return `${media.state}|${media.url ?? ""}|${media.playable ?? ""}|${media.label}`;
 }
 
 /**
@@ -134,7 +140,13 @@ export function mediaInfoForNode(
       : undefined;
   return {
     state: "ready",
-    url: assetUrl(posterId ?? data.assetId),
+    url:
+      node.kind === "video"
+        ? posterId
+          ? assetUrl(posterId)
+          : undefined
+        : assetUrl(data.assetId),
+    playable: node.kind === "video" ? assetUrl(data.assetId) : undefined,
     label: labelFor(entry),
     entry,
   };

@@ -52,6 +52,12 @@ npm run test:e2e  # Playwright: critical path, provider settings, a
 4. Import small and large image/audio/video fixtures; preview each, then
    remove them safely (referencing nodes are flagged, never silently
    deleted).
+   - A video card shows the film's own first frame with a play button
+     over it. Pressing the button plays it in the card itself, controls
+     and all; the rest of the frame still drags, selects, and wires the
+     node while nothing is playing, and pausing or ending brings the
+     button back. The automated equivalent is
+     `npx playwright test canvas-video`.
    - The **Assets** face of the same column is the shelf, cut into the four
      kinds a board can be given. Confirm that **Import…** files what is
      chosen; that each kind tab lists only what belongs to it and counts
@@ -82,7 +88,8 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
      confirm two cards arrive where the menu was opened, all of them
      selected, with one undo taking both back; choose two from a node's
      reference bar and confirm they are added to that node — wired in
-     beside it in the wired-in mode, listed by it in the by-hand mode.
+     beside it where the wiring is what the ask reads, listed by it
+     where a list kept by hand is.
      The automated equivalent is `npm test` (`AssetPickerModal`).
 5. Run a valid workflow and an invalid one (validation errors surface on
    the run card); cancel a running workflow; retry a failed one; reopen
@@ -219,21 +226,28 @@ a_text_node_is_filed_once_and_its_words_come_back` and `npm test`
     size and the card it came from. Run it and confirm that is what the
     provider was handed — the automated equivalent is
     `cargo test --test provider_runs what_the_panel_shows`, with the
-    panel, the bar and the mention field covered by `npm test`. Switch
-    the bar to **By hand**, point at two nodes, drag one above the
-    other, and confirm the preview lists them in the new order rather
-    than in the order the wires were drawn. Switch to **In the prompt**,
-    type `@`, and confirm what is offered is the nodes this one could
-    mean, that a picture is offered by its thumbnail and a text by its
-    first words, that what is chosen is written as `@[node:<id>]` with a
-    chip under the field, and that the chip can be looked at, taken out
-    whole, and followed back to the card it names. Delete the node a
-    mention names and confirm the chip says so and the button refuses
-    rather than sending an ask that quietly means something else. Drop
-    an asset from the assets panel onto the bar in each of the two
-    modes that take one and confirm it is wired in beside the node in
-    one and listed by it in the other; confirm the bar is not a place to
-    leave one in the mode where the prompt decides. Move a wired-in
+    panel, the bar and the mention field covered by `npm test`. Point at
+    two nodes by hand and drag one above the other, and confirm the
+    preview lists them in the new order rather than in the order the
+    wires were drawn — and that the prompt's own words take over from
+    the list as soon as they name a card, there being no mode to choose
+    on the panel. Type `@`, and confirm what is offered is the nodes
+    this one could mean, that a picture is offered by its thumbnail and
+    a text by its first words, that what is chosen is written as
+    `@[node:<id>]` and drawn in the field as the card's name between
+    ticks, that hovering the name summons what it points at, and that
+    backspace takes it out whole. Confirm the strip under the field
+    lists what the prompt names, in the order it names them, wearing the
+    mark of its kind where the card has no picture — a text and an audio
+    — and that hovering an entry shows the whole of it: the words, the
+    sound playing, the picture large. Delete the node a mention names
+    and confirm the name is drawn as one that is gone, that the field
+    says so, and that the button refuses rather than sending an ask that
+    quietly means something else. Drop an asset from the assets panel
+    onto the bar and confirm it is wired in beside the node when the
+    wiring is what the ask reads, and listed by it when a list kept by
+    hand is; confirm the bar takes nothing while the prompt names its own
+    cards, since nothing dropped there would be read. Move a wired-in
     reference onto the mask or the first frame of the node taking it and
     confirm the preview lists it under that role. Fill an upstream text
     past the prompt limit and confirm the preview says by how much it was

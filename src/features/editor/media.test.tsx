@@ -20,6 +20,7 @@ import type {
   NodeData,
   SelfCheckReport,
 } from "../../shared/domain";
+import { createNode } from "../../shared/domain";
 import {
   mediaInfoForNode,
   buildIssueIndex,
@@ -158,6 +159,58 @@ describe("mediaCards", () => {
     const b = waveformPeaks("deadbeef");
     expect(a).toEqual(b);
     expect(a.every((peak) => peak >= 0.25 && peak <= 1)).toBe(true);
+  });
+
+  it("gives a video its own file to play and a poster to be seen as", () => {
+    const moka = buildGoldenMokaFile();
+    moka.resources.videos.push({
+      id: "asset-shot",
+      name: "shot.mp4",
+      path: "assets/videos/shot.mp4",
+      mime: "video/mp4",
+      bytes: 40960,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      probe: {
+        mime: "video/mp4",
+        bytes: 40960,
+        sha256: "bb",
+        width: 640,
+        height: 360,
+        durationMs: 4000,
+      },
+    });
+    const shot = createNode("video", { x: 0, y: 0 });
+    shot.data = { ...shot.data, assetId: "asset-shot" };
+    const bare = mediaInfoForNode(shot, buildResourceIndex(moka), new Map());
+    expect(bare?.state).toBe("ready");
+    expect(bare?.label).toBe("640×360 · 0:04");
+    expect(bare?.playable).toContain("/assets/asset-shot");
+    // Nothing has made a poster, and the file itself is not a picture: the
+    // card has no image to draw, only a file to play.
+    expect(bare?.url).toBeUndefined();
+
+    moka.resources.images.push({
+      id: "asset-poster",
+      name: "poster.png",
+      path: "assets/images/poster.png",
+      mime: "image/png",
+      bytes: 2048,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      probe: { mime: "image/png", bytes: 2048, sha256: "cc" },
+    });
+    const postered = {
+      ...shot,
+      data: { ...shot.data, posterAssetId: "asset-poster" },
+    };
+    const drawn = mediaInfoForNode(
+      postered,
+      buildResourceIndex(moka),
+      new Map(),
+    );
+    expect(drawn?.url).toContain("/assets/asset-poster");
+    expect(drawn?.playable).toContain("/assets/asset-shot");
   });
 
   it("collapses a generation spec into one card line", () => {

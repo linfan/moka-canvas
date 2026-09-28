@@ -415,15 +415,15 @@ describe("the prompt field", () => {
     expect(dismissed).toHaveBeenCalledTimes(1);
   });
 
-  it("draws a mention among the words as a chip wearing its kind", () => {
+  it("draws a mention among the words as the card's name between ticks", () => {
     render(<Field initial={`over ${mentionToken("n-plate")} again`} />);
     const shown = chip();
     expect(shown).toBeTruthy();
     expect(shown?.title).toBe("Plate");
     expect(shown?.dataset.kind).toBe("image");
-    expect(shown?.textContent).toBe("▣");
+    expect(shown?.textContent).toBe("`Plate`");
     // The words around it stay the words around it.
-    expect(field().textContent).toBe("over ▣ again");
+    expect(field().textContent).toBe("over `Plate` again");
   });
 
   it("draws a token that arrived as words as the chip it is", async () => {
@@ -483,6 +483,27 @@ describe("the prompt field", () => {
     const look = screen.getByTestId("mention-look");
     expect(look.textContent).toContain("A calm voice reading");
     expect(look.querySelector("img")).toBeNull();
+  });
+
+  it("plays the file when the chip of an audio is hovered", async () => {
+    const voice = card("audio", "n-voice", "Voice", {
+      assetId: "asset-voice",
+    });
+    render(
+      <Field
+        initial={mentionToken("n-voice")}
+        on={sheet([...SHEET.nodes, voice])}
+      />,
+    );
+    await act(async () => {
+      fireEvent.mouseOver(chip()!);
+    });
+    const player = screen.getByTestId("mention-look").querySelector("audio");
+    expect(player?.getAttribute("src")).toContain(
+      "/api/v1/projects/current/assets/asset-voice",
+    );
+    // Playing is what the hover is for: the reader asked what this card holds.
+    expect(player?.hasAttribute("autoplay")).toBe(true);
   });
 
   it("commits on losing focus and asks on a command Enter", async () => {

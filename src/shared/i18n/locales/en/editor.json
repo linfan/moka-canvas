@@ -497,8 +497,6 @@
     "previewHint": "What a run of this node would actually hand over",
     "close": "Close the generation panel",
     "starting": "Starting…",
-    "foldAway": "Fold the prompt away and take what is given from the wiring",
-    "unfold": "Unfold the prompt and say in words what is given",
     "noModel": "No {{kind}} model is configured yet",
     "noModelPeriod": "No {{kind}} model is configured yet.",
     "configureModels": "Configure models",
@@ -547,7 +545,9 @@
     "gone": "A node that is gone",
     "fieldGrip": "Drag to make the prompt field wider or taller",
     "mayMention": "What this prompt may mention",
-    "noAnswer": "Nothing on this canvas answers to that."
+    "noAnswer": "Nothing on this canvas answers to that.",
+    "referenced": "What this prompt refers to",
+    "playAudio": "Play {{name}}"
   },
   "inputPreview": {
     "aria": "What this node will send",
@@ -688,7 +688,8 @@
     "encodeFailed": "The browser could not encode the image",
     "canvasImageExported": "Canvas image exported",
     "canvasNotReady": "The canvas is not ready",
-    "canvasNotExported": "The canvas could not be exported"
+    "canvasNotExported": "The canvas could not be exported",
+    "playVideo": "Play {{name}}"
   },
   "interactions": {
     "nothingSelected": "Nothing selected",
