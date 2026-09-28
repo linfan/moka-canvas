@@ -18,7 +18,6 @@ import {
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
-import { StepHeading } from "../components/StepHeading";
 import { FilmCard } from "../panels/FilmCard";
 import { useStoryStore } from "../stores/storyStore";
 
@@ -159,13 +158,11 @@ export function EditStep({ story }: { story: StoryDocument }) {
 
   return (
     <div className="story-step-scroll" data-testid="story-step-edit-body">
-      <div className="story-step-narrow">
-        <StepHeading
-          action={<StoryImportButton story={story} target="timeline" />}
-          step="edit"
-        />
-        <p className="story-step-lead">{t("story:edit.lead")}</p>
-        <StepConfirm step="edit" story={story} />
+      <div className="story-step-wide">
+        <div className="story-step-bar">
+          <p className="story-step-lead">{t("story:edit.lead")}</p>
+          <StoryImportButton story={story} target="timeline" />
+        </div>
 
         <section className="story-assembly" data-testid="story-assembly">
           <h3>{t("story:edit.assemble")}</h3>
@@ -242,6 +239,7 @@ export function EditStep({ story }: { story: StoryDocument }) {
                 ? t("story:edit.assemble")
                 : t("story:edit.reassemble")}
             </button>
+            <StepConfirm step="edit" story={story} />
           </div>
         </section>
 

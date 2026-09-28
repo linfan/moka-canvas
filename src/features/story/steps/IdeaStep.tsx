@@ -154,10 +154,8 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
 
   return (
     <div className="story-step-scroll" data-testid="story-step-idea-body">
-      <div className="story-step-narrow">
-        <h2>{t("story:step.idea")}</h2>
+      <div className="story-step-wide">
         <p className="story-step-lead">{t("story:idea.lead")}</p>
-        <StepConfirm prepare={commit} step="idea" story={story} />
 
         <div
           aria-label={t("story:idea.tabs")}
@@ -346,12 +344,13 @@ export function IdeaStep({ story }: { story: StoryDocument }) {
           </p>
         )}
 
-        <div className="story-step-actions">
+        <div className="story-step-bar">
           <span className="story-hint">
             {brief.genre.trim() === "" || brief.style.trim() === ""
               ? t("story:idea.styleHintMissing")
               : ""}
           </span>
+          <StepConfirm prepare={commit} step="idea" story={story} />
         </div>
       </div>
     </div>

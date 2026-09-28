@@ -27,7 +27,6 @@ import { useAppStore } from "../../editor/stores/appStore";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
-import { StepHeading } from "../components/StepHeading";
 import { applyFixedOutline, readOutlineAnswer } from "../jobs/apply";
 import { planOutline, storySplitChars } from "../jobs/plan";
 import { readTextAsset } from "../readText";
@@ -243,49 +242,13 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
 
   return (
     <div className="story-step-scroll" data-testid="story-step-outline-body">
-      <div className="story-step-narrow">
-        <StepHeading
-          action={<StoryImportButton story={story} target="canvas" />}
-          step="outline"
-        />
-        <p className="story-step-lead">{t("story:outline.lead")}</p>
-        <StepConfirm step="outline" story={story} />
-        <StoryModelPicks places={["text"]} />
-
-        <div className="story-outline-bar">
-          <div
-            aria-label={t("story:outline.source")}
-            className="story-chips"
-            role="radiogroup"
-          >
-            <button
-              aria-checked={mode === "expand"}
-              className={`story-choice${mode === "expand" ? " is-on" : ""}`}
-              data-testid="story-outline-mode-expand"
-              onClick={() => setMode("expand")}
-              role="radio"
-              type="button"
-            >
-              {t("story:outline.modeExpand")}
-            </button>
-            <button
-              aria-checked={mode === "split"}
-              className={`story-choice${mode === "split" ? " is-on" : ""}`}
-              data-testid="story-outline-mode-split"
-              disabled={sourceId === undefined}
-              onClick={() => setMode("split")}
-              role="radio"
-              title={
-                sourceId === undefined
-                  ? t("story:outline.modeSplitLocked")
-                  : undefined
-              }
-              type="button"
-            >
-              {t("story:outline.modeSplit")}
-            </button>
-          </div>
-
+      <div className="story-step-wide">
+        <div className="story-step-bar">
+          <p className="story-step-lead">{t("story:outline.lead")}</p>
+          <StoryImportButton story={story} target="canvas" />
+        </div>
+        <div className="story-step-bar">
+          <StoryModelPicks places={["text"]} />
           <div className="story-outline-count">
             <span className="story-field-label">
               {t("story:outline.chapters")}
@@ -333,33 +296,69 @@ export function OutlineStep({ story }: { story: StoryDocument }) {
               })}
         </p>
 
-        <div className="story-step-actions">
-          <span className="story-hint" data-testid="story-outline-will-ask">
-            {t("story:outline.willAsk", { count: wanted })}
-          </span>
-          {totalWaves > 1 && (running !== null || waves.length > 0) && (
-            <span className="story-hint" data-testid="story-outline-wave">
-              {t("story:outline.wave", {
-                at: Math.max(1, totalWaves - waves.length),
-                of: totalWaves,
-              })}
-            </span>
-          )}
-          <button
-            className="primary"
-            data-testid="story-outline-start"
-            disabled={writing !== null || reading}
-            onClick={start}
-            type="button"
+        <div className="story-step-bar">
+          <div
+            aria-label={t("story:outline.source")}
+            className="story-chips"
+            role="radiogroup"
           >
-            {writing !== null
-              ? t("story:jobs.busy", jobProgress(writing))
-              : reading
-                ? t("story:outline.reading")
-                : story.chapters.length > 0
-                  ? t("story:outline.resplit")
-                  : t("story:outline.start")}
-          </button>
+            <button
+              aria-checked={mode === "expand"}
+              className={`story-choice${mode === "expand" ? " is-on" : ""}`}
+              data-testid="story-outline-mode-expand"
+              onClick={() => setMode("expand")}
+              role="radio"
+              type="button"
+            >
+              {t("story:outline.modeExpand")}
+            </button>
+            <button
+              aria-checked={mode === "split"}
+              className={`story-choice${mode === "split" ? " is-on" : ""}`}
+              data-testid="story-outline-mode-split"
+              disabled={sourceId === undefined}
+              onClick={() => setMode("split")}
+              role="radio"
+              title={
+                sourceId === undefined
+                  ? t("story:outline.modeSplitLocked")
+                  : undefined
+              }
+              type="button"
+            >
+              {t("story:outline.modeSplit")}
+            </button>
+          </div>
+
+          <div className="story-step-actions">
+            <span className="story-hint" data-testid="story-outline-will-ask">
+              {t("story:outline.willAsk", { count: wanted })}
+            </span>
+            {totalWaves > 1 && (running !== null || waves.length > 0) && (
+              <span className="story-hint" data-testid="story-outline-wave">
+                {t("story:outline.wave", {
+                  at: Math.max(1, totalWaves - waves.length),
+                  of: totalWaves,
+                })}
+              </span>
+            )}
+            <button
+              className="primary"
+              data-testid="story-outline-start"
+              disabled={writing !== null || reading}
+              onClick={start}
+              type="button"
+            >
+              {writing !== null
+                ? t("story:jobs.busy", jobProgress(writing))
+                : reading
+                  ? t("story:outline.reading")
+                  : story.chapters.length > 0
+                    ? t("story:outline.resplit")
+                    : t("story:outline.start")}
+            </button>
+            <StepConfirm step="outline" story={story} />
+          </div>
         </div>
 
         {failure !== null && (

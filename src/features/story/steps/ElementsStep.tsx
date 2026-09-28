@@ -20,7 +20,6 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
-import { StepHeading } from "../components/StepHeading";
 import { ElementCard } from "../panels/ElementCard";
 import { readElementsAnswer } from "../jobs/apply";
 import { planElementArt, planElements, storyReadChars } from "../jobs/plan";
@@ -197,12 +196,10 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-elements-body">
       <div className="story-step-wide">
-        <StepHeading
-          action={<StoryImportButton story={story} target="canvas" />}
-          step="elements"
-        />
-        <p className="story-step-lead">{t("story:elements.lead")}</p>
-        <StepConfirm step="elements" story={story} />
+        <div className="story-step-bar">
+          <p className="story-step-lead">{t("story:elements.lead")}</p>
+          <StoryImportButton story={story} target="canvas" />
+        </div>
         <StoryModelPicks places={["text", "image"]} />
 
         {warnings.length > 0 && (
@@ -219,7 +216,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
           </div>
         )}
 
-        <div className="story-elements-bar">
+        <div className="story-step-bar">
           <div
             aria-label={t("story:elements.group")}
             className="story-chips"
@@ -322,6 +319,7 @@ export function ElementsStep({ story }: { story: StoryDocument }) {
                   ? t("story:elements.recognise")
                   : t("story:elements.recogniseAgain")}
             </button>
+            <StepConfirm step="elements" story={story} />
           </div>
         </div>
 

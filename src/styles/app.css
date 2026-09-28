@@ -5623,29 +5623,43 @@ body.is-dragging-split {
 }
 
 /* One column, read top to bottom: a step is a thing done in order, and a
-   second column beside it would be a second place to look. */
-.story-step-narrow {
+   second column beside it would be a second place to look. Every step is
+   given the same column, so walking the five steps does not move the page's
+   margins under the reader. */
+.story-step-wide {
   display: grid;
   gap: 22px;
   margin: 0 auto;
-  max-width: 720px;
+  max-width: 1100px;
   padding-bottom: 24px;
   width: 100%;
 }
 
-.story-step-lead {
-  color: var(--muted);
-  margin: -12px 0 0;
-}
-
-/* A step's name, and the things that act on the whole step beside it: a step
-   is read top to bottom, so what belongs to all of it stands on its own line
-   rather than among the controls of one of its parts. */
-.story-step-heading {
+/* A band of a step's head: what it says on the left, what it is read against
+   on the right — the step's words and the way out of it, the models and the
+   numbers they are asked with, the step's own choices and its buttons. */
+.story-step-bar {
   align-items: center;
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   justify-content: space-between;
+}
+
+/* What a band reads against keeps to its right edge even when a narrow page
+   has wrapped it onto a line of its own: a field is at the far end of its
+   row, not at the start of the next one. */
+.story-step-bar > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+
+/* The words of a step take the room their band has left rather than the whole
+   band: the far end of the row stays on the first line, beside the words, and
+   the words themselves are what wraps. */
+.story-step-lead {
+  color: var(--muted);
+  flex: 1 1 0;
+  margin: 0;
 }
 
 /* Taking the telling into another room: a way out of the step rather than a
@@ -5665,9 +5679,9 @@ body.is-dragging-split {
   color: var(--ink);
 }
 
-/* The models a step's buttons will ask, under the words that say what the step
-   is for. A row rather than a panel: it is read on the way to the button, and
-   each picker is as wide as the name of the model chosen in it. */
+/* The models a step's buttons will ask: one picker per kind of work, each as
+   wide as the name of the model chosen in it, standing on the band under the
+   words that say what the step is for. */
 .story-models {
   align-items: end;
   display: flex;
@@ -5936,25 +5950,21 @@ body.is-dragging-split {
 .story-step-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: flex-end;
   padding-top: 4px;
 }
 
-/* The one press a step has, under the words that say what the step is for:
-   what settles the step and opens the next. What is missing, when something
-   is, is listed under it rather than said in a passing toast. */
-.story-confirm {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.story-confirm > .story-hint {
-  flex: 1;
-  min-width: 0;
+/* The press that settles a step: last in the row the step's own buttons are
+   in, and set apart from them — filled where they are outlined, since it is
+   the one thing a step does not move past. What is missing, when something
+   is, is listed under the row rather than said in a passing toast. */
+.story-confirm-button {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
 }
 
 .story-confirm-gaps {
@@ -5964,14 +5974,6 @@ body.is-dragging-split {
 /* ---------------------------------------------------------------------------
    Step two: the outline
    --------------------------------------------------------------------------- */
-
-.story-outline-bar {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  justify-content: space-between;
-}
 
 .story-outline-count {
   align-items: center;
@@ -6173,23 +6175,6 @@ body.is-dragging-split {
 /* ---------------------------------------------------------------------------
    Step three: the elements, and the places their pictures live in
    --------------------------------------------------------------------------- */
-
-.story-step-wide {
-  display: grid;
-  gap: 22px;
-  margin: 0 auto;
-  max-width: 1100px;
-  padding-bottom: 24px;
-  width: 100%;
-}
-
-.story-elements-bar {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  justify-content: space-between;
-}
 
 .story-elements {
   display: grid;
@@ -6676,7 +6661,6 @@ button > .story-spin {
 .story-granularity {
   display: inline-flex;
   gap: 4px;
-  margin-left: auto;
 }
 
 .story-board-head {

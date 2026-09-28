@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Capability } from "../../../shared/domain";
 import { ModelPicker } from "../../settings/ModelPicker";
@@ -27,20 +26,14 @@ const CAPABILITY_OF_PLACE: Record<StoryAskPlace, Capability> = {
 /**
  * The models the buttons below will ask.
  *
- * One picker per kind of work the step does, standing between the words that
- * say what the step is for and the buttons that ask for it: which model answers
- * is settled before the ask rather than discovered after it. Nothing picked is
- * the deployment's default, and the pickers are kept per place — a telling's
- * score is not its voice, even when one model does both.
+ * One picker per kind of work the step does, standing on the band under the
+ * words that say what the step is for and beside the numbers the step asks
+ * with: which model answers is settled before the ask rather than discovered
+ * after it. Nothing picked is the deployment's default, and the pickers are
+ * kept per place — a telling's score is not its voice, even when one model
+ * does both.
  */
-export function StoryModelPicks({
-  places,
-  children,
-}: {
-  places: StoryAskPlace[];
-  /** A control that belongs beside the picks, in the same row. */
-  children?: ReactNode;
-}) {
+export function StoryModelPicks({ places }: { places: StoryAskPlace[] }) {
   const { t } = useTranslation();
   const choices = useStoryModels((state) => state.choices);
 
@@ -75,7 +68,6 @@ export function StoryModelPicks({
           </div>
         ),
       )}
-      {children}
     </div>
   );
 }

@@ -88,9 +88,6 @@
   },
   "confirm": {
     "button": "Confirm content",
-    "hint": "Check that this step has everything it needs; confirming opens the next step.",
-    "settled": "This step is settled — the next one is open.",
-    "finished": "Everything this telling needs is settled.",
     "gapIdea": "The premise is not written yet: write at least {{min}} characters, or upload a manuscript.",
     "gapNoChapters": "There are no chapters yet: set how many episodes and write them.",
     "gapChapters": "{{count}} chapters still have no title or synopsis (chapter {{list}}).",

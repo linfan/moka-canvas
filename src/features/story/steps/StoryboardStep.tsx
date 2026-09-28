@@ -23,7 +23,6 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryModelPicks } from "../components/StoryModelPicks";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { StepConfirm } from "../components/StepConfirm";
-import { StepHeading } from "../components/StepHeading";
 import { ActCard } from "../panels/ActCard";
 import { writeActs } from "../panels/writeBoard";
 import { chapterGuesses } from "../jobs/apply";
@@ -204,7 +203,6 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
           className="clip-empty clip-empty-first"
           data-testid="story-board-nochapters"
         >
-          <h2>{t("story:step.storyboard")}</h2>
           <p>{t("story:storyboard.noChapters")}</p>
           <button
             className="primary"
@@ -229,36 +227,18 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
   return (
     <div className="story-step-scroll" data-testid="story-step-storyboard-body">
       <div className="story-step-wide">
-        <StepHeading
-          action={<StoryImportButton story={story} target="canvas" />}
-          step="storyboard"
-        />
-        <p className="story-step-lead">{t("story:storyboard.lead")}</p>
-        <StepConfirm step="storyboard" story={story} />
-        <StoryModelPicks places={["text", "image", "video", "audio", "music"]}>
+        <div className="story-step-bar">
+          <p className="story-step-lead">{t("story:storyboard.lead")}</p>
+          <StoryImportButton story={story} target="canvas" />
+        </div>
+        <div className="story-step-bar">
+          <StoryModelPicks
+            places={["text", "image", "video", "audio", "music"]}
+          />
           <ReferenceLimitField story={story} />
-        </StoryModelPicks>
+        </div>
 
-        <div className="story-chapter-strip" role="tablist">
-          {story.chapters.map((held, at) => {
-            const state = boardState(held, story.shotGranularity);
-            return (
-              <button
-                aria-selected={held.id === chapter.id}
-                className={`story-choice${held.id === chapter.id ? " is-on" : ""}`}
-                data-testid={`story-board-chapter-${at}`}
-                key={held.id}
-                onClick={() => useStoryStore.getState().openChapter(held.id)}
-                role="tab"
-                type="button"
-              >
-                {at + 1}. {held.title}
-                <span className="story-hint">
-                  {t(state.key, state.values ?? {})}
-                </span>
-              </button>
-            );
-          })}
+        <div className="story-step-bar">
           <span
             aria-label={t("story:storyboard.granularity")}
             className="story-granularity"
@@ -278,33 +258,32 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
               </button>
             ))}
           </span>
-        </div>
-
-        <div className="story-board-head">
-          <span className="story-board-name">
-            {t("story:storyboard.chapterAt", {
-              number: index + 1,
-              title: chapter.title,
-            })}
-          </span>
-          <span className="story-count" data-testid="story-board-target">
-            {t("story:storyboard.target", {
-              duration: formatDuration(chapter.targetDurationMs),
-            })}
-          </span>
-          <span className="story-hint" data-testid="story-board-settled">
-            {t("story:storyboard.settled", {
-              done: completeActs,
-              total: actsTotal,
-            })}
-          </span>
           <div className="story-step-actions">
-            {chapter.acts.some(
-              (act) => act.voice !== undefined || act.music !== undefined,
-            ) && (
-              <span className="story-hint" data-testid="story-board-sound">
-                {t("story:storyboard.soundReady")}
-              </span>
+            {missingFrames.length > 0 && (
+              <button
+                data-testid="story-board-draw-missing"
+                onClick={() =>
+                  void run(
+                    story.id,
+                    "keyframeArt",
+                    planKeyframeArt(story, missingFrames),
+                  )
+                }
+                type="button"
+              >
+                {t("story:storyboard.drawAllMissing", {
+                  count: missingFrames.length,
+                })}
+              </button>
+            )}
+            {boardable.length >= 2 && (
+              <button
+                data-testid="story-board-all"
+                onClick={() => void boardAll()}
+                type="button"
+              >
+                {t("story:storyboard.generateAll", { count: boardable.length })}
+              </button>
             )}
             <button
               className="primary"
@@ -331,36 +310,60 @@ export function StoryboardStep({ story }: { story: StoryDocument }) {
                   : "story:storyboard.generate",
               )}
             </button>
-            {boardable.length >= 2 && (
-              <button
-                data-testid="story-board-all"
-                onClick={() => void boardAll()}
-                type="button"
-              >
-                {t("story:storyboard.generateAll", { count: boardable.length })}
-              </button>
-            )}
+            <StepConfirm step="storyboard" story={story} />
           </div>
         </div>
 
-        <div className="story-step-actions">
-          {missingFrames.length > 0 && (
-            <button
-              data-testid="story-board-draw-missing"
-              onClick={() =>
-                void run(
-                  story.id,
-                  "keyframeArt",
-                  planKeyframeArt(story, missingFrames),
-                )
-              }
-              type="button"
-            >
-              {t("story:storyboard.drawAllMissing", {
-                count: missingFrames.length,
-              })}
-            </button>
+        <div className="story-chapter-strip" role="tablist">
+          {story.chapters.map((held, at) => {
+            const state = boardState(held, story.shotGranularity);
+            return (
+              <button
+                aria-selected={held.id === chapter.id}
+                className={`story-choice${held.id === chapter.id ? " is-on" : ""}`}
+                data-testid={`story-board-chapter-${at}`}
+                key={held.id}
+                onClick={() => useStoryStore.getState().openChapter(held.id)}
+                role="tab"
+                type="button"
+              >
+                {at + 1}. {held.title}
+                <span className="story-hint">
+                  {t(state.key, state.values ?? {})}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="story-board-head">
+          <span className="story-board-name">
+            {t("story:storyboard.chapterAt", {
+              number: index + 1,
+              title: chapter.title,
+            })}
+          </span>
+          <span className="story-count" data-testid="story-board-target">
+            {t("story:storyboard.target", {
+              duration: formatDuration(chapter.targetDurationMs),
+            })}
+          </span>
+          <span className="story-hint" data-testid="story-board-settled">
+            {t("story:storyboard.settled", {
+              done: completeActs,
+              total: actsTotal,
+            })}
+          </span>
+          {chapter.acts.some(
+            (act) => act.voice !== undefined || act.music !== undefined,
+          ) && (
+            <span className="story-hint" data-testid="story-board-sound">
+              {t("story:storyboard.soundReady")}
+            </span>
           )}
+        </div>
+
+        <div className="story-step-actions">
           {totalWaves > 1 && (running !== null || waves.length > 0) && (
             <span className="story-hint" data-testid="story-board-wave">
               {t("story:outline.wave", {
