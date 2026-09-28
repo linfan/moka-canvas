@@ -5646,8 +5646,19 @@ body.is-dragging-split {
   justify-content: space-between;
 }
 
+/* What a band reads against keeps to its right edge even when a narrow page
+   has wrapped it onto a line of its own: a field is at the far end of its
+   row, not at the start of the next one. */
+.story-step-bar > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+
+/* The words of a step take the room their band has left rather than the whole
+   band: the far end of the row stays on the first line, beside the words, and
+   the words themselves are what wraps. */
 .story-step-lead {
   color: var(--muted);
+  flex: 1 1 0;
   margin: 0;
 }
 
