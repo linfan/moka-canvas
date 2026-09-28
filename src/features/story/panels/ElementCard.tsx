@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import {
   STORY_NAME_MAX,
   currentTake,
+  elementOf,
+  slotWithoutTake,
   slotWithCurrent,
 } from "../../../shared/domain";
 import type {
@@ -19,6 +21,7 @@ import { planElementArt } from "../jobs/plan";
 import { useStoryRun } from "../stores/storyJobStore";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { frameRatio } from "./ratios";
+import { liveStory, removeOldTake, type TakeDrop } from "./removeOldTake";
 import { StorySlotView } from "./StorySlotView";
 import { useField } from "./useField";
 
@@ -83,6 +86,11 @@ export function ElementCard({
           label={t("story:elements.main")}
           onChoose={(assetId) => choose(story, element, "main", assetId)}
           onGenerate={() => generate("main")}
+          onRemove={(assetId) =>
+            removeOldTake(assetId, () =>
+              dropTake(story, element.id, "main", assetId),
+            )
+          }
           ratio={ratio}
           slot={element.main}
           testId="story-slot-main"
@@ -100,6 +108,11 @@ export function ElementCard({
               choose(story, element, "turnaround", assetId)
             }
             onGenerate={() => generate("turnaround")}
+            onRemove={(assetId) =>
+              removeOldTake(assetId, () =>
+                dropTake(story, element.id, "turnaround", assetId),
+              )
+            }
             ratio="1 / 1"
             slot={element.turnaround ?? EMPTY_SLOT}
             testId="story-slot-turnaround"
@@ -272,8 +285,8 @@ function writeSlot(
   element: StoryElement,
   view: "main" | "turnaround",
   slot: StorySlot,
-): void {
-  execute(i18n.t("story:history.elements"), [
+) {
+  return execute(i18n.t("story:history.elements"), [
     {
       type: "setStorySlot",
       storyId: story.id,
@@ -293,6 +306,30 @@ function choose(
   const slot = view === "main" ? element.main : element.turnaround;
   if (slot === undefined) return;
   writeSlot(story, element, view, slotWithCurrent(slot, assetId));
+}
+
+/**
+ * One of an element's drawings dropped from its place, as the live document
+ * holds that place: a slot is written whole, so a slot read off the card's
+ * render would put back whatever a job landed while the picks dialog stood
+ * open.
+ */
+function dropTake(
+  story: StoryDocument,
+  elementId: string,
+  view: "main" | "turnaround",
+  assetId: string,
+): TakeDrop {
+  const live = liveStory(story.id);
+  const element = live === undefined ? undefined : elementOf(live, elementId);
+  const slot = view === "main" ? element?.main : element?.turnaround;
+  if (live === undefined || element === undefined || slot === undefined)
+    return "gone";
+  const without = slotWithoutTake(slot, assetId);
+  if (without === slot) return "gone";
+  return writeSlot(live, element, view, without) === null
+    ? "refused"
+    : "dropped";
 }
 
 /** Takes an element out of the story, leaving the pictures it was drawn in. */

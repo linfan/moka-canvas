@@ -21,14 +21,6 @@ use crate::metadata::{
 
 use super::error::ProviderError;
 
-/// The model created on a first run, so Settings opens on a filled-in form
-/// rather than an empty list. It carries no credential, which is what makes
-/// it safe to create without asking.
-pub const SEED_MODEL_ID: &str = "gpt-4o-mini";
-const SEED_DISPLAY_NAME: &str = "GPT-4o mini (OpenAI)";
-const SEED_MODEL_NAME: &str = "gpt-4o-mini";
-const SEED_URL: &str = "https://api.openai.com/v1/chat/completions";
-
 /// The separator an old `channelId::modelId` reference used. Identifiers are
 /// refused when they contain it, so a stored reference can never be ambiguous
 /// about which half is missing.
@@ -383,30 +375,6 @@ impl ModelRepo {
             .ok_or_else(|| ProviderError::KeyMissing {
                 model: config_id.to_string(),
             })
-    }
-
-    /// Creates the starter model on a first run.
-    ///
-    /// Guarded by the document still being untouched: a configuration the user
-    /// deliberately deleted must not come back on the next launch.
-    pub async fn seed(&self) -> Result<bool, ProviderError> {
-        let snapshot = self.metadata.models_snapshot().await?;
-        if snapshot.revision != 0 || !snapshot.models.is_empty() {
-            return Ok(false);
-        }
-        let draft = ModelDraft {
-            id: SEED_MODEL_ID.to_string(),
-            category: Capability::Text,
-            protocol: Protocol::from_wire_name("openaiChat"),
-            url: SEED_URL.to_string(),
-            model: SEED_MODEL_NAME.to_string(),
-            display_name: SEED_DISPLAY_NAME.to_string(),
-            max_video_seconds: None,
-            enabled: true,
-            expected_revision: Some(snapshot.revision),
-        };
-        self.metadata.upsert_model(&draft).await?;
-        Ok(true)
     }
 }
 

@@ -50,7 +50,6 @@ impl LocalServer {
         );
 
         let state = ApiState::new(config, mode, metadata_root)?;
-        seed_starter_model(&state).await;
         crate::converter::deploy::ensure_deployed(state.converter_root())
             .await
             .unwrap_or_else(|error| {
@@ -96,29 +95,6 @@ impl LocalServer {
 impl Drop for LocalServer {
     fn drop(&mut self) {
         self.shutdown();
-    }
-}
-
-/// Gives a first launch a model to fill in instead of an empty list.
-///
-/// A failure is logged rather than fatal. The editor is usable without it —
-/// Settings creates the same model by hand — so refusing to start over a
-/// missing starter row would trade a cosmetic gap for an app that does not
-/// open at all.
-async fn seed_starter_model(state: &ApiState) {
-    match state.models.seed().await {
-        Ok(true) => tracing::info!(
-            target: "moka::models",
-            model = crate::generate::models::SEED_MODEL_ID,
-            "created the starter model configuration"
-        ),
-        Ok(false) => {}
-        Err(error) => tracing::warn!(
-            target: "moka::models",
-            code = error.code(),
-            error = %error,
-            "could not create the starter model configuration"
-        ),
     }
 }
 

@@ -33,6 +33,8 @@ import {
 import { capabilityServes } from "./factories";
 import { STORY_ASPECTS } from "./types";
 import type {
+  AssetHolder,
+  AssetId,
   CanvasDocument,
   DataType,
   EdgeEndpoint,
@@ -46,12 +48,14 @@ import type {
   ResultSlot,
   StoryDocument,
   StorySlot,
+  StorySlotTarget,
   StoryTake,
   ValidationIssue,
   WorkflowEdge,
   WorkflowNode,
 } from "./types";
 import { folderDepth, foldersOf } from "./folders";
+import { currentTake } from "./story";
 import { validateTimeline } from "./timeline";
 import { i18n } from "../i18n";
 
@@ -278,6 +282,32 @@ export function topologicalOrder(canvas: CanvasDocument): WorkflowNode[] {
 }
 
 /**
+ * The files one card points at.
+ *
+ * All of them, not only the one it shows: a card asked several times over
+ * keeps its first answer and holds the rest in slots beside it, and a video
+ * keeps the still that stands for it.
+ */
+export function nodeAssetIds(node: WorkflowNode): AssetId[] {
+  // Read as a record rather than as one arm of the union: which of these a
+  // card carries depends on its kind, and a group carries none of them. Asking
+  // each in turn is the same question asked of every kind at once, and cannot
+  // go out of step with a kind that gains a way of holding a file.
+  const data = node.data as {
+    assetId?: AssetId;
+    posterAssetId?: AssetId;
+    resultSlots?: { assetId?: AssetId }[];
+  };
+  const ids: AssetId[] = [];
+  if (data.assetId) ids.push(data.assetId);
+  if (data.posterAssetId) ids.push(data.posterAssetId);
+  for (const slot of data.resultSlots ?? []) {
+    if (slot.assetId) ids.push(slot.assetId);
+  }
+  return ids;
+}
+
+/**
  * What points at each asset, as a list of the cards and clips that do.
  *
  * Both halves of a document hold assets — a canvas node shows one, a timeline
@@ -298,13 +328,7 @@ export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
   };
   for (const canvas of moka.canvas) {
     for (const node of canvas.nodes) {
-      const data = node.data as Record<string, unknown>;
-      add(data.assetId as string | undefined, node.id);
-      add(data.posterAssetId as string | undefined, node.id);
-      const slots = data.resultSlots as { assetId?: string }[] | undefined;
-      if (Array.isArray(slots)) {
-        for (const slot of slots) add(slot.assetId, node.id);
-      }
+      for (const assetId of nodeAssetIds(node)) add(assetId, node.id);
     }
   }
   for (const timeline of moka.timelines ?? []) {
@@ -337,6 +361,123 @@ export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
     }
   }
   return refs;
+}
+
+/** Every slot a story holds, with the target that names it. */
+function storySlots(
+  story: StoryDocument,
+): { target: StorySlotTarget; slot: StorySlot }[] {
+  const places: { target: StorySlotTarget; slot: StorySlot }[] = [];
+  for (const element of story.elements) {
+    places.push({
+      target: { kind: "element", elementId: element.id, view: "main" },
+      slot: element.main,
+    });
+    if (element.turnaround) {
+      places.push({
+        target: { kind: "element", elementId: element.id, view: "turnaround" },
+        slot: element.turnaround,
+      });
+    }
+  }
+  for (const chapter of story.chapters) {
+    for (const act of chapter.acts) {
+      places.push({
+        target: { kind: "actVideo", chapterId: chapter.id, actId: act.id },
+        slot: act.video,
+      });
+      if (act.voice) {
+        places.push({
+          target: { kind: "actVoice", chapterId: chapter.id, actId: act.id },
+          slot: act.voice,
+        });
+      }
+      if (act.music) {
+        places.push({
+          target: { kind: "actMusic", chapterId: chapter.id, actId: act.id },
+          slot: act.music,
+        });
+      }
+      for (const keyframe of act.keyframes) {
+        places.push({
+          target: {
+            kind: "keyframe",
+            chapterId: chapter.id,
+            actId: act.id,
+            keyframeId: keyframe.id,
+          },
+          slot: keyframe.art,
+        });
+        places.push({
+          target: {
+            kind: "keyframeVideo",
+            chapterId: chapter.id,
+            actId: act.id,
+            keyframeId: keyframe.id,
+          },
+          slot: keyframe.video,
+        });
+      }
+    }
+  }
+  return places;
+}
+
+/**
+ * Everything pointing at one file, told apart by kind.
+ *
+ * The same pointing-at that `collectAssetReferences` gathers, kept as whole
+ * holders rather than ids, because what a delete does with each is different:
+ * a card and a place's old drawing are taken out of what holds them, and the
+ * rest are named. A place is one answer per place and not per take — dropping
+ * a file from a slot lets every take holding it go at once — and the place
+ * that is using the file is told from the ones that are not, since only the
+ * latter may be emptied.
+ */
+export function assetHolders(moka: MokaFile, assetId: AssetId): AssetHolder[] {
+  const holders: AssetHolder[] = [];
+  for (const canvas of moka.canvas) {
+    for (const node of canvas.nodes) {
+      if (nodeAssetIds(node).includes(assetId)) {
+        holders.push({ kind: "node", canvasId: canvas.id, nodeId: node.id });
+      }
+    }
+  }
+  for (const timeline of moka.timelines ?? []) {
+    for (const clip of timeline.clips) {
+      if (clip.assetId === assetId) {
+        holders.push({
+          kind: "clip",
+          timelineId: timeline.id,
+          timelineName: timeline.name,
+          clipId: clip.id,
+          clipLabel: clip.label,
+        });
+      }
+    }
+  }
+  for (const story of moka.stories ?? []) {
+    const where = { storyId: story.id, storyName: story.name };
+    if (story.brief.sourceAssetId === assetId) {
+      holders.push({ ...where, kind: "storyFile", what: "manuscript" });
+    }
+    if (story.edit.film?.assetIds.includes(assetId)) {
+      holders.push({ ...where, kind: "storyFile", what: "film" });
+    }
+    for (const place of storySlots(story)) {
+      const held = place.slot.takes.some((take) =>
+        take.assetIds.includes(assetId),
+      );
+      if (!held) continue;
+      const inUse = currentTake(place.slot)?.assetIds.includes(assetId);
+      holders.push({
+        ...where,
+        kind: inUse === true ? "drawingInUse" : "drawing",
+        target: place.target,
+      });
+    }
+  }
+  return holders;
 }
 
 export function allResources(moka: MokaFile): ResourceEntry[] {

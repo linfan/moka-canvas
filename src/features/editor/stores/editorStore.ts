@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  AssetDrawing,
   AssetId,
   AssetKind,
   EdgeId,
@@ -180,8 +181,18 @@ interface EditorState {
   promptPanel: { nodeId: NodeId; focus: boolean } | null;
   /** Inspector "replace input" pick mode: choosing a new source node. */
   inputPick: { nodeId: NodeId; portId: string } | null;
-  /** Confirmation for deleting an asset still referenced by nodes. */
-  assetDeletePrompt: { assetId: AssetId; nodeIds: NodeId[] } | null;
+  /**
+   * Confirmation for deleting an asset something still holds.
+   *
+   * The two holders a delete can empty, listed whole: the cards to take the
+   * file out of, and the story places keeping it as a drawing they are not
+   * using. A file held by nothing opens no prompt.
+   */
+  assetDeletePrompt: {
+    assetId: AssetId;
+    nodeIds: NodeId[];
+    drawings: AssetDrawing[];
+  } | null;
   /** Full-preview dialog for an asset (image/video). */
   previewAssetId: AssetId | null;
   /** The keyboard help dialog. */
@@ -250,6 +261,7 @@ interface EditorState {
   openAssetDeletePrompt: (prompt: {
     assetId: AssetId;
     nodeIds: NodeId[];
+    drawings: AssetDrawing[];
   }) => void;
   closeAssetDeletePrompt: () => void;
   openPreview: (assetId: AssetId) => void;

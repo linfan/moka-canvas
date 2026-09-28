@@ -54,6 +54,7 @@ import { PromptPanel } from "./components/PromptPanel";
 import { RunHint } from "./components/RunHint";
 import { NodeActionBar } from "./components/NodeActionBar";
 import { SelectionActionBar } from "./components/SelectionActionBar";
+import { VideoCardOverlays } from "./components/VideoCardOverlays";
 import { DescribeDialog } from "./components/DescribeDialog";
 import { PictureToolDialog } from "./components/PictureToolDialog";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
@@ -270,6 +271,7 @@ export function EditorPage() {
           }}
         >
           <CanvasSurface />
+          <VideoCardOverlays />
           <NodeActionBar />
           <SelectionActionBar />
           <RenameOverlay />

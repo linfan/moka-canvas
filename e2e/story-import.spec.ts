@@ -158,12 +158,12 @@ test("a telling is imported into a board, and into a cut of its own", async ({
       timeout: 30_000,
     });
     await firstAct.getByTestId("story-act-draw-0").click();
-    await expect(firstAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
-      { timeout: 60_000 },
-    );
-    await expect(firstAct.getByTestId("story-kf-slot-1").locator("img")).toBeVisible(
-      { timeout: 60_000 },
-    );
+    await expect(
+      firstAct.getByTestId("story-kf-slot-0").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(
+      firstAct.getByTestId("story-kf-slot-1").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
     await firstAct.getByTestId("story-act-video-go-0").click();
     await expect(firstAct.getByTestId("story-act-video-0")).toBeVisible({
       timeout: 60_000,
@@ -179,9 +179,9 @@ test("a telling is imported into a board, and into a cut of its own", async ({
 
     const secondAct = page.getByTestId("story-act-1");
     await secondAct.getByTestId("story-act-draw-1").click();
-    await expect(secondAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
-      { timeout: 60_000 },
-    );
+    await expect(
+      secondAct.getByTestId("story-kf-slot-0").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
     await secondAct.getByTestId("story-act-video-go-1").click();
     await expect(secondAct.getByTestId("story-act-video-1")).toBeVisible({
       timeout: 60_000,
@@ -268,9 +268,7 @@ test("a telling is imported into a board, and into a cut of its own", async ({
       "audio",
       "audio",
     ]);
-    expect(handed.clips.map((clip) => clip.startMs)).toEqual([
-      0, 1_000, 0, 0,
-    ]);
+    expect(handed.clips.map((clip) => clip.startMs)).toEqual([0, 1_000, 0, 0]);
     // The telling itself assembled nothing: this cut is the reader's own.
     expect(handed.assembled).toBeUndefined();
   } finally {

@@ -10,6 +10,8 @@ import {
   STORY_SHOT_SIZES,
   createKeyframe,
   currentTake,
+  keyframeAt,
+  slotWithoutTake,
   slotWithCurrent,
   storyMentions,
   type StoryGuess,
@@ -34,6 +36,7 @@ import {
 import { useStoryRun } from "../stores/storyJobStore";
 import { KeyframeContentField, type MentionKind } from "./KeyframeContentField";
 import { frameRatio } from "./ratios";
+import { liveStory, removeOldTake, type TakeDrop } from "./removeOldTake";
 import { StoryLightbox } from "./StoryLightbox";
 import { StorySlotView } from "./StorySlotView";
 import { useField } from "./useField";
@@ -348,6 +351,11 @@ function KeyframeRow({
               keepFrame(story, chapterId, act, keyframe, assetId)
             }
             onGenerate={draw}
+            onRemove={(assetId) =>
+              removeOldTake(assetId, () =>
+                dropFrame(story, chapterId, act, keyframe, assetId),
+              )
+            }
             ratio={frameRatio(story)}
             slot={keyframe.art}
             testId={`story-kf-slot-${index}`}
@@ -752,8 +760,8 @@ function writeFrame(
   act: StoryAct,
   keyframe: StoryKeyframe,
   slot: StorySlot,
-): void {
-  execute(i18n.t("story:history.storyboard"), [
+) {
+  return execute(i18n.t("story:history.storyboard"), [
     {
       type: "setStorySlot",
       storyId: story.id,
@@ -766,6 +774,35 @@ function writeFrame(
       slot,
     },
   ]);
+}
+
+/**
+ * One shot's old drawing dropped from its place, as the live document holds
+ * that place: a slot is written whole, so a slot read off the table's render
+ * would put back whatever a job landed while the picks dialog stood open.
+ */
+function dropFrame(
+  story: StoryDocument,
+  chapterId: string,
+  act: StoryAct,
+  keyframe: StoryKeyframe,
+  assetId: string,
+): TakeDrop {
+  const live = liveStory(story.id);
+  const frame =
+    live === undefined
+      ? undefined
+      : keyframeAt(live, {
+          chapterId,
+          actId: act.id,
+          keyframeId: keyframe.id,
+        });
+  if (live === undefined || frame === undefined) return "gone";
+  const without = slotWithoutTake(frame.art, assetId);
+  if (without === frame.art) return "gone";
+  return writeFrame(live, chapterId, act, frame, without) === null
+    ? "refused"
+    : "dropped";
 }
 
 /** Keeps the frame a reader picked, letting the older ones go on being there. */

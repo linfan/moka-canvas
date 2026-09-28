@@ -880,10 +880,13 @@ impl ProjectStore for FsProjectStore {
             .as_mut()
             .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?;
         let references = state.moka.asset_references();
-        if references.contains_key(id) {
+        if let Some(held) = references.get(id) {
+            // Where it is held is the client's to say, in the reader's own
+            // language: it knows which of the holds the reader can empty, and
+            // this guard only knows the document still points at the file.
             return Err(ProjectError::domain(
                 "ASSET_IN_USE",
-                "The asset is referenced by canvas nodes",
+                format!("The asset is still in use ({} places)", held.len()),
             ));
         }
         let mut next = state.moka.clone();

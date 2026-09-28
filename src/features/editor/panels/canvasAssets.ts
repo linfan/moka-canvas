@@ -7,9 +7,8 @@ import type {
   MokaFile,
   NodeId,
   ResourceEntry,
-  WorkflowNode,
 } from "../../../shared/domain";
-import { PROJECT_ASSET_CATEGORIES } from "../../../shared/domain";
+import { PROJECT_ASSET_CATEGORIES, nodeAssetIds } from "../../../shared/domain";
 import { SHELF_KINDS, kindOfShelf } from "./shelfFilter";
 
 /**
@@ -26,33 +25,6 @@ import { SHELF_KINDS, kindOfShelf } from "./shelfFilter";
 export function shelfOf(entry: ResourceEntry): AssetCategory | null {
   const category = entry.path.split("/")[1];
   return PROJECT_ASSET_CATEGORIES.find((shelf) => shelf === category) ?? null;
-}
-
-/**
- * The assets one card points at.
- *
- * All of them, not only the one it shows: a card asked several times over keeps
- * its first answer and holds the rest in slots beside it, and a video keeps the
- * still that stands for it. What a board uses is everything it would take to
- * draw the cards as they are.
- */
-function nodeAssetIds(node: WorkflowNode): AssetId[] {
-  // Read as a record rather than as one arm of the union: which of these a card
-  // carries depends on its kind, and a group carries none of them. Asking each
-  // in turn is the same question asked of every kind at once, and cannot go out
-  // of step with a kind that gains a way of holding a file.
-  const data = node.data as {
-    assetId?: AssetId;
-    posterAssetId?: AssetId;
-    resultSlots?: { assetId?: AssetId }[];
-  };
-  const ids: AssetId[] = [];
-  if (data.assetId) ids.push(data.assetId);
-  if (data.posterAssetId) ids.push(data.posterAssetId);
-  for (const slot of data.resultSlots ?? []) {
-    if (slot.assetId) ids.push(slot.assetId);
-  }
-  return ids;
 }
 
 /** The assets a board's cards point at, once each, in the order held. */

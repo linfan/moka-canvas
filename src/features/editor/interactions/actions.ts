@@ -5,15 +5,22 @@ import {
   GROUP_DETACH_THRESHOLD_PX,
   MAX_TEXT_CONTENT_LENGTH,
   MOKA_FRAGMENT_MIME,
+  assetHolders,
   createNode,
   defaultGenerationSpec,
+  elementOf,
   findNode,
   findResource,
   generationCapabilityFor,
+  keyframeAt,
   newId,
   nowIso,
   portTypesIntersect,
+  slotAt,
+  slotWithoutTake,
   validateEdgeCandidate,
+  type AssetDrawing,
+  type AssetHolder,
   type AssetId,
   type BackgroundMode,
   type CanvasDocument,
@@ -21,6 +28,7 @@ import {
   type DocumentCommand,
   type EdgeId,
   type GenerationSpec,
+  type MokaFile,
   type NodeData,
   type NodeId,
   type NodeKind,
@@ -28,6 +36,8 @@ import {
   type Rect,
   type ResultSlot,
   type ResourceEntry,
+  type StoryDocument,
+  type StorySlotTarget,
   type WorkflowNode,
 } from "../../../shared/domain";
 import { assetsApi, assetUrl, type AssetShelfEdit } from "../../../api";
@@ -956,16 +966,9 @@ export function resolveInputPick(sourceNodeId: NodeId) {
 export function assetReferencingNodeIds(assetId: string): NodeId[] {
   const { moka } = useProjectStore.getState();
   if (!moka) return [];
-  const ids: NodeId[] = [];
-  for (const canvas of moka.canvas) {
-    for (const node of canvas.nodes) {
-      const data = node.data as { assetId?: string; posterAssetId?: string };
-      if (data.assetId === assetId || data.posterAssetId === assetId) {
-        ids.push(node.id);
-      }
-    }
-  }
-  return ids;
+  return assetHolders(moka, assetId)
+    .filter((holder) => holder.kind === "node")
+    .map((holder) => holder.nodeId);
 }
 
 /**
@@ -1120,16 +1123,161 @@ export async function fileNodeAsAsset(
 }
 
 /**
- * Delete flow: unreferenced assets go straight to the server; referenced
- * ones open a confirmation that also removes the referencing nodes.
+ * Delete flow: a file nothing holds goes straight to the server; one held by
+ * cards or by a story's old drawings opens a confirmation that lets those go
+ * too; one held by something a delete cannot empty is refused by name.
+ *
+ * What holds a file is read across the whole document, not off the board being
+ * looked at: a file whose only holder is a story drawing looks unreferenced on
+ * the canvas, and the server would refuse the delete for a reason the reader
+ * was never told. The two halves of what can be emptied are gathered here and
+ * emptied together on confirmation, so the ask and the act say the same thing.
  */
 export async function requestDeleteAsset(assetId: string) {
-  const nodeIds = assetReferencingNodeIds(assetId);
-  if (nodeIds.length > 0) {
-    useEditorStore.getState().openAssetDeletePrompt({ assetId, nodeIds });
+  const { moka } = useProjectStore.getState();
+  if (!moka) return;
+  const holders = assetHolders(moka, assetId);
+  const blocking = holders.filter(blocksDelete);
+  if (blocking.length > 0) {
+    toastError(
+      i18n.t("editor:holders.stillUsed", {
+        holders: blocking.map(holderText).join(i18n.t("editor:holders.join")),
+      }),
+    );
+    return;
+  }
+  const nodeIds = holders
+    .filter((holder) => holder.kind === "node")
+    .map((holder) => holder.nodeId);
+  const drawings = holders.filter((holder) => holder.kind === "drawing");
+  if (nodeIds.length > 0 || drawings.length > 0) {
+    useEditorStore
+      .getState()
+      .openAssetDeletePrompt({ assetId, nodeIds, drawings });
     return;
   }
   await removeAssetNow(assetId);
+}
+
+/** What holds a file in a way a delete cannot empty. */
+type BlockingHolder = Extract<
+  AssetHolder,
+  { kind: "drawingInUse" | "clip" | "storyFile" }
+>;
+
+/** Whether letting the file go means changing something a delete may not. */
+function blocksDelete(holder: AssetHolder): holder is BlockingHolder {
+  return (
+    holder.kind === "drawingInUse" ||
+    holder.kind === "clip" ||
+    holder.kind === "storyFile"
+  );
+}
+
+/**
+ * One holder said out loud, for the refusal's list.
+ *
+ * The phrase is the holder's own sentence — what is using the file and where —
+ * so the same holder reads the same wherever it is named.
+ */
+function holderText(holder: BlockingHolder): string {
+  switch (holder.kind) {
+    case "drawingInUse":
+      return i18n.t("editor:holders.drawingInUse", {
+        place: drawingName(holder),
+      });
+    case "clip":
+      return i18n.t("editor:holders.clip", {
+        timeline: holder.timelineName,
+        clip: holder.clipLabel,
+      });
+    case "storyFile":
+      return i18n.t(
+        holder.what === "manuscript"
+          ? "editor:holders.manuscript"
+          : "editor:holders.film",
+        { story: holder.storyName },
+      );
+  }
+}
+
+/**
+ * A story place as a reader knows it: the story's name around the place's.
+ *
+ * The inside of the name is read off the document at the moment it is said
+ * rather than kept in the holder, since a name is the document's to change and
+ * the holder only carries what the delete has to find again — the place, by
+ * its id. A place the document no longer holds is still named, since a holder
+ * is only asked about while the file is held.
+ */
+export function drawingName(drawing: {
+  storyId: string;
+  storyName: string;
+  target: StorySlotTarget;
+}): string {
+  const story = useProjectStore
+    .getState()
+    .moka?.stories?.find((held) => held.id === drawing.storyId);
+  return i18n.t("editor:holders.storyPlace", {
+    story: drawing.storyName,
+    place:
+      story === undefined
+        ? i18n.t("editor:holders.aPlace")
+        : placeName(story, drawing.target),
+  });
+}
+
+/** What a place is called within its own story: its owner, and which part it is. */
+function placeName(story: StoryDocument, target: StorySlotTarget): string {
+  switch (target.kind) {
+    case "element": {
+      const element = elementOf(story, target.elementId);
+      const view = i18n.t(
+        target.view === "main"
+          ? "story:elements.main"
+          : "story:elements.turnaround",
+      );
+      // An unnamed element still has a place: the view is what it is.
+      return element === undefined || element.name === ""
+        ? view
+        : `${element.name} · ${view}`;
+    }
+    case "keyframe":
+    case "keyframeVideo": {
+      const shot = keyframeAt(story, target)?.title ?? "";
+      const what = i18n.t(
+        target.kind === "keyframe"
+          ? "story:storyboard.frame"
+          : "story:storyboard.clip",
+      );
+      return shot === "" ? what : `${shot} · ${what}`;
+    }
+    case "actVideo":
+    case "actVoice":
+    case "actMusic": {
+      const chapter = story.chapters.find(
+        (held) => held.id === target.chapterId,
+      );
+      const at =
+        chapter?.acts.findIndex((held) => held.id === target.actId) ?? -1;
+      const act = at < 0 ? undefined : chapter?.acts[at];
+      // An act nobody has named yet is still the nth of its chapter.
+      const owner =
+        act === undefined
+          ? ""
+          : act.title !== ""
+            ? act.title
+            : i18n.t("story:storyboard.actIndex", { index: at + 1 });
+      const what = i18n.t(
+        target.kind === "actVideo"
+          ? "story:storyboard.clip"
+          : target.kind === "actVoice"
+            ? "story:edit.voiceTrack"
+            : "story:edit.musicTrack",
+      );
+      return owner === "" ? what : `${owner} · ${what}`;
+    }
+  }
 }
 
 async function removeAssetNow(assetId: string) {
@@ -1152,7 +1300,17 @@ async function removeAssetNow(assetId: string) {
   }
 }
 
-/** Confirmed delete: drop the referencing nodes (edges cascade), then the file. */
+/**
+ * Confirmed delete: what holds the file lets it go — the cards that show it,
+ * and the story places keeping it as an old drawing — and then the file.
+ *
+ * The drawings are emptied off the live document rather than off the ask, one
+ * write per place: a place is written whole, and a slot computed from what the
+ * prompt saw would put back whatever a job landed while the ask stood open. A
+ * place that moved on in the meantime is left as it is, and the server then
+ * says what still holds the file — the truth, where the old wording blamed
+ * nodes that were never there.
+ */
 export async function confirmDeleteAsset() {
   const prompt = useEditorStore.getState().assetDeletePrompt;
   useEditorStore.getState().closeAssetDeletePrompt();
@@ -1172,6 +1330,7 @@ export async function confirmDeleteAsset() {
       });
     }
   }
+  commands.push(...dropDrawings(moka, prompt.assetId, prompt.drawings));
   if (
     commands.length > 0 &&
     !execute(i18n.t("editor:history.removeReferencingNodes"), commands)
@@ -1180,6 +1339,35 @@ export async function confirmDeleteAsset() {
   }
   useEditorStore.getState().setSelection({ nodeIds: [], edgeIds: [] });
   await removeAssetNow(prompt.assetId);
+}
+
+/**
+ * The writes that throw a file out of the story places keeping it as an old
+ * drawing.
+ */
+function dropDrawings(
+  moka: MokaFile,
+  assetId: AssetId,
+  drawings: AssetDrawing[],
+): DocumentCommand[] {
+  const commands: DocumentCommand[] = [];
+  for (const drawing of drawings) {
+    const story = (moka.stories ?? []).find(
+      (held) => held.id === drawing.storyId,
+    );
+    const slot =
+      story === undefined ? undefined : slotAt(story, drawing.target);
+    if (!slot) continue;
+    const without = slotWithoutTake(slot, assetId);
+    if (without === slot) continue;
+    commands.push({
+      type: "setStorySlot",
+      storyId: drawing.storyId,
+      target: drawing.target,
+      slot: without,
+    });
+  }
+  return commands;
 }
 
 /** The kind of node a registered asset becomes, read from where it is filed. */

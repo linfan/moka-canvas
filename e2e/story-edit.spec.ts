@@ -118,12 +118,12 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     // Every frame of the act is drawn, and a clip is made once they are: the
     // pictures are what the clip waits on, and nothing is agreed to per piece.
     await firstAct.getByTestId("story-act-draw-0").click();
-    await expect(firstAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
-      { timeout: 60_000 },
-    );
-    await expect(firstAct.getByTestId("story-kf-slot-1").locator("img")).toBeVisible(
-      { timeout: 60_000 },
-    );
+    await expect(
+      firstAct.getByTestId("story-kf-slot-0").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(
+      firstAct.getByTestId("story-kf-slot-1").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
     await firstAct.getByTestId("story-act-video-go-0").click();
     await expect(firstAct.getByTestId("story-act-video-0")).toBeVisible({
       timeout: 60_000,
@@ -144,9 +144,9 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     // press reads before it opens step five.
     const secondAct = page.getByTestId("story-act-1");
     await secondAct.getByTestId("story-act-draw-1").click();
-    await expect(secondAct.getByTestId("story-kf-slot-0").locator("img")).toBeVisible(
-      { timeout: 60_000 },
-    );
+    await expect(
+      secondAct.getByTestId("story-kf-slot-0").locator("img"),
+    ).toBeVisible({ timeout: 60_000 });
     await secondAct.getByTestId("story-act-video-go-1").click();
     await expect(secondAct.getByTestId("story-act-video-1")).toBeVisible({
       timeout: 60_000,

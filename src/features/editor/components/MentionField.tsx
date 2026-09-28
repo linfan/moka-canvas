@@ -10,36 +10,21 @@ import { useTranslation } from "react-i18next";
 import type {
   AssetId,
   CanvasDocument,
-  GenerationSpec,
   ResourceEntry,
-  WorkflowNode,
 } from "../../../shared/domain";
 import { findNode, mentionSpans } from "../../../shared/domain";
+import { mediaInfoForNode, type MediaState } from "../canvas/mediaCards";
 import {
-  mediaInfoForNode,
-  type MediaCardInfo,
-  type MediaState,
-} from "../canvas/mediaCards";
-import {
-  MENTION_HOVER_CHARS,
   mentionBeingTyped,
   mentionToken,
   narrowMentions,
   type MentionChoice,
   type MentionGroup,
 } from "../canvas/mentions";
+import { MentionPreview } from "./MentionPreview";
 
 /** What a chip is found by, and what carries the node it points at. */
 const CHIP_SELECTOR = "[data-node-id]";
-
-/** The mark each kind of node wears when it is mentioned in a sentence. */
-const MENTION_GLYPHS: Record<string, string> = {
-  text: "¶",
-  image: "▣",
-  video: "▶",
-  audio: "♪",
-  group: "▢",
-};
 
 /**
  * The words of a field as one string.
@@ -180,7 +165,11 @@ export function focusEnd(area: HTMLElement): void {
   placeCaret(area, serialize(area).length);
 }
 
-/** A mention drawn: the mark of the kind of node it points at. */
+/**
+ * A mention drawn: the name of the card it points at, written the way a
+ * sentence writes a reference — between ticks, so `` `Plate` `` reads as a
+ * card being named rather than as another word in the line.
+ */
 function chipFor(
   document: Document,
   canvas: CanvasDocument,
@@ -193,12 +182,20 @@ function chipFor(
   chip.dataset.nodeId = nodeId;
   chip.dataset.kind = mentioned?.kind ?? "gone";
   chip.title = mentioned?.title ?? "A node that is gone";
-  const glyph = document.createElement("span");
-  glyph.className = "mention-chip-glyph";
-  glyph.setAttribute("aria-hidden", "true");
-  glyph.textContent = MENTION_GLYPHS[mentioned?.kind ?? ""] ?? "?";
-  chip.appendChild(glyph);
+  const name = document.createElement("span");
+  name.className = "mention-chip-name";
+  name.textContent = mentioned?.title ?? nodeId;
+  chip.append(tick(document, "`"), name, tick(document, "`"));
   return chip;
+}
+
+/** One of the two marks a chip is wrapped in. Decoration, not words. */
+function tick(document: Document, mark: string): HTMLElement {
+  const span = document.createElement("span");
+  span.className = "mention-chip-tick";
+  span.setAttribute("aria-hidden", "true");
+  span.textContent = mark;
+  return span;
 }
 
 /**
@@ -253,43 +250,6 @@ function caretPoint(wrap: HTMLElement): { left: number; top: number } | null {
   };
 }
 
-/** What a chip summons when it is hovered: the picture, or the start of words. */
-function MentionLook({
-  node,
-  media,
-}: {
-  node: WorkflowNode;
-  media: MediaCardInfo | null;
-}) {
-  const data = node.data as { content?: string; generation?: GenerationSpec };
-  // A picture of what the node holds: the plate itself, or a shot's first
-  // frame. An audio has nothing to be seen, so what it was asked for is shown
-  // instead, the way a text shows its own words.
-  const picture =
-    (node.kind === "image" || node.kind === "video") && media?.url
-      ? media.url
-      : null;
-  const words =
-    node.kind === "text"
-      ? (data.content ?? "")
-      : node.kind === "audio"
-        ? (data.generation?.prompt ?? "")
-        : "";
-  const shown = words.replace(/\s+/g, " ").trim();
-  return (
-    <>
-      {picture && <img alt="" className="mention-look-picture" src={picture} />}
-      {shown !== "" && (
-        <p className="mention-look-words">
-          {shown.slice(0, MENTION_HOVER_CHARS)}
-        </p>
-      )}
-      <p className="mention-look-name">{node.title}</p>
-      {media?.label && <p className="mention-look-label">{media.label}</p>}
-    </>
-  );
-}
-
 /** The size a dragged field is held within, so it stays a field. */
 const FIELD_MIN_WIDTH = 220;
 const FIELD_MIN_HEIGHT = 60;
@@ -303,14 +263,15 @@ interface OfferRow {
 
 /**
  * The prompt field, which knows that a mention points at another card rather
- * than being prose, and draws one as a chip wearing the mark of its kind.
+ * than being prose, and draws one as the name of that card between ticks —
+ * the way a sentence written in Markdown refers to something.
  *
  * A rich field rather than a textarea with the tokens shown among the words:
- * a token is forty-four characters across and a chip is not, so the words
- * themselves would spend more room naming a card than the card ever would.
- * The chip is one thing the caret walks over and the backspace takes out
- * whole, and hovering it summons what it points at — the picture, a shot's
- * first frame, or the start of the words.
+ * a token is forty-four characters across and the name it stands for is not,
+ * so the words themselves would spend more room naming a card than the card
+ * ever would. The chip is one thing the caret walks over and the backspace
+ * takes out whole, and hovering it summons what it points at — the picture,
+ * the file to listen to, or the words it holds.
  *
  * What reaches the document is still the token, which is what the resolver
  * reads; the chips are only how the field shows one.
@@ -332,6 +293,7 @@ export function MentionField({
   onSubmit,
   onDismiss,
   onOffer,
+  under,
 }: {
   canvas: CanvasDocument;
   /**
@@ -364,6 +326,12 @@ export function MentionField({
   onFieldResize?: (size: { width: number; height: number }) => void;
   onSubmit: () => void;
   onDismiss: () => void;
+  /**
+   * What stands under the field, inside the same box: what the words point at,
+   * or whatever else belongs with them. Part of the field rather than the
+   * column after it, because the field is the thing that grows with the panel.
+   */
+  under?: React.ReactNode;
   /**
    * The candidate list opened or closed.
    *
@@ -707,6 +675,8 @@ export function MentionField({
         )}
       </div>
 
+      {under}
+
       {hovered && (
         <div
           className="mention-look"
@@ -714,7 +684,7 @@ export function MentionField({
           style={{ left: `${hovered.left}px`, top: `${hovered.top}px` }}
         >
           {looked ? (
-            <MentionLook media={lookedMedia} node={looked} />
+            <MentionPreview media={lookedMedia} node={looked} />
           ) : (
             <p className="mention-look-label">{t("editor:mention.gone")}</p>
           )}

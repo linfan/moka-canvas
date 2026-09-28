@@ -20,6 +20,7 @@ import {
   BACKGROUND_MODES,
   CAPABILITY_LABELS,
   PROVIDER_EXECUTOR_KEY,
+  assetHolders,
   executorKeyForNode,
   generationSpecFromSnapshot,
 } from "../../../shared/domain";
@@ -199,9 +200,9 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
             : ""}
         </p>
       )}
-      {media?.state === "ready" && media.url && entry && (
+      {media?.state === "ready" && entry && (
         <>
-          {node.kind === "image" && (
+          {node.kind === "image" && media.url && (
             <button
               aria-label={t("editor:inspector.openFullPreview")}
               className="inspector-preview"
@@ -211,11 +212,11 @@ function MediaAssetSection({ node }: { node: WorkflowNode }) {
               <img alt={entry.name} src={media.url} />
             </button>
           )}
-          {node.kind === "audio" && (
+          {node.kind === "audio" && media.url && (
             <audio controls preload="metadata" src={media.url} />
           )}
-          {node.kind === "video" && (
-            <video controls preload="metadata" src={media.url} />
+          {node.kind === "video" && media.playable && (
+            <video controls preload="metadata" src={media.playable} />
           )}
         </>
       )}
@@ -1167,17 +1168,20 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
   const keeper = entry.favorite === true;
   const url = assetUrl(entry.id);
   // Counted here rather than taken from the row that was clicked, since the
-  // column reads the file as it stands and not as it stood a click ago.
+  // column reads the file as it stands and not as it stood a click ago. What
+  // the project holds it by is every kind of hold and not only the cards —
+  // a file a story keeps as a drawing is used by the project as much as one a
+  // card shows, and "0" over a file the server refuses to delete is a lie.
   const usesHere = activeCanvas ? canvasNodesUsing(activeCanvas, entry.id) : [];
-  const usesProject =
-    moka?.canvas.reduce(
-      (total, canvas) => total + canvasNodesUsing(canvas, entry.id).length,
-      0,
-    ) ?? 0;
+  const held = moka === null ? 0 : assetHolders(moka, entry.id).length;
   const cards = (count: number) =>
     count === 1
       ? t("editor:inspector.cardsOne", { count })
       : t("editor:inspector.cardsMany", { count });
+  const uses = (count: number) =>
+    count === 1
+      ? t("editor:inspector.usesOne", { count })
+      : t("editor:inspector.usesMany", { count });
 
   return (
     <div className="inspector-asset" data-testid="asset-inspector">
@@ -1254,10 +1258,7 @@ function AssetInspector({ entry }: { entry: ResourceEntry }) {
           label={t("editor:field.onThisCanvas")}
           value={cards(usesHere.length)}
         />
-        <Row
-          label={t("editor:field.inThisProject")}
-          value={cards(usesProject)}
-        />
+        <Row label={t("editor:field.inThisProject")} value={uses(held)} />
       </section>
       {/* What can be done about the file rather than about a card: where it is
           on this machine, the cards made of it, whether it is kept to hand, and

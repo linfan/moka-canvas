@@ -14,6 +14,7 @@ import {
   createChapter,
   createElement,
   createKeyframe,
+  emptyStorySlot,
 } from "./factories";
 import type {
   AssetId,
@@ -770,6 +771,23 @@ export function slotWithCurrent(slot: StorySlot, assetId: string): StorySlot {
   };
 }
 
+/**
+ * A place with one of its drawings thrown away.
+ *
+ * What a reader throws away here is work they no longer need, so the take a
+ * place is keeping is not one of them: letting that one go would leave the
+ * place holding a picture nobody chose, and it is a different act — made by
+ * choosing another take first. A name the place never held, or the one it is
+ * using, leaves the slot exactly as it was.
+ */
+export function slotWithoutTake(slot: StorySlot, assetId: string): StorySlot {
+  const current = currentTake(slot);
+  if (current?.assetIds.includes(assetId)) return slot;
+  const takes = slot.takes.filter((take) => !take.assetIds.includes(assetId));
+  if (takes.length === slot.takes.length) return slot;
+  return { ...slot, takes };
+}
+
 /** The element an id names, if the story still holds it. */
 export function elementOf(
   story: StoryDocument,
@@ -897,6 +915,43 @@ export function keyframeAt(
   return actAt(story, target.chapterId, target.actId)?.keyframes.find(
     (keyframe) => keyframe.id === target.keyframeId,
   );
+}
+
+/**
+ * The slot a place holds, so a take can be added to it or one taken out.
+ *
+ * The two sound slots are absent on a telling that was never voiced, and an
+ * absent place answers as an empty one: the first take ever made for an act is
+ * written into a slot that was not there, which is what a reader pressing the
+ * button for the first time is asking for.
+ */
+export function slotAt(
+  story: StoryDocument,
+  target: StorySlotTarget,
+): StorySlot | undefined {
+  switch (target.kind) {
+    case "element": {
+      const element = elementOf(story, target.elementId);
+      if (element === undefined) return undefined;
+      return target.view === "main" ? element.main : element.turnaround;
+    }
+    case "keyframe":
+      return keyframeAt(story, target)?.art;
+    case "actVideo":
+      return actAt(story, target.chapterId, target.actId)?.video;
+    case "actVoice": {
+      const act = actAt(story, target.chapterId, target.actId);
+      if (act === undefined) return undefined;
+      return act.voice ?? emptyStorySlot();
+    }
+    case "actMusic": {
+      const act = actAt(story, target.chapterId, target.actId);
+      if (act === undefined) return undefined;
+      return act.music ?? emptyStorySlot();
+    }
+    case "keyframeVideo":
+      return keyframeAt(story, target)?.video;
+  }
 }
 
 // -----------------------------------------------------------------------------

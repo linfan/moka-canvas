@@ -262,7 +262,15 @@
     "pickCurrent": "当前",
     "piece": "第 {{index}}/{{total}} 段",
     "pickUndated": "更早的一张",
-    "enlarge": "放大看{{label}}"
+    "enlarge": "放大看{{label}}",
+    "removeOld": "删除{{label}}的一张旧图",
+    "removeAsk": "删除这张旧图？",
+    "removeNote": "文件会从素材库中删除，无法撤销；项目别处还在用的，只从故事里移走。",
+    "removeDo": "删除",
+    "removeKept": "文件仍被别处使用，只从故事里移走了。",
+    "removeUnsettled": "改动尚未保存，文件暂留在素材库。",
+    "removeGone": "这张已经不在列表里了。",
+    "removeFailed": "文件没能删除：{{reason}}"
   },
   "elements": {
     "lead": "这段讲述由什么构成：它跟着的角色、它发生在的场景、它用得上的物品，一条一张卡。",

@@ -1,5 +1,5 @@
 {
-  "assetInUse": "素材仍被画布节点引用，无法删除",
+  "assetInUse": "素材仍在使用中，无法删除",
   "assetInvalid": "素材文件无效或无法读取",
   "assetMissing": "素材文件丢失或未登记",
   "boundsInvalid": "节点的位置或尺寸无效",

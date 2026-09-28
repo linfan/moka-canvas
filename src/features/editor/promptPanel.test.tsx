@@ -432,43 +432,46 @@ describe("the generation panel", () => {
     expect(screen.queryByRole("menuitem", { name: "Generate…" })).toBeNull();
   });
 
-  it("has one fold in place of a choice of modes", async () => {
+  it("offers no mode to choose, only the words themselves", async () => {
     await openEditor();
     selectNode(ids.image);
     await settle();
     expect(within(panel()).queryByRole("group", { name: "Mode" })).toBeNull();
-    // Nothing is wired into this node, so the words are out from the start.
-    const fold = within(panel()).getByRole("button", { name: "Prompt" });
-    expect(fold).toHaveProperty("ariaExpanded", "true");
-
-    fireEvent.click(fold);
-    await settle();
-    expect(fold).toHaveProperty("ariaExpanded", "false");
+    // The field is out and empty from the start, and there is no fold to put
+    // it away: what the ask takes its inputs from follows the words, not a
+    // control beside them.
+    const prompt = within(panel()).getByRole("textbox", {
+      name: "Prompt for Reference image",
+    });
+    expect(prompt.textContent).toBe("");
     expect(
-      within(panel()).queryByRole("textbox", { name: /Prompt for/ }),
+      within(panel()).queryByRole("button", { name: "Prompt" }),
     ).toBeNull();
   });
 
-  it("folds the words away for a node the wiring already feeds", async () => {
+  it("takes what the wiring feeds it until the words name a card", async () => {
     const fed = withFedNode();
     await openEditor();
     selectNode(fed);
     await settle();
-    const fold = within(panel()).getByRole("button", { name: "Prompt" });
-    expect(fold).toHaveProperty("ariaExpanded", "false");
+    // A node the wiring feeds comes up with its words empty and out, the same
+    // as any other: nothing is folded away to be unfolded.
     expect(
-      within(panel()).queryByRole("textbox", { name: /Prompt for/ }),
-    ).toBeNull();
+      within(panel()).getByRole("textbox", { name: /Prompt for/ }).textContent,
+    ).toBe("");
 
-    // An ask written while folded takes what arrives on the wiring.
+    // Nothing written, so the ask is what arrives on the wiring.
     fireEvent.click(within(panel()).getByRole("tab", { name: "Preview" }));
     await settle();
     expect(specOf(fed)?.inputMode).toBe("upstream");
 
-    // Unfolding the words by hand turns the ask to what the prompt points at.
+    // A mention in the words turns the ask to what the prompt points at.
     fireEvent.click(within(panel()).getByRole("tab", { name: "Prompt" }));
     await settle();
-    fireEvent.click(within(panel()).getByRole("button", { name: "Prompt" }));
+    type(`Paint over @[node:${ids.text}]`);
+    fireEvent.blur(
+      within(panel()).getByRole("textbox", { name: /Prompt for/ }),
+    );
     await settle();
     expect(specOf(fed)?.inputMode).toBe("mentions");
   });
@@ -1345,6 +1348,30 @@ describe("a prompt that points at other nodes", () => {
     fireEvent.blur(prompt());
     await settle();
     expect(specOf(ids.image)?.inputMode).toBe("manual");
+  });
+
+  it("lifts what the words name into a strip under the field", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    expect(document.querySelector(".mention-strip")).toBeNull();
+
+    type(`Paint over @[node:${ids.text}]`);
+    await settle();
+    // Under the words and inside the field's own box, which is the part of the
+    // panel that grows: a list after the field would be pushed out of sight.
+    const field = panel().querySelector(".mention-field");
+    const strip = field?.querySelector(".mention-strip");
+    expect(strip).toBeTruthy();
+    expect(
+      [...strip!.querySelectorAll(".mention-strip-item")].map((item) =>
+        item.getAttribute("data-node-id"),
+      ),
+    ).toEqual([ids.text]);
+
+    type("Paint over the lake");
+    await settle();
+    expect(field?.querySelector(".mention-strip")).toBeNull();
   });
 });
 

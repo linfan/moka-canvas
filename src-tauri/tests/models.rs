@@ -10,7 +10,7 @@ use std::sync::Arc;
 use base64::Engine;
 use moka_canvas::config::{MetadataConfig, RuntimeMode};
 use moka_canvas::domain::Capability;
-use moka_canvas::generate::models::{ModelRepo, SEED_MODEL_ID};
+use moka_canvas::generate::models::ModelRepo;
 use moka_canvas::metadata::crypto::MASTER_KEY_FILE;
 use moka_canvas::metadata::{self, Defaults, MetadataStore, ModelDraft, Protocol};
 
@@ -195,30 +195,6 @@ async fn resolution_follows_the_configured_default() {
 
     let unset = repo.resolve_default(Capability::Video).await.unwrap_err();
     assert_eq!(unset.code(), "PROVIDER_NOT_CONFIGURED");
-}
-
-#[tokio::test]
-async fn the_starter_model_appears_once_and_never_returns() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo(root.path());
-    assert!(repo.seed().await.unwrap());
-    assert!(!repo.seed().await.unwrap(), "seeding is not repeated");
-
-    let view = repo.view().await.unwrap();
-    assert_eq!(view.models.len(), 1);
-    assert_eq!(view.models[0].id, SEED_MODEL_ID);
-    assert_eq!(view.models[0].category, Capability::Text);
-    assert!(
-        !view.models[0].api_key.set,
-        "it starts without a credential"
-    );
-
-    repo.delete(SEED_MODEL_ID, None).await.unwrap();
-    assert!(
-        !repo.seed().await.unwrap(),
-        "a model the user deleted must not come back"
-    );
-    assert!(repo.view().await.unwrap().models.is_empty());
 }
 
 #[tokio::test]

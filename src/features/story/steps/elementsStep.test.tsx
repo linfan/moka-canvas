@@ -44,6 +44,10 @@ let held: StoryJobRecord[] = [];
 let answers: Record<string, string> = {};
 /** The files a picture ask comes home with, by the piece's id. */
 let pictures: Record<string, string[]> = {};
+/** The asset ids the room has asked the shelf to remove, in order. */
+let deleted: string[] = [];
+/** Whether the shelf refuses every removal, as one still in use is refused. */
+let shelfRefuses = false;
 
 /**
  * The server under the test: the project as it stands, the batches the room
@@ -109,6 +113,26 @@ function serving(): void {
           return json(home);
         }
         return json(held);
+      }
+      if (
+        method === "DELETE" &&
+        url.includes("/api/v1/projects/current/assets/")
+      ) {
+        const id = url.split("/").pop() ?? "";
+        if (shelfRefuses) {
+          return json(
+            {
+              code: "ASSET_IN_USE",
+              message: "The asset is referenced by canvas nodes",
+            },
+            409,
+          );
+        }
+        deleted.push(id);
+        return json({
+          revision: useProjectStore.getState().moka?.metadata.revision ?? 1,
+          updatedAt: "2026-01-05T00:00:00Z",
+        });
       }
       if (url.includes("/api/v1/projects/current")) {
         return json({
@@ -257,6 +281,8 @@ beforeEach(() => {
   held = [];
   answers = {};
   pictures = {};
+  deleted = [];
+  shelfRefuses = false;
   useModelStore.setState({ view: null });
   serving();
   localStorage.clear();
@@ -915,6 +941,89 @@ describe("the pictures of an element", () => {
       [ids.heroMain, "asset-hero-c", "asset-hero-b"],
     );
     expect(screen.queryByTestId("story-picks")).toBeNull();
+  });
+
+  it("throws an old drawing away, and its file with it", async () => {
+    const moka = buildStoryMokaFile();
+    const hero = moka.stories![0].elements[0]!;
+    hero.main.takes = [
+      { assetIds: [ids.heroMain], createdAt: "2026-01-02T00:00:00Z" },
+      { assetIds: ["asset-hero-b"], createdAt: "2026-01-03T00:00:00Z" },
+      { assetIds: ["asset-hero-c"], createdAt: "2026-01-04T00:00:00Z" },
+    ];
+    moka.resources.images.push({
+      id: "asset-hero-b",
+      name: "hero-b",
+      path: "assets/images/hero-b-00000000.png",
+      mime: "image/png",
+      bytes: 120_000,
+      createdAt: "2026-01-03T00:00:00Z",
+      updatedAt: "2026-01-03T00:00:00Z",
+    });
+    openAtElements(moka);
+
+    fireEvent.click(
+      within(card("林", "character")).getByTestId("story-slot-main-pick"),
+    );
+    // The drawing in use is not one to throw away, so it carries no ✕.
+    expect(screen.queryByTestId("story-pick-remove-asset-hero-c")).toBeNull();
+    fireEvent.click(screen.getByTestId("story-pick-remove-asset-hero-b"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-confirm"));
+
+    await waitFor(() => {
+      expect(
+        slotOf("林", "main")?.takes.map((take) => take.assetIds[0]),
+      ).toEqual([ids.heroMain, "asset-hero-c"]);
+    });
+    await waitFor(() => {
+      expect(deleted).toEqual(["asset-hero-b"]);
+    });
+    expect(
+      useProjectStore
+        .getState()
+        .moka?.resources.images.map((entry) => entry.id),
+    ).not.toContain("asset-hero-b");
+  });
+
+  it("keeps a file the project still uses, saying so", async () => {
+    const moka = buildStoryMokaFile();
+    const hero = moka.stories![0].elements[0]!;
+    hero.main.takes = [
+      { assetIds: ["asset-hero-b"], createdAt: "2026-01-03T00:00:00Z" },
+      { assetIds: [ids.heroMain], createdAt: "2026-01-04T00:00:00Z" },
+    ];
+    moka.resources.images.push({
+      id: "asset-hero-b",
+      name: "hero-b",
+      path: "assets/images/hero-b-00000000.png",
+      mime: "image/png",
+      bytes: 120_000,
+      createdAt: "2026-01-03T00:00:00Z",
+      updatedAt: "2026-01-03T00:00:00Z",
+    });
+    shelfRefuses = true;
+    openAtElements(moka);
+
+    fireEvent.click(
+      within(card("林", "character")).getByTestId("story-slot-main-pick"),
+    );
+    fireEvent.click(screen.getByTestId("story-pick-remove-asset-hero-b"));
+    fireEvent.click(screen.getByTestId("story-pick-remove-confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("story-pick-notice").textContent).toContain(
+        "still used elsewhere",
+      );
+    });
+    // The story let it go; the shelf did not.
+    expect(slotOf("林", "main")?.takes.map((take) => take.assetIds[0])).toEqual(
+      [ids.heroMain],
+    );
+    expect(
+      useProjectStore
+        .getState()
+        .moka?.resources.images.map((entry) => entry.id),
+    ).toContain("asset-hero-b");
   });
 
   it("adds a redrawn picture to the place rather than replacing what is there", async () => {

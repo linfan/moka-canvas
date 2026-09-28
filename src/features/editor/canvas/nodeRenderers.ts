@@ -249,14 +249,7 @@ function syncMedia(
   view.media.bars = [];
   if (!media) return;
 
-  if (media.state === "ready" && media.url && node.kind !== "audio") {
-    view.media.thumb = new Rect({
-      cornerRadius: 8,
-      fill: { type: "image", url: media.url, mode: "cover" },
-      hittable: false,
-    });
-    view.group.add(view.media.thumb);
-  } else if (media.state === "ready" && node.kind === "audio") {
+  if (media.state === "ready" && node.kind === "audio") {
     const accent = canvasTheme.kindAccent.audio;
     view.media.bars = waveformPeaks(media.entry?.sha256).map((peak) => {
       const bar = new Rect({
@@ -269,7 +262,14 @@ function syncMedia(
       view.group.add(bar);
       return bar;
     });
-  } else {
+  } else if (media.state === "ready" && media.url) {
+    view.media.thumb = new Rect({
+      cornerRadius: 8,
+      fill: { type: "image", url: media.url, mode: "cover" },
+      hittable: false,
+    });
+    view.group.add(view.media.thumb);
+  } else if (media.state !== "ready") {
     // Missing / changed / empty: a distinct broken-media wash.
     view.media.thumb = new Rect({
       cornerRadius: 8,
@@ -281,6 +281,9 @@ function syncMedia(
     });
     view.group.add(view.media.thumb);
   }
+  // A video with no poster draws no picture here: its own first frame is put
+  // over the card by the overlay that plays it, and the file itself is not
+  // something an image fill can decode.
 
   if (media.label) {
     view.media.badge = new Text({

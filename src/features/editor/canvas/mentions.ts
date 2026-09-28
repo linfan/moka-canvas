@@ -18,8 +18,6 @@ const PREFIX = "@[node:";
 
 /** How much of a text a candidate row shows. */
 export const MENTION_SUMMARY_CHARS = 40;
-/** How much of a text the card a chip summons shows. */
-export const MENTION_HOVER_CHARS = 200;
 
 /** What a mention is written as, which is the only form the resolver reads. */
 export function mentionToken(nodeId: string): string {
