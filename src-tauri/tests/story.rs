@@ -341,6 +341,7 @@ fn story_document() -> MokaFile {
             element(PROP, StoryElementKind::Prop),
         ],
         shot_granularity: StoryShotGranularity::Act,
+        max_reference_images: story::REFERENCE_IMAGES_DEFAULT,
         edit: StoryEdit {
             timeline_id: Some(TIMELINE.into()),
             clip_by_act: Some(vec![StoryEditClip {
@@ -509,6 +510,36 @@ fn changes_the_granularity_and_keeps_the_clips_already_made() {
     let story = story_of(&next);
     assert_eq!(story.shot_granularity, StoryShotGranularity::Keyframe);
     assert_eq!(story.chapters[0].acts[0].video.takes.len(), 1);
+}
+
+#[test]
+fn moves_the_reference_limit_and_keeps_the_frames_already_drawn() {
+    let moka = story_document();
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryReferenceLimit {
+            story_id: STORY.into(),
+            max_reference_images: 5,
+        }],
+    );
+    let story = story_of(&next);
+    assert_eq!(story.max_reference_images, 5);
+    assert_eq!(story.chapters[0].acts[0].keyframes[0].art.takes.len(), 1);
+}
+
+#[test]
+fn refuses_a_reference_limit_no_ask_could_carry() {
+    let moka = story_document();
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::UpdateStoryReferenceLimit {
+                story_id: STORY.into(),
+                max_reference_images: story::REFERENCE_IMAGES_MAX + 1,
+            }
+        ),
+        "VALIDATION_FAILED"
+    );
 }
 
 #[test]
@@ -1205,6 +1236,9 @@ fn reads_a_word_it_does_not_know_as_the_plainest_thing_it_could_be() {
     }"##;
     let story: StoryDocument = serde_json::from_str(raw).expect("the telling is read");
     assert_eq!(story.shot_granularity, StoryShotGranularity::Act);
+    // A document written before the reference limit existed says nothing about
+    // it, and the default is what it meant.
+    assert_eq!(story.max_reference_images, story::REFERENCE_IMAGES_DEFAULT);
     assert_eq!(story.brief.aspect, story::StoryAspect::Widescreen);
     assert_eq!(story.elements[0].kind, StoryElementKind::Prop);
     let frame = &story.chapters[0].acts[0].keyframes[0];
@@ -1316,6 +1350,7 @@ fn create_story(name: &str) -> StoryDocument {
         chapters: Vec::new(),
         elements: Vec::new(),
         shot_granularity: StoryShotGranularity::Act,
+        max_reference_images: story::REFERENCE_IMAGES_DEFAULT,
         edit: StoryEdit::default(),
         created_at: NOW.into(),
         updated_at: NOW.into(),

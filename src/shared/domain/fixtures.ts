@@ -4,6 +4,7 @@ import {
   MAX_CHAPTERS_PER_STORY,
   MAX_KEYFRAMES_PER_ACT,
   MOKA_FILE_VERSION,
+  REFERENCE_IMAGES_DEFAULT,
 } from "./constants";
 import { createStory, derivePorts } from "./factories";
 import type {
@@ -1067,7 +1068,7 @@ export function buildStoryMokaFile(): MokaFile {
                   shotSize: "wide",
                   cameraMove: "pushIn",
                   angle: "eyeLevel",
-                  content: "雨中的站台，一个人立在灯下。",
+                  content: "雨中的站台，`林`立在灯下。",
                   dialogue: [
                     {
                       characterId: ids.hero,
@@ -1097,7 +1098,7 @@ export function buildStoryMokaFile(): MokaFile {
                   shotSize: "close",
                   cameraMove: "static",
                   angle: "overTheShoulder",
-                  content: "另一人转过身来。",
+                  content: "`周`转过身来。",
                   dialogue: [],
                   durationMs: 3_000,
                   art: { takes: [], confirmed: false },
@@ -1184,6 +1185,7 @@ export function buildStoryMokaFile(): MokaFile {
         },
       ],
       shotGranularity: "act",
+      maxReferenceImages: REFERENCE_IMAGES_DEFAULT,
       edit: {
         timelineId: timelineIds().timeline,
         clipByAct: [

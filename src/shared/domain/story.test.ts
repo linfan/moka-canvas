@@ -6,6 +6,8 @@ import {
   MAX_ELEMENTS_PER_STORY,
   MAX_KEYFRAMES_PER_ACT,
   MAX_TAKES_PER_SLOT,
+  REFERENCE_IMAGES_DEFAULT,
+  REFERENCE_IMAGES_MAX,
   STORY_NAME_MAX,
 } from "./constants";
 import { decodeMokaFile, encodeMokaFile } from "./codec";
@@ -40,8 +42,10 @@ import {
   mergeChaptersAt,
   mergeElements,
   stepReachable,
+  storyMentions,
   STORY_STEPS,
   storyProgress,
+  stripStoryMentions,
   targetKey,
   timelineSizeForAspect,
   withTake,
@@ -726,6 +730,38 @@ function element(id: string, kind: StoryElement["kind"]): StoryElement {
   };
 }
 
+describe("the names a shot's words mention", () => {
+  it("reads every backticked name with where it is written", () => {
+    expect(storyMentions("`林`看着`周`，`林`笑了。")).toEqual([
+      { start: 0, end: 3, name: "林" },
+      { start: 5, end: 8, name: "周" },
+      { start: 9, end: 12, name: "林" },
+    ]);
+  });
+
+  it("leaves a backtick with no partner as the character it is", () => {
+    // A content cut short or a reader mid-typing: nothing is swallowed.
+    expect(storyMentions("雨下个不停`")).toEqual([]);
+    expect(storyMentions("`没有关上的名字")).toEqual([]);
+    expect(storyMentions("``")).toEqual([]);
+    expect(storyMentions("雨中的站台，一个人立在灯下。")).toEqual([]);
+  });
+
+  it("sends the words without the marks that made them mentions", () => {
+    expect(stripStoryMentions("`林`看着`周`，`林`笑了。")).toBe(
+      "林看着周，林笑了。",
+    );
+    expect(stripStoryMentions("雨下个不停`")).toBe("雨下个不停`");
+    expect(stripStoryMentions("雨中的站台。")).toBe("雨中的站台。");
+  });
+
+  it("gives a new telling the default reference limit", () => {
+    expect(createStory("新的故事").maxReferenceImages).toBe(
+      REFERENCE_IMAGES_DEFAULT,
+    );
+  });
+});
+
 describe("story lifecycle commands", () => {
   it("adds a story at the place it asks for, and puts it back there on undo", () => {
     const moka = buildEmptyStory();
@@ -849,6 +885,31 @@ describe("story lifecycle commands", () => {
           type: "updateStoryGranularity",
           storyId: storyIds().story,
           shotGranularity: "scene" as never,
+        }),
+      ),
+    ).toBe("VALIDATION_FAILED");
+  });
+
+  it("moves the reference limit, and leaves the frames already drawn alone", () => {
+    const moka = buildStoryMokaFile();
+    const next = expectRoundTrip(moka, {
+      type: "updateStoryReferenceLimit",
+      storyId: storyIds().story,
+      maxReferenceImages: 5,
+    });
+    const story = storyOfFile(next);
+    expect(story.maxReferenceImages).toBe(5);
+    expect(story.chapters[0].acts[0].keyframes[0].art.takes).toHaveLength(1);
+  });
+
+  it("refuses a reference limit no ask could carry", () => {
+    const moka = buildStoryMokaFile();
+    expect(
+      codeOf(() =>
+        apply(moka, {
+          type: "updateStoryReferenceLimit",
+          storyId: storyIds().story,
+          maxReferenceImages: REFERENCE_IMAGES_MAX + 1,
         }),
       ),
     ).toBe("VALIDATION_FAILED");
@@ -1079,7 +1140,7 @@ describe("the board commands", () => {
     expect(frame.shotSize).toBe("extremeWide");
     expect(frame.durationMs).toBe(1_200);
     expect(frame.dialogue).toEqual([{ speaker: "周", text: "车还会来。" }]);
-    expect(frame.content).toBe("另一人转过身来。");
+    expect(frame.content).toBe("`周`转过身来。");
 
     expect(
       codeOf(() =>

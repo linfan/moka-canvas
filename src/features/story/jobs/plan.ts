@@ -20,7 +20,6 @@ import type {
   StoryTarget,
 } from "../../../api/story";
 import {
-  MAX_REFERENCE_IMAGES,
   MAX_VIDEO_SECONDS,
   STORY_READ_CHARS_DEFAULT,
   STORY_SPLIT_CHARS_DEFAULT,
@@ -31,12 +30,13 @@ import {
   STORY_SHOT_SIZES,
 } from "../../../shared/domain/types";
 import {
-  actCast,
   actAt,
   actPlannedMs,
   currentTake,
   elementOf,
   keyframeAt,
+  storyMentions,
+  stripStoryMentions,
   takeFile,
   targetKey,
 } from "../../../shared/domain/story";
@@ -466,44 +466,61 @@ export function planElementArt(
   });
 }
 
-/**
- * The cast of an act that has been drawn, in the order a picture is prompted
- * with them: the characters, then the place, then the things.
- *
- * The order is the contract between the numbered references in the prompt and
- * the pictures that travel with it, so it is decided once, here.
- */
-function drawnCast(
-  story: StoryDocument,
-  act: StoryAct,
-): Array<{ element: StoryElement; assetId: string }> {
-  const { characters, scenes, props } = actCast(story, act);
-  return [...characters, ...scenes, ...props].flatMap((element) => {
-    const take = currentTake(element.main);
-    return take === undefined ? [] : [{ element, assetId: take.assetIds[0] }];
-  });
+/** One of a frame's mentioned pictures: the element it names, and the drawing
+ * that travels with the ask. */
+export interface StoryReference {
+  element: StoryElement;
+  assetId: string;
 }
 
 /**
- * The cast a frame travels with, and the cast left to the words.
+ * The cast a frame travels with, as the frame's own words name it.
  *
- * One ask carries a bounded set of reference pictures, and a service asked for
- * more refuses the whole batch rather than drawing with the first of them, so
- * a frame takes the first of its cast that fit — in the order the prompt
- * numbers them — and the rest are left to the words, the way an element nobody
- * has drawn always was.
+ * The pictures are chosen by the mentions in a shot's content: each mentioned
+ * name the story knows and has drawn is a reference, in the order it is first
+ * named, and one nobody has drawn — or nobody has at all — is left to the
+ * words. The order is the contract between the numbered references in the
+ * prompt and the pictures that travel with it, so it is decided once, here.
+ *
+ * The story's own limit decides how many of them fit: an image service refuses
+ * a request over its bound whole rather than drawing with the first of the
+ * pictures, so the first of the mentioned ones travel and the rest are left to
+ * the words.
  */
-export function frameCast(
+export function keyframeCast(
   story: StoryDocument,
-  act: StoryAct,
+  content: string,
 ): {
-  carried: Array<{ element: StoryElement; assetId: string }>;
-  beyond: StoryElement[];
+  /** The pictures that travel, in the order the content names them. */
+  carried: StoryReference[];
+  /** The mentioned pictures the story's limit leaves behind. */
+  beyond: StoryReference[];
+  /** The mentioned names no drawing could be sent for. */
+  undrawn: string[];
 } {
-  const drawn = drawnCast(story, act);
+  const byName = new Map<string, StoryElement>();
+  for (const element of story.elements) {
+    if (!byName.has(element.name)) byName.set(element.name, element);
+  }
+  const seen = new Set<string>();
+  const drawn: StoryReference[] = [];
+  const undrawn: string[] = [];
+  for (const mention of storyMentions(content)) {
+    if (seen.has(mention.name)) continue;
+    seen.add(mention.name);
+    const element = byName.get(mention.name);
+    const take = element === undefined ? undefined : currentTake(element.main);
+    if (element === undefined || take === undefined) {
+      undrawn.push(mention.name);
+      continue;
+    }
+    drawn.push({ element, assetId: take.assetIds[0] });
+  }
+  const limit = story.maxReferenceImages;
   return {
-    carried: drawn.slice(0, MAX_REFERENCE_IMAGES),
-    beyond: drawn.slice(MAX_REFERENCE_IMAGES).map(({ element }) => element),
+    carried: drawn.slice(0, limit),
+    beyond: drawn.slice(limit),
+    undrawn,
   };
 }
 
@@ -523,7 +540,7 @@ export function planKeyframeArt(
         : act.keyframes.find((held) => held.id === keyframeId);
     if (chapter === undefined || act === undefined || keyframe === undefined)
       return [];
-    const cast = frameCast(story, act).carried;
+    const cast = keyframeCast(story, keyframe.content).carried;
     const target: StoryTarget = {
       kind: "keyframeArt",
       chapterId,
@@ -593,7 +610,12 @@ export function planActVideos(
         const take = currentTake(keyframe.art);
         return take === undefined
           ? []
-          : [{ content: keyframe.content, assetId: take.assetIds[0] }];
+          : [
+              {
+                content: stripStoryMentions(keyframe.content),
+                assetId: take.assetIds[0],
+              },
+            ];
       });
       const first = drawn[0];
       const last = drawn[drawn.length - 1];
@@ -671,7 +693,7 @@ export function planKeyframeVideos(
         prompt: storyKeyframeVideoPrompt({
           ...look,
           title: keyframe.title,
-          content: keyframe.content,
+          content: stripStoryMentions(keyframe.content),
           seconds,
         }),
         inputs,

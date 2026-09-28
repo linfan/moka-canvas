@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CANVAS_SCHEMA_VERSION } from "./constants";
+import { CANVAS_SCHEMA_VERSION, REFERENCE_IMAGES_MAX } from "./constants";
 import {
   buildConversationMokaFile,
   buildCutMokaFile,
@@ -155,6 +155,22 @@ describe("moka codec", () => {
       decodeMokaFile(encodeMokaFile(single)).stories![0].chapters[0].acts[0]
         .video.takes[0].assetIds,
     ).toEqual([one]);
+  });
+
+  it("reads a story's reference limit whole, and one beyond the bound as the bound", () => {
+    const story = buildStoryMokaFile();
+    story.stories![0].maxReferenceImages = 7;
+    expect(
+      decodeMokaFile(encodeMokaFile(story)).stories![0].maxReferenceImages,
+    ).toBe(7);
+
+    // A number no command would accept is read as the nearest bound rather
+    // than refusing the whole story.
+    const beyond = buildStoryMokaFile();
+    beyond.stories![0].maxReferenceImages = 99;
+    expect(
+      decodeMokaFile(encodeMokaFile(beyond)).stories![0].maxReferenceImages,
+    ).toBe(REFERENCE_IMAGES_MAX);
   });
 
   /**

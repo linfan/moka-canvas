@@ -1505,6 +1505,12 @@ pub enum DocumentCommand {
         story_id: String,
         shot_granularity: StoryShotGranularity,
     },
+    /// Only the picture limit moves; frames already drawn are kept as they are.
+    #[serde(rename_all = "camelCase")]
+    UpdateStoryReferenceLimit {
+        story_id: String,
+        max_reference_images: u32,
+    },
     /// The outline, whole.
     ///
     /// A chapter arriving with an id the story already knows keeps its board

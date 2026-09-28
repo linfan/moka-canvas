@@ -242,7 +242,9 @@ function jsonAnswer(prompt: string): string | undefined {
   }
   // One episode's board: two acts of two shots each, with the cast the
   // elements answer above gives the story — a board naming anyone else would
-  // be a board whose references the reading drops.
+  // be a board whose references the reading drops. The names a shot is drawn
+  // from are written in backticks, the way the prompt asks for them: a mention
+  // is the picture that travels with the shot's ask.
   if (prompt.includes("Board this chapter as acts")) {
     return JSON.stringify({
       acts: [
@@ -258,7 +260,7 @@ function jsonAnswer(prompt: string): string | undefined {
               shotSize: "wide",
               cameraMove: "pushIn",
               angle: "eyeLevel",
-              content: "Rain over the platform, one figure under the lamp.",
+              content: "Rain over the platform, `Keeper` under the lamp.",
               durationMs: 3_000,
               dialogue: [
                 { speaker: "Keeper", text: "It stopped running years ago." },
@@ -268,7 +270,7 @@ function jsonAnswer(prompt: string): string | undefined {
               shotSize: "close",
               cameraMove: "static",
               angle: "overTheShoulder",
-              content: "The other one turns.",
+              content: "`Traveller` turns.",
               durationMs: 2_000,
               dialogue: [],
             },
@@ -286,7 +288,7 @@ function jsonAnswer(prompt: string): string | undefined {
               shotSize: "medium",
               cameraMove: "handheld",
               angle: "low",
-              content: "The ticket is held up to the light.",
+              content: "The `Old ticket` is held up to the light.",
               durationMs: 2_000,
               dialogue: [],
             },

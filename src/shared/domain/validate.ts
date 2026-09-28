@@ -26,6 +26,7 @@ import {
   MIN_KEYFRAME_MS,
   MIN_TOTAL_DURATION_MS,
   PROJECT_ASSET_CATEGORIES,
+  REFERENCE_IMAGES_MAX,
   STORY_NAME_MAX,
   STORY_SCHEMA_VERSION,
 } from "./constants";
@@ -878,6 +879,15 @@ export function validateStory(story: StoryDocument): ValidationIssue[] {
     at("STORY_CHAPTER_LIMIT", i18n.t("errors:validate.storyChapterLimit"));
   if (story.elements.length > MAX_ELEMENTS_PER_STORY)
     at("STORY_ELEMENT_LIMIT", i18n.t("errors:validate.storyElementLimit"));
+  if (
+    !Number.isInteger(story.maxReferenceImages) ||
+    story.maxReferenceImages < 0 ||
+    story.maxReferenceImages > REFERENCE_IMAGES_MAX
+  )
+    at(
+      "VALIDATION_FAILED",
+      i18n.t("errors:validate.storyReferenceLimitOutOfRange"),
+    );
 
   const slot = (held: StorySlot) => {
     if (held.takes.length > MAX_TAKES_PER_SLOT)

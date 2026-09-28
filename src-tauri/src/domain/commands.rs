@@ -1312,6 +1312,7 @@ fn apply_one(
         | DocumentCommand::RenameStory { .. }
         | DocumentCommand::UpdateStoryBrief { .. }
         | DocumentCommand::UpdateStoryGranularity { .. }
+        | DocumentCommand::UpdateStoryReferenceLimit { .. }
         | DocumentCommand::SetStoryChapters { .. }
         | DocumentCommand::SetStoryElements { .. }
         | DocumentCommand::UpdateStoryElement { .. }

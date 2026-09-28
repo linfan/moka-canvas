@@ -4,6 +4,8 @@ import {
   MOKA_FILE_VERSION,
   MOKA_MAGIC,
   PROJECT_ASSET_CATEGORIES,
+  REFERENCE_IMAGES_DEFAULT,
+  REFERENCE_IMAGES_MAX,
   STORY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
   TRANSITION_KINDS,
@@ -525,6 +527,7 @@ function encodeStory(story: StoryDocument): Record<string, unknown> {
     chapters: story.chapters.map(encodeStoryChapter),
     elements: story.elements.map(encodeStoryElement),
     shotGranularity: story.shotGranularity,
+    maxReferenceImages: story.maxReferenceImages,
     edit: encodeStoryEdit(story.edit),
     createdAt: story.createdAt,
     updatedAt: story.updatedAt,
@@ -1201,6 +1204,19 @@ function fallbackOneOf<T extends string>(
     : fallback;
 }
 
+/**
+ * How many reference pictures a frame may carry, as a document holds it.
+ *
+ * A document written before the limit existed says nothing, and the default is
+ * what it meant; one that says a number no command would accept is read as the
+ * nearest bound rather than refusing the whole story.
+ */
+function decodeReferenceImages(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value)
+    ? Math.min(REFERENCE_IMAGES_MAX, Math.max(0, value))
+    : REFERENCE_IMAGES_DEFAULT;
+}
+
 function decodeStoryTake(value: unknown): StoryTake {
   const doc = asRecord(value, "stories[].takes[]");
   // The list is what a take is; a document from when a take was a single file
@@ -1398,6 +1414,7 @@ function decodeStory(value: unknown): StoryDocument {
       doc.shotGranularity,
       "act",
     ),
+    maxReferenceImages: decodeReferenceImages(doc.maxReferenceImages),
     edit: decodeStoryEdit(doc.edit),
     createdAt: asString(doc.createdAt, "stories[].createdAt"),
     updatedAt: asString(doc.updatedAt, "stories[].updatedAt"),
