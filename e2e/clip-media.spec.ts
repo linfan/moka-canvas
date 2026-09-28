@@ -1,9 +1,10 @@
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   openClipRoom,
   projectHome,
@@ -122,7 +123,7 @@ test("the two faces read one shelf, each asking its own question", async ({
   await expect(rowFor(page, "one.png")).toBeVisible();
   await expect(page.getByTestId("shelf-where")).toHaveCount(0);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the project face filters to what was made and what the boards hold", async ({
@@ -152,7 +153,7 @@ test("the project face filters to what was made and what the boards hold", async
   await page.getByTestId("clip-project-filter-all").click();
   await expect(rowFor(page, "one.png")).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the search narrows the face and says so when nothing says it", async ({
@@ -182,7 +183,7 @@ test("the search narrows the face and says so when nothing says it", async ({
   await page.getByTestId("shelf-clear").click();
   await expect(rowFor(page, "one.png")).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a row carries the drag-out contract the timeline will take", async ({
@@ -211,7 +212,7 @@ test("a row carries the drag-out contract the timeline will take", async ({
     await carried.evaluate((data) => data.getData("application/x-moka-asset")),
   ).toBe(listed);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("files dropped over the column are imported, and the column turns to Local", async ({
@@ -248,7 +249,7 @@ test("files dropped over the column are imported, and the column turns to Local"
   );
   await expect(rowFor(page, "dropped.png")).toBeVisible({ timeout: 10_000 });
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a sound on a row is tried before it is used, one at a time", async ({
@@ -284,7 +285,7 @@ test("a sound on a row is tried before it is used, one at a time", async ({
     timeout: 10_000,
   });
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a video row opens its player in the card beside the shelf", async ({
@@ -310,5 +311,5 @@ test("a video row opens its player in the card beside the shelf", async ({
     /\/api\/v1\/projects\/current\/assets\//,
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

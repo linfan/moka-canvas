@@ -1,8 +1,8 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -102,23 +102,6 @@ async function dropAssetOnTimeline(
 
 function timeline(page: Page) {
   return page.locator(".clip-timeline");
-}
-
-/**
- * The project's files, let go of once the test is done with them.
- *
- * The room's own autosave can still be landing when a test ends, and a
- * directory removed under a write that is on its way fails with ENOTEMPTY on
- * macOS — a teardown error over a cut that was made correctly. The retries are
- * `rmSync`'s own, for exactly that kind of refusal.
- */
-function forgetHome(home: string) {
-  rmSync(home, {
-    recursive: true,
-    force: true,
-    maxRetries: 8,
-    retryDelay: 150,
-  });
 }
 
 async function canvasBox(page: Page) {

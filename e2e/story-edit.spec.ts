@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   configureTheWholeStudio,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openStoryRoom,
@@ -199,6 +199,6 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
         .getByRole("tab", { name: /Rain at Night/ }),
     ).toHaveAttribute("aria-selected", "true");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });

@@ -1,8 +1,8 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -58,5 +58,5 @@ test("a machine without a renderer is told so, and the cut is left alone", async
     "3",
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

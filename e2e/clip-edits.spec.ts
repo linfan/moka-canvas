@@ -1,10 +1,10 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { expect, test, type Page } from "@playwright/test";
 import { RULER_H, TRACK_HEIGHT } from "../src/features/clip/timeline/geometry";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -188,7 +188,7 @@ test("a picture dropped on the video row lands a clip, and undo takes it away", 
   await page.keyboard.press("Control+Shift+z");
   await expect(timeline(page)).toHaveAttribute("data-clip-count", "1");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a picture dropped on the audio row is refused, and the room says why", async ({
@@ -206,7 +206,7 @@ test("a picture dropped on the audio row is refused, and the room says why", asy
   );
   await expect(timeline(page)).toHaveAttribute("data-clip-count", "0");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the toolbar's scissors cuts the clip the playhead stands in", async ({
@@ -261,7 +261,7 @@ test("the toolbar's scissors cuts the clip the playhead stands in", async ({
   await page.keyboard.press("Control+z");
   await expect(timeline(page)).toHaveAttribute("data-clip-count", "1");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a click on a clip chooses it, and Delete takes it off the cut", async ({
@@ -284,7 +284,7 @@ test("a click on a clip chooses it, and Delete takes it off the cut", async ({
   await page.keyboard.press("Control+z");
   await expect(timeline(page)).toHaveAttribute("data-clip-count", "1");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("Ctrl+D lays the chosen clip down again on its own tail", async ({
@@ -305,7 +305,7 @@ test("Ctrl+D lays the chosen clip down again on its own tail", async ({
   await page.keyboard.press("Control+z");
   await expect(timeline(page)).toHaveAttribute("data-clip-count", "1");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("? lists the room's keys, and Escape closes the list", async ({
@@ -323,7 +323,7 @@ test("? lists the room's keys, and Escape closes the list", async ({
   await page.keyboard.press("Escape");
   await expect(list).toBeHidden();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the edits reach the document on disk, and the badge says Saved", async ({
@@ -342,5 +342,5 @@ test("the edits reach the document on disk, and the badge says Saved", async ({
     timeout: 10_000,
   });
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

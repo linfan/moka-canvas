@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { RULER_H, TRACK_HEIGHT } from "../src/features/clip/timeline/geometry";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -186,7 +186,7 @@ test("the play button runs the clock, and the pause button holds it", async ({
   await page.waitForTimeout(300);
   expect(await playheadMs(page)).toBe(held);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("Space starts and stops the clock", async ({ page }) => {
@@ -204,7 +204,7 @@ test("Space starts and stops the clock", async ({ page }) => {
   await page.waitForTimeout(300);
   expect(await playheadMs(page)).toBe(held);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("playing to the tail stops the clock there", async ({ page }) => {
@@ -225,7 +225,7 @@ test("playing to the tail stops the clock there", async ({ page }) => {
   await page.waitForTimeout(300);
   expect(await playheadMs(page)).toBe(stopped);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the arrow keys walk the playhead a frame and a second at a time", async ({
@@ -246,7 +246,7 @@ test("the arrow keys walk the playhead a frame and a second at a time", async ({
   await page.keyboard.press("Shift+ArrowLeft");
   await expect.poll(() => playheadMs(page)).toBe(5_000);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the quality tier takes effect and is remembered across a page load", async ({
@@ -272,7 +272,7 @@ test("the quality tier takes effect and is remembered across a page load", async
     "quarter",
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the repeat comes round at the tail, and the camera saves the frame", async ({
@@ -309,5 +309,5 @@ test("the repeat comes round at the tail, and the camera saves the frame", async
   ]);
   expect(download.suggestedFilename()).toMatch(/^Timeline 1-.*\.png$/);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

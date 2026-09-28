@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   configureTheWholeStudio,
   createProject,
+  forgetHome,
   forgetProjects,
   newStory,
   openStoryRoom,
@@ -261,6 +261,6 @@ test("a telling is imported into a board, and into a cut of its own", async ({
     // The telling itself assembled nothing: this cut is the reader's own.
     expect(handed.assembled).toBeUndefined();
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    forgetHome(home);
   }
 });

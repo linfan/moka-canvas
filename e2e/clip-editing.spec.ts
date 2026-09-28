@@ -1,8 +1,8 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -233,7 +233,7 @@ test("a block dragged along its row moves by the pointer's own distance", async 
   await page.keyboard.press("Control+z");
   await expect.poll(async () => (await spans(page))[0]?.startMs).toBe(5_000);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the right edge pulled left shortens the block", async ({ page }) => {
@@ -271,7 +271,7 @@ test("the right edge pulled left shortens the block", async ({ page }) => {
   await page.keyboard.press("Control+z");
   await expect.poll(async () => (await spans(page))[0]?.durationMs).toBe(4_000);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 /**
@@ -428,7 +428,7 @@ test("a sound block is trimmed to a piece of its own file", async ({
   );
   await expectWindow(page, { startMs: 5_000, inPointMs: 0 });
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a block is dragged onto another row of the same kind", async ({
@@ -460,7 +460,7 @@ test("a block is dragged onto another row of the same kind", async ({
   );
   await expect.poll(async () => (await spans(page))[0]?.trackId).toBe(secondId);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the magnet catches a head on the block ahead, and its absence does not", async ({
@@ -520,7 +520,7 @@ test("the magnet catches a head on the block ahead, and its absence does not", a
     false,
   );
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 /**
@@ -617,7 +617,7 @@ test("a file dragged over the rows wears the block it would land as", async ({
   );
   await expect(timeline(page)).toHaveAttribute("data-drop-preview", "");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a marquee catches the blocks it covers, and Delete clears them", async ({
@@ -657,7 +657,7 @@ test("a marquee catches the blocks it covers, and Delete clears them", async ({
   await page.keyboard.press("Control+z");
   await expect(timeline(page)).toHaveAttribute("data-clip-count", "2");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a locked row refuses the drag until it is unlocked", async ({ page }) => {
@@ -695,7 +695,7 @@ test("a locked row refuses the drag until it is unlocked", async ({ page }) => {
     .poll(async () => ((await spans(page))[0]?.startMs ?? 0) > 6_500)
     .toBe(true);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the right-click menus duplicate a block and grow the stack", async ({
@@ -753,5 +753,5 @@ test("the right-click menus duplicate a block and grow the stack", async ({
     page.locator(".clip-tl-header-row", { hasText: "Main" }),
   ).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

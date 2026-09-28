@@ -1,8 +1,8 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -265,7 +265,7 @@ test("a speed preset changes how long a sound runs, and undo puts it back", asyn
   await page.keyboard.press("Control+z");
   await expect.poll(async () => (await spans(page))[0].durationMs).toBe(before);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the Adjust sliders are dragged live and one undo brings the grade back", async ({
@@ -289,7 +289,7 @@ test("the Adjust sliders are dragged live and one undo brings the grade back", a
   await page.keyboard.press("Control+z");
   await expect(brightness).toHaveValue("0");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a look is applied by its tile, taken off by pressing it again, and undone", async ({
@@ -313,7 +313,7 @@ test("a look is applied by its tile, taken off by pressing it again, and undone"
   await page.keyboard.press("Control+z");
   await expect(mono).toHaveAttribute("aria-pressed", "true");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("with nothing chosen the timeline card is shown and its background reaches the frame", async ({
@@ -342,7 +342,7 @@ test("with nothing chosen the timeline card is shown and its background reaches 
     )
     .toBe(true);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("a file chosen on the shelf is read by the inspector as material", async ({
@@ -356,5 +356,5 @@ test("a file chosen on the shelf is read by the inspector as material", async ({
   await expect(page.getByRole("heading", { name: "still.png" })).toBeVisible();
   await expect(page.getByLabel("Tags")).toBeVisible();
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });

@@ -1,9 +1,9 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { RULER_H, TRACK_HEIGHT } from "../src/features/clip/timeline/geometry";
 import {
   createProject,
+  forgetHome,
   forgetProjects,
   newTimeline,
   openClipRoom,
@@ -214,7 +214,7 @@ test("the picture under the playhead shows, and the frame outside it is the back
   // approximation of it.
   await expect(page.locator(".clip-preview-badge")).toHaveCount(0);
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
 
 test("the timecode reads the playhead, on the frame's own clock", async ({
@@ -237,5 +237,5 @@ test("the timecode reads the playhead, on the frame's own clock", async ({
   await page.mouse.up();
   await expect(timecode).toHaveText("00:00:08:00");
 
-  rmSync(home, { recursive: true, force: true });
+  forgetHome(home);
 });
