@@ -117,7 +117,7 @@ describe("app boot", () => {
     );
     expect(
       rooms.getAllByRole("button").map((each) => each.textContent),
-    ).toEqual(["Story", "Canvas", "Clip"]);
+    ).toEqual(["Story", "Canvas", "Clip", "Assets"]);
     fireEvent.click(rooms.getByRole("button", { name: "Canvas" }));
 
     // The board a project opens onto has a tab, and the tree holds them both.
@@ -144,6 +144,19 @@ describe("app boot", () => {
     // the story room stands, and the project was never put on a canvas first.
     expect(await screen.findByTestId("story-page")).toBeTruthy();
     expect(useAppStore.getState().phase).toBe("story");
+    expect(useProjectStore.getState().moka).not.toBeNull();
+    expect(screen.queryByTestId("canvas-host")).toBeNull();
+  });
+
+  it("opens a project straight into the files room", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByText("Golden Fixture"));
+    fireEvent.click(await screen.findByRole("button", { name: "Assets" }));
+
+    // The files are a room of the project like any other: nothing is put on a
+    // canvas on the way in, and the room stands with the project open.
+    expect(await screen.findByTestId("assets-page")).toBeTruthy();
+    expect(useAppStore.getState().phase).toBe("assets");
     expect(useProjectStore.getState().moka).not.toBeNull();
     expect(screen.queryByTestId("canvas-host")).toBeNull();
   });
@@ -204,6 +217,18 @@ describe("app boot", () => {
     fireEvent.click(within(clipMenu).getByRole("menuitem", { name: "Canvas" }));
     expect(useAppStore.getState().phase).toBe("editing");
     expect(screen.getByTestId("canvas-host")).toBeTruthy();
+
+    // The files room is one more page of the same walk, and stepping over to
+    // it is no more a close than stepping to the cutting room was.
+    fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
+    fireEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", {
+        name: "Assets",
+      }),
+    );
+    expect(useAppStore.getState().phase).toBe("assets");
+    expect(await screen.findByTestId("assets-page")).toBeTruthy();
+    expect(useProjectStore.getState().moka).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Projects menu" }));
     fireEvent.click(

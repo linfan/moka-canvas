@@ -12,9 +12,10 @@ import { useAppStore } from "./features/editor/stores/appStore";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { useModelStore } from "./features/settings/modelStore";
 
-// The board, the cutting room, and the story room are the heaviest rooms of
-// the app, and none of them is where it starts: each arrives as a chunk of its
-// own instead of weighing down the entry bundle the launcher actually needs.
+// The board, the cutting room, the story room, and the room the project's
+// files are read in are the heaviest rooms of the app, and none of them is
+// where it starts: each arrives as a chunk of its own instead of weighing down
+// the entry bundle the launcher actually needs.
 const EditorPage = lazy(() =>
   import("./features/editor/EditorPage").then((module) => ({
     default: module.EditorPage,
@@ -28,6 +29,11 @@ const ClipPage = lazy(() =>
 const StoryPage = lazy(() =>
   import("./features/story/StoryPage").then((module) => ({
     default: module.StoryPage,
+  })),
+);
+const AssetsPage = lazy(() =>
+  import("./features/assets/AssetsPage").then((module) => ({
+    default: module.AssetsPage,
   })),
 );
 
@@ -54,14 +60,15 @@ export default function App() {
 
   // A room the reader is about to enter is fetched while they are still in the
   // room before it — the launcher leads to the board, the board to the cutting
-  // room, and the cutting room to the story room — so the step between rooms
-  // stays a step rather than a wait.
+  // room and the files room, and the cutting room to the story room — so the
+  // step between rooms stays a step rather than a wait.
   useEffect(() => {
     if (phase === "launcher") {
       void import("./features/editor/EditorPage");
     }
     if (phase === "editing") {
       void import("./features/clip/ClipPage");
+      void import("./features/assets/AssetsPage");
     }
     if (phase === "clip") {
       void import("./features/story/StoryPage");
@@ -77,6 +84,7 @@ export default function App() {
         {phase === "editing" && <EditorPage />}
         {phase === "clip" && <ClipPage />}
         {phase === "story" && <StoryPage />}
+        {phase === "assets" && <AssetsPage />}
       </Suspense>
       <SettingsDialog />
       <SavePathHost />

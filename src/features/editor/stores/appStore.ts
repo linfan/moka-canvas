@@ -8,7 +8,14 @@ import { PROVIDER_EXECUTOR_KEY } from "../../../shared/domain";
 import { i18n } from "../../../shared/i18n";
 
 export type AppPhase =
-  "booting" | "launcher" | "opening" | "editing" | "clip" | "story" | "error";
+  | "booting"
+  | "launcher"
+  | "opening"
+  | "editing"
+  | "clip"
+  | "story"
+  | "assets"
+  | "error";
 
 export interface Toast {
   id: number;

@@ -1,0 +1,16 @@
+{
+  "page": {
+    "title": "Assets",
+    "empty": "Pick a file to read it.",
+    "historyBoundary": "Files room",
+    "saveConflict": "The project changed elsewhere; reopen it to carry on.",
+    "saveFailed": "The project could not be saved."
+  },
+  "stage": {
+    "label": "The file, and what it is used by"
+  },
+  "inspector": {
+    "label": "File",
+    "empty": "What a file is, and what was said about it, is read here."
+  }
+}

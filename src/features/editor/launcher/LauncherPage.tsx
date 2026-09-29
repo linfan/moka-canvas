@@ -4,7 +4,12 @@ import { useTranslation } from "react-i18next";
 import { recentApi, type RecentProject } from "../../../api";
 import type { SelfCheckReport } from "../../../shared/domain";
 import { useModelStore } from "../../settings/modelStore";
-import { CanvasIcon, ClipIcon, StoryIcon } from "../components/HomeMenu";
+import {
+  AssetsIcon,
+  CanvasIcon,
+  ClipIcon,
+  StoryIcon,
+} from "../components/HomeMenu";
 import { useAppStore, type AppPhase } from "../stores/appStore";
 import { useProjectStore } from "../stores/projectStore";
 import { MissingAssetsDialog } from "./MissingAssetsDialog";
@@ -18,26 +23,29 @@ import { ProjectDialog, type DialogMode } from "./ProjectDialog";
  * board a reader did not ask for is never built on the way past it. Each way
  * wears the room's name and mark, the two the corner menu speaks the room by.
  */
-type Room = "story" | "canvas" | "clip";
+type Room = "story" | "canvas" | "clip" | "assets";
 
-const ROOMS: Room[] = ["story", "canvas", "clip"];
+const ROOMS: Room[] = ["story", "canvas", "clip", "assets"];
 
 const ROOM_PHASE: Record<Room, AppPhase> = {
   story: "story",
   canvas: "editing",
   clip: "clip",
+  assets: "assets",
 };
 
 const ROOM_LABEL: Record<Room, string> = {
   story: "app:homeMenu.story",
   canvas: "app:homeMenu.canvas",
   clip: "app:homeMenu.clip",
+  assets: "app:homeMenu.assets",
 };
 
 const ROOM_ICON: Record<Room, ComponentType<{ size?: number }>> = {
   story: StoryIcon,
   canvas: CanvasIcon,
   clip: ClipIcon,
+  assets: AssetsIcon,
 };
 
 export function LauncherPage() {

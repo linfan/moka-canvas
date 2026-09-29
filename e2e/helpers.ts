@@ -177,7 +177,7 @@ export async function persistedNodeCount(page: Page): Promise<number> {
 export async function openRecent(
   page: Page,
   name: string,
-  room: "Story" | "Canvas" | "Clip" = "Canvas",
+  room: "Story" | "Canvas" | "Clip" | "Assets" = "Canvas",
 ) {
   await page
     .locator("button.launcher-recent")
@@ -212,6 +212,21 @@ export async function openStoryRoom(page: Page) {
   await page.getByRole("button", { name: "Projects menu" }).click();
   await page.getByRole("menuitem", { name: "Story" }).click();
   await expect(page.getByTestId("story-page")).toBeVisible({ timeout: 10_000 });
+}
+
+/**
+ * Step into the files room from whichever working page is open.
+ *
+ * The project stays open across the step, as it does for every other room:
+ * the coffee button is the way between the pages, and the Assets row is where
+ * the reader arrives.
+ */
+export async function openAssetsRoom(page: Page) {
+  await page.getByRole("button", { name: "Projects menu" }).click();
+  await page.getByRole("menuitem", { name: "Assets" }).click();
+  await expect(page.getByTestId("assets-page")).toBeVisible({
+    timeout: 10_000,
+  });
 }
 
 /** Begin a story under a name, from the door that stands open. */

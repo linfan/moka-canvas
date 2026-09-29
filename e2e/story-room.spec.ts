@@ -42,11 +42,17 @@ test("the corner menu leads to the story room, above the board", async ({
     page.getByText("A story is told here: a premise, the episodes it is told"),
   ).toBeVisible();
 
-  // The corner menu walks between three working pages in telling order, and
+  // The corner menu walks between the working pages in telling order, and
   // marks the one being stood on.
   await page.getByRole("button", { name: "Projects menu" }).click();
   const rows = page.getByTestId("home-menu").getByRole("menuitem");
-  await expect(rows).toHaveText(["Projects", "Story", "Canvas", "Clip"]);
+  await expect(rows).toHaveText([
+    "Projects",
+    "Story",
+    "Canvas",
+    "Clip",
+    "Assets",
+  ]);
   await expect(rows.filter({ hasText: "Story" })).toHaveAttribute(
     "aria-current",
     "page",

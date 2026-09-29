@@ -197,12 +197,16 @@ h2 {
 }
 
 /* One step under the row they hang from: laid on the page rather than raised
-   off it, wearing mark and name a size down, so the three read as the row's
-   own ways in rather than as three more rows standing beside it. */
+   off it, wearing mark and name a size down, so the ways in read as the row's
+   own rather than as rows standing beside it. The words are the palette's own
+   foreground rather than its muted grey: these are the doors into a project,
+   and a door read as a whisper is a door missed. When a light palette arrives
+   it moves `--ink` and this rule follows it; the hover wash below is white on
+   purpose and belongs to the dark palette. */
 .launcher-recent-rooms button {
   align-items: center;
   background: transparent;
-  color: var(--muted);
+  color: var(--ink);
   display: flex;
   flex: 1;
   font-size: 12px;
@@ -5255,6 +5259,96 @@ body.is-dragging-split {
   font-size: 12px;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   The files room: everything a project holds, and everywhere it is used.
+   --------------------------------------------------------------------------- */
+
+/* The editor's skeleton with a file in place of the canvas: a library column
+   on the left, the file on the stage in the middle, and what is known about
+   it on the right. Both side columns fold and drag as they do beside the
+   canvas; the stage is what is left over. */
+.assets-page {
+  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.assets-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  z-index: 0;
+}
+
+/* The library column: the kinds, their counts, the shelf's own filter bar,
+   and the rows — read at the width the reader dragged it to. */
+.assets-column {
+  background: var(--surface);
+  border-right: 1px solid var(--stroke);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+  padding: 16px 12px 0;
+  width: var(--panel-left-width, 300px);
+}
+
+.assets-column-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding-right: 10px;
+}
+
+.assets-column-head h2 {
+  font-size: 14px;
+  margin: 0;
+}
+
+/* The shelf scrolls inside the column, so the kind tabs and the filter bar
+   stay where a reader left them however long the list under them is. */
+.assets-column-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The stage: the chosen file read large, with everything pointing at it under
+   it; while nothing is chosen, the project itself. */
+.assets-stage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.assets-stage-hint {
+  color: var(--muted);
+  margin: auto;
+  padding: 24px;
+}
+
+/* The right column: what the file is, and what was said about it. */
+.assets-inspector {
+  background: var(--surface);
+  border-left: 1px solid var(--stroke);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 16px;
+  width: var(--panel-right-width, 300px);
 }
 
 /* ---------------------------------------------------------------------------

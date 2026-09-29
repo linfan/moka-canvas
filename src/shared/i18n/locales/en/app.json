@@ -77,10 +77,11 @@
   },
   "homeMenu": {
     "button": "Projects menu",
-    "hint": "Projects, canvas, story, and clip",
+    "hint": "Projects, canvas, story, clip, and assets",
     "home": "Projects",
     "canvas": "Canvas",
     "clip": "Clip",
-    "story": "Story"
+    "story": "Story",
+    "assets": "Assets"
   }
 }

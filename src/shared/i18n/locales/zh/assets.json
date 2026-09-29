@@ -1,0 +1,16 @@
+{
+  "page": {
+    "title": "素材",
+    "empty": "从列表里选一个文件。",
+    "historyBoundary": "素材房",
+    "saveConflict": "项目在别处被改动，请重新打开后再继续。",
+    "saveFailed": "项目未能保存。"
+  },
+  "stage": {
+    "label": "文件及其引用"
+  },
+  "inspector": {
+    "label": "文件",
+    "empty": "文件是什么、有哪些记录，都从这里读。"
+  }
+}

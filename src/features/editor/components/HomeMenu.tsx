@@ -3,13 +3,14 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "../stores/appStore";
 
 /** Which page the menu is standing on, and marks as current. */
-export type HomeMenuPage = "canvas" | "clip" | "story";
+export type HomeMenuPage = "canvas" | "clip" | "story" | "assets";
 
 /** Where each row of the menu leads. */
-const PHASE: Record<HomeMenuPage, "editing" | "clip" | "story"> = {
+const PHASE: Record<HomeMenuPage, "editing" | "clip" | "story" | "assets"> = {
   canvas: "editing",
   story: "story",
   clip: "clip",
+  assets: "assets",
 };
 
 /**
@@ -126,6 +127,27 @@ export function ClipIcon({ size = 16 }: { size?: number }) {
       <rect height="14" rx="1.5" width="18" x="3" y="5" />
       <path d="M7.5 5v14M16.5 5v14" />
       <path d="M3 9.7h4.5M3 14.3h4.5M16.5 9.7H21M16.5 14.3H21" />
+    </svg>
+  );
+}
+
+/** Two sheets laid one over the other: the files a project is made of. */
+export function AssetsIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <rect height="12" rx="2" width="13" x="4" y="8" />
+      <path d="M8.5 8V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v9.5" />
+      <path d="m4 15.5 3.2-3 2.8 2.6 2.4-2.2L17 16" />
     </svg>
   );
 }
@@ -262,6 +284,18 @@ export function HomeMenu({ current, onHome }: HomeMenuProps) {
               >
                 <ClipIcon />
                 <span>{t("app:homeMenu.clip")}</span>
+              </button>
+              <button
+                aria-current={current === "assets" ? "page" : undefined}
+                className={`home-menu-item${
+                  current === "assets" ? " is-current" : ""
+                }`}
+                onClick={() => go("assets")}
+                role="menuitem"
+                type="button"
+              >
+                <AssetsIcon />
+                <span>{t("app:homeMenu.assets")}</span>
               </button>
             </div>
           </div>
