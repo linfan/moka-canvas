@@ -14,6 +14,7 @@ import {
   importFiles,
 } from "./interactions/actions";
 import { useEditorKeyboard } from "./interactions/keyboard";
+import { askSavePath, fileSafeName } from "./launcher/savePath";
 import { useAppStore } from "./stores/appStore";
 import { useEditorStore, useEffectiveTool } from "./stores/editorStore";
 import { usePanelFolds } from "./stores/panelFolds";
@@ -100,6 +101,11 @@ export function EditorPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportChoices, setExportChoices] =
     useState<ExportChoices>(EXPORT_DEFAULTS);
+  // Where the package is going, asked once per export: a refusal that offers
+  // to carry on anyway must not ask for the path a second time.
+  const [exportDestination, setExportDestination] = useState<string | null>(
+    null,
+  );
   const [leftBehind, setLeftBehind] = useState<LeftBehind>({
     count: 0,
     bytes: 0,
@@ -115,6 +121,7 @@ export function EditorPage() {
   // dialog is being read are numbers to read again.
   const askAboutExport = (thenClose: boolean) => {
     setLeftBehind(countLeftBehind(useProjectStore.getState().moka));
+    setExportDestination(null);
     setExportThenClose(thenClose);
     setExportOpen(true);
   };
@@ -179,9 +186,24 @@ export function EditorPage() {
     allowIncomplete = false,
   ) => {
     setExportChoices(choices);
+    // Asked before anything is made, and answered once: the export that says
+    // the placed assets are missing offers to carry on, and the path a reader
+    // chose is the path that export takes.
+    let destination = exportDestination;
+    if (destination === null) {
+      const name = useProjectStore.getState().moka?.metadata.name ?? "";
+      destination = await askSavePath({
+        title: t("editor:dialogs.exportPackage.saveTitle"),
+        defaultName: `${fileSafeName(name)}.mokapkg.zip`,
+        extensions: ["zip"],
+      });
+      if (destination === null) return;
+      setExportDestination(destination);
+    }
     setExportBusy(true);
     try {
       const report = await projectsApi.exportPackage({
+        destination,
         allowIncomplete: allowIncomplete || undefined,
         includePersonalHistory: choices.includePersonalHistory || undefined,
         onlyReferencedAssets: choices.onlyReferencedAssets || undefined,

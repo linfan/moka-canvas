@@ -781,8 +781,6 @@ export interface StoryEdit {
    * story's to take away.
    */
   clipByAct?: Array<{ actId: string; keyframeId?: string; clipId: ClipId }>;
-  /** The finished film, once it has been rendered and filed. */
-  film?: StoryTake;
 }
 
 export interface StoryDocument {
@@ -848,8 +846,8 @@ export type StorySlotTarget =
  *
  * A card and a place's old drawing are the two a delete can take out of what
  * holds them; the drawing a place is using, a clip cut into a timeline, and a
- * story's manuscript or finished film are the ones it cannot — those are named
- * to the reader instead, since the way out of them is a change somewhere else.
+ * story's manuscript are the ones it cannot — those are named to the reader
+ * instead, since the way out of them is a change somewhere else.
  */
 export type AssetHolder =
   | { kind: "node"; canvasId: CanvasId; nodeId: NodeId }
@@ -875,12 +873,12 @@ export type AssetHolder =
       clipId: ClipId;
       clipLabel: string;
     }
-  /** A story's manuscript, or the film it was rendered into. */
+  /** A story's manuscript. */
   | {
       kind: "storyFile";
       storyId: string;
       storyName: string;
-      what: "manuscript" | "film";
+      what: "manuscript";
     };
 
 /** A story place keeping a file only as a drawing it is not using. */
@@ -951,7 +949,6 @@ export interface StoryEditPatch {
     keyframeId?: string;
     clipId: ClipId;
   }> | null;
-  film?: StoryTake | null;
 }
 
 export interface NodePatch {

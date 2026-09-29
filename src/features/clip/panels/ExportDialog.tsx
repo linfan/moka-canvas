@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { assetsApi } from "../../../api/assets";
-import { findResource, type TimelineDocument } from "../../../shared/domain";
-import { formatBytes, formatDuration } from "../../editor/canvas/mediaCards";
-import { useProjectStore, saveTrouble } from "../../editor/stores/projectStore";
-import { useAppStore } from "../../editor/stores/appStore";
+import { filesystemApi } from "../../../api";
+import type { TimelineDocument } from "../../../shared/domain";
 import { i18n } from "../../../shared/i18n";
+import { formatDuration } from "../../editor/canvas/mediaCards";
+import { askSavePath, fileSafeName } from "../../editor/launcher/savePath";
+import { useProjectStore } from "../../editor/stores/projectStore";
 import { clipApi } from "../api";
 import type { ClipCapabilities } from "../api";
 import { useClipStore } from "../stores/clipStore";
@@ -20,7 +20,10 @@ const POLL_MS = 700;
  * Three states and one machine: asking, waiting, and an answer. The work is
  * the server's from the moment it is asked for — closing this dialog does not
  * cancel a render, and reopening it picks the handle back up — so nothing here
- * decides anything about the artifact, it only reports.
+ * decides anything about the render, it only reports.
+ *
+ * Where the file goes is the reader's to say, asked once per export: the
+ * render writes the path it was told and nowhere else.
  *
  * What the machine can do is read once per opening and shown as it stands: a
  * machine without a renderer is not a broken dialog, it is a dialog that says
@@ -98,28 +101,10 @@ export function ExportDialog() {
     return () => window.clearInterval(timer);
   }, [task?.id, live, task]);
 
-  // The artifact is filed into the project by the server, so a finished
-  // render is read back out of the document rather than guessed at: that is
-  // also what puts it on the shelf behind this dialog.
-  const assetId = task?.status === "done" ? task.assetId : undefined;
-  useEffect(() => {
-    if (!assetId) return;
-    void useProjectStore
-      .getState()
-      .reload()
-      .then((adopted) => {
-        if (adopted) return;
-        // The render is filed on the server, but a change of the reader's
-        // would not save, so the stored document was not read back over it
-        // and the artifact is not on the shelf here yet. Said rather than
-        // passed over: a reader who sees nothing will look in the wrong place.
-        const blocked = saveTrouble();
-        useAppStore
-          .getState()
-          .pushToast("error", blocked.message, undefined, blocked.detail);
-      });
-  }, [assetId]);
-  const artifact = assetId && moka ? findResource(moka, assetId) : undefined;
+  // The artifact is written by the server to the path the reader chose, and
+  // this dialog only reports what the task says about it: there is nothing in
+  // the project to read back.
+  const savedTo = task?.status === "done" ? task.savedTo : undefined;
 
   if (!timeline) return null;
   const worded = timeline.clips.some((clip) => clip.kind === "text");
@@ -140,7 +125,22 @@ export function ExportDialog() {
     setBusy(true);
     useExportStore.getState().setError(null);
     try {
-      const started = await clipApi.start(timeline.id);
+      // A retry of a render that failed or was stopped goes where that render
+      // was going; a new export starts by asking, as does one after a finished
+      // render — a file that is already there is not quietly written over.
+      const held = useExportStore.getState();
+      const again = held.task !== null && held.task.status !== "done";
+      let destination = again ? held.destination : null;
+      if (destination === null) {
+        destination = await askSavePath({
+          title: t("clip:exportDialog.saveTitle"),
+          defaultName: `${fileSafeName(timeline.name)}.mp4`,
+          extensions: ["mp4"],
+        });
+        if (destination === null) return;
+        useExportStore.getState().setDestination(destination);
+      }
+      const started = await clipApi.start(timeline.id, destination);
       useExportStore.getState().setTask(started);
     } catch (problem) {
       useExportStore
@@ -217,17 +217,9 @@ export function ExportDialog() {
           </div>
         ) : null}
 
-        {task?.status === "done" ? (
-          <p className="clip-export-done">
-            {t("clip:exportDialog.exported", {
-              name:
-                artifact?.name ??
-                task.assetId ??
-                t("clip:exportDialog.theVideo"),
-            }) +
-              (artifact?.bytes !== undefined
-                ? ` (${formatBytes(artifact.bytes)})`
-                : "")}
+        {savedTo !== undefined ? (
+          <p className="clip-export-done" data-testid="clip-export-done">
+            {t("clip:exportDialog.saved", { path: savedTo })}
           </p>
         ) : null}
 
@@ -249,8 +241,12 @@ export function ExportDialog() {
                 : t("clip:exportDialog.close")}
             </button>
           )}
-          {task?.status === "done" && assetId ? (
-            <button onClick={() => void reveal(assetId)} type="button">
+          {savedTo !== undefined ? (
+            <button
+              data-testid="clip-export-reveal"
+              onClick={() => void reveal(savedTo)}
+              type="button"
+            >
               {t("clip:exportDialog.reveal")}
             </button>
           ) : null}
@@ -277,9 +273,9 @@ export function ExportDialog() {
  * Opens the finished file in this machine's file manager, and says so when it
  * cannot rather than failing silently.
  */
-async function reveal(assetId: string) {
+async function reveal(path: string) {
   try {
-    await assetsApi.reveal(assetId);
+    await filesystemApi.reveal(path);
   } catch (problem) {
     useExportStore
       .getState()

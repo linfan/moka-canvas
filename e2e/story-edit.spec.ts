@@ -159,7 +159,10 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     await expect(page.getByTestId("story-step-edit-body")).toBeVisible();
     await expect(page.getByTestId("story-assembly-summary")).toContainText("2");
     await expect(page.getByTestId("story-assembly-sound")).toBeVisible();
-    await page.getByTestId("story-assemble").click();
+    // The card's own link is the way the clips are laid out; there is no
+    // confirm button on this step and nothing above the card any more.
+    await expect(page.getByTestId("story-confirm-edit")).toHaveCount(0);
+    await page.getByTestId("story-film-reassemble").click();
 
     await expect
       .poll(async () => (await persistedTimeline(page)).name, {
@@ -198,6 +201,9 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     const render = page.getByTestId("story-film-export");
     await expect(render).toBeDisabled();
     await expect(render).toHaveAttribute("title", /ffmpeg was not found/);
+    // And no save dialog either: the path is a question only a render that
+    // can happen is worth asking.
+    await expect(page.getByTestId("path-browser")).toHaveCount(0);
 
     // And the cutting room opens on that same timeline.
     await page.getByTestId("story-film-open").click();

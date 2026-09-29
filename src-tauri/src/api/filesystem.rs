@@ -1,14 +1,14 @@
-//! What one directory holds, for the runtime that has no file dialog of its own.
+//! What one directory holds, and where a save lands, for the runtime that has
+//! no file dialog of its own.
 //!
 //! A desktop asks the operating system which folder a reader means. A browser
 //! cannot ask anything, and a reader who has to type a path out by hand is a
 //! reader who has to know it already — so the listing that stands in for the
 //! dialog is served from here instead.
 //!
-//! What leaves this module is names and where they lead. Nothing is read,
-//! nothing is written, and no question about a file's contents is answered: a
-//! listing says what a directory holds and stops there. Two rules keep it that
-//! small:
+//! What leaves this module by the listing is names and where they lead. Nothing
+//! is read, and no question about a file's contents is answered: a listing says
+//! what a directory holds and stops there. Two rules keep it that small:
 //!
 //! - an entry whose name begins with a dot is left out, which keeps the
 //!   dot-directories a home is full of out of a list meant for choosing a
@@ -19,13 +19,20 @@
 //!   choosing somewhere to put a new project wants, and why the answer then
 //!   carries no file at all rather than every file there is.
 //!
-//! Only the web runtime is served. The desktop one has a real dialog, and a
-//! loopback server answering a question nobody there needs to ask is a wider
-//! surface than a narrower one for the same price.
+//! Only the web runtime is served a listing. The desktop one has a real dialog,
+//! and a loopback server answering a question nobody there needs to ask is a
+//! wider surface than a narrower one for the same price.
+//!
+//! A write is the other half of the same question, and it is served to both
+//! runtimes: whichever dialog named the path, the window holding the bytes
+//! cannot put them on this machine's disk itself. It writes only into a folder
+//! that is already there, under a temporary name that is renamed into place, so
+//! a save that fails leaves nothing behind.
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 
 use super::dto::{FilesystemEntry, FilesystemListing};
 
@@ -276,6 +283,93 @@ fn unreadable(directory: &Path, source: std::io::Error) -> BrowseError {
     }
 }
 
+/// What a write could not be.
+#[derive(Debug, Error)]
+pub enum WriteError {
+    /// A path that is not absolute, so there is nothing to resolve it against.
+    #[error("{0} is not an absolute path")]
+    Relative(String),
+    /// A path that names a directory rather than a file to write.
+    #[error("{0} is a directory")]
+    IsADirectory(String),
+    /// A folder the destination would have to land in that is not there.
+    ///
+    /// A save never invents a folder: every dialog that produces a destination
+    /// only offers folders that already exist, so a missing one is a caller's
+    /// mistake rather than a case to paper over.
+    #[error("{} does not exist", .0.display())]
+    NoParent(PathBuf),
+    /// A file that would not be written.
+    #[error("{path}: {reason}")]
+    Io { path: String, reason: String },
+}
+
+impl WriteError {
+    /// The code an answer is given.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Relative(_) | Self::IsADirectory(_) => "VALIDATION_FAILED",
+            Self::NoParent(_) => "NOT_FOUND",
+            Self::Io { .. } => "INTERNAL",
+        }
+    }
+}
+
+/// Writes bytes where a save dialog said, whole or not at all.
+///
+/// The bytes land under the destination's own name with `.tmp` behind it and
+/// are renamed into place, so a file already there is replaced in one move: a
+/// save that fails halfway leaves whatever was there as it was, and a reader's
+/// own folder with nothing new in it.
+pub async fn write(destination: &Path, bytes: &[u8]) -> Result<u64, WriteError> {
+    if destination.is_relative() {
+        return Err(WriteError::Relative(displayed(destination)));
+    }
+    if tokio::fs::metadata(destination)
+        .await
+        .is_ok_and(|meta| meta.is_dir())
+    {
+        return Err(WriteError::IsADirectory(displayed(destination)));
+    }
+    let folder = destination
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .map(Path::to_path_buf);
+    match folder {
+        Some(folder) if is_directory(&folder).await => {}
+        _ => return Err(WriteError::NoParent(destination.to_path_buf())),
+    }
+
+    let staging = staging_name(destination);
+    let written = async {
+        let mut file = tokio::fs::File::create(&staging).await?;
+        file.write_all(bytes).await?;
+        file.sync_all().await
+    }
+    .await;
+    let outcome = match written {
+        Ok(()) => tokio::fs::rename(&staging, destination).await,
+        Err(source) => Err(source),
+    };
+    if let Err(source) = outcome {
+        let _ = tokio::fs::remove_file(&staging).await;
+        return Err(WriteError::Io {
+            path: displayed(destination),
+            reason: source.to_string(),
+        });
+    }
+    Ok(bytes.len() as u64)
+}
+
+/// The name a save takes while it is being made: its destination's own name
+/// with `.tmp` behind it, so it sits in the same folder and never looks like
+/// the file a reader asked for.
+fn staging_name(destination: &Path) -> PathBuf {
+    let mut name = destination.as_os_str().to_os_string();
+    name.push(".tmp");
+    PathBuf::from(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,5 +546,58 @@ mod tests {
                 listing.path
             );
         }
+    }
+
+    /// A save lands whole, replacing what was there, and leaves no staging
+    /// file behind.
+    #[tokio::test]
+    async fn a_save_replaces_what_was_there_in_one_move() {
+        let root = scratch();
+        let target = root.path().join("Cut.mp4");
+        std::fs::write(&target, b"old").unwrap();
+
+        let written = write(&target, b"artifact").await.unwrap();
+        assert_eq!(written, 8);
+        assert_eq!(std::fs::read(&target).unwrap(), b"artifact");
+        assert!(!staging_name(&target).exists());
+    }
+
+    /// What a save refuses: a path with no root to resolve it against, a folder
+    /// that is not there, and a destination that is a folder itself.
+    #[tokio::test]
+    async fn a_save_refuses_a_path_it_cannot_write() {
+        let root = scratch();
+
+        let error = write(Path::new("relative/Cut.mp4"), b"artifact")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "VALIDATION_FAILED");
+
+        let error = write(&root.path().join("nowhere").join("Cut.mp4"), b"artifact")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "NOT_FOUND");
+
+        let error = write(root.path(), b"artifact").await.unwrap_err();
+        assert_eq!(error.code(), "VALIDATION_FAILED");
+        assert_eq!(
+            error.to_string(),
+            format!("{} is a directory", root.path().display())
+        );
+    }
+
+    /// A save that cannot land leaves what was at the destination as it was.
+    #[tokio::test]
+    async fn a_save_that_fails_leaves_the_destination_alone() {
+        let root = scratch();
+        let target = root.path().join("Cut.mp4");
+        std::fs::write(&target, b"old").unwrap();
+        // Something in the way of the staging name: the bytes have nowhere to
+        // land, and the file that was there stands as it was.
+        std::fs::create_dir(staging_name(&target)).unwrap();
+
+        let error = write(&target, b"artifact").await.unwrap_err();
+        assert_eq!(error.code(), "INTERNAL");
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
     }
 }

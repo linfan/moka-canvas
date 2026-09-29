@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { filesystemApi } from "../../../api";
 import type { TimelineDocument } from "../../../shared/domain";
+import { askSavePath, fileSafeName } from "../../editor/launcher/savePath";
+import { useAppStore } from "../../editor/stores/appStore";
 import {
   ExitFullscreenIcon,
   FullscreenIcon,
@@ -26,11 +29,6 @@ const QUALITY_LABELS: { value: PreviewQuality; label: string }[] = [
   { value: "half", label: "clip:transport.qualityHalf" },
   { value: "quarter", label: "clip:transport.qualityQuarter" },
 ];
-
-/** A timeline's name as a file name: a cut is never a path. */
-function safeFileName(name: string): string {
-  return name.replace(/[\\/:*?"<>|]+/g, "-");
-}
 
 /**
  * The row under the picture: everything that plays the cut.
@@ -73,16 +71,31 @@ export function ClipTransport({ timeline }: ClipTransportProps) {
       canvas.toBlob(resolve, "image/png"),
     );
     if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${safeFileName(timeline.name)}-${formatTimecode(playheadMs, fps)}.png`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    // The file is read from the URL after the click returns, so it is let go
-    // on the next turn rather than under the download's feet.
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    // The clock's own colons are not a name a file may wear, so the moment is
+    // written the way the rest of the name is.
+    const moment = formatTimecode(playheadMs, fps).replace(/:/g, "-");
+    const destination = await askSavePath({
+      title: t("clip:transport.saveSnapshotTitle"),
+      defaultName: `${fileSafeName(timeline.name)}-${moment}.png`,
+      extensions: ["png"],
+    });
+    if (destination === null) return;
+    try {
+      await filesystemApi.write(destination, blob);
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          t("clip:transport.snapshotSaved", { path: destination }),
+        );
+    } catch (problem) {
+      useAppStore
+        .getState()
+        .pushToast(
+          "error",
+          problem instanceof Error ? problem.message : String(problem),
+        );
+    }
   };
 
   /** The whole pane to the window, or back: the button says which it will do. */

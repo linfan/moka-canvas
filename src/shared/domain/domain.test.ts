@@ -1226,7 +1226,7 @@ describe("what holds an asset", () => {
     ]);
   });
 
-  it("keeps a manuscript and a film out of a delete's reach", () => {
+  it("keeps a manuscript out of a delete's reach", () => {
     const moka = buildStoryMokaFile();
     expect(assetHolders(moka, storyIds().source)).toEqual([
       {
@@ -1234,15 +1234,6 @@ describe("what holds an asset", () => {
         storyId: storyIds().story,
         storyName: "雨夜列车",
         what: "manuscript",
-      },
-    ]);
-    moka.stories![0].edit.film = { assetIds: ["asset-film"], createdAt: WHEN };
-    expect(assetHolders(moka, "asset-film")).toEqual([
-      {
-        kind: "storyFile",
-        storyId: storyIds().story,
-        storyName: "雨夜列车",
-        what: "film",
       },
     ]);
   });

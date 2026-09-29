@@ -70,6 +70,21 @@ async function openGolden() {
         json({ revision: 4, updatedAt: "2026-01-01T00:00:02.000Z" }),
       );
     }
+    // The save question the browser draws for itself, answered where asked.
+    if (url.startsWith("/api/v1/filesystem?")) {
+      const asked = new URL(`http://localhost${url}`);
+      return Promise.resolve(
+        json({
+          path: asked.searchParams.get("path") ?? "",
+          parent: "/tmp",
+          entries: [],
+          truncated: false,
+        }),
+      );
+    }
+    if (url.startsWith("/api/v1/filesystem/file?")) {
+      return Promise.resolve(json({ path: "saved", bytes: 3 }));
+    }
     return Promise.resolve(
       json({ code: "NOT_FOUND", message: url, status: 404 }, 404),
     );
@@ -81,6 +96,37 @@ async function openGolden() {
   await screen.findByTestId("canvas-tab-Canvas 1");
 }
 
+/** Opens the export menu and asks for the picture. */
+function exportAsImage(): void {
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  fireEvent.click(
+    within(screen.getByRole("menu", { name: "Export" })).getByRole("menuitem", {
+      name: "Export as image",
+    }),
+  );
+}
+
+/** Answers the save dialog where it opens, under the name it offers. */
+async function chooseSavePath(): Promise<void> {
+  const choose = await screen.findByTestId("path-browser-choose");
+  await waitFor(() => expect(choose).toHaveProperty("disabled", false));
+  fireEvent.click(choose);
+}
+
+/** The write the picture became, as the server was told it. */
+function writes(): { url: string; body: BodyInit | null | undefined }[] {
+  return fetchMock.mock.calls
+    .filter(
+      ([url, init]) =>
+        String(url).startsWith("/api/v1/filesystem/file?") &&
+        (init as RequestInit)?.method === "PUT",
+    )
+    .map(([url, init]) => ({
+      url: String(url),
+      body: (init as RequestInit).body,
+    }));
+}
+
 /**
  * Stands in for the mounted canvas, which jsdom cannot build. Only the
  * snapshot the export reaches for is real; the rest answers harmlessly.
@@ -89,17 +135,6 @@ function stubCanvas(snapshot: () => Promise<Blob>) {
   registerController({
     renderSnapshot: snapshot,
   } as unknown as LeaferEditorController);
-}
-
-const originalCreateObjectURL = URL.createObjectURL;
-const originalRevokeObjectURL = URL.revokeObjectURL;
-
-function stubObjectUrls() {
-  const create = vi.fn(() => "blob:snapshot");
-  const revoke = vi.fn();
-  URL.createObjectURL = create as unknown as typeof URL.createObjectURL;
-  URL.revokeObjectURL = revoke as unknown as typeof URL.revokeObjectURL;
-  return { create, revoke };
 }
 
 beforeEach(() => {
@@ -121,43 +156,57 @@ afterEach(() => {
   registerController(null);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  URL.createObjectURL = originalCreateObjectURL;
-  URL.revokeObjectURL = originalRevokeObjectURL;
 });
 
 describe("exporting the canvas as an image", () => {
-  it("hands the snapshot to the browser under the canvas's name", async () => {
+  it("asks where the picture goes, and writes it there", async () => {
     const blob = new Blob(["png"], { type: "image/png" });
     const snapshot = vi.fn(async () => blob);
     await openGolden();
     stubCanvas(snapshot);
-    const urls = stubObjectUrls();
-    let saved: { name: string; href: string } | null = null;
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
-      this: HTMLAnchorElement,
-    ) {
-      saved = { name: this.download, href: this.getAttribute("href") ?? "" };
-    });
 
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
-    fireEvent.click(
-      within(await screen.findByRole("menu", { name: "Export" })).getByRole(
-        "menuitem",
-        { name: "Export as image" },
-      ),
-    );
-    await waitFor(() => expect(urls.create).toHaveBeenCalledWith(blob));
+    exportAsImage();
+    await chooseSavePath();
 
+    await waitFor(() => expect(writes()).toHaveLength(1));
     expect(snapshot).toHaveBeenCalledTimes(1);
-    expect(saved!.name).toBe("Canvas 1.png");
-    expect(saved!.href).toBe("blob:snapshot");
-    expect(document.querySelector("a[download]")).toBeNull();
-    expect(useEditorStore.getState().announcement).toBe(
-      "Canvas image exported",
+    const [written] = writes();
+    const asked = new URL(`http://localhost${written.url}`);
+    expect(asked.searchParams.get("path")).toBe(
+      "/tmp/golden/output/Canvas 1.png",
     );
+    expect(written.body).toBe(blob);
+    // The file is on the machine the server runs on, so the notice says where
+    // rather than pretending a download happened.
     await waitFor(() =>
-      expect(urls.revoke).toHaveBeenCalledWith("blob:snapshot"),
+      expect(useAppStore.getState().toasts).toMatchObject([
+        {
+          kind: "success",
+          message: "Canvas image saved to /tmp/golden/output/Canvas 1.png",
+        },
+      ]),
     );
+  });
+
+  it("writes nothing when the save question is backed out of", async () => {
+    const blob = new Blob(["png"], { type: "image/png" });
+    await openGolden();
+    stubCanvas(vi.fn(async () => blob));
+
+    exportAsImage();
+    const choose = await screen.findByTestId("path-browser-choose");
+    await waitFor(() => expect(choose).toHaveProperty("disabled", false));
+    fireEvent.click(
+      within(screen.getByTestId("path-browser")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("path-browser")).toBeNull(),
+    );
+    expect(writes()).toHaveLength(0);
+    expect(useAppStore.getState().toasts).toEqual([]);
   });
 
   it("shows why when the canvas cannot draw the picture", async () => {
@@ -166,40 +215,28 @@ describe("exporting the canvas as an image", () => {
     });
     await openGolden();
     stubCanvas(snapshot);
-    const urls = stubObjectUrls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
-    fireEvent.click(
-      within(await screen.findByRole("menu", { name: "Export" })).getByRole(
-        "menuitem",
-        { name: "Export as image" },
-      ),
-    );
+    exportAsImage();
     await waitFor(() =>
       expect(useAppStore.getState().toasts).toMatchObject([
         { kind: "error", message: "There is nothing to export yet" },
       ]),
     );
-    expect(urls.create).not.toHaveBeenCalled();
-    expect(useEditorStore.getState().announcement).toBe("");
+    // The picture never came back, so nothing was ever asked.
+    expect(screen.queryByTestId("path-browser")).toBeNull();
+    expect(writes()).toHaveLength(0);
   });
 
   it("says the canvas is not ready while none is mounted", async () => {
     await openGolden();
-    const urls = stubObjectUrls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
-    fireEvent.click(
-      within(await screen.findByRole("menu", { name: "Export" })).getByRole(
-        "menuitem",
-        { name: "Export as image" },
-      ),
-    );
+    exportAsImage();
     await waitFor(() =>
       expect(useAppStore.getState().toasts).toMatchObject([
         { kind: "error", message: "The canvas is not ready" },
       ]),
     );
-    expect(urls.create).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("path-browser")).toBeNull();
+    expect(writes()).toHaveLength(0);
   });
 });

@@ -221,6 +221,36 @@ process can open (see [deployment.md](deployment.md)) — but it is a wider answ
 than any other route gives, which is why it is the one route the desktop runtime
 refuses. Keep the server on loopback, or put identity in front of it.
 
+## Writing files
+
+The other half of the same question: `PUT /api/v1/filesystem/file?path=<file>`
+writes the request body where a save dialog said, and
+`POST /api/v1/filesystem/reveal` hands a file to the platform's file manager.
+Unlike the listing above, both are served in **both** runtimes: the window
+holding the bytes is not the one holding the disk, on the desktop as much as in
+a browser, so a write that only the browser could make would be a feature the
+desktop does not have.
+
+What narrows them:
+
+- **Only where a dialog already pointed.** The path must be absolute, its parent
+  directory must already exist, and the path must not be a directory. No route
+  creates a directory, so a write cannot scatter files somewhere nobody asked
+  for; and the desktop's own save dialog is what produces the path there.
+- **Whole or not at all.** The body goes to `<path>.tmp` first and is renamed
+  over the target, so a write that fails leaves the directory as it was rather
+  than half a file. A file already at the path is replaced — the dialog that
+  produced the path is what asked about that.
+- **Bounded.** A write body is capped at 256 MiB, well under the 2 GiB a media
+  upload may carry.
+- **Reveal reads nothing.** It takes an absolute path to an existing file and
+  opens the platform's file manager on it.
+
+Anyone who can reach the port can therefore write files the process can write.
+That is the same trust the rest of the API asks for, but it is a wider answer
+than the work routes give — keep the server on loopback, or put identity in
+front of it.
+
 ## Exported packages
 
 A project package (`.moka`, a ZIP) can never contain application metadata:
@@ -231,7 +261,10 @@ A project package (`.moka`, a ZIP) can never contain application metadata:
   `models.json`, the legacy `providers.json`, `prompts/sources.json`) are excluded at
   the **project root**
   only, so a project that legitimately contains its own `assets/meta.json` still
-  ships it.
+  ships it;
+- the project's own `output` folder — where the save dialogs open, and where an
+  export is likely to land — is excluded at the **project root**, so an earlier
+  package is not swept into the next one.
 
 Because the metadata directory is structurally outside every project directory,
 these guards are a second line of defence rather than the only one. The
@@ -251,7 +284,7 @@ about where a full backup is sent.
 
 ## Video export
 
-A timeline render hands the project's own file paths to the machine's ffmpeg as a filter graph, written into a temporary directory under the project's temp area (`export-<id>/`, relative file names only) and deleted on success, failure, cancellation, and timeout alike; nothing is uploaded anywhere and no new credential is involved. The program itself is named only by `clip.ffmpegPath`, `MOKA_FFMPEG`, or the server process's search path — never by a request body — and a finished render is filed into the project as an ordinary asset.
+A timeline render hands the project's own file paths to the machine's ffmpeg as a filter graph, written into a temporary directory under the project's temp area (`export-<id>/`, relative file names only) and deleted on success, failure, cancellation, and timeout alike; nothing is uploaded anywhere and no new credential is involved. The program itself is named only by `clip.ffmpegPath`, `MOKA_FFMPEG`, or the server process's search path — never by a request body. The finished render is copied to the destination the request named — the path a save dialog produced — through the same staged write as any other save (see [Writing files](#writing-files)), and nowhere else: it is not filed among the project's assets, so what a reader keeps is the file they chose.
 
 ## Damaged documents
 

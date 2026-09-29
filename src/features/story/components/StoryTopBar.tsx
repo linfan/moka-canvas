@@ -24,7 +24,7 @@ export function StoryTopBar({ onHome }: StoryTopBarProps) {
       exportItems={
         <button
           data-testid="story-export-film"
-          onClick={() => useStoryStore.getState().openExport()}
+          onClick={() => useStoryStore.getState().goStep("edit")}
           role="menuitem"
           type="button"
         >

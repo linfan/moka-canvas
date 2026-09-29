@@ -1279,3 +1279,43 @@ async fn export_never_contains_personal_or_secret_data() {
         );
     }
 }
+
+/// Where packages are exported to is not part of what a package carries: the
+/// second export of a project must not sweep the first one in.
+#[tokio::test]
+async fn an_earlier_export_is_not_swept_into_the_next_package() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    create_project(&app, &temp.path().join("projects"), "Sweep").await;
+
+    let first = export_open_project(&app, json!({})).await;
+    let first_path = PathBuf::from(first["destination"].as_str().unwrap());
+    assert!(first_path.is_file(), "the first package landed");
+
+    let second = export_open_project(&app, json!({})).await;
+    let second_path = PathBuf::from(second["destination"].as_str().unwrap());
+    let entries = read_zip_entries(&second_path);
+    let carried: Vec<&str> = entries.iter().map(|(name, _)| name.as_str()).collect();
+    assert!(
+        carried.iter().all(|name| !name.starts_with("output/")),
+        "a package carries no exports: {carried:?}"
+    );
+
+    // And the manifest says what was left out, so a receiver can hold the
+    // package against what it does not hold.
+    let manifest: Value = serde_json::from_slice(
+        &entries
+            .iter()
+            .find(|(name, _)| name == "moka-package.json")
+            .expect("the manifest ships")
+            .1,
+    )
+    .unwrap();
+    let skipped = manifest["skipped"].as_array().expect("the skip rows");
+    assert!(
+        skipped
+            .iter()
+            .any(|row| row["rule"] == "output/**" && row["files"].as_u64().unwrap_or(0) >= 1),
+        "the export left behind is named as a skip: {manifest}"
+    );
+}

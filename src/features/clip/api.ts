@@ -1,4 +1,4 @@
-import type { AssetId, TimelineId } from "../../shared/domain";
+import type { TimelineId } from "../../shared/domain";
 import { http } from "../../api/client";
 
 /**
@@ -38,8 +38,9 @@ export interface ClipExportTask {
   progress01: number;
   /** What went wrong, on the paths that went wrong. */
   message?: string;
-  /** What the artifact was filed as, once it is in the project. */
-  assetId?: AssetId;
+  /** Where the finished file was written, once there is one: the reader's own
+   * path, and the only copy the render makes. */
+  savedTo?: string;
 }
 
 export const clipApi = {
@@ -49,11 +50,16 @@ export const clipApi = {
     });
   },
 
-  /** Asks for one render; the artifact may be minutes away. */
-  start(timelineId: TimelineId, signal?: AbortSignal): Promise<ClipExportTask> {
+  /** Asks for one render to the path the reader named; the file it writes may
+   * be minutes away. */
+  start(
+    timelineId: TimelineId,
+    destination: string,
+    signal?: AbortSignal,
+  ): Promise<ClipExportTask> {
     return http.request<ClipExportTask>("/api/v1/clip/export", {
       method: "POST",
-      body: { timelineId },
+      body: { timelineId, destination },
       signal,
     });
   },

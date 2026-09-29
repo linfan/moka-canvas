@@ -129,10 +129,6 @@ pub fn router() -> axum::Router<ApiState> {
             "/api/v1/recent-projects/{id}",
             delete(routes::remove_recent),
         )
-        // Beside the project routes rather than under them: a listing answers
-        // where a project could be, and does so before one exists. Only the web
-        // runtime is served — see `api::filesystem`.
-        .route("/api/v1/filesystem", get(routes::browse_filesystem))
         .route("/api/v1/projects", post(routes::create_project))
         .route("/api/v1/projects/open", post(routes::open_project))
         .route("/api/v1/projects/import", post(routes::import_project))
@@ -222,6 +218,7 @@ pub fn router() -> axum::Router<ApiState> {
         .merge(model_router())
         .merge(generate_router())
         .merge(clip_router())
+        .merge(filesystem_router())
         .route(
             "/api/v1/converter/protocols",
             get(routes::converter_protocols),
@@ -301,4 +298,30 @@ fn model_router() -> axum::Router<ApiState> {
             put(routes::set_secret_storage),
         )
         .route_layer(DefaultBodyLimit::max(MAX_PROVIDER_BODY_BYTES))
+}
+
+/// Where a file dialog's questions are answered.
+///
+/// Beside the project routes rather than under them: a listing answers where a
+/// project could be, and does so before one exists. The listing itself is
+/// served only to the web runtime, which has no dialog of its own — the
+/// desktop asks the operating system instead, and a listing nobody there needs
+/// is a way of reading this machine's directories that would otherwise not
+/// exist. A write and a reveal are the other halves of the same question in
+/// both runtimes; `api::filesystem` keeps the rules for all three.
+///
+/// The body ceiling is a picture's or a subtitle's worth — a listing and a
+/// reveal carry no body at all — and it replaces the server router's upload
+/// ceiling for these routes rather than adding to it.
+fn filesystem_router() -> axum::Router<ApiState> {
+    use axum::extract::DefaultBodyLimit;
+    use axum::routing::{get, post, put};
+
+    const MAX_WRITE_BODY_BYTES: usize = 256 * 1024 * 1024;
+
+    axum::Router::new()
+        .route("/api/v1/filesystem", get(routes::browse_filesystem))
+        .route("/api/v1/filesystem/file", put(routes::write_file))
+        .route("/api/v1/filesystem/reveal", post(routes::reveal_path))
+        .route_layer(DefaultBodyLimit::max(MAX_WRITE_BODY_BYTES))
 }

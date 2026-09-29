@@ -151,7 +151,5 @@ function gapLine(
       );
     case "noTimeline":
       return t("story:confirm.gapNoTimeline");
-    case "noFilm":
-      return t("story:confirm.gapNoFilm");
   }
 }

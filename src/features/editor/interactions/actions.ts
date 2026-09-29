@@ -40,7 +40,12 @@ import {
   type StorySlotTarget,
   type WorkflowNode,
 } from "../../../shared/domain";
-import { assetsApi, assetUrl, type AssetShelfEdit } from "../../../api";
+import {
+  assetsApi,
+  assetUrl,
+  filesystemApi,
+  type AssetShelfEdit,
+} from "../../../api";
 import {
   toolsApi,
   type PictureTool,
@@ -78,6 +83,7 @@ import {
 import { buildResourceIndex } from "../canvas/mediaCards";
 import { maskName } from "../canvas/repaint";
 import type { ConnectionCheck } from "../canvas/controller";
+import { askSavePath, fileSafeName } from "../launcher/savePath";
 
 function toastError(message: string) {
   useAppStore.getState().pushToast("error", message);
@@ -1192,12 +1198,9 @@ function holderText(holder: BlockingHolder): string {
         clip: holder.clipLabel,
       });
     case "storyFile":
-      return i18n.t(
-        holder.what === "manuscript"
-          ? "editor:holders.manuscript"
-          : "editor:holders.film",
-        { story: holder.storyName },
-      );
+      return i18n.t("editor:holders.manuscript", {
+        story: holder.storyName,
+      });
   }
 }
 
@@ -2483,7 +2486,8 @@ export function fitSelectionAction() {
 /**
  * Saves the whole canvas as a PNG. The picture is drawn by the canvas itself
  * in the diagram's own coordinates, so it holds every node rather than the
- * part that happens to be on screen.
+ * part that happens to be on screen — and it is written where the reader says
+ * rather than into whatever folder the window downloads to.
  */
 export async function exportCanvasImage(): Promise<void> {
   const canvas = activeCanvas();
@@ -2495,17 +2499,19 @@ export async function exportCanvasImage(): Promise<void> {
   }
   try {
     const blob = await pending;
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${safeFileName(canvas.name)}.png`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    // The file is read from the URL after the click returns, so it is let go
-    // on the next turn rather than under the download's feet.
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    announce(i18n.t("editor:canvas.canvasImageExported"));
+    const destination = await askSavePath({
+      title: i18n.t("editor:topBar.saveImageTitle"),
+      defaultName: `${fileSafeName(canvas.name)}.png`,
+      extensions: ["png"],
+    });
+    if (destination === null) return;
+    await filesystemApi.write(destination, blob);
+    useAppStore
+      .getState()
+      .pushToast(
+        "success",
+        i18n.t("editor:canvas.canvasImageSaved", { path: destination }),
+      );
   } catch (error) {
     toastError(
       error instanceof Error
@@ -2513,10 +2519,6 @@ export async function exportCanvasImage(): Promise<void> {
         : i18n.t("editor:canvas.canvasNotExported"),
     );
   }
-}
-
-function safeFileName(name: string): string {
-  return name.replace(/[\\/:*?"<>|]+/g, "-");
 }
 
 function unionBounds(rects: Rect[]): Rect {

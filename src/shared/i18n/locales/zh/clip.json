@@ -136,7 +136,9 @@
     "qualityHalf": "一半",
     "qualityQuarter": "四分之一",
     "repeat": "循环播放",
+    "saveSnapshotTitle": "保存快照",
     "snapshot": "保存截图",
+    "snapshotSaved": "快照已保存到 {{path}}",
     "toEnd": "跳到末尾"
   },
   "rail": {
@@ -212,7 +214,9 @@
     "noTimeline": "还没有时间线。",
     "openSettings": "配置模型",
     "preset": "预设",
+    "saveSrtTitle": "保存字幕",
     "speakerLabel": "说话人{id}：",
+    "srtSaved": "字幕已保存到 {{path}}",
     "subtitles": "字幕",
     "transcribe": "自动字幕",
     "transcribeNoTask": "识别任务没有开始。",
@@ -251,14 +255,14 @@
   "exportDialog": {
     "close": "关闭",
     "done": "完成",
-    "exported": "已导出 {{name}}",
     "looking": "正在查找渲染器…",
     "noAss": "没有带 libass 的 ffmpeg，无法烧录文字。",
     "notAvailable": "这台机器上还没有可用的渲染器。",
     "nothingToRender": "这条时间线没有可渲染的内容。",
     "progress": "导出进度",
     "reveal": "在文件夹中显示",
-    "theVideo": "视频",
+    "saveTitle": "保存视频",
+    "saved": "已保存到 {{path}}",
     "title": "导出视频",
     "tryAgain": "重试",
     "unknown": "未知"

@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { RULER_H, TRACK_HEIGHT } from "../src/features/clip/timeline/geometry";
 import {
+  chooseSavePath,
   createProject,
   forgetHome,
   forgetProjects,
@@ -302,12 +304,20 @@ test("the repeat comes round at the tail, and the camera saves the frame", async
 
   await transportButton(page, "Pause").click();
 
-  // The camera takes the frame under the playhead out as a PNG.
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    transportButton(page, "Save snapshot").click(),
-  ]);
-  expect(download.suggestedFilename()).toMatch(/^Timeline 1-.*\.png$/);
+  // The camera takes the frame under the playhead out as a PNG, saved where
+  // the dialog said: the project's own output folder, named for the moment.
+  await transportButton(page, "Save snapshot").click();
+  const dialog = page.getByTestId("path-browser");
+  await expect(dialog.getByTestId("path-browser-name")).toHaveValue(
+    /^Timeline 1-.*\.png$/,
+  );
+  const destination = await chooseSavePath(page);
+  expect(destination).toContain(join(home, "project", "output"));
+  await expect(page.getByText(`Snapshot saved to ${destination}`)).toBeVisible({
+    timeout: 10_000,
+  });
+  const bytes = readFileSync(destination);
+  expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
 
   forgetHome(home);
 });

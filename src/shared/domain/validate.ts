@@ -335,12 +335,10 @@ export function collectAssetReferences(moka: MokaFile): Map<string, string[]> {
     for (const clip of timeline.clips) add(clip.assetId, clip.id);
   }
   // A story's pictures are its own: the frames drawn for a shot, the clip
-  // made of an act, the manuscript a premise was lifted from, and the film
-  // the whole was rendered into are all in use, however little of a canvas
-  // or a timeline they appear on.
+  // made of an act, and the manuscript a premise was lifted from are all in
+  // use, however little of a canvas or a timeline they appear on.
   for (const story of moka.stories ?? []) {
     add(story.brief.sourceAssetId, story.id);
-    for (const file of story.edit.film?.assetIds ?? []) add(file, story.id);
     for (const element of story.elements) {
       for (const take of element.main.takes) files(take, element.id);
       for (const take of element.turnaround?.takes ?? [])
@@ -460,9 +458,6 @@ export function assetHolders(moka: MokaFile, assetId: AssetId): AssetHolder[] {
     const where = { storyId: story.id, storyName: story.name };
     if (story.brief.sourceAssetId === assetId) {
       holders.push({ ...where, kind: "storyFile", what: "manuscript" });
-    }
-    if (story.edit.film?.assetIds.includes(assetId)) {
-      holders.push({ ...where, kind: "storyFile", what: "film" });
     }
     for (const place of storySlots(story)) {
       const held = place.slot.takes.some((take) =>

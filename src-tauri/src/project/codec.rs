@@ -175,12 +175,6 @@ fn settle_steps(moka: &mut bson::Document) {
         {
             steps.push("storyboard");
         }
-        if record(story.get("edit"))
-            .and_then(|edit| edit.get("film"))
-            .is_some_and(|film| !matches!(film, bson::Bson::Null))
-        {
-            steps.push("edit");
-        }
         story.insert(
             "confirmedSteps",
             bson::Bson::Array(

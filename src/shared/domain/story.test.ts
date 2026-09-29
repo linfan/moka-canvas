@@ -240,16 +240,17 @@ describe("storyProgress", () => {
     expect(storyProgress(story).storyboard.done).toBe(1);
   });
 
-  it("reads the assembly as working once a timeline is named, and ready once the film is filed", () => {
+  it("reads the assembly as empty until a timeline is named, and done once it is", () => {
     const story = createStory("新的故事", { idea: "一句话" });
     expect(storyProgress(story).edit.state).toBe("empty");
     story.edit = { timelineId: "timeline-1" };
-    expect(storyProgress(story).edit.state).toBe("working");
-    story.edit = { timelineId: "timeline-1", film: take(ids.actVideo) };
     expect(storyProgress(story).edit.state).toBe("ready");
+    expect(storyProgress(story).edit.done).toBe(1);
 
+    // The assembly is the whole of the step: an old document that once had to
+    // confirm it reads the same as one that never did.
     story.confirmedSteps = ["edit"];
-    expect(storyProgress(story).edit.state).toBe("confirmed");
+    expect(storyProgress(story).edit.state).toBe("ready");
   });
 });
 
@@ -313,12 +314,10 @@ describe("what a step is still waiting for", () => {
     ]);
   });
 
-  it("asks for the timeline first, and the film after it", () => {
+  it("asks for the timeline, and for nothing after it", () => {
     const story = createStory("新的故事", { idea: "一句话" });
     expect(stepGaps(story, "edit")).toEqual([{ kind: "noTimeline" }]);
     story.edit = { timelineId: "timeline-1" };
-    expect(stepGaps(story, "edit")).toEqual([{ kind: "noFilm" }]);
-    story.edit = { timelineId: "timeline-1", film: take(ids.actVideo) };
     expect(stepGaps(story, "edit")).toEqual([]);
   });
 });
@@ -1466,23 +1465,20 @@ describe("taking a field away", () => {
     const cleared = expectRoundTrip(moka, {
       type: "setStoryEdit",
       storyId: ids.story,
-      patch: { timelineId: null, clipByAct: null, film: null },
+      patch: { timelineId: null, clipByAct: null },
     });
     expect(storyOfFile(cleared).edit).toEqual({});
 
     // And the other way: an assembly put on a story that had none, undone.
-    const bare = apply(cleared, {
+    const { next, inverse } = apply(cleared, {
       type: "setStoryEdit",
       storyId: ids.story,
       patch: { timelineId: timelineIds().timeline },
-    }).next;
-    const { next, inverse } = apply(bare, {
-      type: "setStoryEdit",
-      storyId: ids.story,
-      patch: { film: take(ids.actVideo) },
     });
-    expect(storyOfFile(next).edit.film?.assetIds[0]).toBe(ids.actVideo);
-    expect(storyOfFile(apply(next, ...inverse).next).edit.film).toBeUndefined();
+    expect(storyOfFile(next).edit.timelineId).toBe(timelineIds().timeline);
+    expect(
+      storyOfFile(apply(next, ...inverse).next).edit.timelineId,
+    ).toBeUndefined();
   });
 });
 
@@ -1495,12 +1491,10 @@ describe("what a story was assembled into", () => {
       storyId: ids.story,
       patch: {
         clipByAct: [{ actId: ids.act, clipId: "clip-cut-a" }],
-        film: take(ids.actVideo),
       },
     });
     const edit = storyOfFile(next).edit;
     expect(edit.clipByAct).toEqual([{ actId: ids.act, clipId: "clip-cut-a" }]);
-    expect(edit.film?.assetIds[0]).toBe(ids.actVideo);
     expect(edit.timelineId).toBe(timelineIds().timeline);
 
     expect(
@@ -1603,7 +1597,7 @@ describe("validateStory", () => {
 });
 
 describe("the assets a story holds", () => {
-  it("counts every drawing, the manuscript and the film as in use", () => {
+  it("counts every drawing and the manuscript as in use", () => {
     const moka = buildStoryMokaFile();
     const ids = storyIds();
     const refs = collectAssetReferences(moka);

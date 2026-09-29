@@ -136,7 +136,9 @@
     "qualityHalf": "Half",
     "qualityQuarter": "Quarter",
     "repeat": "Repeat the cut",
+    "saveSnapshotTitle": "Save the snapshot",
     "snapshot": "Save snapshot",
+    "snapshotSaved": "Snapshot saved to {{path}}",
     "toEnd": "To the end"
   },
   "rail": {
@@ -212,7 +214,9 @@
     "noTimeline": "There is no timeline yet.",
     "openSettings": "Set up models",
     "preset": "Preset",
+    "saveSrtTitle": "Save the subtitles",
     "speakerLabel": "Speaker {id}: ",
+    "srtSaved": "Subtitles saved to {{path}}",
     "subtitles": "Subtitles",
     "transcribe": "Auto subtitles",
     "transcribeNoTask": "The recognition never started.",
@@ -251,14 +255,14 @@
   "exportDialog": {
     "close": "Close",
     "done": "Done",
-    "exported": "Exported {{name}}",
     "looking": "Looking for a renderer…",
     "noAss": "Text cannot be burned in without an ffmpeg built with libass.",
     "notAvailable": "The renderer is not available on this machine yet.",
     "nothingToRender": "This timeline has nothing to render.",
     "progress": "Export progress",
     "reveal": "Reveal in folder",
-    "theVideo": "the video",
+    "saveTitle": "Save the video",
+    "saved": "Saved to {{path}}",
     "title": "Export video",
     "tryAgain": "Try again",
     "unknown": "unknown"

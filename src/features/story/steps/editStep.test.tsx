@@ -10,36 +10,36 @@ import {
 } from "@testing-library/react";
 
 import type { MokaFile } from "../../../shared/domain";
-import { buildStoryMokaFile, storyIds } from "../../../shared/domain/fixtures";
+import { buildStoryMokaFile } from "../../../shared/domain/fixtures";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useClipStore } from "../../clip/stores/clipStore";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { undo } from "../../editor/commands/execute";
 import { StoryPage } from "../StoryPage";
+import { useSavePathStore } from "../../editor/launcher/savePathStore";
 import { useStoryExportStore } from "../stores/storyExportStore";
 import { useStoryStore } from "../stores/storyStore";
 
-const ids = storyIds();
 /** What the render the test started answers with, as it is polled. */
 let renders: Array<{
   id: string;
   timelineId: string;
   status: string;
   progress01: number;
-  assetId?: string;
+  savedTo?: string;
   message?: string;
 }> = [];
 /** Whether this machine can render at all. */
 let canRender = true;
 /** Every render the room asked for, by the timeline it was for. */
 let asked: string[] = [];
+/** Where each of those renders was told to write its file. */
+let destinations: string[] = [];
 /** What the next ask answers with, when it is refused. */
 let refusal: { status: number; code: string; message: string } | null = null;
 /** What the project route hands back, for the reload after a render lands. */
 let reloaded: MokaFile | null = null;
-/** How many times the stored document was read back. */
-let reads = 0;
 
 /** The server under the test: capabilities, one render, and its poll. */
 function serving(): void {
@@ -89,8 +89,10 @@ function serving(): void {
           }
           const body = JSON.parse(String(init?.body ?? "{}")) as {
             timelineId: string;
+            destination: string;
           };
           asked.push(body.timelineId);
+          destinations.push(body.destination);
           const task = {
             id: `render-${asked.length}`,
             timelineId: body.timelineId,
@@ -105,7 +107,6 @@ function serving(): void {
         url.includes("/api/v1/projects/current") &&
         !url.includes("/commands")
       ) {
-        reads += 1;
         return json({
           root: "/tmp/moka-edit-test",
           moka: reloaded ?? useProjectStore.getState().moka,
@@ -151,9 +152,9 @@ function timelines() {
 beforeEach(() => {
   renders = [];
   asked = [];
+  destinations = [];
   refusal = null;
   reloaded = null;
-  reads = 0;
   canRender = true;
   serving();
   localStorage.clear();
@@ -178,7 +179,7 @@ describe("assembling a telling", () => {
       "1",
     );
 
-    fireEvent.click(screen.getByTestId("story-assemble"));
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
     await waitFor(() =>
       expect(timelines()[timelines().length - 1]!.clips.length).toBeGreaterThan(
         clipsBefore,
@@ -227,7 +228,7 @@ describe("assembling a telling", () => {
 
   it("keeps its clips off a timeline of the reader's, and says so first", async () => {
     openAtEdit(filmed());
-    fireEvent.click(screen.getByTestId("story-assemble"));
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
     await waitFor(() => expect(story().edit.timelineId).toBeDefined());
     const timeline = timelines()[timelines().length - 1]!;
     // The reader adds a clip of their own to the same timeline.
@@ -243,7 +244,7 @@ describe("assembling a telling", () => {
       ]);
     });
 
-    fireEvent.click(screen.getByTestId("story-assemble"));
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
     const question = screen.getByTestId("rebuild-timeline");
     expect(question.textContent).toContain("1");
     fireEvent.click(screen.getByTestId("rebuild-timeline-cancel"));
@@ -307,7 +308,7 @@ describe("assembling a telling", () => {
     expect(useProjectStore.getState().saveStatus).toBe("error");
     const before = story().edit;
 
-    fireEvent.click(screen.getByTestId("story-assemble"));
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
 
     await waitFor(() => {
       const said = useAppStore.getState().toasts.at(-1);
@@ -329,7 +330,7 @@ describe("assembling a telling", () => {
       (screen.getByTestId("story-assembly-subtitles") as HTMLInputElement)
         .checked,
     ).toBe(true);
-    fireEvent.click(screen.getByTestId("story-assemble"));
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
     await waitFor(() => expect(story().edit.timelineId).toBeDefined());
     const timeline = timelines()[timelines().length - 1]!;
     const captions = timeline.clips.filter((clip) => clip.kind === "text");
@@ -339,78 +340,64 @@ describe("assembling a telling", () => {
 });
 
 describe("the film of a telling", () => {
-  it("renders the timeline, files the answer, and plays it back", async () => {
+  it("asks where the film goes, renders the timeline, and says where it landed", async () => {
     openAtEdit(filmed());
-    fireEvent.click(screen.getByTestId("story-assemble"));
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
     await waitFor(() => expect(story().edit.timelineId).toBeDefined());
 
     fireEvent.click(screen.getByTestId("story-film-export"));
+    // The path is a question before the render is, and a back-out means no
+    // render at all.
+    await waitFor(() =>
+      expect(useSavePathStore.getState().pending).not.toBeNull(),
+    );
+    expect(useSavePathStore.getState().pending?.title).toBe("Save the film");
+    expect(asked).toHaveLength(0);
+    useSavePathStore.getState().reply("/tmp/moka-edit-test/films/the film.mp4");
+
     await waitFor(() => expect(asked).toHaveLength(1));
     expect(asked[0]).toBe(story().edit.timelineId);
+    expect(destinations[0]).toBe("/tmp/moka-edit-test/films/the film.mp4");
 
-    // The render comes home: its artifact is on the shelf, and the story still
-    // has no film of its own — which is what the stored document says. The
-    // room reads that document and writes the film down from the read.
+    // The render comes home as a file of the reader's own: the card says where
+    // it is, and the telling is not rewritten to hold it.
     renders = [
       {
         ...renders[0]!,
         status: "done",
         progress01: 1,
-        assetId: "asset-film",
+        savedTo: "/tmp/moka-edit-test/films/the film.mp4",
       },
     ];
-    reloaded = withTheArtifact(filmed());
+    useAppStore.setState({ toasts: [] });
     await act(async () => {
       await useStoryExportStore.getState().setTask(renders[0]! as never);
     });
     await waitFor(() =>
-      expect(story().edit.film?.assetIds[0]).toBe("asset-film"),
+      expect(screen.getByTestId("story-film-saved").textContent).toContain(
+        "/tmp/moka-edit-test/films/the film.mp4",
+      ),
     );
-    await waitFor(() =>
-      expect(screen.getByTestId("story-film-video")).toBeDefined(),
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.message).toBe(
+      "The film is saved to /tmp/moka-edit-test/films/the film.mp4.",
     );
-    // And the read asked for no other: an effect re-armed by its own read
-    // would read the document again per frame, for as long as the step stood
-    // open — and never write the film down at all.
-    expect(reads).toBeLessThan(5);
+    expect(said?.choice?.label).toBe("Open in the cutting room");
   });
 
-  it("says why a finished film is not written down when a change will not save", async () => {
+  it("leaves the project untouched when a render lands", async () => {
     openAtEdit(filmed());
-    fireEvent.click(screen.getByTestId("story-assemble"));
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
     await waitFor(() => expect(story().edit.timelineId).toBeDefined());
 
     fireEvent.click(screen.getByTestId("story-film-export"));
+    await waitFor(() =>
+      expect(useSavePathStore.getState().pending).not.toBeNull(),
+    );
+    useSavePathStore.getState().reply("/tmp/moka-edit-test/films/the film.mp4");
     await waitFor(() => expect(asked).toHaveLength(1));
 
-    // A change of the reader's the server will not take, still in this window.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        const json = (payload: unknown, status = 200) =>
-          Promise.resolve(
-            new Response(JSON.stringify(payload), {
-              status,
-              headers: { "Content-Type": "application/json" },
-            }),
-          );
-        if (init?.method === "POST" && url.includes("/commands")) {
-          return json(
-            { code: "INTERNAL", message: "io error: disk full" },
-            500,
-          );
-        }
-        if (url.includes("/api/v1/projects/current")) {
-          return json({
-            root: "/tmp/moka-edit-test",
-            moka: withTheArtifact(filmed()),
-            selfCheck: { ok: true, issues: [] },
-          });
-        }
-        return json([]);
-      }),
-    );
+    // A change of the reader's, still waiting to be written down.
     act(() => {
       useProjectStore.getState().applyLocal([
         {
@@ -420,21 +407,15 @@ describe("the film of a telling", () => {
         },
       ]);
     });
-    await act(async () => {
-      await useProjectStore.getState().flush();
-    });
-    // What the reader changed has not landed, and is still waiting here.
-    expect(useProjectStore.getState().pending.length).toBeGreaterThan(0);
+    const waiting = useProjectStore.getState().pending.length;
+    expect(waiting).toBeGreaterThan(0);
 
-    // The render comes home, but the stored document cannot be read in over
-    // the waiting change — so the film is not written down here, and that is
-    // said rather than left as a film that silently is not on the page.
     renders = [
       {
         ...renders[0]!,
         status: "done",
         progress01: 1,
-        assetId: "asset-film",
+        savedTo: "/tmp/moka-edit-test/films/the film.mp4",
       },
     ];
     useAppStore.setState({ toasts: [] });
@@ -442,11 +423,14 @@ describe("the film of a telling", () => {
       await useStoryExportStore.getState().setTask(renders[0]! as never);
     });
 
-    await waitFor(() => {
-      const said = useAppStore.getState().toasts.at(-1);
-      expect(said?.message).toBe("io error: disk full");
-    });
-    expect(story().edit.film).toBeUndefined();
+    // Landing a file reads and writes nothing of the project, so a change the
+    // server has not taken yet is not in the way of it.
+    await waitFor(() =>
+      expect(useAppStore.getState().toasts.at(-1)?.message).toBe(
+        "The film is saved to /tmp/moka-edit-test/films/the film.mp4.",
+      ),
+    );
+    expect(useProjectStore.getState().pending.length).toBe(waiting);
   });
 
   it("says a machine without a renderer cannot render, rather than failing", async () => {
@@ -464,10 +448,10 @@ describe("the film of a telling", () => {
     );
   });
 
-  it("plays the film on the step and opens its timeline in the cutting room", async () => {
-    const moka = withTheFilm(filmed());
-    openAtEdit(moka);
-    expect(screen.getByTestId("story-film-video")).toBeDefined();
+  it("opens the assembled timeline in the cutting room", async () => {
+    openAtEdit(filmed());
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
+    await waitFor(() => expect(story().edit.timelineId).toBeDefined());
 
     fireEvent.click(screen.getByTestId("story-film-open"));
     await waitFor(() => expect(useAppStore.getState().phase).toBe("clip"));
@@ -475,57 +459,29 @@ describe("the film of a telling", () => {
       story().edit.timelineId,
     );
   });
+
+  it("has nothing to confirm, and one link that lays the clips out", async () => {
+    openAtEdit(filmed());
+    // The step is the assembly: there is no confirm button to press, and the
+    // card's link is the only way the clips are laid down.
+    expect(screen.queryByTestId("story-confirm-edit")).toBeNull();
+    expect(screen.queryByTestId("story-assemble")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("story-film-reassemble"));
+    await waitFor(() => expect(story().edit.timelineId).toBeDefined());
+  });
+
+  it("says why the clips cannot be laid out when none is filmed", async () => {
+    const moka = filmed();
+    const acts = moka.stories![0].chapters[0]!.acts;
+    for (const act of acts) {
+      act.video = { takes: [] };
+      for (const keyframe of act.keyframes) keyframe.video = { takes: [] };
+    }
+    openAtEdit(moka);
+
+    const link = screen.getByTestId("story-film-reassemble");
+    expect(link).toHaveProperty("disabled", true);
+    expect(link.getAttribute("title")).toContain("No clip has been filmed");
+  });
 });
-
-/**
- * The fixture after a render landed: the artifact on the shelf, and the story
- * still without a film of its own — the shape the room reads back, since the
- * film is written down by the room rather than by the render.
- */
-function withTheArtifact(base: MokaFile): MokaFile {
-  const film = {
-    id: "asset-film",
-    name: "the film.mp4",
-    path: "assets/videos/the-film.mp4",
-    mime: "video/mp4",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-    probe: {
-      mime: "video/mp4",
-      bytes: 2048,
-      sha256: "0".repeat(64),
-      width: 1920,
-      height: 1080,
-      durationMs: 5_000,
-    },
-  };
-  return {
-    ...base,
-    resources: { ...base.resources, videos: [...base.resources.videos, film] },
-  };
-}
-
-/** The same fixture, with the room's own note of the film written down. */
-function withTheFilm(base: MokaFile): MokaFile {
-  const moka = withTheArtifact(base);
-  return {
-    ...moka,
-    stories: (moka.stories ?? []).map((held) =>
-      held.id === ids.story
-        ? {
-            ...held,
-            edit: {
-              ...held.edit,
-              film: {
-                assetIds: ["asset-film"],
-                jobId: "render-1",
-                itemId: "export",
-                note: "the film.mp4",
-                createdAt: "2026-01-01T00:00:00.000Z",
-              },
-            },
-          }
-        : held,
-    ),
-  };
-}

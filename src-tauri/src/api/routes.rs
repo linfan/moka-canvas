@@ -1,15 +1,16 @@
 use super::dto::{
     ApplyCommandsRequest, AssetChangeResponse, AssetShelfRequest, CapabilitiesResponse,
     ClipExportRequest, CreateProjectRequest, DefaultsPatch, ExportRequest, FileNodeRequest,
-    FileNodeResponse, FilesystemListing, FilesystemQuery, GenerateResponse,
-    GenerationPreviewRequest, GenerationPreviewResponse, ImportProjectRequest, ModelKeyRequest,
-    OpenProjectRequest, OpenProjectResponse, PackageResponse, PreferencesPatch, PreviewInput,
-    PublicConfigResponse, RevisionQuery, RunStreamQuery, SaveResponse, SecretStorageRequest,
-    StartRunRequest, StartStoryJobRequest, StoryJobItemDraft, StoryJobQuery, UpsertModelRequest,
+    FileNodeResponse, FilesystemListing, FilesystemQuery, FilesystemWriteQuery,
+    FilesystemWriteResponse, GenerateResponse, GenerationPreviewRequest, GenerationPreviewResponse,
+    ImportProjectRequest, ModelKeyRequest, OpenProjectRequest, OpenProjectResponse,
+    PackageResponse, PreferencesPatch, PreviewInput, PublicConfigResponse, RevealRequest,
+    RevisionQuery, RunStreamQuery, SaveResponse, SecretStorageRequest, StartRunRequest,
+    StartStoryJobRequest, StoryJobItemDraft, StoryJobQuery, UpsertModelRequest,
 };
 use super::problem::{json_or_problem, Problem};
 use super::{filesystem, ApiState};
-use crate::clip::jobs::{drive, ArtifactSink, ExportRun, ExportTask, ProjectSink};
+use crate::clip::jobs::{drive, ExportRun, ExportTask};
 use crate::clip::locate::ClipCapabilities;
 use crate::clip::plan::build_plan;
 use crate::config::RuntimeMode;
@@ -29,7 +30,7 @@ use crate::project::{
 use crate::story::{StoryJobItem, StoryJobRecord};
 use crate::workflow::events::RunEvent;
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{rejection::JsonRejection, FromRequest, Multipart, Path, Query, Request, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
@@ -157,6 +158,63 @@ pub async fn browse_filesystem(
             .await
             .map_err(Problem::from)?,
     ))
+}
+
+/// Writes bytes where a save dialog said, in either runtime.
+///
+/// The listing beside this answers only the web runtime, which has no dialog of
+/// its own. A write is the other half of that same question in both runtimes:
+/// whichever dialog named the path, the window holding the bytes cannot put
+/// them on this machine's disk itself.
+pub async fn write_file(
+    Query(query): Query<FilesystemWriteQuery>,
+    body: Bytes,
+) -> Result<Json<FilesystemWriteResponse>, Problem> {
+    let asked = query
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty());
+    let Some(asked) = asked else {
+        return Err(Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+            "A destination path is required",
+        ));
+    };
+    let destination = PathBuf::from(asked);
+    let bytes = filesystem::write(&destination, &body)
+        .await
+        .map_err(Problem::from)?;
+    Ok(Json(FilesystemWriteResponse {
+        path: destination.to_string_lossy().into_owned(),
+        bytes,
+    }))
+}
+
+/// Shows a file this machine wrote in the platform's own file manager.
+///
+/// The asset route beside the project does the same for a file the project
+/// holds; a file a render or a save put outside the project is not an asset, so
+/// it is named by its path instead.
+pub async fn reveal_path(
+    json: Result<Json<RevealRequest>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let Json(request) = json_or_problem(json)?;
+    let path = PathBuf::from(request.path.trim());
+    let there = path.is_absolute()
+        && tokio::fs::metadata(&path)
+            .await
+            .is_ok_and(|meta| meta.is_file());
+    if !there {
+        return Err(Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+            "Only a file that is there can be shown",
+        ));
+    }
+    reveal_in_folder(&path)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Whether a folder can take a project as it stands.
@@ -1681,6 +1739,9 @@ pub async fn start_clip_export(
             "A timeline id is required",
         ));
     }
+    // Checked before the machine is asked for anything: a destination nobody
+    // could write to costs no render.
+    let destination = render_destination(&request.destination)?;
 
     let capabilities = state.clip_capabilities();
     if !capabilities.available {
@@ -1728,16 +1789,49 @@ pub async fn start_clip_export(
             .video_encoder
             .unwrap_or_else(|| "libx264".to_string()),
         temp_root: opened.root.join("tmp"),
+        destination,
         timeout: state.config.clip.timeout(),
     };
     let registry = Arc::clone(&state.exports);
-    let sink: Arc<dyn ArtifactSink> = Arc::new(ProjectSink(
-        Arc::clone(&state.store) as Arc<dyn ProjectStore>
-    ));
     tokio::spawn(async move {
-        drive(registry, sink, run, reservation.cancel).await;
+        drive(registry, run, reservation.cancel).await;
     });
     Ok((StatusCode::ACCEPTED, Json(reservation.task)))
+}
+
+/// The path a render is asked to land at, as the server will write it.
+///
+/// A destination is the one thing a render request says about the machine's own
+/// disk, and a save dialog is the only thing that produces one: the folder it
+/// names has to be there, because a save never invents a folder, and the target
+/// itself must not be a directory, because a file has to be able to land.
+fn render_destination(asked: &str) -> Result<PathBuf, Problem> {
+    let refused = |message: String| {
+        Err(Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+            message,
+        ))
+    };
+    let asked = asked.trim();
+    if asked.is_empty() {
+        return refused("A destination is required".to_string());
+    }
+    let destination = PathBuf::from(asked);
+    if destination.is_relative() {
+        return refused(format!("{} is not an absolute path", destination.display()));
+    }
+    if std::fs::metadata(&destination).is_ok_and(|meta| meta.is_dir()) {
+        return refused(format!("{} is a directory", destination.display()));
+    }
+    let folder = destination.parent().filter(|folder| folder.is_dir());
+    if folder.is_none() {
+        return refused(format!(
+            "The destination's folder does not exist: {}",
+            destination.display()
+        ));
+    }
+    Ok(destination)
 }
 
 /// What has become of a render.

@@ -16,19 +16,27 @@ import type { ClipExportTask } from "../../clip/api";
 interface StoryExportState {
   /** The last render this session started or picked up, live or ended. */
   task: ClipExportTask | null;
+  /** Where the live render was told to land, held so a retry keeps the choice. */
+  destination: string | null;
   /** What a refusal said, when the ask never became a render. */
   error: string | null;
   setTask: (task: ClipExportTask | null) => void;
+  setDestination: (destination: string | null) => void;
   setError: (error: string | null) => void;
   reset: () => void;
 }
 
 export const useStoryExportStore = create<StoryExportState>()((set) => ({
   task: null,
+  destination: null,
   error: null,
 
   setTask(task) {
     set({ task });
+  },
+
+  setDestination(destination) {
+    set({ destination });
   },
 
   setError(error) {
@@ -36,6 +44,6 @@ export const useStoryExportStore = create<StoryExportState>()((set) => ({
   },
 
   reset() {
-    set({ task: null, error: null });
+    set({ task: null, destination: null, error: null });
   },
 }));

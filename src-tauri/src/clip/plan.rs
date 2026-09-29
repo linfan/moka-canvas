@@ -61,8 +61,6 @@ pub struct RenderPlan {
     pub duration_ms: i64,
     /// The frame rate the render is written at.
     pub fps: i32,
-    /// What the artifact is called once it lands in the project.
-    pub output_name: String,
     /// Whether the graph ends in an audio stream that must be mapped.
     pub audio: bool,
 }
@@ -418,7 +416,6 @@ aresample=48000[aout]",
         ass,
         duration_ms,
         fps,
-        output_name: format!("{}.mp4", timeline.name),
         audio,
     })
 }
@@ -829,7 +826,6 @@ mod tests {
         assert_eq!(plan.inputs[0].duration_ms, Some(2000));
         assert!(!plan.inputs[0].shared);
         assert_eq!(plan.duration_ms, 2000);
-        assert_eq!(plan.output_name, "Cut.mp4");
         // The window was handed to the input, so the graph has no trim of its
         // own — and no `trim` in the audio chain either.
         assert!(!plan.graph.contains("trim="), "{}", plan.graph);

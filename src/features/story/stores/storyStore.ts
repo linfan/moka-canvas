@@ -25,7 +25,6 @@ interface StoryState {
   openChapterId: string | null;
   /** The cards unfolded in steps three and four, by element or act id. */
   expanded: string[];
-  exportOpen: boolean;
   /** Whether the question a new story is opened under is standing. */
   newStoryOpen: boolean;
   /** Takes up the place a project's stories leave open. */
@@ -34,8 +33,6 @@ interface StoryState {
   goStep: (step: StoryStep) => void;
   openChapter: (chapterId: string | null) => void;
   toggleExpanded: (id: string) => void;
-  openExport: () => void;
-  setExportOpen: (open: boolean) => void;
   setNewStoryOpen: (open: boolean) => void;
   /** Everything the room was holding, when the project is put down. */
   forget: () => void;
@@ -114,7 +111,6 @@ export const useStoryStore = create<StoryState>()((set, get) => ({
   step: "idea",
   openChapterId: null,
   expanded: [],
-  exportOpen: false,
   newStoryOpen: false,
 
   adopt(moka) {
@@ -152,7 +148,6 @@ export const useStoryStore = create<StoryState>()((set, get) => ({
       step,
       openChapterId: story?.chapters[0]?.id ?? null,
       expanded: [],
-      exportOpen: false,
     });
     rememberPlace(moka?.metadata.id ?? null, { storyId, step });
   },
@@ -178,18 +173,6 @@ export const useStoryStore = create<StoryState>()((set, get) => ({
     });
   },
 
-  openExport() {
-    set({ exportOpen: true, step: "edit" });
-    rememberPlace(useProjectStore.getState().moka?.metadata.id ?? null, {
-      storyId: get().storyId,
-      step: "edit",
-    });
-  },
-
-  setExportOpen(exportOpen) {
-    set({ exportOpen });
-  },
-
   setNewStoryOpen(newStoryOpen) {
     set({ newStoryOpen });
   },
@@ -200,7 +183,6 @@ export const useStoryStore = create<StoryState>()((set, get) => ({
       step: "idea",
       openChapterId: null,
       expanded: [],
-      exportOpen: false,
       newStoryOpen: false,
     });
   },

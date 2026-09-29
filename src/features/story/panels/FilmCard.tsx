@@ -1,19 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { assetUrl, assetsApi } from "../../../api/assets";
 import { isApiError } from "../../../api/client";
-import { findResource } from "../../../shared/domain";
 import type {
   StoryDocument,
   TimelineDocument,
 } from "../../../shared/domain/types";
 import { i18n } from "../../../shared/i18n";
-import { errorText } from "../../../api/client";
-import { formatDuration } from "../../../shared/domain/story";
-import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
-import { saveTrouble, useProjectStore } from "../../editor/stores/projectStore";
+import { useProjectStore } from "../../editor/stores/projectStore";
+import { askSavePath, fileSafeName } from "../../editor/launcher/savePath";
 import { clipApi, type ClipCapabilities } from "../../clip/api";
 import { useClipStore } from "../../clip/stores/clipStore";
 import { useExportStore } from "../../clip/stores/exportStore";
@@ -27,22 +23,31 @@ const POLL_MS = 700;
  * that makes it.
  *
  * Rendering is the server's work from the moment it is asked for, so nothing
- * here decides anything about the artifact — it asks, it watches, and it writes
- * down what came back. The film is an asset like any other, which is why it can
- * be played here, opened in the cutting room, or found on the shelf.
+ * here decides anything about the artifact — it asks where the file should
+ * land, it watches, and it says where the file went. The file is the reader's,
+ * at the path they chose: nothing about it is written down in the telling.
+ *
+ * The assembly's own way in lives here too: the buttons that used to stand
+ * above the card are gone, so the link that lays the clips out is this card's,
+ * and it says why it cannot be pressed when there is nothing to lay out.
  */
 export function FilmCard({
   story,
   timeline,
+  assembleBlocked,
+  assembling,
   onAssembleAgain,
 }: {
   story: StoryDocument;
   /** The timeline the telling was laid down on, if the document still has it. */
   timeline: TimelineDocument | undefined;
+  /** Why the clips cannot be laid out, if they cannot. */
+  assembleBlocked: string | null;
+  /** Whether an assembly is already on its way. */
+  assembling: boolean;
   onAssembleAgain: () => void;
 }) {
   const { t } = useTranslation();
-  const moka = useProjectStore((state) => state.moka);
   const task = useStoryExportStore((state) => state.task);
   const error = useStoryExportStore((state) => state.error);
   const [capabilities, setCapabilities] = useState<ClipCapabilities | null>(
@@ -50,7 +55,9 @@ export function FilmCard({
   );
   const [busy, setBusy] = useState(false);
   const live = task?.status === "queued" || task?.status === "running";
-  const film = story.edit.film;
+  // Where the last render of this session went, held while the process runs:
+  // this card is the only place a reader is told it.
+  const savedTo = task?.status === "done" ? task.savedTo : undefined;
 
   // What this machine can do, asked once: the answer cannot change while the
   // process runs, and a machine without a renderer is not a broken step — it is
@@ -70,77 +77,25 @@ export function FilmCard({
     };
   }, []);
 
-  // The artifact is filed by the server, so a finished render is read back out
-  // of the document rather than guessed at: the file it became is what the step
-  // shows, and what the next opening of the room finds. The story is watched by
-  // its id rather than by the object, because a read replaces the document
-  // whole: an effect watching the object would run again on the read it had
-  // just made, and the write inside that read would be cancelled by the
-  // successor the read began — a read that feeds itself, and a film never
-  // written down.
-  const done =
-    task?.status === "done" && task.assetId !== undefined ? task : undefined;
+  // A finished render has nowhere to be filed — the file is the reader's, at
+  // the path they chose — so all that is left to do is say so, once, and offer
+  // the way into the cutting room where the same telling can be worked on.
+  const announced = useRef<string | null>(null);
   useEffect(() => {
-    if (done === undefined || done.assetId === film?.assetIds[0]) return;
-    let alive = true;
-    void useProjectStore
+    if (task?.status !== "done" || task.savedTo === undefined) return;
+    if (announced.current === task.id) return;
+    announced.current = task.id;
+    useAppStore
       .getState()
-      .reload()
-      .then((adopted) => {
-        if (!alive) return;
-        if (!adopted) {
-          // The same as the catch below, with the work still on its way as
-          // the reason: the film is made and filed, but the shelf was not
-          // read back, so it is not written down here yet.
-          const blocked = saveTrouble();
-          useAppStore
-            .getState()
-            .pushToast("error", blocked.message, undefined, blocked.detail);
-          return;
-        }
-        const assetId = done.assetId;
-        if (assetId === undefined) return;
-        const held = useProjectStore.getState().moka;
-        const name =
-          held === null
-            ? assetId
-            : (findResource(held, assetId)?.name ?? assetId);
-        execute(i18n.t("story:history.assemble"), [
-          {
-            type: "setStoryEdit",
-            storyId: story.id,
-            patch: {
-              film: {
-                assetIds: [assetId],
-                jobId: done.id,
-                itemId: "export",
-                note: name,
-                createdAt: new Date().toISOString(),
-              },
-            },
-          },
-        ]);
-        useAppStore
-          .getState()
-          .pushToast("success", i18n.t("story:edit.filmReady"), {
-            label: i18n.t("story:edit.openInClip"),
-            go: () => openInCuttingRoom(story.id),
-          });
-      })
-      .catch((problem: unknown) => {
-        // The film is made and filed, but this room could not read the shelf
-        // back, so it is not written down here yet. Said rather than passed
-        // over: a reader who does not see the notice and finds no film will
-        // look for it in the wrong place.
-        const trouble = errorText(problem);
-        useAppStore
-          .getState()
-          .pushToast("error", trouble.message, undefined, trouble.detail);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [done, film?.assetIds, story.id]);
+      .pushToast(
+        "success",
+        i18n.t("story:edit.filmSaved", { path: task.savedTo }),
+        {
+          label: i18n.t("story:edit.openInClip"),
+          go: () => openInCuttingRoom(story.id),
+        },
+      );
+  }, [task, story.id]);
 
   // Polling while a render is live, and only then.
   useEffect(() => {
@@ -162,7 +117,21 @@ export function FilmCard({
     setBusy(true);
     useStoryExportStore.getState().setError(null);
     try {
-      const started = await clipApi.start(timeline.id);
+      // A retry of a render that failed or was stopped goes where that render
+      // was going; a fresh export starts by asking, since a render that made
+      // its film already has a file that must not be quietly written over.
+      const held = useStoryExportStore.getState();
+      const again = held.task !== null && held.task.status !== "done";
+      const destination = again
+        ? held.destination
+        : await askSavePath({
+            title: t("story:edit.saveTitle"),
+            defaultName: `${fileSafeName(timeline.name)}.mp4`,
+            extensions: ["mp4"],
+          });
+      if (destination === null) return;
+      useStoryExportStore.getState().setDestination(destination);
+      const started = await clipApi.start(timeline.id, destination);
       useStoryExportStore.getState().setTask(started);
     } catch (problem) {
       useStoryExportStore
@@ -196,10 +165,6 @@ export function FilmCard({
         : timeline.clips.length === 0
           ? t("story:edit.nothingToRender")
           : null;
-  const resource =
-    film === undefined || moka === null
-      ? undefined
-      : findResource(moka, film.assetIds[0]);
   const problem =
     error ??
     (task !== null && !live && task.status !== "done"
@@ -219,30 +184,10 @@ export function FilmCard({
         </p>
       )}
 
-      {film === undefined ? (
-        <p className="story-hint" data-testid="story-film-none">
-          {t("story:edit.noFilm")}
+      {savedTo !== undefined && (
+        <p className="story-hint" data-testid="story-film-saved">
+          {t("story:edit.filmSaved", { path: savedTo })}
         </p>
-      ) : (
-        <>
-          <video
-            className="story-film-video"
-            controls
-            data-testid="story-film-video"
-            preload="metadata"
-            src={assetUrl(film.assetIds[0])}
-          />
-          <p className="story-hint" data-testid="story-film-line">
-            {t("story:edit.filmLine", {
-              name: resource?.name ?? film.assetIds[0],
-              duration: formatDuration(resource?.probe?.durationMs ?? 0),
-              size:
-                resource?.probe?.width === undefined
-                  ? ""
-                  : `${resource.probe.width}×${resource.probe.height ?? ""}`,
-            })}
-          </p>
-        </>
       )}
 
       {live && task !== null && (
@@ -298,7 +243,7 @@ export function FilmCard({
             title={blocked ?? undefined}
             type="button"
           >
-            {film === undefined
+            {savedTo === undefined
               ? t("story:edit.export")
               : t("story:edit.exportAgain")}
           </button>
@@ -315,19 +260,12 @@ export function FilmCard({
             {t("story:edit.openInClip")}
           </button>
         )}
-        {film !== undefined && (
-          <button
-            data-testid="story-film-reveal"
-            onClick={() => void reveal(film.assetIds[0])}
-            type="button"
-          >
-            {t("story:edit.reveal")}
-          </button>
-        )}
         <button
           className="link"
           data-testid="story-film-reassemble"
+          disabled={assembling || assembleBlocked !== null}
           onClick={onAssembleAgain}
+          title={assembleBlocked ?? undefined}
           type="button"
         >
           {t("story:edit.reassemble")}
@@ -343,10 +281,9 @@ export function FilmCard({
  * The project is flushed first: a film is exported from the timeline the server
  * holds, and one that is still in this window is a timeline it has never heard
  * of. The telling is read again after that flush, for the same reason and for
- * the toast that offers this way over: it holds the telling from the moment
- * the offer was made, which the room may have written to since. A save that
- * cannot land keeps the reader where they are rather than walking away from
- * work.
+ * the toast that offers this way over: it holds the telling from the moment the
+ * offer was made, which the room may have written to since. A save that cannot
+ * land keeps the reader where they are rather than walking away from work.
  */
 async function openInCuttingRoom(
   storyId: string,
@@ -373,19 +310,5 @@ async function openInCuttingRoom(
   if (withExportDialog) {
     useExportStore.getState().setOpen(true);
     useExportStore.getState().setTask(null);
-  }
-}
-
-/** Opens the film in this machine's file manager, saying so when it cannot. */
-async function reveal(assetId: string): Promise<void> {
-  try {
-    await assetsApi.reveal(assetId);
-  } catch (problem) {
-    useAppStore
-      .getState()
-      .pushToast(
-        "error",
-        problem instanceof Error ? problem.message : String(problem),
-      );
   }
 }

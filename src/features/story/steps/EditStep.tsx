@@ -17,7 +17,6 @@ import {
 } from "../assembly";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryImportButton } from "../components/StoryImportButton";
-import { StepConfirm } from "../components/StepConfirm";
 import { FilmCard } from "../panels/FilmCard";
 import { useStoryStore } from "../stores/storyStore";
 
@@ -221,29 +220,13 @@ export function EditStep({ story }: { story: StoryDocument }) {
               </ul>
             </div>
           )}
-
-          <div className="story-step-actions">
-            <button
-              className="primary"
-              data-testid="story-assemble"
-              disabled={busy || plan.units.length === 0}
-              onClick={pressAssemble}
-              title={
-                plan.units.length === 0
-                  ? t("story:edit.nothingToAssemble")
-                  : undefined
-              }
-              type="button"
-            >
-              {story.edit.timelineId === undefined
-                ? t("story:edit.assemble")
-                : t("story:edit.reassemble")}
-            </button>
-            <StepConfirm step="edit" story={story} />
-          </div>
         </section>
 
         <FilmCard
+          assembleBlocked={
+            plan.units.length === 0 ? t("story:edit.nothingToAssemble") : null
+          }
+          assembling={busy}
           onAssembleAgain={pressAssemble}
           story={story}
           timeline={timeline}

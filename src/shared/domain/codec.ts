@@ -516,7 +516,6 @@ function encodeStoryEdit(edit: StoryEdit): Record<string, unknown> {
         ? { keyframeId: entry.keyframeId }
         : {}),
     }));
-  if (edit.film !== undefined) doc.film = encodeStoryTake(edit.film);
   return doc;
 }
 
@@ -1391,7 +1390,6 @@ function decodeStoryEdit(value: unknown): StoryEdit {
       return held;
     });
   }
-  if (doc.film !== undefined) edit.film = decodeStoryTake(doc.film);
   return edit;
 }
 
@@ -1461,8 +1459,6 @@ function decodeSteps(
   ) {
     steps.push("storyboard");
   }
-  if (asRecord(doc.edit ?? {}, "stories[].edit").film !== undefined)
-    steps.push("edit");
   return steps;
 }
 

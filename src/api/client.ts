@@ -171,7 +171,12 @@ async function request<T>(
   }
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+/**
+ * The trouble a response names, or a plain status-code failure when it names
+ * none. Exported for the few callers that bring their own response — a save
+ * written whole — so they report trouble the way every other request does.
+ */
+export async function toApiError(response: Response): Promise<ApiError> {
   const problem = await readProblem(response);
   if (problem !== null) return problem;
   return new ApiError({

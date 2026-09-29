@@ -170,6 +170,16 @@ impl From<super::filesystem::BrowseError> for Problem {
     }
 }
 
+impl From<super::filesystem::WriteError> for Problem {
+    fn from(error: super::filesystem::WriteError) -> Self {
+        Problem::new(
+            status_for_code(error.code()),
+            error.code(),
+            error.to_string(),
+        )
+    }
+}
+
 impl From<crate::clip::ClipError> for Problem {
     fn from(error: crate::clip::ClipError) -> Self {
         Problem::new(

@@ -7,6 +7,7 @@ import {
 } from "./features/editor/components/BootScreen";
 import { Toasts } from "./features/editor/components/Toasts";
 import { LauncherPage } from "./features/editor/launcher/LauncherPage";
+import { SavePathHost } from "./features/editor/launcher/SavePathHost";
 import { useAppStore } from "./features/editor/stores/appStore";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { useModelStore } from "./features/settings/modelStore";
@@ -78,6 +79,7 @@ export default function App() {
         {phase === "story" && <StoryPage />}
       </Suspense>
       <SettingsDialog />
+      <SavePathHost />
       <Toasts />
     </ErrorBoundary>
   );

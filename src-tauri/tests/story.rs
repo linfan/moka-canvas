@@ -340,7 +340,6 @@ fn story_document() -> MokaFile {
                 keyframe_id: None,
                 clip_id: "clip-video".into(),
             }]),
-            film: None,
         },
         created_at: NOW.into(),
         updated_at: NOW.into(),
@@ -1043,14 +1042,12 @@ fn remembers_what_a_story_was_assembled_into_and_refuses_a_timeline_nobody_holds
                     keyframe_id: None,
                     clip_id: "clip-cut-a".into(),
                 }])),
-                film: Some(Some(take(ACT_VIDEO))),
             },
         }],
     );
     let edit = &story_of(&next).edit;
     assert_eq!(edit.timeline_id.as_deref(), Some(TIMELINE));
     assert_eq!(edit.clip_by_act.as_ref().unwrap()[0].clip_id, "clip-cut-a");
-    assert_eq!(edit.film.as_ref().unwrap().asset_ids, vec![ACT_VIDEO]);
 
     assert_eq!(
         code_of(
@@ -1155,9 +1152,8 @@ fn reports_a_slot_that_carries_more_takes_than_it_may() {
 }
 
 #[test]
-fn counts_every_drawing_the_manuscript_and_the_film_as_in_use() {
+fn counts_every_drawing_and_the_manuscript_as_in_use() {
     let mut moka = story_document();
-    moka.stories.as_mut().unwrap()[0].edit.film = Some(take(ACT_VIDEO));
     moka.stories.as_mut().unwrap()[0].chapters[0].acts[0].voice = Some(StorySlot {
         takes: vec![take("asset-act-voice")],
     });
@@ -1234,7 +1230,9 @@ fn reads_the_steps_an_older_document_settled_one_place_at_a_time() {
     act.insert("videoConfirmed", true);
 
     // The steps those answers stand for, and no others: the cast is not drawn
-    // through, so the third step was never settled, and nothing was rendered.
+    // through, so the third step was never settled. The fifth has no answer a
+    // document could stand in for it any more, so the assembly the fixture
+    // carries is not read as one.
     let read = decode_moka_file(&bytes(&document)).unwrap();
     assert_eq!(
         story_of(&read).confirmed_steps,
