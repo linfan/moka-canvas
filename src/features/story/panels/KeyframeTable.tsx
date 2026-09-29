@@ -34,9 +34,12 @@ import type {
   StoryVoiceTake,
 } from "../../../shared/domain/types";
 import { assetUrl } from "../../../api/assets";
+import { findResource } from "../../../shared/domain/validate";
 import { i18n } from "../../../shared/i18n";
 import { storyKeyframePromptParts } from "../../../shared/prompts";
 import { execute } from "../../editor/commands/execute";
+import { planAssembly } from "../assembly";
+import { planDubbing, type DubCue } from "../dubbing";
 import {
   drawnFrames,
   filmRoleOf,
@@ -833,6 +836,7 @@ function LineVoiceRow({
   index,
   take,
   sentence,
+  cue,
   busy,
   dirty,
   moka,
@@ -842,6 +846,8 @@ function LineVoiceRow({
   take: StoryVoiceTake | undefined;
   /** The line as the document holds it, which the take is read against. */
   sentence: StoryDialogueLine;
+  /** How this line's reading will lie under its shot, where it is planned. */
+  cue: DubCue | undefined;
   busy: boolean;
   /** Whether the editor's words are not the document's yet. */
   dirty: boolean;
@@ -880,6 +886,16 @@ function LineVoiceRow({
           src={assetUrl(assetId)}
         />
       )}
+      {/* What the reading costs where it will lie, so that the reader can
+          shorten the words or lengthen the shot before paying for a cut. */}
+      {cue !== undefined && cue.fit !== "natural" && (
+        <span
+          className="story-hint"
+          data-testid={`story-line-voice-fit-${index}`}
+        >
+          {fitsLine(cue)}
+        </span>
+      )}
       <button
         className="link"
         data-testid={`story-line-voice-go-${index}`}
@@ -896,6 +912,22 @@ function LineVoiceRow({
       </button>
     </div>
   );
+}
+
+/** How a reading lies in its shot, in the reader's language. */
+function fitsLine(cue: DubCue): string {
+  if (cue.fit === "unmeasured") return i18n.t("story:voice.fitsUnmeasured");
+  const over = (((cue.materialMs ?? 0) - cue.windowMs) / 1000).toFixed(1);
+  if (cue.fit === "sped") {
+    return i18n.t("story:voice.fitsSped", {
+      over,
+      speed: cue.speed.toFixed(2),
+    });
+  }
+  return i18n.t("story:voice.fitsOverrun", {
+    over,
+    spill: ((cue.durationMs - cue.windowMs) / 1000).toFixed(1),
+  });
 }
 
 /**
@@ -946,6 +978,18 @@ function DialogueEditor({
   const runWaves = useStoryWavesRun();
   const moka = useProjectStore((state) => state.moka);
   const [draft, setDraft] = useState(lines);
+  // Where the readings that exist will lie under their shots, planned from the
+  // telling as it stands: a line about to be read is told what it will cost.
+  const cues =
+    moka === null
+      ? undefined
+      : new Map(
+          planDubbing(
+            story,
+            planAssembly(story, moka).units,
+            (assetId) => findResource(moka, assetId)?.probe?.durationMs,
+          ).cues.map((cue) => [cue.lineId, cue]),
+        );
   const write = (at: number, patch: Partial<StoryDialogueLine>) =>
     setDraft(
       draft.map((held, index) =>
@@ -1008,6 +1052,7 @@ function DialogueEditor({
             {saved !== undefined && (
               <LineVoiceRow
                 busy={busyLines.has(line.id)}
+                cue={cues?.get(line.id)}
                 dirty={line.text.trim() !== saved.text.trim()}
                 index={index}
                 moka={moka}

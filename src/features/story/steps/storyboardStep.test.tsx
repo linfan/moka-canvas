@@ -1423,6 +1423,84 @@ describe("writing an episode's board", () => {
   });
 });
 
+/**
+ * The same telling with its one line already read aloud, the file measured as
+ * the test says — an unmeasured file stands for one nobody probed.
+ */
+function withReadLine(durationMs?: number): MokaFile {
+  const moka = boarded();
+  const frame = moka.stories![0].chapters[0]!.acts[0]!.keyframes[0]!;
+  frame.voices = [
+    {
+      lineId: ids.lineFirst,
+      text: "车已经停运了。",
+      voice: "reader-1",
+      slot: {
+        takes: [{ assetIds: ["asset-line-said"], createdAt: T0 }],
+      },
+    },
+  ];
+  moka.resources.voice = [
+    {
+      id: "asset-line-said",
+      name: "said.mp3",
+      path: "assets/audio/said.mp3",
+      mime: "audio/mpeg",
+      createdAt: T0,
+      updatedAt: T0,
+      ...(durationMs === undefined
+        ? {}
+        : {
+            probe: {
+              mime: "audio/mpeg",
+              bytes: 2_048,
+              sha256: "1".repeat(64),
+              durationMs,
+            },
+          }),
+    },
+  ];
+  return moka;
+}
+
+/** The line's own row of the dialogue editor, opened and waiting. */
+function openLine(): HTMLElement {
+  fireEvent.click(screen.getByTestId("story-kf-dialogue-0"));
+  return screen.getByTestId("story-line-voice-fit-0");
+}
+
+describe("a reading too long for its shot", () => {
+  it("says how much faster it will be read before the cut is made", () => {
+    // The shot runs two seconds and the reading is two and two fifths: the
+    // card says what fitting it will cost while there is still time to shorten
+    // the words or lengthen the shot.
+    openAtBoard(withReadLine(2_400));
+    expect(openLine().textContent).toContain(
+      "0.4s longer than its shot · read 1.20× faster",
+    );
+  });
+
+  it("says which way a reading past the fastest read runs over", () => {
+    openAtBoard(withReadLine(3_400));
+    expect(openLine().textContent).toContain(
+      "1.4s longer than its shot · read as fast as it may, 0.5s over the shot",
+    );
+  });
+
+  it("says when nobody measured the reading at all", () => {
+    openAtBoard(withReadLine());
+    expect(openLine().textContent).toContain(
+      "No measured length · laid at the shot's own length",
+    );
+  });
+
+  it("keeps quiet about a reading that fits its shot", () => {
+    openAtBoard(withReadLine(1_200));
+    fireEvent.click(screen.getByTestId("story-kf-dialogue-0"));
+    expect(screen.queryByTestId("story-line-voice-fit-0")).toBeNull();
+  });
+});
+
 describe("a telling at every ceiling", () => {
   it("draws the episode it stands on and no other", () => {
     const moka = buildLongStory();

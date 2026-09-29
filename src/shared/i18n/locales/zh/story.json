@@ -462,6 +462,8 @@
     "noVideo": "{{place}} 还没有视频",
     "assetMissing": "{{place}} 的素材不在项目里了，重新生成一次",
     "noDuration": "{{place}} 的素材没有测出时长，按计划时长拼入",
+    "lineOverrun": "{{place}} 有一句念得比它那一格长 {{over}} 秒",
+    "lineUnmeasured": "{{place}} 有一句量不出长度，按所在格的长度摆放",
     "warnings": "还有 {{count}} 条",
     "goFill": "去补",
     "assembled": "装好了：{{count}} 段片段，共 {{seconds}} 秒。",
@@ -533,6 +535,9 @@
     "saveFirst": "先把改动写下来再念",
     "allRead": "{{count}} 句都念过了",
     "legacyNote": "整幕一次念的旧版",
-    "audioFallback": "这里的音频模型是没给自己的模型的角色、以及旁白的兜底；每个角色的声音在第三步「剧情元素」里定。"
+    "audioFallback": "这里的音频模型是没给自己的模型的角色、以及旁白的兜底；每个角色的声音在第三步「剧情元素」里定。",
+    "fitsSped": "比这一格长 {{over}} 秒 · 按 {{speed}} 倍速念",
+    "fitsOverrun": "比这一格长 {{over}} 秒 · 按最快念完，末尾 {{spill}} 秒压到下一格上",
+    "fitsUnmeasured": "没量出长度 · 按这一格的长度原速放"
   }
 }

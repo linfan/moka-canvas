@@ -462,6 +462,8 @@
     "noVideo": "{{place}} has no clip yet",
     "assetMissing": "The material of {{place}} has left the project; film it again",
     "noDuration": "The material of {{place}} was never measured; the planned length is used",
+    "lineOverrun": "A reading runs {{over}}s past its shot in {{place}}",
+    "lineUnmeasured": "A reading in {{place}} was never measured; it is laid at its shot's own length",
     "warnings": "and {{count}} more",
     "goFill": "Go and fill it",
     "assembled": "Assembled: {{count}} clips, {{seconds}}s.",
@@ -533,6 +535,9 @@
     "saveFirst": "Write the change down before reading it",
     "allRead": "Every line is read ({{count}})",
     "legacyNote": "an older reading of the whole act",
-    "audioFallback": "The audio model here is what characters without a model of their own — and the narrator — fall back to. Each character's voice is set on the third step."
+    "audioFallback": "The audio model here is what characters without a model of their own — and the narrator — fall back to. Each character's voice is set on the third step.",
+    "fitsSped": "{{over}}s longer than its shot · read {{speed}}× faster",
+    "fitsOverrun": "{{over}}s longer than its shot · read as fast as it may, {{spill}}s over the shot",
+    "fitsUnmeasured": "No measured length · laid at the shot's own length"
   }
 }

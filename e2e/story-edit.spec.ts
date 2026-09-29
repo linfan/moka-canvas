@@ -130,9 +130,10 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
     });
 
     // The sound of the act, asked for as two pieces of the whole act: the lines
-    // read aloud, and the music and sound under them.
+    // read aloud in the voice of whoever says them, and the music and sound
+    // under them.
     await firstAct.getByTestId("story-act-voice-go-0").click();
-    await expect(firstAct.getByTestId("story-act-voice-0")).toBeVisible({
+    await expect(firstAct.getByTestId("story-act-voice-count-0")).toBeVisible({
       timeout: 60_000,
     });
     await firstAct.getByTestId("story-act-music-go-0").click();
@@ -171,9 +172,10 @@ test("a telling is assembled into one timeline and handed to the cutting room", 
       .toContain("Rain at Night");
     const timeline = await persistedTimeline(page);
     expect(timeline.isTheStories).toBe(true);
-    // The clip of each act in telling order, the voice and the score under the
-    // first of them, then the words said in it — laid down from zero, the
-    // lengths coming from the material the stand-in handed back.
+    // The clip of each act in telling order, the line read aloud inside the
+    // shot it is said in and the score under the act, then the words said in
+    // it — laid down from zero, the lengths coming from the material the
+    // stand-in handed back.
     expect(timeline.clips.map((clip) => clip.kind)).toEqual([
       "video",
       "video",

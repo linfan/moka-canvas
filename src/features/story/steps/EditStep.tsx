@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { StoryDocument } from "../../../shared/domain/types";
+import { findResource } from "../../../shared/domain/validate";
 import { i18n } from "../../../shared/i18n";
 import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
@@ -15,6 +16,7 @@ import {
   type AssemblyPlan,
   type AssemblyWarning,
 } from "../assembly";
+import { planDubbing, type DubWarning } from "../dubbing";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryImportButton } from "../components/StoryImportButton";
 import { FilmCard } from "../panels/FilmCard";
@@ -43,6 +45,21 @@ export function EditStep({ story }: { story: StoryDocument }) {
     moka === null
       ? { units: [], warnings: [], totalPlannedMs: 0 }
       : planAssembly(story, moka);
+  // How the lines lie inside their shots — what is too long for its window, and
+  // what nobody measured — is worth saying before the cut is rendered rather
+  // than discovered in the finished film.
+  const dubbing =
+    moka === null
+      ? undefined
+      : planDubbing(
+          story,
+          plan.units,
+          (assetId) => findResource(moka, assetId)?.probe?.durationMs,
+        );
+  const warnings: Array<AssemblyWarning | DubWarning> = [
+    ...plan.warnings,
+    ...(dubbing?.warnings ?? []),
+  ];
   const timeline = (moka?.timelines ?? []).find(
     (held) => held.id === story.edit.timelineId,
   );
@@ -191,13 +208,13 @@ export function EditStep({ story }: { story: StoryDocument }) {
             </p>
           )}
 
-          {plan.warnings.length > 0 && (
+          {warnings.length > 0 && (
             <div
               className="story-warnings"
               data-testid="story-assembly-warnings"
             >
               <ul>
-                {plan.warnings.slice(0, WARNINGS_SHOWN).map((warning, at) => (
+                {warnings.slice(0, WARNINGS_SHOWN).map((warning, at) => (
                   <li key={at}>
                     <span>{warningLine(warning)}</span>
                     <button
@@ -210,7 +227,7 @@ export function EditStep({ story }: { story: StoryDocument }) {
                     </button>
                   </li>
                 ))}
-                {plan.warnings.length > WARNINGS_SHOWN && (
+                {warnings.length > WARNINGS_SHOWN && (
                   <li className="story-hint">
                     {t("story:edit.warnings", {
                       count: plan.warnings.length - WARNINGS_SHOWN,
@@ -294,7 +311,13 @@ function shotNumber(story: StoryDocument, keyframeId: string): number {
 }
 
 /** One warning, in the reader's language. */
-function warningLine(warning: AssemblyWarning): string {
+function warningLine(warning: AssemblyWarning | DubWarning): string {
+  if (warning.kind === "lineOverrun") {
+    return i18n.t("story:edit.lineOverrun", {
+      place: warning.place,
+      over: ((warning.overMs ?? 0) / 1000).toFixed(1),
+    });
+  }
   return i18n.t(`story:edit.${warning.kind}`, { place: warning.place });
 }
 

@@ -169,7 +169,7 @@ test("a telling is imported into a board, and into a cut of its own", async ({
       timeout: 60_000,
     });
     await firstAct.getByTestId("story-act-voice-go-0").click();
-    await expect(firstAct.getByTestId("story-act-voice-0")).toBeVisible({
+    await expect(firstAct.getByTestId("story-act-voice-count-0")).toBeVisible({
       timeout: 60_000,
     });
     await firstAct.getByTestId("story-act-music-go-0").click();
