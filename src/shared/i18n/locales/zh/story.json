@@ -520,7 +520,8 @@
       "empty": "还没有生成任何片段，暂无可导入。",
       "done": "已把 {{count}} 个片段导入「{{name}}」。",
       "name": "{{name}} · 剪辑"
-    }
+    },
+    "voiceLine": "第 {{at}} 句"
   },
   "voice": {
     "rowLabel": "声音",

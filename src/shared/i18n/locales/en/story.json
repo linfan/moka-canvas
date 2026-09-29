@@ -520,7 +520,8 @@
       "empty": "No clip has been filmed yet — nothing to import.",
       "done": "Imported {{count}} clips into “{{name}}”.",
       "name": "{{name}} · cut"
-    }
+    },
+    "voiceLine": "Line {{at}}"
   },
   "voice": {
     "rowLabel": "Sound",
