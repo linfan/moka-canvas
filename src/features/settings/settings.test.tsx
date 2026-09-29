@@ -436,9 +436,6 @@ describe("model settings", () => {
     fireEvent.change(await screen.findByLabelText("Display name"), {
       target: { value: "Composer" },
     });
-    fireEvent.change(screen.getByLabelText("Model identifier"), {
-      target: { value: "composer" },
-    });
     fireEvent.change(screen.getByLabelText("Model name"), {
       target: { value: "composer-1" },
     });
@@ -455,7 +452,7 @@ describe("model settings", () => {
 
     const [write] = writesTo("/api/v1/models");
     expect(write.body).toEqual({
-      id: "composer",
+      id: expect.stringMatching(/^composer-[a-z0-9]{6}$/),
       category: "text",
       protocol: "openaiChat",
       url: "https://api.openai.com/v1/chat/completions",
@@ -477,9 +474,6 @@ describe("model settings", () => {
     fireEvent.change(await screen.findByLabelText("Display name"), {
       target: { value: "Filmer" },
     });
-    fireEvent.change(screen.getByLabelText("Model identifier"), {
-      target: { value: "filmer" },
-    });
     fireEvent.change(screen.getByLabelText("Model name"), {
       target: { value: "happyhorse-1.1-t2v" },
     });
@@ -493,7 +487,7 @@ describe("model settings", () => {
 
     const [write] = writesTo("/api/v1/models");
     expect(write.body).toMatchObject({
-      id: "filmer",
+      id: expect.stringMatching(/^filmer-[a-z0-9]{6}$/),
       category: "video",
       model: "happyhorse-1.1-t2v",
       maxVideoSeconds: 15,
@@ -516,9 +510,6 @@ describe("model settings", () => {
 
     fireEvent.change(await screen.findByLabelText("Display name"), {
       target: { value: "Routed" },
-    });
-    fireEvent.change(screen.getByLabelText("Model identifier"), {
-      target: { value: "routed" },
     });
     fireEvent.change(screen.getByLabelText("Model name"), {
       target: { value: "happy-1.1-t2v" },
@@ -559,7 +550,7 @@ describe("model settings", () => {
 
     const [write] = writesTo("/api/v1/models");
     expect(write.body).toMatchObject({
-      id: "routed",
+      id: expect.stringMatching(/^routed-[a-z0-9]{6}$/),
       category: "video",
       subModels: [
         {
@@ -639,11 +630,15 @@ describe("model settings", () => {
     expect(screen.queryByTestId("model-sub-add")).toBeNull();
   });
 
-  it("suggests an identifier from the display name", async () => {
+  it("names a new model without asking for an identifier", async () => {
     await openSettings();
     fireEvent.click(
       await screen.findByRole("button", { name: "New text model" }),
     );
+
+    // Nobody is asked for the reference a node stores: it is derived from the
+    // display name, which is the part a person chose.
+    expect(screen.queryByLabelText("Model identifier")).toBeNull();
 
     fireEvent.change(await screen.findByLabelText("Display name"), {
       target: { value: "GPT-4o mini (OpenAI)" },
@@ -651,50 +646,37 @@ describe("model settings", () => {
     fireEvent.change(screen.getByLabelText("Model name"), {
       target: { value: "gpt-4o-mini" },
     });
-
-    // Readable, and nobody had to invent it.
-    const id = screen.getByLabelText("Model identifier") as HTMLInputElement;
-    const suggested = id.value;
-    expect(suggested).toMatch(/^gpt-4o_mini_openai_[a-z0-9]{6}$/);
-
     fireEvent.click(screen.getByRole("button", { name: "Save model" }));
     await screen.findByText("GPT-4o mini (OpenAI)");
 
     const [write] = writesTo("/api/v1/models");
     expect(write.body).toMatchObject({
-      id: suggested,
+      id: expect.stringMatching(/^gpt-4o-mini-openai-[a-z0-9]{6}$/),
       category: "text",
       displayName: "GPT-4o mini (OpenAI)",
     });
   });
 
-  it("hands the identifier back to the suggestion when it is cleared", async () => {
+  it("keeps the stored identifier out of an edit", async () => {
     await openSettings();
     fireEvent.click(
-      await screen.findByRole("button", { name: "New text model" }),
+      within(cardOf("Writer")).getByRole("button", { name: "Edit" }),
     );
+
+    // The reference nodes hold is the saved model's own: a rename is a rename
+    // of the display name, and the identifier is neither shown nor typed.
+    expect(screen.queryByLabelText("Model identifier")).toBeNull();
     fireEvent.change(await screen.findByLabelText("Display name"), {
       target: { value: "Composer" },
     });
-    const id = screen.getByLabelText("Model identifier") as HTMLInputElement;
-
-    // Typing one takes over.
-    fireEvent.change(id, { target: { value: "my-own" } });
-    expect(id.value).toBe("my-own");
-
-    // Clearing it does not leave the form with nothing to save.
-    fireEvent.change(id, { target: { value: "" } });
-    expect(id.value).toMatch(/^composer_[a-z0-9]{6}$/);
-
     fireEvent.change(screen.getByLabelText("Model name"), {
       target: { value: "composer-1" },
     });
-    const suggested = id.value;
     fireEvent.click(screen.getByRole("button", { name: "Save model" }));
     await screen.findByText("Composer");
 
     const [write] = writesTo("/api/v1/models");
-    expect(write.body).toMatchObject({ id: suggested });
+    expect(write.body).toMatchObject({ id: "writer" });
   });
 
   it("says the category by the tab and the heading, not by a field of its own", async () => {
@@ -888,18 +870,16 @@ describe("model settings", () => {
     expect(key.placeholder).toContain("Writer");
     expect(key.value).toBe("");
 
-    // The identifier is a suggestion from the name, the way a new model's
-    // is — not a fixed "-copy" — and it is editable until the save.
-    const id = screen.getByLabelText("Model identifier") as HTMLInputElement;
-    expect(id.value).toMatch(/^writer_copy_[a-z0-9]{6}$/);
-    fireEvent.change(id, { target: { value: "my-writer" } });
+    // Nobody is asked for the copy's identifier either: it is derived from the
+    // name the copy opens with, the way a new model's is.
+    expect(screen.queryByLabelText("Model identifier")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Save model" }));
     await screen.findByText("Writer (copy)");
 
     const [write] = writesTo("/api/v1/models");
     expect(write.body).toMatchObject({
-      id: "my-writer",
+      id: expect.stringMatching(/^writer-copy-[a-z0-9]{6}$/),
       displayName: "Writer (copy)",
       copyKeyFrom: "writer",
     });

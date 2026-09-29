@@ -28,14 +28,11 @@ test("a model written from the form is stored and kept", async ({ page }) => {
     "https://api.openai.com/v1/chat/completions",
   );
 
-  // An identifier of its own: the suite shares one metadata store, and the
-  // other specs already configured the stand-in's own model ids. What the form
-  // suggests from the display name is checked before it is replaced.
+  // Nobody is asked for an identifier: it is derived from the display name,
+  // which keeps this model's reference out of the way of the stand-in's own
+  // ids the other specs already stored in the shared metadata store.
   await dialog.getByLabel("Display name").fill("Typed Model");
-  await expect(dialog.getByLabel("Model identifier")).toHaveValue(
-    /^typed_model_[a-z0-9]{6}$/,
-  );
-  await dialog.getByLabel("Model identifier").fill("typed-model");
+  await expect(dialog.getByLabel("Model identifier")).toHaveCount(0);
   await dialog.getByLabel("Endpoint URL").fill(CHAT_URL);
   await dialog.getByLabel("Model name").fill("typed-model-1");
   await dialog.getByLabel("API key").fill(CHANNEL_KEY);
@@ -60,16 +57,14 @@ test("a model written from the form is stored and kept", async ({ page }) => {
     }),
   ).toBeChecked();
 
-  // A copy carries the fields and the key, and opens ready to be changed.
+  // A copy carries the fields and the key, and opens ready to be changed. Its
+  // identifier follows the name it opens with, the way a plain new model's
+  // does, and is no more visible than one.
   await card.getByRole("button", { name: "Copy Typed Model" }).click();
   await expect(dialog.getByLabel("Display name")).toHaveValue(
     "Typed Model (copy)",
   );
-  // A copy's identifier is a suggestion from the copy's own display name, the
-  // way a plain new model's is, rather than a fixed "-copy" of the source's.
-  await expect(dialog.getByLabel("Model identifier")).toHaveValue(
-    /^typed_model_copy_[a-z0-9]{6}$/,
-  );
+  await expect(dialog.getByLabel("Model identifier")).toHaveCount(0);
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   await dialog.getByRole("button", { name: "Close settings" }).click();

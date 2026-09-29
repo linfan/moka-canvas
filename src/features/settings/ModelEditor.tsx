@@ -8,7 +8,6 @@ import type {
 } from "../../api";
 import {
   CAPABILITY_LABELS,
-  MAX_MODEL_ID_LENGTH,
   MAX_MODEL_NAME_LENGTH,
   MAX_VIDEO_SECONDS,
   MODEL_SCENE_LABELS,
@@ -35,9 +34,6 @@ interface Props {
 }
 
 interface FormState {
-  id: string;
-  /** Whether the identifier was typed, or is still the suggested one. */
-  idTouched: boolean;
   /** The id of a converter directory, which is the protocol's wire name. */
   protocol: string;
   url: string;
@@ -124,11 +120,8 @@ function initialForm(
 ): FormState {
   if (model === null && copySource !== null) {
     // A copy starts from the source's fields, including the protocol it may
-    // alone speak; the identifier is left to the suggestion, which follows
-    // the display name the way a plain new model's does.
+    // alone speak.
     return {
-      id: "",
-      idTouched: false,
       protocol: copySource.protocol,
       url: copySource.url,
       model: copySource.model,
@@ -148,8 +141,6 @@ function initialForm(
     // form may start with no protocol at all and adopt one when it arrives.
     const choice = protocolChoices(protocols, category)[0] ?? null;
     return {
-      id: "",
-      idTouched: false,
       protocol: choice?.id ?? "",
       url: choice?.urlExample ?? "",
       model: "",
@@ -161,8 +152,6 @@ function initialForm(
     };
   }
   return {
-    id: model.id,
-    idTouched: true,
     protocol: model.protocol,
     url: model.url,
     model: model.model,
@@ -188,9 +177,9 @@ function ceilingText(seconds: number | null | undefined): string {
  * than a relationship — duplicating carries the fields and the key, and the
  * two can then diverge without touching each other.
  *
- * The identifier is the one field nobody has to think about: it is suggested
- * from the display name and can be overwritten, because what it does — stay
- * the reference a node holds — matters more than what it reads as.
+ * The identifier is the one thing nobody has to think about: it is derived
+ * from the display name and never shown, because what it does — stay the
+ * reference a node holds — matters more than what it reads as.
  */
 export function ModelEditor({
   model,
@@ -265,35 +254,17 @@ export function ModelEditor({
   );
 
   /**
-   * The identifier this form will save.
-   *
-   * A new configuration is handed one derived from its display name, which
-   * follows the name as it is typed — writing an identifier is optional,
-   * having one is not. Typing one takes over, and clearing the field hands it
-   * back to the suggestion rather than saving nothing. An existing
-   * configuration's identifier is the one its nodes already store.
+   * The identifier this form will save, which is never shown or typed: a new
+   * configuration is handed one derived from its display name — following the
+   * name as it is typed, since that is what it reads as — and an existing
+   * configuration keeps the one its nodes already store.
    */
-  const identifier = useMemo(() => {
-    if (model !== null) return model.id;
-    if (form.idTouched) return form.id.trim();
-    return uniqueModelId(form.displayName, isTaken);
-  }, [model, form.idTouched, form.id, form.displayName, isTaken]);
+  const identifier = useMemo(
+    () =>
+      model !== null ? model.id : uniqueModelId(form.displayName, isTaken),
+    [model, form.displayName, isTaken],
+  );
 
-  const chooseId = (typed: string) => {
-    if (typed.trim() === "") {
-      edit({ id: "", idTouched: false });
-      return;
-    }
-    edit({ id: typed, idTouched: true });
-  };
-
-  const idTaken = model === null && isTaken(identifier);
-  const idShaped = !/\s/.test(identifier);
-  const idProblem = idTaken
-    ? t("settings:editor.identifierTaken")
-    : idShaped
-      ? null
-      : t("settings:editor.identifierSpaces");
   const urlShaped = /^https?:\/\/\S+$/.test(form.url.trim());
   // A clip ceiling is a video model's alone, and a number outside what one
   // clip may be is nothing to plan with: the field says so before the save.
@@ -307,8 +278,6 @@ export function ModelEditor({
       ceilingNumber <= MAX_VIDEO_SECONDS);
   const canSave =
     !saving &&
-    !idTaken &&
-    idShaped &&
     form.protocol !== "" &&
     form.displayName.trim() !== "" &&
     form.model.trim() !== "" &&
@@ -408,30 +377,6 @@ export function ModelEditor({
           value={form.displayName}
         />
       </label>
-
-      <label className="dialog-field">
-        <span>{t("settings:editor.identifier")}</span>
-        <input
-          aria-label={t("settings:editor.identifierAria")}
-          disabled={model !== null}
-          maxLength={MAX_MODEL_ID_LENGTH}
-          onChange={(event) => chooseId(event.target.value)}
-          title={
-            model !== null
-              ? t("settings:editor.identifierLockedTip")
-              : undefined
-          }
-          value={identifier}
-        />
-      </label>
-      {model === null && (
-        <p className="settings-hint">{t("settings:editor.identifierHint")}</p>
-      )}
-      {idProblem && (
-        <p className="settings-hint" role="alert">
-          {idProblem}
-        </p>
-      )}
 
       <label className="dialog-field">
         <span>{t("settings:editor.protocol")}</span>
