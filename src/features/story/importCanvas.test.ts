@@ -194,6 +194,7 @@ describe("the board a telling makes", () => {
     expect(asked(card(canvas, "1. 第一章 站台"))?.prompt).toBe(
       planStoryboard(story, [ids.chapterFirst])[0]?.prompt,
     );
+    const frame = card(canvas, "1.1.1 · frame");
     const frameAsk = planKeyframeArt(story, [
       {
         chapterId: ids.chapterFirst,
@@ -201,16 +202,43 @@ describe("the board a telling makes", () => {
         keyframeId: ids.frameFirst,
       },
     ])[0];
-    expect(asked(card(canvas, "1.1.1 · frame"))?.prompt).toBe(frameAsk?.prompt);
-    expect(asked(card(canvas, "1.1.1 · frame"))?.params).toEqual(
-      frameAsk?.params,
+    expect(asked(frame)?.params).toEqual(frameAsk?.params);
+    // A card whose ask travelled with a picture says so where the ask names it,
+    // rather than leaving the name as prose: the name the room wrote the
+    // character with is the card its picture belongs to, and the ask is read
+    // the way it is written — the pictures it names are the ones it sends.
+    expect(asked(frame)?.inputMode).toBe("mentions");
+    expect(asked(frame)?.prompt).toContain(
+      `@[node:${card(canvas, "林 · main").id}]`,
     );
-    // Everything wired into a card is what its ask was made of.
-    expect(asked(card(canvas, "1.1.1 · frame"))?.inputMode).toBe("upstream");
+    expect(asked(frame)?.prompt).not.toContain("林 —");
+    // The words the ask was written with are otherwise kept.
+    expect(asked(frame)?.prompt).toContain("雨中的站台");
     // A card of words that nothing was asked for carries no ask at all.
     expect(asked(card(canvas, "1.1.1"))).toBeUndefined();
-    expect(asked(card(canvas, "1.1.1 · frame"))?.prompt).toContain("林");
+    // An ask that named nothing it travelled with is asked from the wiring.
+    expect(asked(card(canvas, "1.1 · clip"))?.inputMode).toBe("upstream");
     expect(moka.stories?.[0]).toBe(story);
+  });
+
+  it("writes the picture an ask was drawn from into its prompt by name", () => {
+    const { canvas } = board();
+    const asked = (title: string) =>
+      (
+        card(canvas, title).data as {
+          generation?: { prompt: string; inputMode: string };
+        }
+      ).generation;
+    const drawn = card(canvas, "林 · main");
+
+    // A turn-around asks for the character by their name and travels with the
+    // one picture of them there is, so the name is that picture's card.
+    expect(asked("林 · turn-around")?.inputMode).toBe("mentions");
+    expect(asked("林 · turn-around")?.prompt).toContain(`@[node:${drawn.id}]`);
+    // A main picture is drawn from its description alone, so its own name is
+    // the ask's subject rather than a picture travelling with it.
+    expect(asked("林 · main")?.inputMode).toBe("upstream");
+    expect(asked("林 · main")?.prompt).toContain("林");
   });
 
   it("is a canvas the document takes as it stands", () => {

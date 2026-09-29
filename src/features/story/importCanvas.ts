@@ -44,6 +44,7 @@ import { i18n } from "../../shared/i18n";
 import type { InputRole } from "../../api/generate";
 import type { StoryJobItemDraft } from "../../api/story";
 import { execute } from "../editor/commands/execute";
+import { mentionToken } from "../editor/canvas/mentions";
 import { openCanvas } from "../editor/interactions/canvasTree";
 import { useAppStore } from "../editor/stores/appStore";
 import {
@@ -162,7 +163,7 @@ interface Seat {
 
 /**
  * The board while it is being made: the cards and wires as they land, where
- * each card sits, and which card shows each file.
+ * each card sits, which card shows each file, and what the telling calls it.
  */
 interface Sheet {
   canvas: CanvasDocument;
@@ -173,15 +174,18 @@ interface Sheet {
   row: number;
   /** The card showing each asset, so a wire can say where it comes from. */
   holder: Map<AssetId, NodeId>;
+  /** What the telling calls the material in each picture it has a name for. */
+  named: Map<AssetId, string>;
 }
 
-function newSheet(name: string): Sheet {
+function newSheet(name: string, story: StoryDocument): Sheet {
   return {
     canvas: createCanvas(name),
     seats: new Map(),
     heights: [],
     row: 0,
     holder: new Map(),
+    named: namedPictures(story),
   };
 }
 
@@ -209,11 +213,62 @@ function sit(
   return node.id;
 }
 
+/**
+ * What the telling calls the material in each picture, where it has a name for
+ * one: an element's drawing is the element, and its ask says so by name.
+ */
+function namedPictures(story: StoryDocument): Map<AssetId, string> {
+  const named = new Map<AssetId, string>();
+  for (const element of story.elements) {
+    const main = takeFile(currentTake(element.main));
+    if (main !== undefined && !named.has(main)) named.set(main, element.name);
+  }
+  return named;
+}
+
+/**
+ * The ask's words with the materials it travelled with named as mentions.
+ *
+ * The room writes a picture into a prompt by naming it — a frame's ask lists
+ * the cast it is drawn from, and names them in the sentence above the list —
+ * but a board left with those names as prose has references nothing can read:
+ * nothing under the field says what the sentence points at, and a run sends the
+ * pictures without the sentence saying which is which. Every name the ask
+ * travelled with becomes the mention of the card holding that picture, which is
+ * how the canvas writes a reference — and what the field draws as the card's
+ * own name beside the mark of what it is.
+ *
+ * The longest names go first, so a name that stands inside another is read as
+ * the longer of the two rather than left as half a mention.
+ */
+function written(ask: StoryJobItemDraft, sheet: Sheet): string {
+  const mentioned = new Map<string, NodeId>();
+  for (const input of ask.inputs ?? []) {
+    const name = sheet.named.get(input.assetId);
+    const holder = sheet.holder.get(input.assetId);
+    if (name !== undefined && holder !== undefined && !mentioned.has(name)) {
+      mentioned.set(name, holder);
+    }
+  }
+  let prompt = ask.prompt;
+  const names = [...mentioned.keys()].sort(
+    (one, other) => other.length - one.length,
+  );
+  for (const name of names) {
+    prompt = prompt
+      .split(name)
+      .join(mentionToken(mentioned.get(name) as NodeId));
+  }
+  return prompt;
+}
+
 /** The ask a card carries, as the spec a run reads it through. */
 function specOf(
   ask: StoryJobItemDraft | undefined,
+  sheet: Sheet,
 ): GenerationSpec | undefined {
   if (ask === undefined) return undefined;
+  const prompt = written(ask, sheet);
   return {
     capability: ask.capability,
     mode: "generate",
@@ -221,10 +276,11 @@ function specOf(
     // is kept beside the machine rather than in a document: a card carrying one
     // would name a model a reader elsewhere has never configured.
     model: "",
-    prompt: ask.prompt,
+    prompt,
     // Everything wired into the card is what its ask was made of, so the card
-    // is asked the way the room asked it.
-    inputMode: "upstream",
+    // is asked the way the room asked it — and where the ask's own words name
+    // those pictures, the naming is what says so.
+    inputMode: prompt === ask.prompt ? "upstream" : "mentions",
     params: {
       ...(ask.params ?? {}),
       // The standing instruction a written answer was asked under rides in the
@@ -251,7 +307,7 @@ function words(
     { x: 0, y: 0 },
     { title, width: CARD_WIDTH, height: CARD_HEIGHT },
   );
-  const spec = specOf(ask);
+  const spec = specOf(ask, sheet);
   node.data = {
     content,
     ...(spec === undefined ? {} : { generation: spec }),
@@ -296,7 +352,7 @@ function material(
     { x: 0, y: 0 },
     { title, width: CARD_WIDTH, height: materialHeight(kind, assetId, moka) },
   );
-  const spec = specOf(ask);
+  const spec = specOf(ask, sheet);
   node.data = {
     ...node.data,
     assetId,
@@ -641,7 +697,7 @@ export function planStoryCanvas(
   moka: MokaFile,
   name: string,
 ): CanvasDocument {
-  const sheet = newSheet(name);
+  const sheet = newSheet(name, story);
   if (story.elements.length > 0) {
     elementsBand(sheet, moka, story);
     air(sheet);
