@@ -260,15 +260,19 @@ test("a telling is imported into a board, and into a cut of its own", async ({
       .poll(async () => (await persistedCut(page)).names, { timeout: 30_000 })
       .toEqual(["Rain at Night · cut"]);
     const handed = await persistedCut(page);
-    // The clip of each act and the two pieces of sound under the first — and no
-    // captions: the lines are the cutting room's to place.
+    // The clip of each act, both lines read aloud inside the shots they are
+    // said in, and the score under the first — and no captions: the lines are
+    // the cutting room's to place.
     expect(handed.clips.map((clip) => clip.kind)).toEqual([
       "video",
       "video",
       "audio",
       "audio",
+      "audio",
     ]);
-    expect(handed.clips.map((clip) => clip.startMs)).toEqual([0, 1_000, 0, 0]);
+    expect(handed.clips.map((clip) => clip.startMs)).toEqual([
+      0, 1_000, 0, 3_000, 0,
+    ]);
     // The telling itself assembled nothing: this cut is the reader's own.
     expect(handed.assembled).toBeUndefined();
   } finally {
