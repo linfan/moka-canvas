@@ -7,6 +7,7 @@ import type {
   MokaFile,
   NodeId,
   ResourceEntry,
+  WorkflowNode,
 } from "../../../shared/domain";
 import { PROJECT_ASSET_CATEGORIES, nodeAssetIds } from "../../../shared/domain";
 import { SHELF_KINDS, kindOfShelf } from "./shelfFilter";
@@ -46,6 +47,19 @@ export function canvasNodesUsing(
   return canvas.nodes
     .filter((node) => nodeAssetIds(node).includes(assetId))
     .map((node) => node.id);
+}
+
+/** The node that made an asset, on whichever canvas it is. */
+export function makerOf(
+  moka: MokaFile | null,
+  nodeId?: NodeId,
+): WorkflowNode | null {
+  if (!moka || !nodeId) return null;
+  for (const canvas of moka.canvas) {
+    const maker = canvas.nodes.find((node) => node.id === nodeId);
+    if (maker) return maker;
+  }
+  return null;
 }
 
 /**

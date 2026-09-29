@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { historyBoundary } from "../editor/commands/execute";
+import { AssetDeleteDialog } from "../editor/components/AssetDeleteDialog";
+import { AssetPreviewDialog } from "../editor/components/AssetPreviewDialog";
 import { PanelUnfold } from "../editor/components/PanelFold";
 import { PanelResizer } from "../editor/components/PanelResizer";
 import { panelWidthStyle } from "../editor/components/panelWidthVars";
@@ -89,6 +91,11 @@ export function AssetsPage() {
         {!rightFolded && <PanelResizer side="right" />}
         {rightFolded ? <PanelUnfold side="right" /> : <AssetsInspector />}
       </div>
+      {/* The same two dialogs the board offers: removing a file and looking at
+          one full-screen read the stores this room already writes through, so
+          the asks and their answers are the board's own. */}
+      <AssetDeleteDialog />
+      <AssetPreviewDialog />
     </div>
   );
 }

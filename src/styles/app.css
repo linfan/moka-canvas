@@ -5371,10 +5371,285 @@ body.is-dragging-split {
   overflow-y: auto;
 }
 
-.assets-stage-hint {
-  color: var(--muted);
+/* What the room says before anything is chosen: one line about the project,
+   the way to the files nothing points at, and the four kinds it holds them
+   as. Centred in the stage rather than pinned to its top, since this is an
+   arrival and not a document. */
+.assets-overview {
+  align-content: start;
+  display: grid;
+  gap: 12px;
   margin: auto;
-  padding: 24px;
+  max-width: 640px;
+  padding: 32px 24px;
+  width: 100%;
+}
+
+.assets-overview-total {
+  color: var(--ink);
+  font-size: 15px;
+  margin: 0;
+}
+
+.assets-overview-unused {
+  background: none;
+  border: none;
+  color: var(--coral);
+  font-size: 12px;
+  justify-self: start;
+  padding: 0;
+}
+
+.assets-overview-unused:hover {
+  text-decoration: underline;
+}
+
+.assets-overview-kinds {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  margin-top: 6px;
+}
+
+/* A kind's card: a name in the shelf's group-heading voice, and what the
+   project holds of it. Pressing one turns the column to that kind. */
+.assets-overview-kind {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.assets-overview-kind:hover {
+  border-color: var(--primary);
+}
+
+.assets-overview-kind strong {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.assets-overview-kind span {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+/* The chosen file: its head, its picture, and every use under them, the whole
+   of it scrolling with the stage. */
+.assets-chosen {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 24px 32px;
+}
+
+.assets-stage-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.assets-stage-head h2 {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.assets-stage-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.assets-chip {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 9px;
+}
+
+.assets-stage-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.assets-stage-actions a {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 7px 12px;
+  text-decoration: none;
+}
+
+.assets-stage-actions a:hover {
+  border-color: var(--primary);
+}
+
+/* The picture's frame: the file shown big enough to judge, contained rather
+   than stretched, since a picture is read here and not edited. */
+.assets-preview {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+
+.assets-preview .inspector-preview img {
+  object-fit: contain;
+  max-height: 460px;
+}
+
+/* Everywhere the file is used: a room's sub-heading and the places under it,
+   each row a door to the room it lives in. */
+.assets-uses {
+  display: grid;
+  gap: 12px;
+}
+
+.assets-uses h3 {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.assets-uses-none {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.assets-use-group {
+  display: grid;
+  gap: 6px;
+}
+
+.assets-use-group h4 {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.assets-use-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* A use, with the holders a delete may not walk through marked down the left:
+   the edge says "this one is holding the file as it stands" without a word. */
+.assets-use-row {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.assets-use-row.is-blocking {
+  border-left-color: var(--coral);
+}
+
+.assets-use-title {
+  color: var(--ink);
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assets-use-old {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 1px 7px;
+}
+
+.assets-use-open {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+/* The words the file is filed under, written from the right column: chips for
+   tags, a few rows for a note, one line for what the file is about. */
+.assets-word-field {
+  display: grid;
+  gap: 4px;
+}
+
+.assets-word-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.assets-word-field input,
+.assets-word-field textarea {
+  font-size: 12px;
+  padding: 5px 9px;
+}
+
+.assets-word-tags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.assets-word-chip {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  padding: 2px 4px 2px 9px;
+}
+
+.assets-word-drop {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 0 3px;
+}
+
+.assets-word-drop:hover {
+  color: var(--danger);
+}
+
+.assets-word-add {
+  background: transparent;
+  border-style: dashed;
+  flex: 1;
+  min-width: 90px;
 }
 
 /* The right column: what the file is, and what was said about it. */

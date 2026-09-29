@@ -16,8 +16,37 @@
     "emptyUnused": "没有闲置文件——每个文件都被用着。",
     "unplaced": "已导入 · 未放置"
   },
+  "overview": {
+    "totalOne": "1 个文件 · 已用 {{used}} · 未使用 {{unused}} · {{bytes}}",
+    "totalMany": "{{files}} 个文件 · 已用 {{used}} · 未使用 {{unused}} · {{bytes}}",
+    "unusedLink": "未使用 {{count}} 项 · 去查看",
+    "kindOne": "1 个文件 · {{bytes}}",
+    "kindMany": "{{files}} 个文件 · {{bytes}}"
+  },
   "stage": {
     "label": "文件及其引用"
+  },
+  "uses": {
+    "heading": "引用位置",
+    "canvas": "画布",
+    "clip": "剪辑",
+    "story": "故事",
+    "open": "打开",
+    "openAria": "打开 {{title}}",
+    "none": "项目里还没有用到这个文件。导出时若只含已使用文件，它会被留在项目里。",
+    "oldTake": "旧 take",
+    "boardCard": "{{board}} · {{card}}",
+    "cutClip": "{{timeline}} · {{clip}}",
+    "storyPlace": "{{story}} · {{place}}",
+    "manuscriptTitle": "{{story}} · 剧本"
+  },
+  "words": {
+    "heading": "文字",
+    "tags": "标签",
+    "add": "添加标签",
+    "removeAria": "移除 {{word}}",
+    "note": "备注",
+    "keyword": "简介"
   },
   "inspector": {
     "label": "文件",

@@ -16,8 +16,37 @@
     "emptyUnused": "Nothing is unused — every file is placed somewhere.",
     "unplaced": "Imported, not placed"
   },
+  "overview": {
+    "totalOne": "1 file · {{used}} used · {{unused}} unused · {{bytes}}",
+    "totalMany": "{{files}} files · {{used}} used · {{unused}} unused · {{bytes}}",
+    "unusedLink": "Unused {{count}} — go look",
+    "kindOne": "1 file · {{bytes}}",
+    "kindMany": "{{files}} files · {{bytes}}"
+  },
   "stage": {
     "label": "The file, and what it is used by"
+  },
+  "uses": {
+    "heading": "Used by",
+    "canvas": "Canvas",
+    "clip": "Clip",
+    "story": "Story",
+    "open": "Open",
+    "openAria": "Open {{title}}",
+    "none": "Nothing in this project uses this file yet — a package exported without unused files leaves it behind.",
+    "oldTake": "old take",
+    "boardCard": "{{board}} · {{card}}",
+    "cutClip": "{{timeline}} · {{clip}}",
+    "storyPlace": "{{story}} · {{place}}",
+    "manuscriptTitle": "{{story}} · manuscript"
+  },
+  "words": {
+    "heading": "Words",
+    "tags": "Filed under",
+    "add": "Add a word",
+    "removeAria": "Remove {{word}}",
+    "note": "Note",
+    "keyword": "About"
   },
   "inspector": {
     "label": "File",

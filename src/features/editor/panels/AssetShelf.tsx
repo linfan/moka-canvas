@@ -14,7 +14,6 @@ import type {
   MokaFile,
   NodeId,
   ResourceEntry,
-  WorkflowNode,
 } from "../../../shared/domain";
 import {
   ASSET_CATEGORY_LABELS,
@@ -36,7 +35,7 @@ import {
 } from "../interactions/actions";
 import { useEditorStore } from "../stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
-import { canvasNodesUsing, shelfOf } from "./canvasAssets";
+import { canvasNodesUsing, makerOf, shelfOf } from "./canvasAssets";
 import { unplacedEntries } from "./unplaced";
 import {
   KIND_SHELVES,
@@ -134,16 +133,6 @@ export interface AssetShelfProps {
 function focusGeneratingNode(nodeId: NodeId) {
   focusNodes([nodeId]);
   useEditorStore.getState().announce(i18n.t("editor:shelf.selectedMaker"));
-}
-
-/** The node that made an asset, on whichever canvas it is. */
-function makerOf(moka: MokaFile | null, nodeId?: NodeId): WorkflowNode | null {
-  if (!moka || !nodeId) return null;
-  for (const canvas of moka.canvas) {
-    const maker = canvas.nodes.find((node) => node.id === nodeId);
-    if (maker) return maker;
-  }
-  return null;
 }
 
 /** The picture a row leads with, when the file has one to show. */

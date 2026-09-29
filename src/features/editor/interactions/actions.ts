@@ -1023,6 +1023,28 @@ export function focusAssetUses(nodeIds: NodeId[]): void {
 }
 
 /**
+ * Opens a file in this machine's file manager, and says so when it cannot.
+ *
+ * One function for every column that reads a file — the card's inspector, the
+ * shelf's own panel, the files room — since what is asked of the machine is
+ * the same in all of them and the answer it gives when it fails should be too.
+ */
+export async function revealAsset(assetId: AssetId): Promise<void> {
+  try {
+    await assetsApi.reveal(assetId);
+  } catch (error) {
+    useAppStore
+      .getState()
+      .pushToast(
+        "error",
+        error instanceof Error
+          ? error.message
+          : i18n.t("editor:inspector.revealFailed"),
+      );
+  }
+}
+
+/**
  * Writes down whether this file is kept to hand. The registry entry is all it
  * touches, so marking a video a keeper costs nothing of the video's.
  */
@@ -1166,13 +1188,13 @@ export async function requestDeleteAsset(assetId: string) {
 }
 
 /** What holds a file in a way a delete cannot empty. */
-type BlockingHolder = Extract<
+export type BlockingHolder = Extract<
   AssetHolder,
   { kind: "drawingInUse" | "clip" | "storyFile" }
 >;
 
 /** Whether letting the file go means changing something a delete may not. */
-function blocksDelete(holder: AssetHolder): holder is BlockingHolder {
+export function blocksDelete(holder: AssetHolder): holder is BlockingHolder {
   return (
     holder.kind === "drawingInUse" ||
     holder.kind === "clip" ||
@@ -1231,7 +1253,10 @@ export function drawingName(drawing: {
 }
 
 /** What a place is called within its own story: its owner, and which part it is. */
-function placeName(story: StoryDocument, target: StorySlotTarget): string {
+export function placeName(
+  story: StoryDocument,
+  target: StorySlotTarget,
+): string {
   switch (target.kind) {
     case "element": {
       const element = elementOf(story, target.elementId);

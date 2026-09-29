@@ -6,8 +6,12 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
-import { buildGoldenMokaFile } from "../../shared/domain/fixtures";
+import {
+  buildGoldenMokaFile,
+  goldenNodeIds,
+} from "../../shared/domain/fixtures";
 import { i18n } from "../../shared/i18n";
 import { AssetsPage } from "./AssetsPage";
 import { useAppStore } from "../editor/stores/appStore";
@@ -61,13 +65,40 @@ describe("the files room", () => {
     expect(
       screen.getByLabelText(i18n.t("assets:inspector.label")),
     ).toBeTruthy();
-    expect(screen.getByTestId("assets-stage-hint")).toBeTruthy();
+    expect(screen.getByTestId("assets-overview")).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("home-menu-button"));
     const current = screen
       .getAllByRole("menuitem")
       .find((item) => item.getAttribute("aria-current") === "page");
     expect(current?.textContent).toContain(i18n.t("app:homeMenu.assets"));
+  });
+
+  it("reads the file a row is clicked at, and puts it down when let go of", () => {
+    const ids = goldenNodeIds();
+    openRoom();
+
+    const row = document.querySelector<HTMLElement>(
+      `.resource-row[data-asset-id="${ids.assetImage}"]`,
+    );
+    fireEvent.click(within(row!).getByTestId("resource-main"));
+
+    expect(useAssetsStore.getState().inspectedAssetId).toBe(ids.assetImage);
+    expect(screen.queryByTestId("assets-overview")).toBeNull();
+    expect(screen.getByTestId("assets-stage-file").textContent).toContain(
+      "lake.png",
+    );
+    expect(screen.getByTestId("assets-inspector-file").textContent).toContain(
+      "lake.png",
+    );
+
+    // Choosing nothing is a question the room can be returned to: with no file
+    // chosen the stage reads the project again.
+    act(() => {
+      useAssetsStore.getState().select(null);
+    });
+    expect(screen.getByTestId("assets-overview")).toBeTruthy();
+    expect(screen.queryByTestId("assets-stage-file")).toBeNull();
   });
 
   it("puts the project down on going home", async () => {
