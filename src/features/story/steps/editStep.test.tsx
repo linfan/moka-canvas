@@ -38,6 +38,8 @@ let asked: string[] = [];
 let refusal: { status: number; code: string; message: string } | null = null;
 /** What the project route hands back, for the reload after a render lands. */
 let reloaded: MokaFile | null = null;
+/** How many times the stored document was read back. */
+let reads = 0;
 
 /** The server under the test: capabilities, one render, and its poll. */
 function serving(): void {
@@ -99,7 +101,11 @@ function serving(): void {
           return json(task);
         }
       }
-      if (url.includes("/api/v1/projects/current")) {
+      if (
+        url.includes("/api/v1/projects/current") &&
+        !url.includes("/commands")
+      ) {
+        reads += 1;
         return json({
           root: "/tmp/moka-edit-test",
           moka: reloaded ?? useProjectStore.getState().moka,
@@ -147,6 +153,7 @@ beforeEach(() => {
   asked = [];
   refusal = null;
   reloaded = null;
+  reads = 0;
   canRender = true;
   serving();
   localStorage.clear();
@@ -341,8 +348,9 @@ describe("the film of a telling", () => {
     await waitFor(() => expect(asked).toHaveLength(1));
     expect(asked[0]).toBe(story().edit.timelineId);
 
-    // The render comes home: the room reads the project again and writes the
-    // film down as the story's own.
+    // The render comes home: its artifact is on the shelf, and the story still
+    // has no film of its own — which is what the stored document says. The
+    // room reads that document and writes the film down from the read.
     renders = [
       {
         ...renders[0]!,
@@ -351,7 +359,7 @@ describe("the film of a telling", () => {
         assetId: "asset-film",
       },
     ];
-    reloaded = withTheFilm(filmed());
+    reloaded = withTheArtifact(filmed());
     await act(async () => {
       await useStoryExportStore.getState().setTask(renders[0]! as never);
     });
@@ -361,6 +369,10 @@ describe("the film of a telling", () => {
     await waitFor(() =>
       expect(screen.getByTestId("story-film-video")).toBeDefined(),
     );
+    // And the read asked for no other: an effect re-armed by its own read
+    // would read the document again per frame, for as long as the step stood
+    // open — and never write the film down at all.
+    expect(reads).toBeLessThan(5);
   });
 
   it("says why a finished film is not written down when a change will not save", async () => {
@@ -392,7 +404,7 @@ describe("the film of a telling", () => {
         if (url.includes("/api/v1/projects/current")) {
           return json({
             root: "/tmp/moka-edit-test",
-            moka: withTheFilm(filmed()),
+            moka: withTheArtifact(filmed()),
             selfCheck: { ok: true, issues: [] },
           });
         }
@@ -465,9 +477,12 @@ describe("the film of a telling", () => {
   });
 });
 
-/** The fixture with a rendered film on the shelf. */
-function withTheFilm(base: MokaFile): MokaFile {
-  const moka = base;
+/**
+ * The fixture after a render landed: the artifact on the shelf, and the story
+ * still without a film of its own — the shape the room reads back, since the
+ * film is written down by the room rather than by the render.
+ */
+function withTheArtifact(base: MokaFile): MokaFile {
   const film = {
     id: "asset-film",
     name: "the film.mp4",
@@ -485,8 +500,16 @@ function withTheFilm(base: MokaFile): MokaFile {
     },
   };
   return {
+    ...base,
+    resources: { ...base.resources, videos: [...base.resources.videos, film] },
+  };
+}
+
+/** The same fixture, with the room's own note of the film written down. */
+function withTheFilm(base: MokaFile): MokaFile {
+  const moka = withTheArtifact(base);
+  return {
     ...moka,
-    resources: { ...moka.resources, videos: [...moka.resources.videos, film] },
     stories: (moka.stories ?? []).map((held) =>
       held.id === ids.story
         ? {
