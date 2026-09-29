@@ -3093,6 +3093,14 @@ button.danger:hover:not(:disabled) {
   color: var(--danger);
 }
 
+/* The mark of the kind of card a mention points at, which is how a name among
+   the words reads as a reference to something rather than as prose. */
+.mention-chip-icon {
+  color: var(--muted);
+  font-size: 10px;
+  margin-right: 4px;
+}
+
 .mention-chip-name {
   font-size: 11px;
 }

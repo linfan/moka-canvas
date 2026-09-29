@@ -16,6 +16,21 @@ import {
 /** How a mention is written into the document. */
 const PREFIX = "@[node:";
 
+/**
+ * How a card of this kind is marked where a chip stands for it.
+ *
+ * A mark of the kind rather than a picture of the card: a reference is named
+ * among the words, and a thumbnail in the middle of a sentence would move the
+ * line it sits in.
+ */
+export const KIND_ICONS: Record<string, string> = {
+  text: "¶",
+  audio: "♪",
+  group: "▢",
+  image: "▣",
+  video: "▶",
+};
+
 /** How much of a text a candidate row shows. */
 export const MENTION_SUMMARY_CHARS = 40;
 

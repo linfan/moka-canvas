@@ -15,6 +15,7 @@ import type {
 import { findNode, mentionSpans } from "../../../shared/domain";
 import { mediaInfoForNode, type MediaState } from "../canvas/mediaCards";
 import {
+  KIND_ICONS,
   mentionBeingTyped,
   mentionToken,
   narrowMentions,
@@ -166,9 +167,9 @@ export function focusEnd(area: HTMLElement): void {
 }
 
 /**
- * A mention drawn: the name of the card it points at, standing among the words
- * as a name does, so the sentence reads as one that references a card rather
- * than as one more word of prose.
+ * A mention drawn: the mark of the kind of card it points at, and that card's
+ * own name — standing among the words as a name does, so the sentence reads as
+ * one that references a card rather than as one more word of prose.
  */
 function chipFor(
   document: Document,
@@ -182,10 +183,14 @@ function chipFor(
   chip.dataset.nodeId = nodeId;
   chip.dataset.kind = mentioned?.kind ?? "gone";
   chip.title = mentioned?.title ?? "A node that is gone";
+  const icon = document.createElement("span");
+  icon.className = "mention-chip-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = KIND_ICONS[mentioned?.kind ?? ""] ?? "?";
   const name = document.createElement("span");
   name.className = "mention-chip-name";
   name.textContent = mentioned?.title ?? nodeId;
-  chip.append(name);
+  chip.append(icon, name);
   return chip;
 }
 

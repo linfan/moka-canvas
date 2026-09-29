@@ -415,15 +415,18 @@ describe("the prompt field", () => {
     expect(dismissed).toHaveBeenCalledTimes(1);
   });
 
-  it("draws a mention among the words as the card's own name", () => {
+  it("draws a mention among the words as the card's kind and its own name", () => {
     render(<Field initial={`over ${mentionToken("n-plate")} again`} />);
     const shown = chip();
     expect(shown).toBeTruthy();
     expect(shown?.title).toBe("Plate");
     expect(shown?.dataset.kind).toBe("image");
-    expect(shown?.textContent).toBe("Plate");
+    expect(shown?.querySelector(".mention-chip-icon")?.textContent).toBe("▣");
+    expect(shown?.querySelector(".mention-chip-name")?.textContent).toBe(
+      "Plate",
+    );
     // The words around it stay the words around it.
-    expect(field().textContent).toBe("over Plate again");
+    expect(field().textContent).toBe("over ▣Plate again");
   });
 
   it("draws a token that arrived as words as the chip it is", async () => {
