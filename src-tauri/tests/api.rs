@@ -1265,3 +1265,110 @@ async fn the_desktop_runtime_is_not_served_a_directory_listing() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(body_json(response).await["code"], "NOT_FOUND");
 }
+
+/// A save writes where the dialog said, in either runtime.
+///
+/// The listing is the web runtime's question because it has no dialog of its
+/// own; a write is the other half of the same question in both runtimes, since
+/// the window holding the bytes cannot put them on this machine's disk itself.
+#[tokio::test]
+async fn a_save_writes_where_it_was_told_in_either_runtime() {
+    let web_home = tempfile::tempdir().unwrap();
+    let desktop_home = tempfile::tempdir().unwrap();
+    let somewhere = tempfile::tempdir().unwrap();
+    let target = somewhere.path().join("Cut.mp4");
+
+    for app in [
+        test_app(web_home.path()),
+        desktop_test_app(desktop_home.path()),
+    ] {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", &target.display().to_string())
+            .finish();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/v1/filesystem/file?{query}"))
+                    .body(Body::from("artifact"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["path"], target.to_string_lossy().as_ref());
+        assert_eq!(body["bytes"], 8);
+        assert_eq!(std::fs::read(&target).unwrap(), b"artifact");
+    }
+}
+
+/// What a save refuses: a path with no root to resolve it against, a folder
+/// that is not there, and a destination that is a folder itself.
+#[tokio::test]
+async fn a_save_refuses_a_path_it_cannot_write() {
+    let home = tempfile::tempdir().unwrap();
+    let app = test_app(home.path());
+    let somewhere = tempfile::tempdir().unwrap();
+
+    let cases = [
+        (
+            "relative/Cut.mp4".to_string(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+        ),
+        (
+            somewhere
+                .path()
+                .join("nowhere")
+                .join("Cut.mp4")
+                .display()
+                .to_string(),
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND",
+        ),
+        (
+            somewhere.path().display().to_string(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+        ),
+    ];
+    for (path, status, code) in cases {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", &path)
+            .finish();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/v1/filesystem/file?{query}"))
+                    .body(Body::from("artifact"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "{path}");
+        assert_eq!(body_json(response).await["code"], code, "{path}");
+    }
+}
+
+/// A reveal of something that is not a file is refused before the platform's
+/// file manager is asked anything.
+#[tokio::test]
+async fn a_reveal_of_something_that_is_not_there_is_refused() {
+    let home = tempfile::tempdir().unwrap();
+    let app = test_app(home.path());
+    let missing = home.path().join("nowhere").join("Cut.mp4");
+
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/filesystem/reveal",
+            json!({ "path": missing.display().to_string() }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(response).await["code"], "VALIDATION_FAILED");
+}

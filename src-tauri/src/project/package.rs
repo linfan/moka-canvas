@@ -104,6 +104,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 enum Skip {
     /// Scratch space, holding whatever a half-finished write left behind.
     Scratch,
+    /// Where exports were asked to land: a reader's own copies of the work,
+    /// which the work itself does not hold and a package has no business
+    /// carrying — least of all the package that was exported there before.
+    Output,
     /// A job a provider on this machine is still running.
     Job,
     /// The record of a run this machine made.
@@ -131,6 +135,7 @@ impl Skip {
     fn rule(&self) -> String {
         match self {
             Self::Scratch => "tmp/**".into(),
+            Self::Output => "output/**".into(),
             Self::Job => format!("{JOB_RECORDS}**"),
             Self::Run => format!("{RUN_RECORDS}**"),
             Self::Secret => format!("**/{}", docs::SECRETS_DOC),
@@ -146,6 +151,9 @@ impl Skip {
 fn skipped(relative: &str, scope: &PackageScope) -> Option<Skip> {
     if relative == "tmp" || relative.starts_with("tmp/") {
         return Some(Skip::Scratch);
+    }
+    if relative == "output" || relative.starts_with("output/") {
+        return Some(Skip::Output);
     }
     if relative.starts_with(JOB_RECORDS) {
         return Some(Skip::Job);
@@ -715,6 +723,27 @@ mod tests {
             "Thumbs.db",
         ] {
             assert!(!ships(relative, &WORK), "{relative} must not be packaged");
+        }
+    }
+
+    /// Where exports were saved is a reader's own copy of the work, and a
+    /// package carries the work: never a copy, and least of all the package
+    /// that was exported there before.
+    #[test]
+    fn an_export_never_lands_in_a_package() {
+        for relative in [
+            "output",
+            "output/Cut.mokapkg.zip",
+            "output/Cut.mp4",
+            "output/nested/picture.png",
+        ] {
+            assert!(!ships(relative, &WORK), "{relative} must not be packaged");
+            assert!(!ships(relative, &BACKUP), "{relative} must not be packaged");
+        }
+        // A folder that merely shares the name is project content, wherever it
+        // sits — the exclusion is the project root's own output folder.
+        for relative in ["assets/output.png", "notes/output/notes.txt"] {
+            assert!(ships(relative, &WORK), "{relative} is project content");
         }
     }
 

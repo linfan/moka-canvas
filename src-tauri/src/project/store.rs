@@ -727,6 +727,10 @@ impl ProjectStore for FsProjectStore {
         };
         let (moka, stamp) = self.load_from_disk(&root)?;
         Self::clean_tmp(&root);
+        // A project made before saves asked where to go has no output folder
+        // yet, and the save dialogs open at it: made here rather than left to
+        // the first export, which never invents one.
+        std::fs::create_dir_all(root.join("output"))?;
         Self::sweep_interrupted_runs(&root);
         Self::sweep_interrupted_story_jobs(&root);
         let report = Self::self_check(&root, &moka);

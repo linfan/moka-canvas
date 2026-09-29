@@ -139,14 +139,16 @@ pub struct StartRunRequest {
     pub assistant_session_id: Option<String>,
 }
 
-/// What a render is asked for: which timeline, and nothing else.
+/// What a render is asked for: which timeline, and where the finished file goes.
 ///
-/// Where the renderer is, what it is asked with, and where its artifact goes
-/// are all facts about this machine, never about a request.
+/// Where the renderer is and what it is asked with are facts about this machine,
+/// never about a request; the destination is the one thing a request does say,
+/// because it is a reader's own choice and nobody else can make it.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipExportRequest {
     pub timeline_id: String,
+    pub destination: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -437,6 +439,30 @@ pub struct FilesystemEntry {
     pub path: String,
     /// `directory` or `file`; a dialog opens the one and chooses the other.
     pub kind: &'static str,
+}
+
+/// Where a save is asked to write, in a query string.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemWriteQuery {
+    /// The absolute path the save dialog settled on.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// What a write answered: where the bytes landed, and how many there were.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemWriteResponse {
+    pub path: String,
+    pub bytes: u64,
+}
+
+/// The file a reader wants shown in this machine's file manager.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealRequest {
+    pub path: String,
 }
 
 /// Which run a stream follows. One, because a listener is watching one.

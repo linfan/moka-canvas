@@ -9,8 +9,6 @@
 use super::plan::RenderPlan;
 use super::runner::{self, RunError, RunSpec};
 use super::ClipError;
-use crate::domain::{now_iso, AssetProvenance};
-use crate::project::{ProjectError, ProjectStore, StagedAsset};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -54,9 +52,10 @@ pub struct ExportTask {
     pub progress01: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    /// What the render was filed as, once it is in the project.
+    /// Where the finished render was written, which is where the reader asked
+    /// for it and nowhere else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asset_id: Option<String>,
+    pub saved_to: Option<String>,
 }
 
 /// One export, and how to stop it.
@@ -107,7 +106,7 @@ impl ExportRegistry {
             status: ExportStatus::Queued,
             progress01: 0.0,
             message: None,
-            asset_id: None,
+            saved_to: None,
         };
         tasks.insert(
             id,
@@ -179,7 +178,7 @@ impl ExportRegistry {
         id: &str,
         status: ExportStatus,
         message: Option<String>,
-        asset_id: Option<String>,
+        saved_to: Option<String>,
     ) {
         debug_assert!(status.terminal());
         let mut tasks = self.tasks.write().expect("a panic left this unlocked");
@@ -188,7 +187,7 @@ impl ExportRegistry {
         };
         entry.task.status = status;
         entry.task.message = message;
-        entry.task.asset_id = asset_id;
+        entry.task.saved_to = saved_to;
         if status == ExportStatus::Done {
             entry.task.progress01 = 1.0;
         }
@@ -215,62 +214,6 @@ impl ExportRegistry {
     }
 }
 
-/// Where a finished render goes.
-///
-/// A trait rather than a store so a render's whole life — progress, the
-/// artifact, the scratch directory — can be driven in a test without a
-/// project on disk, and so filing one is something a caller can hand over.
-#[async_trait::async_trait]
-pub trait ArtifactSink: Send + Sync {
-    /// Files the artifact and answers with the asset that holds it.
-    async fn keep(
-        &self,
-        artifact: &Path,
-        plan: &RenderPlan,
-        timeline_id: &str,
-    ) -> Result<String, ProjectError>;
-}
-
-/// The project's own shelf: what a render made is an asset like any other.
-pub struct ProjectSink(pub Arc<dyn ProjectStore>);
-
-#[async_trait::async_trait]
-impl ArtifactSink for ProjectSink {
-    async fn keep(
-        &self,
-        artifact: &Path,
-        plan: &RenderPlan,
-        timeline_id: &str,
-    ) -> Result<String, ProjectError> {
-        let change = self
-            .0
-            .add_asset(StagedAsset {
-                name: plan.output_name.clone(),
-                tmp_path: artifact.to_path_buf(),
-                declared_mime: Some("video/mp4".to_string()),
-                category_hint: None,
-                provenance: Some(AssetProvenance {
-                    run_id: None,
-                    canvas_id: None,
-                    operation_node_id: None,
-                    assistant_session_id: None,
-                    story_job_id: None,
-                    story_id: None,
-                    input_asset_ids: None,
-                    // What this file is a render of, so a reader a month from
-                    // now can tell it from anything else in the project.
-                    parameter_snapshot: Some(serde_json::json!({
-                        "timelineId": timeline_id,
-                        "timeline": plan.output_name,
-                    })),
-                    created_at: now_iso(),
-                }),
-            })
-            .await?;
-        Ok(change.entry.id)
-    }
-}
-
 /// Everything one run needs that is not in the plan.
 #[derive(Debug, Clone)]
 pub struct ExportRun {
@@ -282,17 +225,14 @@ pub struct ExportRun {
     pub encoder: String,
     /// The project's scratch directory: `export-<id>/` is made inside it.
     pub temp_root: PathBuf,
+    /// Where the reader asked for the finished file.
+    pub destination: PathBuf,
     pub timeout: Duration,
 }
 
 /// Drives one export from queued to a place it stays, and leaves nothing on
 /// the disk whichever way it ends.
-pub async fn drive(
-    registry: Arc<ExportRegistry>,
-    sink: Arc<dyn ArtifactSink>,
-    run: ExportRun,
-    cancel: oneshot::Receiver<()>,
-) {
+pub async fn drive(registry: Arc<ExportRegistry>, run: ExportRun, cancel: oneshot::Receiver<()>) {
     registry.set_running(&run.id);
     let spec = RunSpec {
         program: run.program,
@@ -315,13 +255,24 @@ pub async fn drive(
 
     match outcome {
         Ok(artifact) => {
-            // The artifact has to be filed before the guard goes: the
-            // scratch directory leaves with it.
-            match sink.keep(&artifact.path, &run.plan, &run.timeline_id).await {
-                Ok(asset_id) => registry.finish(&run.id, ExportStatus::Done, None, Some(asset_id)),
-                Err(error) => {
-                    registry.finish(&run.id, ExportStatus::Failed, Some(error.to_string()), None)
-                }
+            // The copy has to land before the guard goes: the scratch
+            // directory leaves with the artifact.
+            match place(&artifact.path, &run.destination).await {
+                Ok(()) => registry.finish(
+                    &run.id,
+                    ExportStatus::Done,
+                    None,
+                    Some(run.destination.to_string_lossy().into_owned()),
+                ),
+                Err(error) => registry.finish(
+                    &run.id,
+                    ExportStatus::Failed,
+                    Some(format!(
+                        "Could not save the render to {}: {error}",
+                        run.destination.display()
+                    )),
+                    None,
+                ),
             }
         }
         Err(RunError::Cancelled) => registry.finish(&run.id, ExportStatus::Cancelled, None, None),
@@ -329,10 +280,37 @@ pub async fn drive(
     }
 }
 
+/// Copies a finished render where the reader asked for it.
+///
+/// The copy lands under a temporary name beside its destination and is renamed
+/// into place, so a destination that already held something is replaced whole
+/// or not at all — a half-written file at a reader's own path is not something
+/// a failed copy may leave behind.
+async fn place(artifact: &Path, destination: &Path) -> std::io::Result<()> {
+    let staging = staging_name(destination);
+    let outcome = async {
+        tokio::fs::copy(artifact, &staging).await?;
+        tokio::fs::rename(&staging, destination).await
+    }
+    .await;
+    if outcome.is_err() {
+        let _ = tokio::fs::remove_file(&staging).await;
+    }
+    outcome
+}
+
+/// The name a copy takes while it is being made: its destination's own name
+/// with `.tmp` behind it, so it sits in the same folder and never looks like
+/// the file a reader asked for.
+fn staging_name(destination: &Path) -> PathBuf {
+    let mut name = destination.as_os_str().to_os_string();
+    name.push(".tmp");
+    PathBuf::from(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     fn plan_stub() -> RenderPlan {
         RenderPlan {
@@ -341,39 +319,7 @@ mod tests {
             ass: None,
             duration_ms: 2_000,
             fps: 30,
-            output_name: "Cut.mp4".to_string(),
             audio: false,
-        }
-    }
-
-    /// A sink that writes down what it was handed instead of filing it, so a
-    /// render's whole life can be driven without a project on disk.
-    #[derive(Default)]
-    struct RecordingSink {
-        kept: Mutex<Vec<(PathBuf, String)>>,
-        refuse: bool,
-    }
-
-    #[async_trait::async_trait]
-    impl ArtifactSink for RecordingSink {
-        async fn keep(
-            &self,
-            artifact: &Path,
-            _plan: &RenderPlan,
-            timeline_id: &str,
-        ) -> Result<String, ProjectError> {
-            self.kept
-                .lock()
-                .unwrap()
-                .push((artifact.to_path_buf(), timeline_id.to_string()));
-            assert!(artifact.is_file(), "the artifact is handed over as a file");
-            if self.refuse {
-                return Err(ProjectError::domain(
-                    "UNSUPPORTED_MEDIA_TYPE",
-                    "the shelf would not take it",
-                ));
-            }
-            Ok("asset-1".to_string())
         }
     }
 
@@ -403,7 +349,12 @@ mod tests {
         assert_eq!(error.code(), "CONFLICT");
         assert_eq!(error.to_string(), "An export is already running.");
 
-        registry.finish(&first.task.id, ExportStatus::Done, None, Some("a".into()));
+        registry.finish(
+            &first.task.id,
+            ExportStatus::Done,
+            None,
+            Some("/tmp/Cut.mp4".into()),
+        );
         assert!(registry.begin("tl-1").is_ok(), "the place is free again");
     }
 
@@ -471,11 +422,11 @@ mod tests {
         let registry = ExportRegistry::new();
         let reservation = registry.begin("tl-1").expect("the place is free");
         let id = reservation.task.id.clone();
-        registry.finish(&id, ExportStatus::Done, None, Some("asset-1".into()));
+        registry.finish(&id, ExportStatus::Done, None, Some("/tmp/Cut.mp4".into()));
         // A done render reports as done, at the end of its progress.
         let task = registry.snapshot(&id).unwrap();
         assert_eq!(task.status, ExportStatus::Done);
-        assert_eq!(task.asset_id.as_deref(), Some("asset-1"));
+        assert_eq!(task.saved_to.as_deref(), Some("/tmp/Cut.mp4"));
         assert_eq!(task.progress01, 1.0);
 
         // Aged out: the same handle then reads as one that was never issued,
@@ -515,7 +466,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_render_is_driven_to_done_and_filed() {
+    async fn a_render_is_driven_to_done_and_saved_where_it_was_told() {
         let root = tempfile::tempdir().unwrap();
         let script = write_script(
             root.path(),
@@ -527,9 +478,10 @@ mod tests {
              exit 0\n",
         );
         let registry = Arc::new(ExportRegistry::new());
-        let sink = Arc::new(RecordingSink::default());
         let reservation = registry.begin("tl-1").expect("the place is free");
         let id = reservation.task.id.clone();
+        let destination = root.path().join("out").join("Cut.mp4");
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
         let run = ExportRun {
             id: id.clone(),
             timeline_id: "tl-1".to_string(),
@@ -537,27 +489,30 @@ mod tests {
             program: script,
             encoder: "libx264".to_string(),
             temp_root: root.path().join("tmp"),
+            destination: destination.clone(),
             timeout: Duration::from_secs(10),
         };
         let _cancel = reservation.cancel;
 
-        drive(
-            Arc::clone(&registry),
-            Arc::clone(&sink) as Arc<dyn ArtifactSink>,
-            run,
-            oneshot::channel().1,
-        )
-        .await;
+        drive(Arc::clone(&registry), run, oneshot::channel().1).await;
 
         let task = registry.snapshot(&id).expect("still tracked");
         assert_eq!(task.status, ExportStatus::Done);
-        assert_eq!(task.asset_id.as_deref(), Some("asset-1"));
+        assert_eq!(
+            task.saved_to.as_deref(),
+            Some(destination.to_string_lossy().as_ref())
+        );
         assert_eq!(task.progress01, 1.0);
-        let kept = sink.kept.lock().unwrap();
-        assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].1, "tl-1");
-        assert!(!kept[0].0.exists(), "the artifact was taken away");
-        // The scratch directory went with it.
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"artifact",
+            "the finished render lands where it was asked for"
+        );
+        assert!(
+            !staging_name(&destination).exists(),
+            "no staging file is left beside it"
+        );
+        // The scratch directory went with the artifact.
         assert!(!root
             .path()
             .join("tmp")
@@ -575,9 +530,9 @@ mod tests {
             "#!/bin/sh\nprintf 'the encoder gave up\\n' >&2\nexit 1\n",
         );
         let registry = Arc::new(ExportRegistry::new());
-        let sink = Arc::new(RecordingSink::default());
         let reservation = registry.begin("tl-1").expect("the place is free");
         let id = reservation.task.id.clone();
+        let destination = root.path().join("Cut.mp4");
         let run = ExportRun {
             id: id.clone(),
             timeline_id: "tl-1".to_string(),
@@ -585,17 +540,12 @@ mod tests {
             program: script,
             encoder: "libx264".to_string(),
             temp_root: root.path().join("tmp"),
+            destination,
             timeout: Duration::from_secs(10),
         };
         let _cancel = reservation.cancel;
 
-        drive(
-            Arc::clone(&registry),
-            Arc::clone(&sink) as Arc<dyn ArtifactSink>,
-            run,
-            oneshot::channel().1,
-        )
-        .await;
+        drive(Arc::clone(&registry), run, oneshot::channel().1).await;
 
         let task = registry.snapshot(&id).expect("still tracked");
         assert_eq!(task.status, ExportStatus::Failed);
@@ -606,7 +556,7 @@ mod tests {
             "{:?}",
             task.message
         );
-        assert!(sink.kept.lock().unwrap().is_empty());
+        assert!(!root.path().join("Cut.mp4").exists());
         assert!(!root
             .path()
             .join("tmp")
@@ -616,7 +566,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_render_whose_filing_fails_is_failed_rather_than_lost() {
+    async fn a_render_whose_save_fails_is_failed_rather_than_lost() {
         let root = tempfile::tempdir().unwrap();
         let script = write_script(
             root.path(),
@@ -624,12 +574,11 @@ mod tests {
             "#!/bin/sh\nprintf 'progress=end\\n'\nprintf 'artifact' > out.mp4\nexit 0\n",
         );
         let registry = Arc::new(ExportRegistry::new());
-        let sink = Arc::new(RecordingSink {
-            refuse: true,
-            ..RecordingSink::default()
-        });
         let reservation = registry.begin("tl-1").expect("the place is free");
         let id = reservation.task.id.clone();
+        // A folder that is not there: the copy has nowhere to land, and the
+        // render is reported rather than quietly lost.
+        let destination = root.path().join("nowhere").join("Cut.mp4");
         let run = ExportRun {
             id: id.clone(),
             timeline_id: "tl-1".to_string(),
@@ -637,25 +586,22 @@ mod tests {
             program: script,
             encoder: "libx264".to_string(),
             temp_root: root.path().join("tmp"),
+            destination: destination.clone(),
             timeout: Duration::from_secs(10),
         };
         let _cancel = reservation.cancel;
 
-        drive(
-            Arc::clone(&registry),
-            Arc::clone(&sink) as Arc<dyn ArtifactSink>,
-            run,
-            oneshot::channel().1,
-        )
-        .await;
+        drive(Arc::clone(&registry), run, oneshot::channel().1).await;
 
         let task = registry.snapshot(&id).expect("still tracked");
         assert_eq!(task.status, ExportStatus::Failed);
-        assert!(task
-            .message
-            .as_deref()
-            .unwrap()
-            .contains("would not take it"));
+        assert!(task.saved_to.is_none());
+        assert!(
+            task.message.as_deref().unwrap().contains("nowhere"),
+            "{:?}",
+            task.message
+        );
+        assert!(!staging_name(&destination).exists());
         assert!(!root
             .path()
             .join("tmp")

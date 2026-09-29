@@ -325,7 +325,6 @@ fn the_real_fixtures_read_into_a_plan_of_the_shape_the_cut_asks_for() {
     );
     // The render runs to the last block's end: the video block's.
     assert_eq!(plan.duration_ms, 1_600);
-    assert_eq!(plan.output_name, "Export cut.mp4");
 }
 
 fn test_app(root: &Path, ffmpeg: Option<PathBuf>) -> axum::Router {
@@ -373,7 +372,7 @@ fn upload_request(uri: &str, filename: &str, bytes: &[u8]) -> Request<Body> {
 }
 
 #[tokio::test]
-async fn a_whole_render_lands_as_an_asset_that_streams() {
+async fn a_whole_render_lands_where_it_was_asked_for() {
     let Some(program) = machine_ffmpeg() else {
         println!(
             "skipping the whole-render test: no ffmpeg on this machine \
@@ -453,13 +452,22 @@ async fn a_whole_render_lands_as_an_asset_that_streams() {
         body_json(applied).await
     );
 
+    // Where the save dialog would have pointed: a folder of the reader's own,
+    // outside the project.
+    let saved = home.path().join("saved");
+    std::fs::create_dir_all(&saved).unwrap();
+    let destination = saved.join("Export cut.mp4");
+
     // Started, and polled the way the dialog polls.
     let started = app
         .clone()
         .oneshot(json_request(
             "POST",
             "/api/v1/clip/export",
-            json!({ "timelineId": "timeline-export" }),
+            json!({
+                "timelineId": "timeline-export",
+                "destination": destination.to_string_lossy(),
+            }),
         ))
         .await
         .unwrap();
@@ -494,53 +502,14 @@ async fn a_whole_render_lands_as_an_asset_that_streams() {
     };
     assert_eq!(finished["status"], "done", "{finished}");
     assert_eq!(finished["progress01"], 1.0, "{finished}");
-    let asset_id = finished["assetId"].as_str().expect("the artifact is filed");
-
-    // The artifact streams: a range of it comes back as a range.
-    let ranged = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(format!("/api/v1/projects/current/assets/{asset_id}"))
-                .header(header::RANGE, "bytes=0-99")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(ranged.status(), StatusCode::PARTIAL_CONTENT);
     assert_eq!(
-        ranged
-            .headers()
-            .get(header::CONTENT_RANGE)
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.starts_with("bytes 0-99/")),
-        Some(true),
-        "a streamable artifact answers with its range"
+        finished["savedTo"].as_str(),
+        Some(destination.to_string_lossy().as_ref()),
+        "{finished}"
     );
 
     // And it is a real 1080p30 file with sound, a second and a bit long.
-    let opened = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/v1/projects/current")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let current = body_json(opened).await;
-    let entry = current["moka"]["resources"]["videos"]
-        .as_array()
-        .expect("the videos")
-        .iter()
-        .find(|entry| entry["id"] == asset_id)
-        .expect("the artifact is on the shelf")
-        .clone();
-    let root = PathBuf::from(current["root"].as_str().expect("the root"));
-    let artifact = root.join(entry["path"].as_str().expect("a path"));
-    let bytes = std::fs::read(&artifact).unwrap();
+    let bytes = std::fs::read(&destination).expect("the render is where it was asked for");
     let media = moka_canvas::assets::probe::probe_media("video/mp4", &bytes);
     assert_eq!(media.width, Some(1920));
     assert_eq!(media.height, Some(1080));
@@ -552,6 +521,29 @@ async fn a_whole_render_lands_as_an_asset_that_streams() {
     let codecs = media.codec_summary.clone().unwrap_or_default();
     assert!(codecs.contains("avc1"), "the picture is H.264: {codecs}");
     assert!(codecs.contains("mp4a"), "the sound is there: {codecs}");
+
+    // The project keeps no copy of it: a render is a file the reader asked
+    // for, and not material the project holds.
+    let opened = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/projects/current")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let current = body_json(opened).await;
+    let videos = current["moka"]["resources"]["videos"]
+        .as_array()
+        .expect("the videos");
+    assert_eq!(
+        videos.len(),
+        1,
+        "the only video the project holds is the one it was given: {current}"
+    );
+    let root = PathBuf::from(current["root"].as_str().expect("the root"));
 
     // Nothing was left in the scratch directory.
     let scratch = root.join("tmp");
@@ -593,12 +585,17 @@ async fn the_export_paths_are_as_unavailable_as_the_machine_is() {
         "{body}"
     );
 
+    // A destination is checked before the machine is, so this request reaches
+    // the renderer's refusal with a destination a save dialog could have made.
     let refused = app
         .clone()
         .oneshot(json_request(
             "POST",
             "/api/v1/clip/export",
-            json!({ "timelineId": "timeline-anything" }),
+            json!({
+                "timelineId": "timeline-anything",
+                "destination": root.path().join("Cut.mp4").to_string_lossy(),
+            }),
         ))
         .await
         .unwrap();
@@ -609,6 +606,47 @@ async fn the_export_paths_are_as_unavailable_as_the_machine_is() {
             .get("x-error-code")
             .and_then(|value| value.to_str().ok()),
         Some("FFMPEG_UNAVAILABLE")
+    );
+
+    // A request that names no destination, or one no save could have produced,
+    // is refused before the machine is asked anything.
+    let unnamed = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/clip/export",
+            json!({ "timelineId": "timeline-anything" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unnamed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        unnamed
+            .headers()
+            .get("x-error-code")
+            .and_then(|value| value.to_str().ok()),
+        Some("VALIDATION_FAILED")
+    );
+
+    let nowhere = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/clip/export",
+            json!({
+                "timelineId": "timeline-anything",
+                "destination": root.path().join("nowhere").join("Cut.mp4").to_string_lossy(),
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(nowhere.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        nowhere
+            .headers()
+            .get("x-error-code")
+            .and_then(|value| value.to_str().ok()),
+        Some("VALIDATION_FAILED")
     );
 
     let missing = app
