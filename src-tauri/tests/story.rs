@@ -347,6 +347,7 @@ fn story_document() -> MokaFile {
                 keyframe_id: None,
                 clip_id: "clip-video".into(),
             }]),
+            assembled_digest: None,
         },
         narrator: None,
         created_at: NOW.into(),
@@ -1283,12 +1284,44 @@ fn remembers_what_a_story_was_assembled_into_and_refuses_a_timeline_nobody_holds
                     keyframe_id: None,
                     clip_id: "clip-cut-a".into(),
                 }])),
+                assembled_digest: Some(Some("0f3a91cd".into())),
             },
         }],
     );
     let edit = &story_of(&next).edit;
     assert_eq!(edit.timeline_id.as_deref(), Some(TIMELINE));
     assert_eq!(edit.clip_by_act.as_ref().unwrap()[0].clip_id, "clip-cut-a");
+    assert_eq!(edit.assembled_digest.as_deref(), Some("0f3a91cd"));
+
+    // A digest is what an assembly writes down; anything else is refused
+    // rather than kept as though it meant something.
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::SetStoryEdit {
+                story_id: STORY.into(),
+                patch: StoryEditPatch {
+                    assembled_digest: Some(Some("NOT-A-DIGEST".into())),
+                    ..Default::default()
+                },
+            }
+        ),
+        "VALIDATION_FAILED"
+    );
+
+    // And it can be taken away again, which is what an undo of the first
+    // assembly's own writing looks like.
+    let without = round_trip(
+        &next,
+        vec![DocumentCommand::SetStoryEdit {
+            story_id: STORY.into(),
+            patch: StoryEditPatch {
+                assembled_digest: Some(None),
+                ..Default::default()
+            },
+        }],
+    );
+    assert_eq!(story_of(&without).edit.assembled_digest, None);
 
     assert_eq!(
         code_of(

@@ -455,7 +455,6 @@
     "withSubtitles": "Write the lines as a caption track",
     "noLines": "Nothing is said in this telling yet.",
     "subtitlesNote": "A caption sits where the shot was planned to run; a clip that came back a different length leaves the words where they are.",
-    "againNote": "A change here takes effect at the next assembly.",
     "nothingToAssemble": "No clip has been filmed yet — make the acts first.",
     "assemble": "Assemble the film",
     "reassemble": "Assemble again",
@@ -488,7 +487,13 @@
     "notFilmed": "not filmed",
     "line": "{{speaker}}: {{text}}",
     "ownSoundNote": "The clips carry their own sound too, so two things may be heard at once; turn one of them down in the cutting room.",
-    "lineVoice": "Line {{number}}"
+    "lineVoice": "Line {{number}}",
+    "filmFresh": "The film is the telling as it stands.",
+    "filmBehind": "The film is behind the telling; exporting assembles it again first.",
+    "exportFresh": "Export the film (assemble first)",
+    "filmCarries": "It carries {{voices}} readings, {{music}} pieces of music, and subtitles {{subtitles}}.",
+    "subtitlesOn": "on",
+    "subtitlesOff": "off"
   },
   "import": {
     "name": "Name",

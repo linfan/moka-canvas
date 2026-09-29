@@ -107,7 +107,8 @@
     "storySoundInvalid": "Sound must carry its music and effects as text",
     "storyVoiceTooLong": "The voice's model, tone, or manner is too long",
     "storyVoiceRate": "The voice's pace is out of range",
-    "storyVoicePitch": "The voice's pitch is out of range"
+    "storyVoicePitch": "The voice's pitch is out of range",
+    "storyDigestShape": "An assembly's digest is eight hexadecimal digits"
   },
   "timeline": {
     "clipAssetMissing": "Clip's asset is not in the project",

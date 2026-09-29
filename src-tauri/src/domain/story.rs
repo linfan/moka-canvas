@@ -485,6 +485,11 @@ pub struct StoryEdit {
     pub timeline_id: Option<TimelineId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip_by_act: Option<Vec<StoryEditClip>>,
+    /// What the timeline was laid down from, as one short reading of it. A
+    /// document written before this existed carries none, which the room reads
+    /// as "the film is behind the telling".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assembled_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -667,6 +672,12 @@ pub struct StoryEditPatch {
         deserialize_with = "super::deserialize_double_option"
     )]
     pub clip_by_act: Option<Option<Vec<StoryEditClip>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::deserialize_double_option"
+    )]
+    pub assembled_digest: Option<Option<String>>,
 }
 
 impl StoryDocument {
@@ -2020,6 +2031,10 @@ pub fn apply_story_command(
                     .clip_by_act
                     .as_ref()
                     .map(|_| story.edit.clip_by_act.clone()),
+                assembled_digest: patch
+                    .assembled_digest
+                    .as_ref()
+                    .map(|_| story.edit.assembled_digest.clone()),
             };
             let mut edit = story.edit.clone();
             if let Some(timeline_id) = &patch.timeline_id {
@@ -2027,6 +2042,21 @@ pub fn apply_story_command(
             }
             if let Some(clips) = &patch.clip_by_act {
                 edit.clip_by_act = clips.clone();
+            }
+            if let Some(digest) = &patch.assembled_digest {
+                if let Some(digest) = digest {
+                    let shaped = digest.len() == 8
+                        && digest
+                            .chars()
+                            .all(|at| at.is_ascii_digit() || ('a'..='f').contains(&at));
+                    if !shaped {
+                        return Err(CommandError::new(
+                            "VALIDATION_FAILED",
+                            "An assembly's digest is eight hexadecimal digits",
+                        ));
+                    }
+                }
+                edit.assembled_digest = digest.clone();
             }
             let mut next = story.clone();
             next.edit = edit;

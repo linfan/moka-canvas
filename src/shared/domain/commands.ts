@@ -2489,6 +2489,16 @@ function applyOne(
           "TIMELINE_NOT_FOUND",
           i18n.t("errors:command.timelineNotFound"),
         );
+      // A digest is what the room writes down about an assembly it made: a
+      // document carrying anything else is not one this pipeline wrote.
+      if (
+        typeof command.patch.assembledDigest === "string" &&
+        !/^[0-9a-f]{8}$/.test(command.patch.assembledDigest)
+      )
+        throw new CommandError(
+          "VALIDATION_FAILED",
+          i18n.t("errors:command.storyDigestShape"),
+        );
       const previous: typeof command.patch = {};
       const edit = { ...story.edit };
       for (const key of Object.keys(

@@ -818,6 +818,16 @@ export interface StoryEdit {
    * story's to take away.
    */
   clipByAct?: Array<{ actId: string; keyframeId?: string; clipId: ClipId }>;
+  /**
+   * What the timeline was laid down from, as one short reading of it.
+   *
+   * The telling changes after it is assembled — a line re-read, a shot refilmed
+   * — and what is on the timeline is then behind it. This is how the room
+   * notices: the film card plans the assembly the telling would make now and
+   * compares. A document written before this existed carries none, which reads
+   * as "behind", and the next assembly writes it.
+   */
+  assembledDigest?: string;
 }
 
 export interface StoryDocument {
@@ -1019,6 +1029,7 @@ export interface StoryEditPatch {
     keyframeId?: string;
     clipId: ClipId;
   }> | null;
+  assembledDigest?: string | null;
 }
 
 export interface NodePatch {

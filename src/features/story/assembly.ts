@@ -15,6 +15,7 @@
 
 import { CommandError } from "../../shared/domain/commands";
 import { MAX_CLIPS_PER_TIMELINE } from "../../shared/domain/constants";
+import { fnv1a } from "../../shared/domain/digest";
 import {
   createClipFromAsset,
   createTextClip,
@@ -707,4 +708,84 @@ export function assemblySummary(
       seconds: (plan.totalPlannedMs / 1000).toFixed(1),
     },
   );
+}
+
+/**
+ * What an assembly would lay down, counted: the readings and the score.
+ *
+ * The card says what a film will carry before it is made, and the numbers come
+ * from the same plan the assembly itself is made of, so a line added since the
+ * last assembly is counted before anybody presses anything.
+ */
+export function assemblyCarries(
+  story: StoryDocument,
+  moka: MokaFile,
+  plan: AssemblyPlan,
+): { voices: number; music: number } {
+  const dubbing = planDubbing(
+    story,
+    plan.units,
+    (assetId) => findResource(moka, assetId)?.probe?.durationMs,
+  );
+  return {
+    voices: dubbing.cues.length,
+    music: soundCues(story, plan).filter((cue) => cue.kind === "music").length,
+  };
+}
+
+/**
+ * What an assembly would lay down, as one short reading of it.
+ *
+ * Every clip the plan would write is written out in the order it lands — the
+ * pictures, the readings, the score, the words — and the whole of it is hashed:
+ * two assemblies with the same digest would put the same film on the timeline.
+ * What a reader does to that timeline afterwards is theirs and is not in here,
+ * so the digest can say whether the film is behind the telling without saying
+ * anything about the cutting room.
+ */
+export function assemblyDigest(
+  story: StoryDocument,
+  moka: MokaFile,
+  plan: AssemblyPlan,
+  options: { withSubtitles: boolean; timelineId?: string },
+): string {
+  const size = timelineSizeForAspect(story.brief.aspect);
+  const rows = [
+    "assembly:v1",
+    `timeline:${options.timelineId ?? "new"}`,
+    `frame:${size.width}x${size.height}@${ASSEMBLY_FPS}`,
+    `subtitles:${options.withSubtitles ? "on" : "off"}`,
+  ];
+  for (const unit of plan.units) {
+    rows.push(
+      `unit:${unit.actId}:${unit.keyframeId ?? ""}:${unit.startMs}:${unit.durationMs}:${unit.assetId}`,
+    );
+  }
+  // The readings, which are the plan's own arithmetic read a second time: the
+  // same windows, the same speeds, the same files, said as text.
+  const dubbing = planDubbing(
+    story,
+    plan.units,
+    (assetId) => findResource(moka, assetId)?.probe?.durationMs,
+  );
+  for (const cue of dubbing.cues) {
+    rows.push(
+      `voice:${cue.actId}:${cue.keyframeId}:${cue.lineId}:${cue.startMs}:${cue.durationMs}:${cue.speed}:${cue.assetId}`,
+    );
+  }
+  for (const cue of soundCues(story, plan)) {
+    rows.push(
+      `${cue.kind}:${cue.actId}::${cue.startMs}:${cue.take.assetIds[0]}`,
+    );
+  }
+  if (options.withSubtitles) {
+    // The words are the captions' own; the row only needs where each of them
+    // begins and how long it holds, which is what the captions decide.
+    for (const line of captions(story, plan, dubbing.cues, "digest")) {
+      rows.push(
+        `caption:${line.actId}:${line.clip.startMs}:${line.clip.durationMs}:${line.clip.text?.content ?? ""}`,
+      );
+    }
+  }
+  return fnv1a(rows.join("\n"));
 }

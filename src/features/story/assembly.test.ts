@@ -9,7 +9,12 @@ import type {
   ResourceEntry,
   StoryChapter,
 } from "../../shared/domain";
-import { assemblyCommands, assemblySummary, planAssembly } from "./assembly";
+import {
+  assemblyCommands,
+  assemblyDigest,
+  assemblySummary,
+  planAssembly,
+} from "./assembly";
 
 const ids = storyIds();
 const T0 = "2026-01-01T00:00:00.000Z";
@@ -349,6 +354,70 @@ describe("the captions of an assembly", () => {
     expect(command.timeline.clips.every((clip) => clip.kind === "video")).toBe(
       true,
     );
+  });
+});
+
+describe("the digest of an assembly", () => {
+  /** The digest of the telling as it stands, laid on the timeline it holds. */
+  function digestOf(
+    moka: MokaFile,
+    options: { withSubtitles?: boolean; timelineId?: string } = {},
+  ): string {
+    const held = story(moka);
+    return assemblyDigest(held, moka, planAssembly(held, moka), {
+      withSubtitles: options.withSubtitles ?? true,
+      timelineId: options.timelineId ?? "cut-1",
+    });
+  }
+
+  it("reads the same for the same telling, whatever the reader did to the cut", () => {
+    const moka = filmed({ secondAct: true });
+    const first = digestOf(moka);
+    expect(first).toMatch(/^[0-9a-f]{8}$/);
+    expect(digestOf(moka)).toBe(first);
+
+    // What the reader arranges in the cutting room is theirs: the digest says
+    // what this telling would lay down, not what the timeline holds.
+    const cut = moka.timelines?.[0];
+    if (cut !== undefined && cut.clips.length > 0) {
+      moka.timelines = [
+        {
+          ...cut,
+          clips: [...cut.clips, { ...cut.clips[0]!, id: "clip-by-hand" }],
+        },
+      ];
+    }
+    expect(digestOf(moka)).toBe(first);
+  });
+
+  it("moves when the film would, whichever way the telling moved", () => {
+    const moka = filmed({ secondAct: true });
+    const held = story(moka);
+    const first = digestOf(moka);
+
+    // The words of a line, which are written on the film as captions.
+    held.chapters[0]!.acts[0]!.keyframes[0]!.dialogue = [
+      { id: "line-a", speaker: "Keeper", text: "Another line entirely." },
+    ];
+    const spoken = digestOf(moka);
+    expect(spoken).not.toBe(first);
+
+    // The material a clip is made of.
+    moka.resources.videos.push(video("asset-other-take", 5_000));
+    held.chapters[0]!.acts[0]!.video = {
+      takes: [{ assetIds: ["asset-other-take"], createdAt: T0 }],
+    };
+    const refilmed = digestOf(moka);
+    expect(refilmed).not.toBe(spoken);
+
+    // How the film is framed.
+    held.brief = { ...held.brief, aspect: "9:16" };
+    expect(digestOf(moka)).not.toBe(refilmed);
+
+    // Whether the words are written on it at all, and which timeline it is on.
+    const framed = digestOf(moka);
+    expect(digestOf(moka, { withSubtitles: false })).not.toBe(framed);
+    expect(digestOf(moka, { timelineId: "cut-2" })).not.toBe(framed);
   });
 });
 

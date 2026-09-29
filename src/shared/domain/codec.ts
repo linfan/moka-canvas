@@ -552,6 +552,8 @@ function encodeStoryEdit(edit: StoryEdit): Record<string, unknown> {
         ? { keyframeId: entry.keyframeId }
         : {}),
     }));
+  if (edit.assembledDigest !== undefined)
+    doc.assembledDigest = edit.assembledDigest;
   return doc;
 }
 
@@ -1488,6 +1490,8 @@ function decodeStoryEdit(value: unknown): StoryEdit {
       return held;
     });
   }
+  if (doc.assembledDigest !== undefined)
+    edit.assembledDigest = optionalString(doc.assembledDigest);
   return edit;
 }
 

@@ -56,6 +56,21 @@ describe("moka codec", () => {
     expect(normalize(decoded)).toEqual(normalize(golden));
   });
 
+  it("carries what a telling was assembled from, and reads one that never said", () => {
+    // A document written before the digest existed carries none, and is read
+    // as the telling it is rather than refused.
+    const old = buildStoryMokaFile();
+    expect(old.stories![0]!.edit.assembledDigest).toBeUndefined();
+    const read = decodeMokaFile(encodeMokaFile(old));
+    expect(read.stories![0]!.edit.assembledDigest).toBeUndefined();
+
+    const withDigest = buildStoryMokaFile();
+    const story = withDigest.stories![0]!;
+    story.edit = { ...story.edit, assembledDigest: "0f3a91cd" };
+    const back = decodeMokaFile(encodeMokaFile(withDigest));
+    expect(back.stories![0]!.edit.assembledDigest).toBe("0f3a91cd");
+  });
+
   it("is byte-canonical on re-save", () => {
     const golden = buildGoldenMokaFile();
     const first = encodeMokaFile(golden);
