@@ -821,18 +821,21 @@ async fn export_then_import_roundtrip() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
 
+    // A package goes where the request says, the way a save dialog decided it.
+    let asked = temp.path().join("saves").join("Pack.mokapkg.zip");
     let response = app
         .clone()
         .oneshot(json_request(
             "POST",
             "/api/v1/projects/current/export",
-            json!({}),
+            json!({ "destination": asked.to_string_lossy() }),
         ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let report = body_json(response).await;
     let destination = report["destination"].as_str().unwrap().to_string();
+    assert_eq!(Path::new(&destination), asked);
     assert!(Path::new(&destination).is_file());
     assert!(report["entries"].as_u64().unwrap() >= 2);
     assert_eq!(report["incomplete"], false);
@@ -869,6 +872,38 @@ async fn export_then_import_roundtrip() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(body_json(response).await.as_array().unwrap().len(), 0);
+}
+
+/// A package nobody said where to put is refused: the destination is the
+/// reader's own choice, and there is no place the server may invent for it.
+#[tokio::test]
+async fn an_export_without_a_destination_is_refused() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = test_app(temp.path());
+    create_project(&app, &temp.path().join("projects"), "Nowhere").await;
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/export",
+            json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(response).await["code"], "VALIDATION_FAILED");
+
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/projects/current/export",
+            json!({ "destination": "   " }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(response).await["code"], "VALIDATION_FAILED");
 }
 
 #[tokio::test]

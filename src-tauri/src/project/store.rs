@@ -5,7 +5,7 @@ use crate::domain::validate::{
     MAX_ASSET_KEYWORD_LENGTH, MAX_ASSET_NOTE_LENGTH, MAX_ASSET_TAGS, MAX_ASSET_TAG_LENGTH,
 };
 use crate::domain::{
-    id_tag, new_id, now_iso, AssetProvenance, CanvasDocument, DocumentCommand, MokaFile, NodeKind,
+    new_id, now_iso, AssetProvenance, CanvasDocument, DocumentCommand, MokaFile, NodeKind,
     ProjectMetadata, ResourceEntry, ResourceRegistry, RunRecord, RunStatus, SelfCheckIssue,
     SelfCheckNodeRef, SelfCheckReason, SelfCheckReport, MOKA_FILE_VERSION,
 };
@@ -1170,7 +1170,7 @@ impl ProjectStore for FsProjectStore {
 
     async fn export_package(
         &self,
-        destination: Option<&Path>,
+        destination: &Path,
         allow_incomplete: bool,
         scope: PackageScope,
     ) -> Result<PackageReport, ProjectError> {
@@ -1181,18 +1181,10 @@ impl ProjectStore for FsProjectStore {
                 .ok_or_else(|| ProjectError::domain("PROJECT_NOT_OPEN", "No project is open"))?;
             (state.root.clone(), state.moka.clone())
         };
-        let destination = match destination {
-            Some(path) => path.to_path_buf(),
-            None => root.join("output").join(format!(
-                "{}-{}.mokapkg.zip",
-                assets::slugify(&moka.metadata.name),
-                id_tag(&new_id(), 8)
-            )),
-        };
         crate::project::package::export_project(
             &root,
             &moka,
-            &destination,
+            destination,
             &self.config.limits,
             allow_incomplete,
             scope,

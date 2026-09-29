@@ -739,15 +739,28 @@ pub async fn stream_asset(
     Ok(response)
 }
 
+/// Writes the open project out as a package.
+///
+/// The destination is the reader's own choice, made in a save dialog, so it is
+/// asked for rather than invented: a package nobody said where to put is a
+/// package written somewhere nobody asked for.
 pub async fn export_package(
     State(state): State<ApiState>,
-    json: Option<Json<ExportRequest>>,
+    json: Result<Json<ExportRequest>, JsonRejection>,
 ) -> Result<Json<PackageResponse>, Problem> {
-    let request = json.map(|Json(request)| request).unwrap_or_default();
+    let Json(request) = json_or_problem(json)?;
+    let asked = request.destination.trim();
+    if asked.is_empty() {
+        return Err(Problem::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_FAILED",
+            "A destination is required",
+        ));
+    }
     let report = state
         .store
         .export_package(
-            request.destination.as_deref().map(FsPath::new),
+            FsPath::new(asked),
             request.allow_incomplete,
             PackageScope {
                 personal_history: request.include_personal_history,

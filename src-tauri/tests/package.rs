@@ -196,7 +196,8 @@ async fn stage_valid_package(root: &Path) -> (axum::Router, PathBuf) {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
-    let report = export_open_project(&app, json!({})).await;
+    let asked = root.join("staged.mokapkg.zip");
+    let report = export_open_project(&app, json!({ "destination": asked.to_string_lossy() })).await;
     let destination = PathBuf::from(report["destination"].as_str().unwrap());
     assert!(destination.is_file());
     (app, destination)
@@ -401,12 +402,13 @@ async fn export_blocks_missing_assets_until_explicitly_allowed() {
     std::fs::remove_file(root.join(&asset_path)).unwrap();
 
     // Default: refuse to export an incomplete project.
+    let blocked = temp.path().join("blocked.mokapkg.zip");
     let response = app
         .clone()
         .oneshot(json_request(
             "POST",
             "/api/v1/projects/current/export",
-            json!({}),
+            json!({ "destination": blocked.to_string_lossy() }),
         ))
         .await
         .unwrap();
@@ -414,7 +416,15 @@ async fn export_blocks_missing_assets_until_explicitly_allowed() {
     assert_eq!(body_json(response).await["code"], "ASSET_MISSING");
 
     // Explicit opt-in exports with the manifest flagged incomplete.
-    let report = export_open_project(&app, json!({ "allowIncomplete": true })).await;
+    let asked = temp.path().join("incomplete.mokapkg.zip");
+    let report = export_open_project(
+        &app,
+        json!({
+            "destination": asked.to_string_lossy(),
+            "allowIncomplete": true,
+        }),
+    )
+    .await;
     assert_eq!(report["incomplete"], true);
     let destination = PathBuf::from(report["destination"].as_str().unwrap());
     let entries = read_zip_entries(&destination);
@@ -701,7 +711,7 @@ async fn a_package_of_the_work_forgets_the_run_but_keeps_the_asking() {
     let work = temp.path().join("work.mokapkg.zip");
     staged
         .store
-        .export_package(Some(&work), false, PackageScope::default())
+        .export_package(&work, false, PackageScope::default())
         .await
         .unwrap();
 
@@ -762,7 +772,7 @@ async fn a_package_of_the_work_forgets_the_run_but_keeps_the_asking() {
     staged
         .store
         .export_package(
-            Some(&backup),
+            &backup,
             false,
             PackageScope {
                 personal_history: true,
@@ -805,7 +815,7 @@ async fn a_small_package_leaves_the_shelf_behind_entry_and_file_together() {
     let whole = temp.path().join("whole.mokapkg.zip");
     staged
         .store
-        .export_package(Some(&whole), false, PackageScope::default())
+        .export_package(&whole, false, PackageScope::default())
         .await
         .unwrap();
     assert_eq!(
@@ -818,7 +828,7 @@ async fn a_small_package_leaves_the_shelf_behind_entry_and_file_together() {
     staged
         .store
         .export_package(
-            Some(&small),
+            &small,
             false,
             PackageScope {
                 referenced_assets_only: true,
@@ -952,7 +962,7 @@ async fn an_older_package_is_cleaned_to_the_rule_this_build_keeps() {
     staged
         .store
         .export_package(
-            Some(&backup),
+            &backup,
             false,
             PackageScope {
                 personal_history: true,
@@ -1013,7 +1023,7 @@ async fn a_package_that_says_it_carried_the_runs_keeps_them_through_an_import() 
     staged
         .store
         .export_package(
-            Some(&backup),
+            &backup,
             false,
             PackageScope {
                 personal_history: true,
@@ -1207,7 +1217,7 @@ async fn export_never_contains_personal_or_secret_data() {
     let work = temp.path().join("work.mokapkg.zip");
     staged
         .store
-        .export_package(Some(&work), false, PackageScope::default())
+        .export_package(&work, false, PackageScope::default())
         .await
         .unwrap();
     let entries = read_zip_entries(&work);
@@ -1247,7 +1257,7 @@ async fn export_never_contains_personal_or_secret_data() {
     staged
         .store
         .export_package(
-            Some(&backup),
+            &backup,
             false,
             PackageScope {
                 personal_history: true,
@@ -1286,13 +1296,18 @@ async fn export_never_contains_personal_or_secret_data() {
 async fn an_earlier_export_is_not_swept_into_the_next_package() {
     let temp = tempfile::tempdir().unwrap();
     let app = test_app(temp.path());
-    create_project(&app, &temp.path().join("projects"), "Sweep").await;
+    let created = create_project(&app, &temp.path().join("projects"), "Sweep").await;
+    let root = PathBuf::from(created["root"].as_str().unwrap());
 
-    let first = export_open_project(&app, json!({})).await;
+    // Both land in the project's own output folder, the place a save dialog
+    // opens at — exactly where a package could sweep its predecessor in.
+    let asked = root.join("output").join("first.mokapkg.zip");
+    let first = export_open_project(&app, json!({ "destination": asked.to_string_lossy() })).await;
     let first_path = PathBuf::from(first["destination"].as_str().unwrap());
     assert!(first_path.is_file(), "the first package landed");
 
-    let second = export_open_project(&app, json!({})).await;
+    let asked = root.join("output").join("second.mokapkg.zip");
+    let second = export_open_project(&app, json!({ "destination": asked.to_string_lossy() })).await;
     let second_path = PathBuf::from(second["destination"].as_str().unwrap());
     let entries = read_zip_entries(&second_path);
     let carried: Vec<&str> = entries.iter().map(|(name, _)| name.as_str()).collect();

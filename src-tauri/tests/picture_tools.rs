@@ -377,7 +377,7 @@ impl ProjectStore for RefusesAfter {
     }
     async fn export_package(
         &self,
-        destination: Option<&Path>,
+        destination: &Path,
         allow_incomplete: bool,
         scope: PackageScope,
     ) -> Result<PackageReport, ProjectError> {

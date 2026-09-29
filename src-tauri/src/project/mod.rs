@@ -184,7 +184,7 @@ pub trait ProjectStore: Send + Sync {
     ) -> Result<AssetFile, ProjectError>;
     async fn export_package(
         &self,
-        destination: Option<&Path>,
+        destination: &Path,
         allow_incomplete: bool,
         scope: PackageScope,
     ) -> Result<PackageReport, ProjectError>;
