@@ -5311,6 +5311,45 @@ body.is-dragging-split {
   margin: 0;
 }
 
+/* The two questions the column can be asked — everything, or what nothing
+   holds — wearing the pills the cutting room's own filter wears, with the
+   number of files behind each answer. */
+.assets-view {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.assets-view button {
+  background: var(--surface-raised);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+.assets-view button:hover {
+  color: var(--ink);
+}
+
+.assets-view button.is-active {
+  border-color: var(--primary);
+  color: var(--ink);
+}
+
+.assets-view-count {
+  margin-left: 5px;
+  opacity: 0.75;
+}
+
+/* The tray: files brought in and placed nowhere yet, above the list of what
+   the document does hold. Its heading is the shelf's own, marked so a row
+   waiting for a place reads apart from the places. */
+.side-resource-tray h3 {
+  color: var(--coral);
+}
+
 /* The shelf scrolls inside the column, so the kind tabs and the filter bar
    stay where a reader left them however long the list under them is. */
 .assets-column-scroll {

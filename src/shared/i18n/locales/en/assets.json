@@ -6,6 +6,16 @@
     "saveConflict": "The project changed elsewhere; reopen it to carry on.",
     "saveFailed": "The project could not be saved."
   },
+  "view": {
+    "label": "Files shown",
+    "all": "All files",
+    "unused": "Unused"
+  },
+  "shelf": {
+    "empty": "The project holds no {{kind}} files yet.",
+    "emptyUnused": "Nothing is unused — every file is placed somewhere.",
+    "unplaced": "Imported, not placed"
+  },
   "stage": {
     "label": "The file, and what it is used by"
   },

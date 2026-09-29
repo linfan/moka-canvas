@@ -6,6 +6,16 @@
     "saveConflict": "项目在别处被改动，请重新打开后再继续。",
     "saveFailed": "项目未能保存。"
   },
+  "view": {
+    "label": "显示的文件",
+    "all": "全部",
+    "unused": "未使用"
+  },
+  "shelf": {
+    "empty": "项目里还没有{{kind}}文件。",
+    "emptyUnused": "没有闲置文件——每个文件都被用着。",
+    "unplaced": "已导入 · 未放置"
+  },
   "stage": {
     "label": "文件及其引用"
   },

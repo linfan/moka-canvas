@@ -37,6 +37,7 @@ import {
 import { useEditorStore } from "../stores/editorStore";
 import { useActiveCanvas, useProjectStore } from "../stores/projectStore";
 import { canvasNodesUsing, shelfOf } from "./canvasAssets";
+import { unplacedEntries } from "./unplaced";
 import {
   KIND_SHELVES,
   OPEN_SHELF_FILTER,
@@ -107,6 +108,26 @@ export interface AssetShelfProps {
   emptyText?: string;
   /** Told when an import has settled, so a face can turn where the files are. */
   onImported?: () => void;
+  /**
+   * The element around the shelf that a dropped file is taken anywhere over,
+   * as a selector: the column the shelf sits in, which the page names.
+   */
+  dropScope?: string;
+  /**
+   * Files brought in and placed nowhere yet, offered above the shelf's list.
+   *
+   * The rows are the tray's own (the membership is read from the document) and
+   * the action is the page's — a board's tray adds a card, a cut's tray lands
+   * the file at the playhead — since what placing means is the page's to say.
+   * The tray is not read through the face's lens: these files are exactly the
+   * ones the lens excludes.
+   */
+  unplaced?: {
+    /** The group's heading, as a translation key. */
+    titleKey: string;
+    /** The row's own offer, in place of the shelf's row extras. */
+    action: (entry: ResourceEntry) => ReactNode;
+  };
 }
 
 /** Selects the node a generated asset came from, wherever it sits. */
@@ -558,6 +579,8 @@ export function AssetShelf({
   canvasActions = true,
   emptyText,
   onImported,
+  dropScope,
+  unplaced,
 }: AssetShelfProps) {
   const { t } = useTranslation();
   const moka = useProjectStore((state) => state.moka);
@@ -599,6 +622,26 @@ export function AssetShelf({
     const kept = filterShelf(resources, filter);
     return order === "newest" ? newestFirst(kept) : kept;
   }, [resources, filter, order]);
+  /**
+   * The tray: files brought in and placed nowhere yet, of the kind being read.
+   *
+   * Read outside the lens on purpose — a file waiting for a place is exactly
+   * what a face about one document's files leaves out — and inside the
+   * reader's own filter, so a search narrows the tray as it narrows the list.
+   */
+  const tray = useMemo(() => {
+    if (!unplaced || !moka) return [];
+    const waiting = unplacedEntries(moka, kind);
+    if (waiting.length === 0) return [];
+    const registry = Object.fromEntries(
+      PROJECT_ASSET_CATEGORIES.map((category) => [
+        category,
+        waiting.filter((entry) => shelfOf(entry) === category),
+      ]),
+    ) as MokaFile["resources"];
+    const kept = filterShelf(registry, filter);
+    return order === "newest" ? newestFirst(kept) : kept;
+  }, [unplaced, moka, kind, filter, order]);
   // Counted over the kind being read, so a word offered beside it is a word
   // that narrows this list rather than one that would empty it.
   const words = useMemo(() => shelfTags(resources), [resources]);
@@ -678,13 +721,15 @@ export function AssetShelf({
    * A shelf that welcomes files takes them anywhere over the column it sits
    * in, not only over its own rows: a reader dragging a file in does not aim
    * at a scroll region. The listeners are native and on the document because
-   * the column around the shelf is not the shelf's to bind — and they are
-   * added only while a face asks for them, so a drop meant for a board or a
-   * timeline is never taken by a shelf that was not looking for one.
+   * the column around the shelf is not the shelf's to bind — the page names
+   * the region, and they are added only while a face asks for them, so a drop
+   * meant for a board or a timeline is never taken by a shelf that was not
+   * looking for one.
    */
   useEffect(() => {
     if (!acceptFileDrops) return;
-    const column = shelfRef.current?.closest(".clip-column") ?? null;
+    const column =
+      shelfRef.current?.closest(dropScope ?? ".clip-column") ?? null;
     if (!column) return;
     const carryingFiles = (event: DragEvent) =>
       event.dataTransfer?.types.includes("Files") === true &&
@@ -720,7 +765,7 @@ export function AssetShelf({
       document.removeEventListener("drop", drop);
       document.removeEventListener("dragend", ended);
     };
-  }, [acceptFileDrops, startImport]);
+  }, [acceptFileDrops, dropScope, startImport]);
 
   if (!moka) return null;
 
@@ -836,6 +881,35 @@ export function AssetShelf({
           {t("editor:shelf.noMatch")}
         </p>
       )}
+      {unplaced && tray.length > 0 && (
+        <div
+          className="side-resource-group side-resource-tray"
+          data-testid="shelf-tray"
+        >
+          <h3>
+            {t(unplaced.titleKey)} · {tray.length}
+          </h3>
+          <ul className="side-resource-list">
+            {tray.map((entry) => (
+              <ResourceRow
+                broken={issues.has(entry.id)}
+                canvasActions={canvasActions}
+                entry={entry}
+                extraActions={unplaced.action(entry)}
+                focused={focusedId === entry.id}
+                inspected={selectedId === entry.id}
+                key={entry.id}
+                onSelect={(id) => onSelect?.(id)}
+                usesHere={
+                  canvasActions && activeCanvas
+                    ? canvasNodesUsing(activeCanvas, entry.id)
+                    : []
+                }
+              />
+            ))}
+          </ul>
+        </div>
+      )}
       {groupShelf(visible).map(({ category, entries }) => (
         <div className="side-resource-group" key={category}>
           <h3>
@@ -880,7 +954,7 @@ export function AssetShelf({
           </button>
         </div>
       )}
-      {filed === 0 && (
+      {filed === 0 && tray.length === 0 && (
         <p className="inspector-empty">
           {emptyText ??
             t("editor:shelf.empty", {
