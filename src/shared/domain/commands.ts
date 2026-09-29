@@ -41,6 +41,13 @@ import {
   TIMELINE_WIDTH_MAX,
   TIMELINE_WIDTH_MIN,
   TIMELINE_SCHEMA_VERSION,
+  VOICE_INSTRUCTIONS_MAX,
+  VOICE_MODEL_MAX,
+  VOICE_NAME_MAX,
+  VOICE_PITCH_MAX,
+  VOICE_PITCH_MIN,
+  VOICE_RATE_MAX,
+  VOICE_RATE_MIN,
   ZOOM_MAX,
   ZOOM_MIN,
 } from "./constants";
@@ -65,6 +72,7 @@ import type {
   StoryKeyframe,
   StorySlot,
   StorySlotTarget,
+  StoryVoiceProfile,
   TimelineClip,
   TimelineDocument,
   TimelineId,
@@ -2132,8 +2140,8 @@ function applyOne(
       const held = new Map(
         story.elements.map((element) => [element.id, element]),
       );
-      // The drawings stay with the element they were made for; what a new
-      // reading brings is its words.
+      // The drawings and the voice stay with the element they were made for;
+      // what a new reading brings is its words.
       const elements: StoryElement[] = command.elements.map((element) => {
         const before = held.get(element.id);
         if (!before) return element;
@@ -2142,6 +2150,11 @@ function applyOne(
           main: before.main,
           ...(before.turnaround !== undefined
             ? { turnaround: before.turnaround }
+            : {}),
+          // The voice is one of the reader's answers about a character, so a
+          // re-listing that says nothing of it leaves the voice standing.
+          ...(element.voice === undefined && before.voice !== undefined
+            ? { voice: before.voice }
             : {}),
         };
       });
@@ -2199,17 +2212,39 @@ function applyOne(
             i18n.t("errors:command.storyChapterNotFound"),
           );
       }
+      if (command.patch.voice !== undefined && command.patch.voice !== null)
+        checkVoiceProfile(command.patch.voice);
       const previous: typeof command.patch = {};
       for (const key of Object.keys(
         command.patch,
       ) as (keyof typeof command.patch)[]) {
-        (previous as Record<string, unknown>)[key] = element[key];
+        // An optional field the element does not hold is written back as an
+        // explicit clearing, so that undoing the first voice left on a
+        // character takes it off again rather than leaving it standing.
+        (previous as Record<string, unknown>)[key] = element[key] ?? null;
       }
       const next: StoryDocument = {
         ...story,
-        elements: story.elements.map((held) =>
-          held.id === command.elementId ? { ...held, ...command.patch } : held,
-        ),
+        elements: story.elements.map((held) => {
+          if (held.id !== command.elementId) return held;
+          // Field by field rather than a spread, because a voice may be taken
+          // away rather than set: a voice taken away is taken off the element
+          // rather than left holding nothing, since the two say different
+          // things about a character.
+          const merged: StoryElement = { ...held };
+          if (command.patch.name !== undefined)
+            merged.name = command.patch.name;
+          if (command.patch.kind !== undefined)
+            merged.kind = command.patch.kind;
+          if (command.patch.description !== undefined)
+            merged.description = command.patch.description;
+          if (command.patch.chapterIds !== undefined)
+            merged.chapterIds = command.patch.chapterIds;
+          if (command.patch.voice === null) delete merged.voice;
+          else if (command.patch.voice !== undefined)
+            merged.voice = command.patch.voice;
+          return merged;
+        }),
       };
       return {
         next: replaceStory(moka, next),
@@ -2219,6 +2254,27 @@ function applyOne(
             storyId: command.storyId,
             elementId: command.elementId,
             patch: previous,
+          },
+        ],
+      };
+    }
+
+    case "updateStoryNarrator": {
+      const story = storyOf(moka, command.storyId);
+      if (command.narrator !== null) checkVoiceProfile(command.narrator);
+      const previous = story.narrator ?? null;
+      const next: StoryDocument = { ...story };
+      // A telling left without a voice of its own leaves the field off rather
+      // than holding nothing: what it says then is that nobody has said.
+      if (command.narrator === null) delete next.narrator;
+      else next.narrator = command.narrator;
+      return {
+        next: replaceStory(moka, next),
+        inverse: [
+          {
+            type: "updateStoryNarrator",
+            storyId: command.storyId,
+            narrator: previous,
           },
         ],
       };
@@ -2730,6 +2786,42 @@ function checkActSound(sound: StoryAct["sound"]) {
     throw new CommandError(
       "VALIDATION_FAILED",
       i18n.t("errors:command.storySoundInvalid"),
+    );
+}
+
+/**
+ * The voice a character or a narrator is given: a model and a tone named
+ * within reason, and a pace and pitch the providers all accept.
+ */
+function checkVoiceProfile(voice: StoryVoiceProfile) {
+  if (
+    voice.model.length > VOICE_MODEL_MAX ||
+    voice.voice.length > VOICE_NAME_MAX ||
+    (voice.instructions?.length ?? 0) > VOICE_INSTRUCTIONS_MAX
+  )
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyVoiceTooLong"),
+    );
+  if (
+    voice.rate !== undefined &&
+    (!Number.isFinite(voice.rate) ||
+      voice.rate < VOICE_RATE_MIN ||
+      voice.rate > VOICE_RATE_MAX)
+  )
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyVoiceRate"),
+    );
+  if (
+    voice.pitch !== undefined &&
+    (!Number.isFinite(voice.pitch) ||
+      voice.pitch < VOICE_PITCH_MIN ||
+      voice.pitch > VOICE_PITCH_MAX)
+  )
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyVoicePitch"),
     );
 }
 

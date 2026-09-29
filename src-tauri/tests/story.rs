@@ -167,6 +167,7 @@ fn element(id: &str, kind: StoryElementKind) -> StoryElement {
         } else {
             None
         },
+        voice: None,
     }
 }
 
@@ -323,6 +324,7 @@ fn story_document() -> MokaFile {
                 turnaround: Some(StorySlot {
                     takes: vec![take(HERO_SHEET)],
                 }),
+                voice: None,
             },
             element(PARTNER, StoryElementKind::Character),
             element(SCENE, StoryElementKind::Scene),
@@ -343,6 +345,7 @@ fn story_document() -> MokaFile {
                 clip_id: "clip-video".into(),
             }]),
         },
+        narrator: None,
         created_at: NOW.into(),
         updated_at: NOW.into(),
     }]);
@@ -691,6 +694,171 @@ fn names_the_chapters_an_element_was_seen_in_and_refuses_a_chapter_it_has_not() 
         ),
         "STORY_TARGET_INVALID"
     );
+}
+
+fn voice(model: &str, tone: &str) -> story::StoryVoiceProfile {
+    story::StoryVoiceProfile {
+        model: model.into(),
+        voice: tone.into(),
+        rate: None,
+        pitch: None,
+        instructions: None,
+    }
+}
+
+#[test]
+fn gives_a_character_a_voice_takes_it_away_and_keeps_the_round_trip() {
+    let moka = story_document();
+    let held = story::StoryVoiceProfile {
+        model: "voice-model".into(),
+        voice: "longxiaochun".into(),
+        rate: Some(1.2),
+        pitch: None,
+        instructions: Some("低沉、慢".into()),
+    };
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryElement {
+            story_id: STORY.into(),
+            element_id: HERO.into(),
+            patch: StoryElementPatch {
+                voice: Some(Some(held.clone())),
+                ..Default::default()
+            },
+        }],
+    );
+    let hero = story_of(&next)
+        .elements
+        .iter()
+        .find(|element| element.id == HERO)
+        .unwrap();
+    assert_eq!(hero.voice, Some(held));
+    // The characters beside them were never named, and no voice is written for
+    // them: a voice holding nothing is not a voice.
+    assert!(story_of(&next).elements[1].voice.is_none());
+
+    // Taken off the element rather than left holding nothing.
+    let cleared = round_trip(
+        &next,
+        vec![DocumentCommand::UpdateStoryElement {
+            story_id: STORY.into(),
+            element_id: HERO.into(),
+            patch: StoryElementPatch {
+                voice: Some(None),
+                ..Default::default()
+            },
+        }],
+    );
+    assert!(story_of(&cleared).elements[0].voice.is_none());
+
+    // A pitch no provider would take is refused.
+    let mut beyond = voice("", "");
+    beyond.pitch = Some(3.0);
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::UpdateStoryElement {
+                story_id: STORY.into(),
+                element_id: HERO.into(),
+                patch: StoryElementPatch {
+                    voice: Some(Some(beyond)),
+                    ..Default::default()
+                },
+            }
+        ),
+        "VALIDATION_FAILED"
+    );
+}
+
+#[test]
+fn keeps_a_characters_voice_through_a_cast_listed_again_without_it() {
+    let moka = story_document();
+    let voiced = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryElement {
+            story_id: STORY.into(),
+            element_id: HERO.into(),
+            patch: StoryElementPatch {
+                voice: Some(Some(voice("", "longxiaochun"))),
+                ..Default::default()
+            },
+        }],
+    );
+    // A reading brings words, not a voice: the voice is one of the reader's
+    // answers about a character, so a listing that says nothing of it leaves
+    // it standing.
+    let mut listed = story_of(&voiced).elements[0].clone();
+    listed.voice = None;
+    listed.description = "重写的描述".into();
+    let next = round_trip(
+        &voiced,
+        vec![DocumentCommand::SetStoryElements {
+            story_id: STORY.into(),
+            elements: vec![listed],
+        }],
+    );
+    let hero = &story_of(&next).elements[0];
+    assert_eq!(hero.description, "重写的描述");
+    assert_eq!(hero.voice.as_ref().unwrap().voice, "longxiaochun");
+}
+
+#[test]
+fn writes_the_narrators_voice_and_takes_it_away_again() {
+    let moka = story_document();
+    assert!(story_of(&moka).narrator.is_none());
+    assert!(!serde_json::to_string(story_of(&moka))
+        .unwrap()
+        .contains("narrator"));
+
+    let told = voice("", "旁白的音色");
+    let next = round_trip(
+        &moka,
+        vec![DocumentCommand::UpdateStoryNarrator {
+            story_id: STORY.into(),
+            narrator: Some(told.clone()),
+        }],
+    );
+    assert_eq!(story_of(&next).narrator, Some(told));
+
+    let cleared = round_trip(
+        &next,
+        vec![DocumentCommand::UpdateStoryNarrator {
+            story_id: STORY.into(),
+            narrator: None,
+        }],
+    );
+    assert!(story_of(&cleared).narrator.is_none());
+
+    let mut beyond = voice("", "");
+    beyond.rate = Some(4.0);
+    assert_eq!(
+        code_of(
+            &moka,
+            DocumentCommand::UpdateStoryNarrator {
+                story_id: STORY.into(),
+                narrator: Some(beyond),
+            }
+        ),
+        "VALIDATION_FAILED"
+    );
+}
+
+/// A telling written before voices existed is still a telling: the document is
+/// read, and nothing is written back for the voices it never carried.
+#[test]
+fn reads_a_document_written_before_voices_existed() {
+    let moka = story_document();
+    let mut raw: serde_json::Value = serde_json::to_value(story_of(&moka)).unwrap();
+    raw.as_object_mut().unwrap().remove("narrator");
+    for element in raw["elements"].as_array_mut().unwrap() {
+        element.as_object_mut().unwrap().remove("voice");
+    }
+    let story: StoryDocument = serde_json::from_value(raw).unwrap();
+    assert!(story.narrator.is_none());
+    assert!(story.elements[0].voice.is_none());
+    assert!(!serde_json::to_string(&story.elements[0])
+        .unwrap()
+        .contains("voice"));
 }
 
 #[test]
@@ -1545,6 +1713,7 @@ fn create_story(name: &str) -> StoryDocument {
         max_reference_images: story::REFERENCE_IMAGES_DEFAULT,
         confirmed_steps: Vec::new(),
         edit: StoryEdit::default(),
+        narrator: None,
         created_at: NOW.into(),
         updated_at: NOW.into(),
     }

@@ -28,6 +28,15 @@ pub const REFERENCE_IMAGES_DEFAULT: u32 = 3;
 pub const REFERENCE_IMAGES_MAX: u32 = 9;
 pub const MAX_DIALOGUE_LINES_PER_KEYFRAME: usize = 12;
 pub const MAX_DIALOGUE_LINE_LENGTH: usize = 500;
+/// What a voice named in a story may be called, and what it may say of itself.
+pub const VOICE_MODEL_MAX: usize = 120;
+pub const VOICE_NAME_MAX: usize = 120;
+pub const VOICE_INSTRUCTIONS_MAX: usize = 500;
+/// The pace and pitch a character may claim, the bounds the preferences hold to.
+pub const VOICE_RATE_MIN: f64 = 0.5;
+pub const VOICE_RATE_MAX: f64 = 2.0;
+pub const VOICE_PITCH_MIN: f64 = 0.5;
+pub const VOICE_PITCH_MAX: f64 = 2.0;
 pub const MIN_KEYFRAME_MS: i64 = 400;
 pub const MAX_KEYFRAME_MS: i64 = 60_000;
 pub const MIN_TOTAL_DURATION_MS: i64 = 30_000;
@@ -323,6 +332,25 @@ pub struct StoryDialogueLine {
     pub tone: Option<String>,
 }
 
+/// The voice a character or a narrator speaks in: which model reads it, in
+/// which tone, and how. Every field left empty falls through to the next layer
+/// of the chain the client resolves — the story's narrator, the machine's own
+/// speech pick, and then the deployment's default.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryVoiceProfile {
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub voice: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryKeyframe {
@@ -404,6 +432,9 @@ pub struct StoryElement {
     pub main: StorySlot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turnaround: Option<StorySlot>,
+    /// The voice this character speaks in, when the reader has given it one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<StoryVoiceProfile>,
 }
 
 /// One clip this story's assembly laid down.
@@ -447,6 +478,10 @@ pub struct StoryDocument {
     pub confirmed_steps: Vec<StoryStep>,
     #[serde(default)]
     pub edit: StoryEdit,
+    /// The voice lines that belong to no character are read in, and the one
+    /// every character without a voice of its own falls back to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narrator: Option<StoryVoiceProfile>,
     pub created_at: IsoTimestamp,
     pub updated_at: IsoTimestamp,
 }
@@ -503,6 +538,10 @@ pub enum StoryElementView {
 }
 
 /// The fields a caller may move on an element, for `updateStoryElement`.
+///
+/// `voice` is double-layered the way an act's `scene_id` is: left off leaves
+/// the voice where it was, and a null takes it away, since a character with no
+/// voice named and a character whose voice was cleared are the same character.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryElementPatch {
@@ -514,6 +553,12 @@ pub struct StoryElementPatch {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chapter_ids: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::deserialize_double_option"
+    )]
+    pub voice: Option<Option<StoryVoiceProfile>>,
 }
 
 /// The fields a caller may move on an act, for `updateStoryAct`.
@@ -1055,6 +1100,40 @@ fn check_slot(slot: StorySlot) -> StorySlot {
     StorySlot { takes }
 }
 
+/// The voice a character or a narrator is given: a model and a tone named
+/// within reason, and a pace and pitch the providers all accept.
+fn check_voice(voice: &StoryVoiceProfile) -> Result<(), CommandError> {
+    if voice.model.chars().count() > VOICE_MODEL_MAX
+        || voice.voice.chars().count() > VOICE_NAME_MAX
+        || voice
+            .instructions
+            .as_ref()
+            .is_some_and(|instructions| instructions.chars().count() > VOICE_INSTRUCTIONS_MAX)
+    {
+        return Err(CommandError::new(
+            "VALIDATION_FAILED",
+            "The voice's model, tone, or manner is too long",
+        ));
+    }
+    if let Some(rate) = voice.rate {
+        if !(VOICE_RATE_MIN..=VOICE_RATE_MAX).contains(&rate) {
+            return Err(CommandError::new(
+                "VALIDATION_FAILED",
+                "The voice's pace is out of range",
+            ));
+        }
+    }
+    if let Some(pitch) = voice.pitch {
+        if !(VOICE_PITCH_MIN..=VOICE_PITCH_MAX).contains(&pitch) {
+            return Err(CommandError::new(
+                "VALIDATION_FAILED",
+                "The voice's pitch is out of range",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_dialogue(lines: &[StoryDialogueLine]) -> Result<(), CommandError> {
     if lines.len() > MAX_DIALOGUE_LINES_PER_KEYFRAME {
         return Err(CommandError::new(
@@ -1307,14 +1386,17 @@ pub fn apply_story_command(
                 .iter()
                 .map(|element| (element.id.as_str(), element))
                 .collect();
-            // The drawings stay with the element they were made for; what a
-            // new reading brings is its words.
+            // The drawings and the voice stay with the element they were made
+            // for; what a new reading brings is its words, and the voice is
+            // one of the reader's answers, so a re-listing that says nothing
+            // of it leaves the voice standing.
             let merged: Vec<StoryElement> = elements
                 .iter()
                 .map(|element| match held.get(element.id.as_str()) {
                     Some(before) => StoryElement {
                         main: before.main.clone(),
                         turnaround: before.turnaround.clone(),
+                        voice: element.voice.clone().or_else(|| before.voice.clone()),
                         ..element.clone()
                     },
                     None => element.clone(),
@@ -1370,6 +1452,9 @@ pub fn apply_story_command(
                     ));
                 }
             }
+            if let Some(Some(voice)) = &patch.voice {
+                check_voice(voice)?;
+            }
             let previous = StoryElementPatch {
                 name: patch.name.as_ref().map(|_| element.name.clone()),
                 kind: patch.kind.map(|_| element.kind),
@@ -1381,6 +1466,10 @@ pub fn apply_story_command(
                     .chapter_ids
                     .as_ref()
                     .map(|_| element.chapter_ids.clone()),
+                // A voice the element did not hold is written back as an
+                // explicit clearing, so that undoing the first voice left on a
+                // character takes it off again rather than leaving it standing.
+                voice: patch.voice.as_ref().map(|_| element.voice.clone()),
             };
             let mut next = story.clone();
             for held in next.elements.iter_mut() {
@@ -1399,6 +1488,9 @@ pub fn apply_story_command(
                 if let Some(chapter_ids) = &patch.chapter_ids {
                     held.chapter_ids = chapter_ids.clone();
                 }
+                if let Some(voice) = &patch.voice {
+                    held.voice = voice.clone();
+                }
             }
             Ok((
                 replace_story(moka, next),
@@ -1406,6 +1498,25 @@ pub fn apply_story_command(
                     story_id: story_id.clone(),
                     element_id: element_id.clone(),
                     patch: previous,
+                }],
+            ))
+        }
+        DocumentCommand::UpdateStoryNarrator { story_id, narrator } => {
+            let story = story_of(moka, story_id)?;
+            if let Some(narrator) = narrator {
+                check_voice(narrator)?;
+            }
+            let previous = story.narrator.clone();
+            let mut next = story.clone();
+            // A telling left without a voice of its own leaves the field off
+            // rather than holding nothing: what it says then is that nobody
+            // has said.
+            next.narrator = narrator.clone();
+            Ok((
+                replace_story(moka, next),
+                vec![DocumentCommand::UpdateStoryNarrator {
+                    story_id: story_id.clone(),
+                    narrator: previous,
                 }],
             ))
         }

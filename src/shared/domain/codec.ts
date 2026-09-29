@@ -54,6 +54,7 @@ import type {
   StoryKeyframe,
   StorySlot,
   StoryTake,
+  StoryVoiceProfile,
   TextClipStyle,
   TimelineClip,
   TimelineDocument,
@@ -478,6 +479,28 @@ function encodeStoryChapter(chapter: StoryChapter): Record<string, unknown> {
   };
 }
 
+/**
+ * One voice as the document carries it.
+ *
+ * Both words are written even when one is empty — an empty voice is a voice
+ * handed to the next one, and leaving it off would say the profile was never
+ * there — while a number nobody set is left off rather than written as
+ * nothing.
+ */
+function encodeStoryVoiceProfile(
+  profile: StoryVoiceProfile,
+): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    model: profile.model,
+    voice: profile.voice,
+  };
+  if (profile.rate !== undefined) doc.rate = profile.rate;
+  if (profile.pitch !== undefined) doc.pitch = profile.pitch;
+  if (profile.instructions !== undefined)
+    doc.instructions = profile.instructions;
+  return doc;
+}
+
 function encodeStoryElement(element: StoryElement): Record<string, unknown> {
   const doc: Record<string, unknown> = {
     id: element.id,
@@ -489,6 +512,8 @@ function encodeStoryElement(element: StoryElement): Record<string, unknown> {
   };
   if (element.turnaround !== undefined)
     doc.turnaround = encodeStorySlot(element.turnaround);
+  if (element.voice !== undefined)
+    doc.voice = encodeStoryVoiceProfile(element.voice);
   return doc;
 }
 
@@ -522,7 +547,7 @@ function encodeStoryEdit(edit: StoryEdit): Record<string, unknown> {
 }
 
 function encodeStory(story: StoryDocument): Record<string, unknown> {
-  return {
+  const doc: Record<string, unknown> = {
     id: story.id,
     name: story.name,
     schemaVersion: story.schemaVersion,
@@ -536,6 +561,9 @@ function encodeStory(story: StoryDocument): Record<string, unknown> {
     createdAt: story.createdAt,
     updatedAt: story.updatedAt,
   };
+  if (story.narrator !== undefined)
+    doc.narrator = encodeStoryVoiceProfile(story.narrator);
+  return doc;
 }
 
 function encodeProbe(
@@ -1355,7 +1383,35 @@ function decodeStoryElement(value: unknown): StoryElement {
   };
   if (doc.turnaround !== undefined)
     element.turnaround = decodeStorySlot(doc.turnaround);
+  if (doc.voice !== undefined)
+    element.voice = decodeStoryVoiceProfile(doc.voice, "elements[].voice");
   return element;
+}
+
+/**
+ * One voice, as a document carries it.
+ *
+ * The two words that say who reads and in what voice are read as written — a
+ * voice left out is handed to the next one, which is a different answer from a
+ * voice holding nothing — while the two numbers are read only when they are
+ * numbers: a pace nobody could measure is not a pace to read at.
+ */
+function decodeStoryVoiceProfile(
+  value: unknown,
+  where: string,
+): StoryVoiceProfile {
+  const doc = asRecord(value, where);
+  const profile: StoryVoiceProfile = {
+    model: optionalString(doc.model) ?? "",
+    voice: optionalString(doc.voice) ?? "",
+  };
+  if (typeof doc.rate === "number" && Number.isFinite(doc.rate))
+    profile.rate = doc.rate;
+  if (typeof doc.pitch === "number" && Number.isFinite(doc.pitch))
+    profile.pitch = doc.pitch;
+  const instructions = optionalString(doc.instructions);
+  if (instructions !== undefined) profile.instructions = instructions;
+  return profile;
 }
 
 function decodeStoryBrief(value: unknown): StoryBrief {
@@ -1479,7 +1535,7 @@ function decodeStory(value: unknown): StoryDocument {
       `Story schema version ${schemaVersion} is not supported (expected ${STORY_SCHEMA_VERSION} or earlier)`,
     );
   }
-  return {
+  const story: StoryDocument = {
     id: asString(doc.id, "stories[].id"),
     name: asString(doc.name, "stories[].name"),
     schemaVersion,
@@ -1501,6 +1557,12 @@ function decodeStory(value: unknown): StoryDocument {
     createdAt: asString(doc.createdAt, "stories[].createdAt"),
     updatedAt: asString(doc.updatedAt, "stories[].updatedAt"),
   };
+  if (doc.narrator !== undefined)
+    story.narrator = decodeStoryVoiceProfile(
+      doc.narrator,
+      "stories[].narrator",
+    );
+  return story;
 }
 
 /**

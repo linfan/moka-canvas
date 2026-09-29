@@ -34,6 +34,7 @@ import type {
   StorySlotTarget,
   StoryShotSize,
   StoryTake,
+  StoryVoiceProfile,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -798,6 +799,85 @@ export function elementOf(
   id: string,
 ): StoryElement | undefined {
   return story.elements.find((element) => element.id === id);
+}
+
+/** Whether the reader has said anything at all about a voice. */
+export function voiceNamed(voice: StoryVoiceProfile | undefined): boolean {
+  return (
+    voice !== undefined &&
+    (voice.model !== "" ||
+      voice.voice !== "" ||
+      voice.rate !== undefined ||
+      voice.pitch !== undefined ||
+      (voice.instructions ?? "") !== "")
+  );
+}
+
+/**
+ * The voice a character's lines are read in, resolved layer by layer.
+ *
+ * The character's own voice comes first, field by field rather than whole;
+ * then the telling's narrator; then, through `ask`, what this machine reads
+ * its lines in when the story says nothing. What is still empty is the
+ * provider's own default tone, and an empty model means whoever the
+ * deployment's speech default names — the chain the room shows on the cards
+ * is this one, so a card and the ask it stands for cannot disagree.
+ */
+export function voiceFor(
+  story: StoryDocument,
+  characterId: string | undefined,
+  ask: { model?: string } = {},
+): StoryVoiceProfile {
+  const own =
+    characterId === undefined
+      ? undefined
+      : elementOf(story, characterId)?.voice;
+  const layers = [own, story.narrator];
+  const pick = <K extends keyof StoryVoiceProfile>(
+    field: K,
+  ): StoryVoiceProfile[K] | undefined => {
+    for (const layer of layers) {
+      const held = layer?.[field];
+      if (held !== undefined && held !== "") return held;
+    }
+    return undefined;
+  };
+  const voice: StoryVoiceProfile = {
+    model: pick("model") ?? ask.model ?? "",
+    voice: pick("voice") ?? "",
+  };
+  const rate = pick("rate");
+  const pitch = pick("pitch");
+  const instructions = pick("instructions");
+  if (rate !== undefined) voice.rate = rate;
+  if (pitch !== undefined) voice.pitch = pitch;
+  if (instructions !== undefined) voice.instructions = instructions;
+  return voice;
+}
+
+/** How many lines of the whole telling a character is given to say. */
+export function lineCountFor(story: StoryDocument, elementId: string): number {
+  let count = 0;
+  for (const chapter of story.chapters)
+    for (const act of chapter.acts)
+      for (const keyframe of act.keyframes)
+        for (const line of keyframe.dialogue)
+          if (line.characterId === elementId) count += 1;
+  return count;
+}
+
+/** The first line of the telling a character is given, words and all. */
+export function firstLineOf(
+  story: StoryDocument,
+  elementId: string,
+): StoryDialogueLine | undefined {
+  for (const chapter of story.chapters)
+    for (const act of chapter.acts)
+      for (const keyframe of act.keyframes)
+        for (const line of keyframe.dialogue)
+          if (line.characterId === elementId && line.text.trim() !== "")
+            return line;
+  return undefined;
 }
 
 /**

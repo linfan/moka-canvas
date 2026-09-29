@@ -1533,6 +1533,14 @@ pub enum DocumentCommand {
         element_id: String,
         patch: StoryElementPatch,
     },
+    /// The voice the telling reads lines in that belong to no character, and
+    /// the one every character without a voice of its own falls back to. A
+    /// null takes it away rather than leaving it holding nothing.
+    #[serde(rename_all = "camelCase")]
+    UpdateStoryNarrator {
+        story_id: String,
+        narrator: Option<story::StoryVoiceProfile>,
+    },
     /// One episode's board, whole: a known act keeps its frames and its clip.
     #[serde(rename_all = "camelCase")]
     SetStoryActs {

@@ -39,6 +39,7 @@ import {
   stripStoryMentions,
   takeFile,
   targetKey,
+  voiceFor,
 } from "../../../shared/domain/story";
 import type { SourceChunk } from "../../../shared/domain/storySource";
 import type { StoryElement } from "../../../shared/domain";
@@ -49,6 +50,7 @@ import type {
   StoryDocument,
   StoryFilmRole,
   StoryKeyframe,
+  StoryVoiceProfile,
 } from "../../../shared/domain/types";
 import {
   storyActMusicPrompt,
@@ -67,7 +69,11 @@ import {
   type StoryLook,
 } from "../../../shared/prompts";
 import { i18n } from "../../../shared/i18n";
-import { effectiveDefaultId, useModelStore } from "../../settings/modelStore";
+import {
+  effectiveDefaultId,
+  modelOptionsFor,
+  useModelStore,
+} from "../../settings/modelStore";
 import { storyAskModel } from "../stores/storyModels";
 
 /**
@@ -901,21 +907,77 @@ export function spokenLine(line: StoryDialogueLine): string {
 }
 
 /**
- * What a read-aloud ask is carried with: the machine's own voice, and the
- * acting direction the telling gives it.
+ * What a read-aloud ask is carried with, for one voice.
  *
- * The direction rides in `instructions` because that is the parameter a
- * speech model reads as how to say something; a protocol that has never heard
- * of it drops it rather than failing, which is the gateway's standing rule.
+ * The voice's own fields press over this machine's speech settings field by
+ * field, so a character with a tone of its own keeps the machine's format and
+ * pace; an empty tone is the provider's default and nothing is sent for it.
+ * The acting direction rides in `instructions` because that is the parameter
+ * a speech model reads as how to say something; a protocol that has never
+ * heard of it drops it rather than failing, which is the gateway's standing
+ * rule. The try-out and every ask it stands for are assembled here, so what a
+ * reader hears is what the telling will say.
  */
-function voiceParams(story: StoryDocument): Record<string, unknown> {
-  return {
-    ...audioParams(),
-    instructions: i18n.t("story:voice.instructions", {
+export function voiceParamsFor(
+  story: StoryDocument,
+  voice: StoryVoiceProfile,
+  extra: { act?: string; tone?: string } = {},
+): Record<string, unknown> {
+  const tone = (extra.tone ?? "").trim();
+  const instructions = [
+    i18n.t("story:voice.instructions", {
       genre: story.brief.genre,
       style: story.brief.style,
     }),
+    (extra.act ?? "").trim(),
+    tone === "" ? "" : `（${tone}）`,
+    (voice.instructions ?? "").trim(),
+  ]
+    .filter((part) => part !== "")
+    .join(" ");
+  return {
+    ...audioParams(),
+    ...(voice.voice !== "" ? { voice: voice.voice } : {}),
+    ...(voice.rate !== undefined ? { rate: voice.rate } : {}),
+    ...(voice.pitch !== undefined ? { pitch: voice.pitch } : {}),
+    instructions,
   };
+}
+
+/** The same, for a reader who has named no voice: the machine speaks alone. */
+function voiceParams(story: StoryDocument): Record<string, unknown> {
+  return voiceParamsFor(story, { model: "", voice: "" });
+}
+
+/** The speech model a reference names, while this machine still has it. */
+function speechModelOnMachine(reference: string | null): string | null {
+  if (reference === null || reference === "") return null;
+  return modelOptionsFor(useModelStore.getState().view, "speech").some(
+    (option) => option.reference === reference,
+  )
+    ? reference
+    : null;
+}
+
+/**
+ * The voice a character's lines are read in, as this machine can read it.
+ *
+ * The document's own layers resolve first (the character, then the narrator);
+ * a model the telling names but this machine no longer has is passed over
+ * rather than sent to be refused, so a story keeps being read aloud after a
+ * model was deleted or switched off — the same falling through the picker's
+ * empty choice means. What no layer names is the deployment's own default.
+ */
+export function resolveVoice(
+  story: StoryDocument,
+  characterId: string | undefined,
+): StoryVoiceProfile {
+  const asked = speechModelOnMachine(storyAskModel("voice"));
+  const voice = voiceFor(story, characterId, { model: asked ?? "" });
+  if (voice.model !== "" && speechModelOnMachine(voice.model) === null) {
+    return { ...voice, model: asked ?? "" };
+  }
+  return voice;
 }
 
 /** The format and pace this machine's speech settings ask for. */

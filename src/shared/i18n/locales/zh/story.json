@@ -308,7 +308,25 @@
     "removeTitle": "删除 {{name}}？",
     "removeBody": "{{name}} 会离开这份卡司。分镜里引用到它的地方会留下一个空位。",
     "removeNote": "素材库里的东西不会被删：画过的图仍在文件里。",
-    "removeConfirm": "删除"
+    "removeConfirm": "删除",
+    "narratorTip": "旁白：不属于角色的台词用它，也是所有角色的兜底",
+    "voiceModel": "声音",
+    "voiceModelNone": "按旁白、本机选择或部署默认",
+    "voiceTone": "音色",
+    "voiceRate": "语速",
+    "voicePitch": "音高",
+    "voiceManner": "念法",
+    "voiceMannerTip": "这个角色想怎么念",
+    "voiceTry": "试听",
+    "voiceTryBusy": "正在试听…",
+    "voiceTryFailed": "试听没有回来",
+    "voiceUnset": "未定声音",
+    "voiceSet": "已定",
+    "voiceOrphan": "本机没有这个模型",
+    "voiceOrphanNote": "本机没有这个模型，念的时候按下一层回退",
+    "voiceLines": "这个角色在故事里说 {{count}} 句",
+    "voiceNoLines": "还没有台词",
+    "voiceNamed": "{{named}}/{{total}} 个角色定了声音"
   },
   "storyboard": {
     "lead": "一集一集地写：每一幕有哪些镜头、怎么拍，然后逐格出图、逐幕出片。",
@@ -504,6 +522,7 @@
     "noSound": "先在分镜表里写下这一幕的声音。",
     "take": "{{seconds}}",
     "again": "换一段",
-    "instructions": "按{{genre}}的演法、{{style}}的调子念——平稳、不赶，也不要比台词本身更用力。"
+    "instructions": "按{{genre}}的演法、{{style}}的调子念——平稳、不赶，也不要比台词本身更用力。",
+    "sample": "这是一句试听的话，听一听这个声音合不合适。"
   }
 }
