@@ -17,6 +17,7 @@ import { useClipStore } from "../../clip/stores/clipStore";
 import { useHistoryStore } from "../../editor/stores/historyStore";
 import { undo } from "../../editor/commands/execute";
 import { StoryPage } from "../StoryPage";
+import { useSavePathStore } from "../../editor/launcher/savePathStore";
 import { useStoryExportStore } from "../stores/storyExportStore";
 import { useStoryStore } from "../stores/storyStore";
 
@@ -27,13 +28,15 @@ let renders: Array<{
   timelineId: string;
   status: string;
   progress01: number;
-  assetId?: string;
+  savedTo?: string;
   message?: string;
 }> = [];
 /** Whether this machine can render at all. */
 let canRender = true;
 /** Every render the room asked for, by the timeline it was for. */
 let asked: string[] = [];
+/** Where each of those renders was told to write its file. */
+let destinations: string[] = [];
 /** What the next ask answers with, when it is refused. */
 let refusal: { status: number; code: string; message: string } | null = null;
 /** What the project route hands back, for the reload after a render lands. */
@@ -87,8 +90,10 @@ function serving(): void {
           }
           const body = JSON.parse(String(init?.body ?? "{}")) as {
             timelineId: string;
+            destination: string;
           };
           asked.push(body.timelineId);
+          destinations.push(body.destination);
           const task = {
             id: `render-${asked.length}`,
             timelineId: body.timelineId,
@@ -145,6 +150,7 @@ function timelines() {
 beforeEach(() => {
   renders = [];
   asked = [];
+  destinations = [];
   refusal = null;
   reloaded = null;
   canRender = true;
@@ -332,73 +338,63 @@ describe("assembling a telling", () => {
 });
 
 describe("the film of a telling", () => {
-  it("renders the timeline, files the answer, and plays it back", async () => {
+  it("asks where the film goes, renders the timeline, and says where it landed", async () => {
     openAtEdit(filmed());
     fireEvent.click(screen.getByTestId("story-assemble"));
     await waitFor(() => expect(story().edit.timelineId).toBeDefined());
 
     fireEvent.click(screen.getByTestId("story-film-export"));
+    // The path is a question before the render is, and a back-out means no
+    // render at all.
+    await waitFor(() =>
+      expect(useSavePathStore.getState().pending).not.toBeNull(),
+    );
+    expect(useSavePathStore.getState().pending?.title).toBe("Save the film");
+    expect(asked).toHaveLength(0);
+    useSavePathStore.getState().reply("/tmp/moka-edit-test/films/the film.mp4");
+
     await waitFor(() => expect(asked).toHaveLength(1));
     expect(asked[0]).toBe(story().edit.timelineId);
+    expect(destinations[0]).toBe("/tmp/moka-edit-test/films/the film.mp4");
 
-    // The render comes home: the room reads the project again and writes the
-    // film down as the story's own.
+    // The render comes home as a file of the reader's own: the card says where
+    // it is, and the telling is not rewritten to hold it.
     renders = [
       {
         ...renders[0]!,
         status: "done",
         progress01: 1,
-        assetId: "asset-film",
+        savedTo: "/tmp/moka-edit-test/films/the film.mp4",
       },
     ];
-    reloaded = withTheFilm(filmed());
+    useAppStore.setState({ toasts: [] });
     await act(async () => {
       await useStoryExportStore.getState().setTask(renders[0]! as never);
     });
     await waitFor(() =>
-      expect(story().edit.film?.assetIds[0]).toBe("asset-film"),
+      expect(screen.getByTestId("story-film-saved").textContent).toContain(
+        "/tmp/moka-edit-test/films/the film.mp4",
+      ),
     );
-    await waitFor(() =>
-      expect(screen.getByTestId("story-film-video")).toBeDefined(),
-    );
+    const said = useAppStore.getState().toasts.at(-1);
+    expect(said?.message).toBe("The film is ready.");
+    expect(said?.choice?.label).toBe("Open in the cutting room");
+    expect(story().edit.film).toBeUndefined();
   });
 
-  it("says why a finished film is not written down when a change will not save", async () => {
+  it("leaves the project untouched when a render lands", async () => {
     openAtEdit(filmed());
     fireEvent.click(screen.getByTestId("story-assemble"));
     await waitFor(() => expect(story().edit.timelineId).toBeDefined());
 
     fireEvent.click(screen.getByTestId("story-film-export"));
+    await waitFor(() =>
+      expect(useSavePathStore.getState().pending).not.toBeNull(),
+    );
+    useSavePathStore.getState().reply("/tmp/moka-edit-test/films/the film.mp4");
     await waitFor(() => expect(asked).toHaveLength(1));
 
-    // A change of the reader's the server will not take, still in this window.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        const json = (payload: unknown, status = 200) =>
-          Promise.resolve(
-            new Response(JSON.stringify(payload), {
-              status,
-              headers: { "Content-Type": "application/json" },
-            }),
-          );
-        if (init?.method === "POST" && url.includes("/commands")) {
-          return json(
-            { code: "INTERNAL", message: "io error: disk full" },
-            500,
-          );
-        }
-        if (url.includes("/api/v1/projects/current")) {
-          return json({
-            root: "/tmp/moka-edit-test",
-            moka: withTheFilm(filmed()),
-            selfCheck: { ok: true, issues: [] },
-          });
-        }
-        return json([]);
-      }),
-    );
+    // A change of the reader's, still waiting to be written down.
     act(() => {
       useProjectStore.getState().applyLocal([
         {
@@ -408,21 +404,15 @@ describe("the film of a telling", () => {
         },
       ]);
     });
-    await act(async () => {
-      await useProjectStore.getState().flush();
-    });
-    // What the reader changed has not landed, and is still waiting here.
-    expect(useProjectStore.getState().pending.length).toBeGreaterThan(0);
+    const waiting = useProjectStore.getState().pending.length;
+    expect(waiting).toBeGreaterThan(0);
 
-    // The render comes home, but the stored document cannot be read in over
-    // the waiting change — so the film is not written down here, and that is
-    // said rather than left as a film that silently is not on the page.
     renders = [
       {
         ...renders[0]!,
         status: "done",
         progress01: 1,
-        assetId: "asset-film",
+        savedTo: "/tmp/moka-edit-test/films/the film.mp4",
       },
     ];
     useAppStore.setState({ toasts: [] });
@@ -430,10 +420,14 @@ describe("the film of a telling", () => {
       await useStoryExportStore.getState().setTask(renders[0]! as never);
     });
 
-    await waitFor(() => {
-      const said = useAppStore.getState().toasts.at(-1);
-      expect(said?.message).toBe("io error: disk full");
-    });
+    // Landing a file reads and writes nothing of the project, so a change the
+    // server has not taken yet is not in the way of it.
+    await waitFor(() =>
+      expect(useAppStore.getState().toasts.at(-1)?.message).toBe(
+        "The film is ready.",
+      ),
+    );
+    expect(useProjectStore.getState().pending.length).toBe(waiting);
     expect(story().edit.film).toBeUndefined();
   });
 

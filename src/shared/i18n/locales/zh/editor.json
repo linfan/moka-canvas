@@ -154,7 +154,8 @@
     "exportProject": "导出项目",
     "exportProjectHint": "选择随项目导出的内容与目标位置",
     "exportImage": "导出为图片",
-    "exportImageHint": "将画布保存为 PNG 图片"
+    "exportImageHint": "将画布保存为 PNG 图片",
+    "saveImageTitle": "保存图片"
   },
   "sidePanel": {
     "project": "项目",
@@ -464,6 +465,7 @@
       "allPlaced": "此项目中的每个素材都已放在某张画布上。",
       "leavesOutOne": "将省略 1 个未被引用的素材（{{bytes}}）。",
       "leavesOutMany": "将省略 {{count}} 个未被引用的素材（{{bytes}}）。",
+      "saveTitle": "保存导出包",
       "exporting": "导出中…"
     },
     "exportBlocked": {
@@ -692,7 +694,7 @@
     "noAssetYet": "暂无素材",
     "nothingToExport": "还没有可导出的内容",
     "encodeFailed": "浏览器无法编码该图片",
-    "canvasImageExported": "已导出画布图片",
+    "canvasImageSaved": "画布图片已保存到 {{path}}",
     "canvasNotReady": "画布尚未就绪",
     "canvasNotExported": "无法导出画布",
     "playVideo": "播放 {{name}}"

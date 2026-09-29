@@ -17,22 +17,30 @@ interface ExportState {
   open: boolean;
   /** The last render this session started or picked up, live or ended. */
   task: ClipExportTask | null;
+  /** Where the render was asked to write, kept so a retry goes to the same
+   * place rather than asking again. */
+  destination: string | null;
   /** What a refusal said, when the ask never became a render. */
   error: string | null;
   setOpen: (open: boolean) => void;
   setTask: (task: ClipExportTask | null) => void;
+  setDestination: (destination: string | null) => void;
   setError: (error: string | null) => void;
 }
 
 export const useExportStore = create<ExportState>()((set) => ({
   open: false,
   task: null,
+  destination: null,
   error: null,
   setOpen(open) {
     set({ open });
   },
   setTask(task) {
     set({ task });
+  },
+  setDestination(destination) {
+    set({ destination });
   },
   setError(error) {
     set({ error });

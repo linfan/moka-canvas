@@ -18,12 +18,30 @@ interface Props {
   start?: string;
   /** What the button taking the choice says. */
   chooseLabel: string;
+  /**
+   * The name a file is offered under. Given, the dialog saves rather than
+   * opens: the choice is the folder being looked at and that name, and a name
+   * already taken asks again before anything is replaced.
+   */
+  saveAs?: string;
   onClose: () => void;
   onChoose: (path: string) => void;
 }
 
 /** What a row leads with, in the same vocabulary the project tree uses. */
 const GLYPHS = { directory: "▤", file: "▪" } as const;
+
+/**
+ * A typed name with the dialog's own extension behind it, when it has none of
+ * its own — the way an operating system's save dialog completes one.
+ */
+function completedName(name: string, extensions: string[] | undefined): string {
+  if (name === "" || extensions === undefined || extensions.length === 0) {
+    return name;
+  }
+  const last = name.split("/").pop() ?? name;
+  return last.includes(".") ? name : `${name}.${extensions[0]}`;
+}
 
 /**
  * A file dialog drawn by the application itself.
@@ -41,21 +59,28 @@ const GLYPHS = { directory: "▤", file: "▪" } as const;
  *
  * The choice is the file that was picked, or the folder being looked at when no
  * file was — which is what lets one dialog serve both a folder to put a new
- * project in and a project to open, since the second is either of them.
+ * project in and a project to open, since the second is either of them. Asked
+ * to save (`saveAs`), it asks one more thing — the file's name — and the choice
+ * is that name in the folder being looked at.
  */
 export function PathBrowserDialog({
   title,
   extensions,
   start,
   chooseLabel,
+  saveAs,
   onClose,
   onChoose,
 }: Props) {
   const { t } = useTranslation();
   const kinds = (extensions ?? []).join(",");
+  const saving = saveAs !== undefined;
   const [listing, setListing] = useState<FilesystemListing | null>(null);
   const [typed, setTypedState] = useState("");
   const [chosen, setChosen] = useState<FilesystemEntry | null>(null);
+  // The name a save will be under, typed or taken from a file that was
+  // clicked; the field only exists in the mode that has one.
+  const [name, setName] = useState(() => saveAs ?? "");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Where the listing opens is where the field stood when the dialog was asked
@@ -130,17 +155,38 @@ export function PathBrowserDialog({
 
   const entries = listing?.entries ?? [];
   const kindWords = kinds.split(",").join(t("app:browser.joinOr"));
+  const wanted = saving ? completedName(name.trim(), extensions) : "";
   // The file that was picked, or the folder being looked at when no file was: a
   // project is opened from either, and a folder to put one in is only ever the
-  // second.
-  const choice = chosen?.path ?? listing?.path ?? "";
+  // second. A save means the third thing: that name, in the folder looked at.
+  const choice = saving
+    ? listing === null || wanted === ""
+      ? ""
+      : `${listing.path}/${wanted}`
+    : (chosen?.path ?? listing?.path ?? "");
   const up = listing?.parent ?? null;
   const taken = chosen !== null;
+  // A name the folder already holds: the button says it will be replaced, so
+  // nobody replaces one without having been told.
+  const collides =
+    saving && wanted !== "" && entries.some((entry) => entry.name === wanted);
 
-  /** What one row does: a folder is walked into, a file is picked. */
+  /** What one row does: a folder is walked into, a file is picked — or, in the
+   * mode that saves, a file's name is taken. */
   const take = (entry: FilesystemEntry) => {
-    if (entry.kind === "directory") void load(entry.path);
-    else setChosen(entry);
+    if (entry.kind === "directory") {
+      void load(entry.path);
+    } else if (saving) {
+      setName(entry.name);
+    } else {
+      setChosen(entry);
+    }
+  };
+
+  /** Taking the choice: what the button says is what it does. */
+  const press = () => {
+    if (busy || choice === "") return;
+    onChoose(choice);
   };
 
   return (
@@ -233,8 +279,12 @@ export function PathBrowserDialog({
                   onClick={() => take(entry)}
                   onDoubleClick={() => {
                     // A file double-clicked is a file taken, the way the
-                    // operating system's own dialog answers the same gesture.
-                    if (entry.kind === "file") onChoose(entry.path);
+                    // operating system's own dialog answers the same gesture —
+                    // or, when the dialog is saving, the name the file will be
+                    // written under.
+                    if (entry.kind !== "file") return;
+                    if (saving) setName(entry.name);
+                    else onChoose(entry.path);
                   }}
                   title={entry.path}
                   type="button"
@@ -262,6 +312,38 @@ export function PathBrowserDialog({
           </p>
         )}
 
+        {saving && (
+          <form
+            className="path-browser-name"
+            onSubmit={(event) => {
+              event.preventDefault();
+              press();
+            }}
+          >
+            <label>
+              {t("app:browser.fileName")}
+              <input
+                aria-label={t("app:browser.fileName")}
+                data-testid="path-browser-name"
+                onChange={(event) =>
+                  setName(event.target.value.replace(/[/\\]/g, ""))
+                }
+                value={name}
+              />
+            </label>
+          </form>
+        )}
+
+        {collides && (
+          <p
+            className="settings-hint"
+            data-testid="path-browser-overwrite"
+            role="alert"
+          >
+            {t("app:browser.overwrite", { name: wanted })}
+          </p>
+        )}
+
         <footer className="path-browser-foot">
           {/* Named before it is taken: what the button says is a verb, and what
               it will act on is a path a reader should be able to check. */}
@@ -270,7 +352,13 @@ export function PathBrowserDialog({
             data-testid="path-browser-choice"
             title={choice}
           >
-            {taken ? chosen?.name : t("app:browser.thisFolder")}
+            {saving
+              ? wanted === ""
+                ? t("app:browser.fileName")
+                : wanted
+              : taken
+                ? chosen?.name
+                : t("app:browser.thisFolder")}
             <em>{choice}</em>
           </span>
           <div className="dialog-actions">
@@ -281,10 +369,10 @@ export function PathBrowserDialog({
               className="primary"
               data-testid="path-browser-choose"
               disabled={busy || choice === ""}
-              onClick={() => onChoose(choice)}
+              onClick={press}
               type="button"
             >
-              {chooseLabel}
+              {collides ? t("app:browser.overwriteConfirm") : chooseLabel}
             </button>
           </div>
         </footer>

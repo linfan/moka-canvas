@@ -287,3 +287,93 @@ describe("the file dialog a browser has to draw itself", () => {
     expect(onChoose).not.toHaveBeenCalled();
   });
 });
+
+/** What the name field reads. */
+function named(): string {
+  return (screen.getByTestId("path-browser-name") as HTMLInputElement).value;
+}
+
+describe("the same dialog asked to save", () => {
+  it("offers the name it was given, and takes that name in the folder looked at", async () => {
+    const { onChoose } = await open({
+      start: "/home/you",
+      saveAs: "launch.moka",
+      extensions: ["moka"],
+    });
+
+    expect(named()).toBe("launch.moka");
+    expect(chosen()).toContain("/home/you/launch.moka");
+    fireEvent.click(screen.getByTestId("path-browser-choose"));
+    expect(onChoose).toHaveBeenCalledWith("/home/you/launch.moka");
+
+    // A save means the folder being looked at, so walking is what changes
+    // where the file lands — the clicked file's name is taken, not its path.
+    fireEvent.click(screen.getByTestId("path-browser-row-Movies"));
+    await waitFor(() => expect(typed()).toBe("/home/you/Movies"));
+    expect(chosen()).toContain("/home/you/Movies/launch.moka");
+  });
+
+  it("completes a name that has no extension with the dialog's own", async () => {
+    const { onChoose } = await open({
+      start: "/home/you",
+      saveAs: "launch.moka",
+      extensions: ["moka"],
+    });
+
+    fireEvent.change(screen.getByTestId("path-browser-name"), {
+      target: { value: "teaser" },
+    });
+    expect(chosen()).toContain("/home/you/teaser.moka");
+    fireEvent.click(screen.getByTestId("path-browser-choose"));
+    expect(onChoose).toHaveBeenCalledWith("/home/you/teaser.moka");
+
+    // A name that carries an extension of its own is left as it stands.
+    fireEvent.change(screen.getByTestId("path-browser-name"), {
+      target: { value: "teaser.mp4" },
+    });
+    expect(chosen()).toContain("/home/you/teaser.mp4");
+  });
+
+  it("takes the name of a file that was clicked, rather than opening it", async () => {
+    const { onChoose } = await open({
+      start: "/home/you",
+      saveAs: "movie.moka",
+      extensions: ["moka"],
+    });
+
+    fireEvent.click(screen.getByTestId("path-browser-row-launch.moka"));
+    expect(named()).toBe("launch.moka");
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("says so before a name already in the folder is replaced", async () => {
+    const { onChoose } = await open({
+      start: "/home/you",
+      saveAs: "launch.moka",
+      extensions: ["moka"],
+    });
+
+    expect(screen.getByTestId("path-browser-overwrite").textContent).toContain(
+      "launch.moka",
+    );
+    expect(screen.getByTestId("path-browser-choose").textContent).toBe(
+      "Replace",
+    );
+
+    fireEvent.click(screen.getByTestId("path-browser-choose"));
+    expect(onChoose).toHaveBeenCalledWith("/home/you/launch.moka");
+  });
+
+  it("has nothing to warn about while the name is new", async () => {
+    await open({
+      start: "/home/you",
+      saveAs: "brand-new.moka",
+      extensions: ["moka"],
+    });
+
+    expect(screen.queryByTestId("path-browser-overwrite")).toBeNull();
+    expect(screen.getByTestId("path-browser-choose").textContent).toBe(
+      "Choose",
+    );
+  });
+});

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { assetUrl, assetsApi } from "../../../api/assets";
@@ -9,11 +9,10 @@ import type {
   TimelineDocument,
 } from "../../../shared/domain/types";
 import { i18n } from "../../../shared/i18n";
-import { errorText } from "../../../api/client";
 import { formatDuration } from "../../../shared/domain/story";
-import { execute } from "../../editor/commands/execute";
 import { useAppStore } from "../../editor/stores/appStore";
-import { saveTrouble, useProjectStore } from "../../editor/stores/projectStore";
+import { useProjectStore } from "../../editor/stores/projectStore";
+import { askSavePath, fileSafeName } from "../../editor/launcher/savePath";
 import { clipApi, type ClipCapabilities } from "../../clip/api";
 import { useClipStore } from "../../clip/stores/clipStore";
 import { useExportStore } from "../../clip/stores/exportStore";
@@ -27,9 +26,10 @@ const POLL_MS = 700;
  * that makes it.
  *
  * Rendering is the server's work from the moment it is asked for, so nothing
- * here decides anything about the artifact — it asks, it watches, and it writes
- * down what came back. The film is an asset like any other, which is why it can
- * be played here, opened in the cutting room, or found on the shelf.
+ * here decides anything about the artifact — it asks where the file should
+ * land, it watches, and it says where the file went. The render is not filed
+ * among the project's assets: the reader chose a path, and that path is the
+ * only place the film lives.
  */
 export function FilmCard({
   story,
@@ -70,72 +70,21 @@ export function FilmCard({
     };
   }, []);
 
-  // The artifact is filed by the server, so a finished render is read back out
-  // of the document rather than guessed at: the file it became is what the step
-  // shows, and what the next opening of the room finds.
-  const done =
-    task?.status === "done" && task.assetId !== undefined ? task : undefined;
+  // A finished render has nowhere to be filed — the file is the reader's, at
+  // the path they chose — so all that is left to do is say so, once, and offer
+  // the way into the cutting room where the same telling can be worked on.
+  const done = task?.status === "done" ? task : undefined;
+  const announced = useRef<string | null>(null);
   useEffect(() => {
-    if (done === undefined || done.assetId === film?.assetIds[0]) return;
-    let alive = true;
-    void useProjectStore
+    if (done === undefined || announced.current === done.id) return;
+    announced.current = done.id;
+    useAppStore
       .getState()
-      .reload()
-      .then((adopted) => {
-        if (!alive) return;
-        if (!adopted) {
-          // The same as the catch below, with the work still on its way as
-          // the reason: the film is made and filed, but the shelf was not
-          // read back, so it is not written down here yet.
-          const blocked = saveTrouble();
-          useAppStore
-            .getState()
-            .pushToast("error", blocked.message, undefined, blocked.detail);
-          return;
-        }
-        const assetId = done.assetId;
-        if (assetId === undefined) return;
-        const held = useProjectStore.getState().moka;
-        const name =
-          held === null
-            ? assetId
-            : (findResource(held, assetId)?.name ?? assetId);
-        execute(i18n.t("story:history.assemble"), [
-          {
-            type: "setStoryEdit",
-            storyId: story.id,
-            patch: {
-              film: {
-                assetIds: [assetId],
-                jobId: done.id,
-                itemId: "export",
-                note: name,
-                createdAt: new Date().toISOString(),
-              },
-            },
-          },
-        ]);
-        useAppStore
-          .getState()
-          .pushToast("success", i18n.t("story:edit.filmReady"), {
-            label: i18n.t("story:edit.openInClip"),
-            go: () => openInCuttingRoom(story),
-          });
-      })
-      .catch((problem: unknown) => {
-        // The film is made and filed, but this room could not read the shelf
-        // back, so it is not written down here yet. Said rather than passed
-        // over: a reader who does not see the notice and finds no film will
-        // look for it in the wrong place.
-        const trouble = errorText(problem);
-        useAppStore
-          .getState()
-          .pushToast("error", trouble.message, undefined, trouble.detail);
+      .pushToast("success", i18n.t("story:edit.filmReady"), {
+        label: i18n.t("story:edit.openInClip"),
+        go: () => openInCuttingRoom(story),
       });
-    return () => {
-      alive = false;
-    };
-  }, [done, film?.assetIds, story]);
+  }, [done, story]);
 
   // Polling while a render is live, and only then.
   useEffect(() => {
@@ -157,7 +106,21 @@ export function FilmCard({
     setBusy(true);
     useStoryExportStore.getState().setError(null);
     try {
-      const started = await clipApi.start(timeline.id);
+      // A retry of a render that failed or was stopped goes where that render
+      // was going; a fresh export starts by asking, since a render that made
+      // its film already has a file that must not be quietly written over.
+      const held = useStoryExportStore.getState();
+      const again = held.task !== null && held.task.status !== "done";
+      const destination = again
+        ? held.destination
+        : await askSavePath({
+            title: t("story:edit.saveTitle"),
+            defaultName: `${fileSafeName(timeline.name)}.mp4`,
+            extensions: ["mp4"],
+          });
+      if (destination === null) return;
+      useStoryExportStore.getState().setDestination(destination);
+      const started = await clipApi.start(timeline.id, destination);
       useStoryExportStore.getState().setTask(started);
     } catch (problem) {
       useStoryExportStore
@@ -238,6 +201,12 @@ export function FilmCard({
             })}
           </p>
         </>
+      )}
+
+      {done?.savedTo !== undefined && (
+        <p className="story-hint" data-testid="story-film-saved">
+          {t("story:edit.filmSaved", { path: done.savedTo })}
+        </p>
       )}
 
       {live && task !== null && (

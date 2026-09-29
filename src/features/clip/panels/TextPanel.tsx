@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { filesystemApi } from "../../../api";
 import {
   defaultTextStyle,
   type TextClipData,
   type TimelineClip,
 } from "../../../shared/domain";
 import { trackClipsInOrder } from "../../../shared/domain/timeline";
+import { askSavePath, fileSafeName } from "../../editor/launcher/savePath";
 import { useAppStore } from "../../editor/stores/appStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { TextFields } from "../inspector/TextFields";
@@ -52,11 +54,6 @@ import { formatTimecode } from "../timeline/timecode";
  * a chosen clip is the inspector's job, and two forms over one clip would
  * take turns overwriting each other.
  */
-
-/** A timeline's name as a file name: a cut is never a path. */
-function safeFileName(name: string): string {
-  return name.replace(/[\\/:*?"<>|]+/g, "-");
-}
 
 /** What the picker calls each preset of the four the page offers. */
 const PRESET_LABELS: Record<TextStylePresetId, string> = {
@@ -169,21 +166,26 @@ export function TextPanel() {
     importSrt(text, composer.style);
   };
 
-  const exportSrt = () => {
+  const exportSrt = async () => {
     if (!timeline || cues.length === 0) return;
     const blob = new Blob([serializeSrt(cues.map(cueOfClip))], {
       type: "application/x-subrip",
     });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${safeFileName(timeline.name)}.srt`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    // The file is read from the URL after the click returns, so it is let go
-    // on the next turn rather than under the download's feet.
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    const destination = await askSavePath({
+      title: t("clip:textPanel.saveSrtTitle"),
+      defaultName: `${fileSafeName(timeline.name)}.srt`,
+      extensions: ["srt"],
+    });
+    if (destination === null) return;
+    try {
+      await filesystemApi.write(destination, blob);
+      toast("success", t("clip:textPanel.srtSaved", { path: destination }));
+    } catch (problem) {
+      toast(
+        "error",
+        problem instanceof Error ? problem.message : String(problem),
+      );
+    }
   };
 
   /** A cue row's click: choose the clip it stands for and go to its words. */

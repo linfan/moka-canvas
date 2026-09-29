@@ -453,6 +453,8 @@
     "noFilm": "还没有成片。",
     "export": "导出成片",
     "exportAgain": "重新导出",
+    "saveTitle": "保存成片",
+    "filmSaved": "成片已保存到 {{path}}。",
     "exporting": "导出中",
     "noTimeline": "时间线不见了，先重新装配。",
     "noFfmpeg": "这台机器上没有可用的渲染器（ffmpeg）。",

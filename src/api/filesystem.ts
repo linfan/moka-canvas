@@ -1,4 +1,4 @@
-import { http } from "./client";
+import { http, toApiError } from "./client";
 
 /** One row of a listing: a name, where it leads, and which of the two it is. */
 export interface FilesystemEntry {
@@ -16,6 +16,12 @@ export interface FilesystemListing {
   entries: FilesystemEntry[];
   /** Whether the listing stopped before the directory was exhausted. */
   truncated: boolean;
+}
+
+/** Where a save landed, as the server answered it. */
+export interface FilesystemWriteReport {
+  path: string;
+  bytes: number;
 }
 
 /**
@@ -44,5 +50,32 @@ export const filesystemApi = {
     return http.request<FilesystemListing>(
       `/api/v1/filesystem${query === "" ? "" : `?${query}`}`,
     );
+  },
+
+  /**
+   * Writes bytes where a save dialog said, whole or not at all.
+   *
+   * The listing above is the web runtime's question, because it has no dialog
+   * of its own; a write is the other half of that question in both runtimes,
+   * since the window holding the bytes is not the one holding the disk. A file
+   * already at the path is replaced — the dialog that produced the path is what
+   * asked about that.
+   */
+  async write(path: string, bytes: Blob): Promise<FilesystemWriteReport> {
+    const asked = new URLSearchParams({ path });
+    const response = await fetch(`/api/v1/filesystem/file?${asked}`, {
+      method: "PUT",
+      body: bytes,
+    });
+    if (!response.ok) throw await toApiError(response);
+    return (await response.json()) as FilesystemWriteReport;
+  },
+
+  /** Shows a file this machine wrote in the platform's own file manager. */
+  reveal(path: string): Promise<void> {
+    return http.request<void>("/api/v1/filesystem/reveal", {
+      method: "POST",
+      body: { path },
+    });
   },
 };

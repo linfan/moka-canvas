@@ -154,7 +154,8 @@
     "exportProject": "Export project",
     "exportProjectHint": "Choose what leaves with the project, and where to",
     "exportImage": "Export as image",
-    "exportImageHint": "Save the canvas as a PNG image"
+    "exportImageHint": "Save the canvas as a PNG image",
+    "saveImageTitle": "Save the image"
   },
   "sidePanel": {
     "project": "Project",
@@ -464,6 +465,7 @@
       "allPlaced": "Every asset in this project is placed on a canvas.",
       "leavesOutOne": "Leaves out 1 unreferenced asset ({{bytes}}).",
       "leavesOutMany": "Leaves out {{count}} unreferenced assets ({{bytes}}).",
+      "saveTitle": "Save the package",
       "exporting": "Exporting…"
     },
     "exportBlocked": {
@@ -692,7 +694,7 @@
     "noAssetYet": "No asset yet",
     "nothingToExport": "There is nothing to export yet",
     "encodeFailed": "The browser could not encode the image",
-    "canvasImageExported": "Canvas image exported",
+    "canvasImageSaved": "Canvas image saved to {{path}}",
     "canvasNotReady": "The canvas is not ready",
     "canvasNotExported": "The canvas could not be exported",
     "playVideo": "Play {{name}}"

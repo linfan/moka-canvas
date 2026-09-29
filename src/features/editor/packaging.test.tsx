@@ -47,6 +47,7 @@ const fetchMock = vi.fn<typeof fetch>();
 
 /** What the export endpoint is told, as the server reads it. */
 interface ExportBody {
+  destination?: string;
   allowIncomplete?: boolean;
   includePersonalHistory?: boolean;
   onlyReferencedAssets?: boolean;
@@ -81,6 +82,18 @@ function route(options: RouteOptions = {}) {
     if (url === "/api/v1/projects/current/runs") return json([]);
     if (url === "/api/v1/projects/current/commands") {
       return json({ revision: 4, updatedAt: "2026-01-01T00:00:02.000Z" });
+    }
+    // The save question the browser has to draw for itself: the folder asked
+    // for, holding nothing but the folders, resolved where it was asked.
+    if (url.startsWith("/api/v1/filesystem?")) {
+      const asked = new URL(`http://localhost${url}`);
+      const where = asked.searchParams.get("path") ?? "";
+      return json({
+        path: where,
+        parent: "/tmp",
+        entries: [],
+        truncated: false,
+      });
     }
     if (url.includes("/content") && init?.method === "PUT") {
       return json(
@@ -200,6 +213,23 @@ async function askToExport(): Promise<HTMLElement> {
     within(menu).getByRole("menuitem", { name: "Export project" }),
   );
   return screen.findByRole("dialog");
+}
+
+/** The name a package is offered under, in the project's own output folder. */
+const PACKAGE_PATH = "/tmp/golden/output/Golden Fixture.mokapkg.zip";
+
+/**
+ * Answers the save question the browser draws for itself: the folder the
+ * dialog opens at is accepted under the name it offers.
+ */
+async function chooseSavePath(): Promise<void> {
+  const choose = await screen.findByTestId("path-browser-choose");
+  await vi.waitFor(() => expect(choose).toHaveProperty("disabled", false));
+  expect(screen.getByTestId("path-browser-name")).toHaveProperty(
+    "value",
+    "Golden Fixture.mokapkg.zip",
+  );
+  fireEvent.click(choose);
 }
 
 beforeEach(() => {
@@ -328,11 +358,13 @@ describe("export package", () => {
     expect(exportCalls()).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    await chooseSavePath();
     await vi.waitFor(() => {
       expect(exportCalls()).toHaveLength(1);
     });
     // Nothing ticked is the work package: the work, and no record of the
-    // machine that made it.
+    // machine that made it — and it lands where the save dialog said.
+    expect(exportCalls()[0].body.destination).toBe(PACKAGE_PATH);
     expect(exportCalls()[0].body.includePersonalHistory).toBeUndefined();
     expect(exportCalls()[0].body.onlyReferencedAssets).toBeUndefined();
     await vi.waitFor(() => {
@@ -370,10 +402,12 @@ describe("export package", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    await chooseSavePath();
     await vi.waitFor(() => {
       expect(exportCalls()).toHaveLength(1);
     });
     expect(exportCalls()[0].body).toEqual({
+      destination: PACKAGE_PATH,
       includePersonalHistory: true,
       onlyReferencedAssets: true,
     });
@@ -404,6 +438,7 @@ describe("export package", () => {
       screen.getByRole("checkbox", { name: /Include my run history/ }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    await chooseSavePath();
 
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("1 referenced asset");
@@ -415,8 +450,11 @@ describe("export package", () => {
     });
     expect(exportCalls()[1].body.allowIncomplete).toBe(true);
     // A retry after a refusal is the same export, not a fresh one with the
-    // questions asked again from scratch.
+    // questions asked again from scratch — the chosen path least of all.
     expect(exportCalls()[1].body.includePersonalHistory).toBe(true);
+    expect(exportCalls()[1].body.destination).toBe(
+      exportCalls()[0].body.destination,
+    );
     await vi.waitFor(() => {
       expect(
         useAppStore
@@ -442,10 +480,32 @@ describe("export package", () => {
     await screen.findByTestId("canvas-tab-Canvas 1");
     await askToExport();
     fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    await chooseSavePath();
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(exportCalls()).toHaveLength(1);
+    expect(useAppStore.getState().phase).toBe("editing");
+  });
+
+  it("backing out of the save question writes nothing", async () => {
+    await openGolden();
+    await screen.findByTestId("canvas-tab-Canvas 1");
+    await askToExport();
+
+    fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    const choose = await screen.findByTestId("path-browser-choose");
+    await vi.waitFor(() => expect(choose).toHaveProperty("disabled", false));
+    fireEvent.click(
+      within(screen.getByTestId("path-browser")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+
+    expect(screen.queryByTestId("path-browser")).toBeNull();
+    expect(exportCalls()).toHaveLength(0);
+    // The question before it still stands, since nothing was answered.
+    expect(screen.getByRole("dialog")).toBeTruthy();
     expect(useAppStore.getState().phase).toBe("editing");
   });
 });
@@ -558,6 +618,7 @@ describe("unsaved-work guard", () => {
     // asks, and the project closes once the answer has been written.
     await screen.findByRole("dialog");
     fireEvent.click(screen.getByRole("button", { name: "Export package" }));
+    await chooseSavePath();
     await vi.waitFor(() => {
       expect(useAppStore.getState().phase).toBe("launcher");
     });

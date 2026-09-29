@@ -453,6 +453,8 @@
     "noFilm": "There is no film yet.",
     "export": "Export the film",
     "exportAgain": "Export again",
+    "saveTitle": "Save the film",
+    "filmSaved": "The film is saved to {{path}}.",
     "exporting": "Exporting",
     "noTimeline": "The timeline is gone; assemble the film again.",
     "noFfmpeg": "This machine has no renderer (ffmpeg).",
