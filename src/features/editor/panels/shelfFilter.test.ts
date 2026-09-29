@@ -10,9 +10,11 @@ import {
   SHELF_WHERE_LABELS,
   filterShelf,
   groupShelf,
+  heldLens,
   shelfFilterIsOpen,
   shelfTags,
   shelfWhere,
+  unheldLens,
   type ShelfFilter,
 } from "./shelfFilter";
 
@@ -186,5 +188,25 @@ describe("the shelf a reader filters", () => {
     expect(matched.length).toBe(SHELF_PAGE + 3);
     expect(matched.slice(0, SHELF_PAGE).length).toBe(SHELF_PAGE);
     expect(matched.slice(0, 2 * SHELF_PAGE).length).toBe(SHELF_PAGE + 3);
+  });
+});
+
+describe("the lenses a face reads through", () => {
+  it("shows the files a document holds and nothing else", () => {
+    const lens = heldLens(new Set([made.id]));
+    expect(lens.where).toBeUndefined();
+    expect(lens.narrow!(made)).toBe(true);
+    expect(lens.narrow!(keeper)).toBe(false);
+  });
+
+  it("shows what a document does not hold, for the unused view", () => {
+    const lens = unheldLens(new Set([made.id]));
+    expect(lens.narrow!(keeper)).toBe(true);
+    expect(lens.narrow!(made)).toBe(false);
+  });
+
+  it("leaves the origin question to the reader", () => {
+    expect(heldLens(new Set()).where).toBeUndefined();
+    expect(unheldLens(new Set()).where).toBeUndefined();
   });
 });

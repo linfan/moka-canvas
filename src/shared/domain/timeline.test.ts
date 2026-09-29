@@ -21,7 +21,7 @@ import {
   cutFixtureIds,
   timelineIds,
 } from "./fixtures";
-import { validateMokaFile } from "./validate";
+import { validateMokaFile, timelineAssetIds } from "./validate";
 import type {
   DocumentCommand,
   MokaFile,
@@ -1131,3 +1131,33 @@ function seamChain() {
   }).next;
   return { ids, moka: chained, clipC: c.id };
 }
+
+describe("what a cut is made of", () => {
+  it("reads every file its clips take, once each and in order", () => {
+    const ids = cutFixtureIds();
+    const timeline = buildCutMokaFile().timelines![0];
+    // The caption D on the text track takes no file, so it is not counted.
+    expect(timelineAssetIds(timeline)).toEqual([
+      ids.videoAssetA,
+      ids.videoAssetB,
+      ids.audioAsset,
+    ]);
+  });
+
+  it("counts a file laid down twice once", () => {
+    const ids = timelineIds();
+    const timeline = buildTimelineMokaFile().timelines![0];
+    timeline.clips.push({
+      ...timeline.clips[0],
+      id: "clip-again",
+      startMs: 5_000,
+    });
+    expect(timelineAssetIds(timeline)).toEqual([ids.videoAsset]);
+  });
+
+  it("holds nothing for a cut with no clips", () => {
+    const timeline = buildTimelineMokaFile().timelines![0];
+    timeline.clips = [];
+    expect(timelineAssetIds(timeline)).toEqual([]);
+  });
+});

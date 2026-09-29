@@ -1,5 +1,6 @@
 import type {
   AssetCategory,
+  AssetId,
   AssetKind,
   ResourceEntry,
   ResourceRegistry,
@@ -86,6 +87,28 @@ export interface ShelfLens {
   where?: ShelfWhere | null;
   /** Anything else the face will not show. */
   narrow?: (entry: ResourceEntry) => boolean;
+}
+
+/**
+ * The files one document holds, for a face that is about that document.
+ *
+ * A board's column and a cut's column read their own material through this:
+ * what the shelf shows is what that document points at. It narrows and does
+ * not answer the origin question — a reader looking at one board's files may
+ * still ask for the ones brought in.
+ */
+export function heldLens(ids: ReadonlySet<AssetId>): ShelfLens {
+  return { narrow: (entry) => ids.has(entry.id) };
+}
+
+/**
+ * Everything the project holds that is placed nowhere: the unused view.
+ *
+ * Built from the same pointing-at the delete guard reads, so a file kept by a
+ * story's old drawing counts as used as much as one a card shows.
+ */
+export function unheldLens(placed: ReadonlySet<AssetId>): ShelfLens {
+  return { narrow: (entry) => !placed.has(entry.id) };
 }
 
 /**

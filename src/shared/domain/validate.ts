@@ -50,6 +50,7 @@ import type {
   StorySlot,
   StorySlotTarget,
   StoryTake,
+  TimelineDocument,
   ValidationIssue,
   WorkflowEdge,
   WorkflowNode,
@@ -305,6 +306,21 @@ export function nodeAssetIds(node: WorkflowNode): AssetId[] {
     if (slot.assetId) ids.push(slot.assetId);
   }
   return ids;
+}
+
+/**
+ * The files one cut is made of.
+ *
+ * Every clip that reads a file, once each and in the order the clips are laid
+ * down; a clip written on the timeline rather than taken from the shelf (a
+ * text clip) reads none, so a cut made of words alone holds nothing.
+ */
+export function timelineAssetIds(timeline: TimelineDocument): AssetId[] {
+  const seen = new Set<AssetId>();
+  for (const clip of timeline.clips) {
+    if (clip.assetId) seen.add(clip.assetId);
+  }
+  return [...seen];
 }
 
 /**

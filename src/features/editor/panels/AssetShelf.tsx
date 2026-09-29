@@ -464,8 +464,8 @@ function ShelfFilterBar({
         {/*
           The origin question is not offered where the face behind the shelf
           already answers it: Local is what was brought, and asking again on
-          top of that could only empty the shelf. A face with no origin of its
-          own keeps the question.
+          top of that could only empty the shelf. A face whose lens only
+          narrows has not answered it and keeps the question.
         */}
         {!whereLocked && (
           <select
@@ -825,7 +825,10 @@ export function AssetShelf({
         filter={filter}
         onChange={setFilter}
         shelves={shelves}
-        whereLocked={lens !== undefined}
+        // Only a lens that says where files came from has answered the origin
+        // question; one that merely narrows (a board's files, a cut's) leaves
+        // it to the reader.
+        whereLocked={lens?.where != null}
         words={words}
       />
       {filed > 0 && visible.length === 0 && (
