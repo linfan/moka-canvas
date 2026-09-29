@@ -14,16 +14,8 @@ import {
   type MediaCardInfo,
   type MediaState,
 } from "../canvas/mediaCards";
+import { KIND_ICONS } from "../canvas/mentions";
 import { MentionPreview } from "./MentionPreview";
-
-/** The mark a reference wears when it has no picture of its own. */
-const KIND_ICONS: Record<string, string> = {
-  text: "¶",
-  audio: "♪",
-  group: "▢",
-  image: "▣",
-  video: "▶",
-};
 
 /** The width a look is held to, and how close to an edge of the screen it may come. */
 const LOOK_WIDTH = 336;

@@ -68,8 +68,9 @@ const WHEEL_ZOOM_REFERENCE = 1;
  * So the step follows what the viewport holds — the world on screen grows as
  * the zoom falls — taken as its square root, which crosses a large canvas in
  * a few rolls without the near view running away from the hand. `fine` marks
- * the held-modifier step — a quarter of the usual one — which is also what a
- * Mac trackpad pinch sends, for aiming at a detail without overshooting it.
+ * the held-modifier step — half of the usual one — which is also what a Mac
+ * trackpad pinch sends, so a pinch covers ground at a pace the hand can follow
+ * rather than crawling across the canvas.
  */
 export function wheelZoomFactor(
   deltaY: number,
@@ -77,7 +78,7 @@ export function wheelZoomFactor(
   zoom: number,
 ): number {
   const gain = Math.sqrt(WHEEL_ZOOM_REFERENCE / zoom);
-  return Math.pow(1.0015, -deltaY * (fine ? 0.25 : 1) * gain);
+  return Math.pow(1.003, -deltaY * (fine ? 0.5 : 1) * gain);
 }
 
 /** Pan by a screen-space pixel delta. */

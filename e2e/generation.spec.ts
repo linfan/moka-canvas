@@ -558,3 +558,54 @@ test("what the preview shows is what the provider is handed", async ({
   expect(calls[0].path).toBe("/v1/images/generations");
   expect(calls[0].prompt).toBe(previewed);
 });
+
+test("a panel squeezed small keeps the prompt box clear of what stands under it", async ({
+  page,
+}) => {
+  await configureWordsAndPictures();
+  await page.goto("/");
+  // The panel hangs under its node, and it is its own bottom corner that is
+  // dragged, so the window has to be tall enough to hold that corner.
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  await createProject(
+    page,
+    join(projectHome("generation-squeezed"), "project"),
+    "Squeezed Panel",
+  );
+  await addNode(page, "Image");
+  const panel = page.getByTestId("prompt-panel");
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+
+  // Dragged to its shortest by its own corner: the panel a reader makes room
+  // with over a crowded canvas is one with hardly any room left inside it.
+  const grip = await panel.locator(".prompt-panel-grip").boundingBox();
+  if (!grip) throw new Error("the panel has no corner to drag");
+  await page.mouse.move(grip.x + 3, grip.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + 3, grip.y - 400, { steps: 8 });
+  await page.mouse.up();
+
+  // The prompt box keeps to the room it was given: the words scroll inside it
+  // and the control under it — the model the ask is sent to — is not written
+  // over, however little room the panel has.
+  const input = await panel
+    .locator(".prompt-panel-prompt .prompt-panel-input")
+    .boundingBox();
+  const picker = await panel
+    .locator(".prompt-panel-prompt select")
+    .boundingBox();
+  if (!input || !picker)
+    throw new Error("the panel lost its field or its model");
+  expect(input.y + input.height).toBeLessThanOrEqual(picker.y + 1);
+
+  // And what does not fit is scrolled to rather than hidden: the panel's own
+  // page is where the rest of the controls live.
+  const crowded = await panel.locator(".prompt-panel-body").evaluate((body) => {
+    const box = body as unknown as {
+      scrollHeight: number;
+      clientHeight: number;
+    };
+    return { scroll: box.scrollHeight, client: box.clientHeight };
+  });
+  expect(crowded.scroll).toBeGreaterThan(crowded.client);
+});

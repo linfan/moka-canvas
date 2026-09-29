@@ -7,10 +7,10 @@ describe("stepping the zoom with the wheel", () => {
     expect(wheelZoomFactor(100, false, 1)).toBeLessThan(1);
   });
 
-  it("takes a quarter of a step while the fine modifier is held", () => {
+  it("takes half a step while the fine modifier is held", () => {
     const coarse = wheelZoomFactor(-100, false, 1);
     const fine = wheelZoomFactor(-100, true, 1);
-    expect(fine).toBeCloseTo(Math.pow(coarse, 0.25), 12);
+    expect(fine).toBeCloseTo(Math.pow(coarse, 0.5), 12);
     // Still forward, just shorter: a fine step never turns the wheel around.
     expect(fine).toBeGreaterThan(1);
   });

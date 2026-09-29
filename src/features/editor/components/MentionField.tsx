@@ -15,6 +15,7 @@ import type {
 import { findNode, mentionSpans } from "../../../shared/domain";
 import { mediaInfoForNode, type MediaState } from "../canvas/mediaCards";
 import {
+  KIND_ICONS,
   mentionBeingTyped,
   mentionToken,
   narrowMentions,
@@ -166,9 +167,9 @@ export function focusEnd(area: HTMLElement): void {
 }
 
 /**
- * A mention drawn: the name of the card it points at, written the way a
- * sentence writes a reference — between ticks, so `` `Plate` `` reads as a
- * card being named rather than as another word in the line.
+ * A mention drawn: the mark of the kind of card it points at, and that card's
+ * own name — standing among the words as a name does, so the sentence reads as
+ * one that references a card rather than as one more word of prose.
  */
 function chipFor(
   document: Document,
@@ -182,20 +183,15 @@ function chipFor(
   chip.dataset.nodeId = nodeId;
   chip.dataset.kind = mentioned?.kind ?? "gone";
   chip.title = mentioned?.title ?? "A node that is gone";
+  const icon = document.createElement("span");
+  icon.className = "mention-chip-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = KIND_ICONS[mentioned?.kind ?? ""] ?? "?";
   const name = document.createElement("span");
   name.className = "mention-chip-name";
   name.textContent = mentioned?.title ?? nodeId;
-  chip.append(tick(document, "`"), name, tick(document, "`"));
+  chip.append(icon, name);
   return chip;
-}
-
-/** One of the two marks a chip is wrapped in. Decoration, not words. */
-function tick(document: Document, mark: string): HTMLElement {
-  const span = document.createElement("span");
-  span.className = "mention-chip-tick";
-  span.setAttribute("aria-hidden", "true");
-  span.textContent = mark;
-  return span;
 }
 
 /**
@@ -263,8 +259,7 @@ interface OfferRow {
 
 /**
  * The prompt field, which knows that a mention points at another card rather
- * than being prose, and draws one as the name of that card between ticks —
- * the way a sentence written in Markdown refers to something.
+ * than being prose, and draws one as the name of that card.
  *
  * A rich field rather than a textarea with the tokens shown among the words:
  * a token is forty-four characters across and the name it stands for is not,
@@ -294,6 +289,7 @@ export function MentionField({
   onDismiss,
   onOffer,
   under,
+  corner,
 }: {
   canvas: CanvasDocument;
   /**
@@ -332,6 +328,13 @@ export function MentionField({
    * column after it, because the field is the thing that grows with the panel.
    */
   under?: React.ReactNode;
+  /**
+   * What stands in the field's own corner, in the box the words are written
+   * in: the button that sends them where the field has one. Held there rather
+   * than laid out after the field so the words and the thing they are written
+   * for stay together however tall the field grows.
+   */
+  corner?: React.ReactNode;
   /**
    * The candidate list opened or closed.
    *
@@ -673,6 +676,7 @@ export function MentionField({
             title={t("editor:mention.fieldGrip")}
           />
         )}
+        {corner && <div className="mention-field-corner">{corner}</div>}
       </div>
 
       {under}
