@@ -699,6 +699,76 @@ describe("model settings", () => {
     });
   });
 
+  it("draws an identifier again when the one it drew is taken", async () => {
+    // Two draws, made deterministic: the first lands on an identifier the
+    // store already holds, the second on a free one.
+    let draws = 0;
+    vi.stubGlobal("crypto", {
+      getRandomValues: (bytes: Uint8Array) => {
+        draws += 1;
+        bytes.fill(draws === 1 ? 0 : 1);
+        return bytes;
+      },
+    });
+    view.models.push(
+      model("composer-000000", "text", "openaiChat", "Taken", false),
+    );
+
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "Composer" },
+    });
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "composer-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await screen.findByText("Composer");
+
+    // The save takes a name of its own rather than the one the store holds:
+    // an identifier names a configuration, and a write under a taken one
+    // would replace it.
+    const [write] = writesTo("/api/v1/models");
+    expect(write.body).toMatchObject({
+      id: expect.stringMatching(/^composer-[a-z0-9]{6}$/),
+    });
+    expect((write.body as { id: string }).id).not.toBe("composer-000000");
+    expect(draws).toBe(2);
+  });
+
+  it("refuses the save when every identifier a name suggests is taken", async () => {
+    // Every draw lands on the same identifier, and the store holds it.
+    vi.stubGlobal("crypto", {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.fill(0);
+        return bytes;
+      },
+    });
+    view.models.push(
+      model("composer-000000", "text", "openaiChat", "Taken", false),
+    );
+
+    await openSettings();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New text model" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Display name"), {
+      target: { value: "Composer" },
+    });
+    fireEvent.change(screen.getByLabelText("Model name"), {
+      target: { value: "composer-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+
+    // Nothing is written over the model that holds the identifier, and the
+    // form says why instead of pretending it saved.
+    expect(await screen.findByTestId("model-id-clash")).toBeTruthy();
+    expect(screen.getByText(/already taken/)).toBeTruthy();
+    expect(writesTo("/api/v1/models")).toHaveLength(0);
+  });
+
   it("keeps the stored identifier out of an edit", async () => {
     await openSettings();
     fireEvent.click(

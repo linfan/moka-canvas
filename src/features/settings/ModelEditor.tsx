@@ -223,7 +223,10 @@ function ceilingText(seconds: number | null | undefined): string {
  *
  * The identifier is the one thing nobody has to think about: it is derived
  * from the display name and never shown, because what it does — stay the
- * reference a node holds — matters more than what it reads as.
+ * reference a node holds — matters more than what it reads as. It is settled
+ * at the save against the models that exist then: an identifier a stored
+ * configuration holds names that configuration, and a write under it would
+ * replace it, so a name already taken is answered by drawing another.
  */
 export function ModelEditor({
   model,
@@ -238,6 +241,11 @@ export function ModelEditor({
   const [form, setForm] = useState<FormState>(() =>
     initialForm(model, copySource, category, protocols),
   );
+  /**
+   * Whether the last save was refused because every identifier the name
+   * suggests is taken. Nothing is saved over anybody; a rename draws afresh.
+   */
+  const [clash, setClash] = useState(false);
 
   const edit = (patch: Partial<FormState>) =>
     setForm((state) => ({ ...state, ...patch }));
@@ -302,18 +310,6 @@ export function ModelEditor({
     [view],
   );
 
-  /**
-   * The identifier this form will save, which is never shown or typed: a new
-   * configuration is handed one derived from its display name — following the
-   * name as it is typed, since that is what it reads as — and an existing
-   * configuration keeps the one its nodes already store.
-   */
-  const identifier = useMemo(
-    () =>
-      model !== null ? model.id : uniqueModelId(form.displayName, isTaken),
-    [model, form.displayName, isTaken],
-  );
-
   const urlShaped = /^https?:\/\/\S+$/.test(form.url.trim());
   // A clip ceiling is a video model's alone, and a number outside what one
   // clip may be is nothing to plan with: the field says so before the save.
@@ -352,8 +348,21 @@ export function ModelEditor({
     });
 
   const save = async () => {
+    // The identifier is settled here, against the models the store holds now,
+    // rather than while the form is typed: it is never shown, so nothing else
+    // would notice a name taken since — and the server replaces the
+    // configuration an identifier names, so a second model sharing one would
+    // be one write over the other. An existing configuration keeps the
+    // identifier its nodes already store; a new one draws until free.
+    const id =
+      model !== null ? model.id : uniqueModelId(form.displayName, isTaken);
+    if (id === null) {
+      setClash(true);
+      return;
+    }
+    setClash(false);
     const draft: ModelDraft = {
-      id: identifier,
+      id,
       category,
       protocol: form.protocol,
       url: form.url.trim(),
@@ -712,6 +721,12 @@ export function ModelEditor({
         />
         <span>{t("settings:editor.enabled")}</span>
       </label>
+
+      {clash && (
+        <p className="settings-hint" role="alert" data-testid="model-id-clash">
+          {t("settings:editor.identifierClash")}
+        </p>
+      )}
 
       <div className="dialog-actions">
         <button

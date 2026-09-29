@@ -89,13 +89,12 @@ describe("uniqueModelId", () => {
       }
       return false;
     });
-    expect(taken.has(id)).toBe(false);
     expect(id).toMatch(/^writer-[a-z0-9]{6}$/);
+    if (id === null) throw new Error("a free identifier was expected");
+    expect(taken.has(id)).toBe(false);
   });
 
-  it("gives up on an identifier somebody else holds, so the form says so", () => {
-    expect(uniqueModelId("Writer", () => true, 3)).toMatch(
-      /^writer-[a-z0-9]{6}$/,
-    );
+  it("gives up on an identifier somebody else holds, so nothing is saved over them", () => {
+    expect(uniqueModelId("Writer", () => true, 3)).toBeNull();
   });
 });

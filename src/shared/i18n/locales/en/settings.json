@@ -55,6 +55,7 @@
     "headingNew": "New {{category}} model",
     "displayName": "Display name",
     "displayNameTip": "What the pickers show",
+    "identifierClash": "Every identifier this name suggests is already taken; change the display name and save again.",
     "protocol": "Protocol",
     "noProtocols": "No protocol is available for this kind of model. Its shapes come from converter scripts, and none are deployed.",
     "url": "URL",
