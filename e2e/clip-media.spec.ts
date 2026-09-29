@@ -102,55 +102,54 @@ async function filedId(page: Page, name: string): Promise<string> {
   }, name);
 }
 
-test("the two faces read one shelf, each asking its own question", async ({
-  page,
-}) => {
+test("the cut's face reads the cut's own material", async ({ page }) => {
   const home = await clipRoom(page, "Media Faces");
 
+  // A file brought in is held by no clip yet, so it waits in the tray above
+  // the cut's own list rather than being the cut's material already.
   await importFile(page, "one.png", "image/png", TINY_PNG);
+  const tray = page.getByTestId("shelf-tray");
+  await expect(tray).toContainText("one.png");
+  // The face has answered which cut the material is for, not where a file
+  // came from, so the shelf still asks that question.
+  await expect(page.getByTestId("shelf-where")).toHaveCount(1);
 
-  // The file was brought in, so the local face holds it...
+  // Landing it on the cut moves it out of the tray and into the cut's list.
+  await tray
+    .getByRole("button", { name: "Add one.png at the playhead" })
+    .click();
+  await expect(page.getByTestId("shelf-tray")).toHaveCount(0);
   await expect(rowFor(page, "one.png")).toBeVisible();
-  // ...and the source faces are the origin question themselves: the shelf does
-  // not ask where a file came from on top of a face that has just answered it.
-  await expect(page.getByTestId("shelf-where")).toHaveCount(0);
-
-  // The same shelf is read by the project face, open on every origin.
-  await page.getByTestId("clip-face-project").click();
-  await expect(
-    page.getByRole("heading", { name: "Project media" }),
-  ).toBeVisible();
-  await expect(rowFor(page, "one.png")).toBeVisible();
-  await expect(page.getByTestId("shelf-where")).toHaveCount(0);
 
   forgetHome(home);
 });
 
-test("the project face filters to what was made and what the boards hold", async ({
+test("the whole project is reached from the cut through the picker", async ({
   page,
 }) => {
-  const home = await clipRoom(page, "Media Project Filter");
+  const home = await clipRoom(page, "Media From Project");
   await importFile(page, "one.png", "image/png", TINY_PNG);
 
-  // The filter is the project face's own question, asked where it is read.
-  await expect(page.getByTestId("clip-project-filter-all")).toHaveCount(0);
-  await page.getByTestId("clip-face-project").click();
-  await expect(rowFor(page, "one.png")).toBeVisible();
+  // The cut's column holds this cut's material; everything the project holds
+  // is the picker's question, asked from the head of the column.
+  await page.getByTestId("clip-from-project").click();
+  const dialog = page.getByTestId("asset-picker");
+  await expect(dialog).toBeVisible();
 
-  // Nothing was generated, so the made narrowing stands empty and says so.
-  await page.getByTestId("clip-project-filter-made").click();
-  await expect(page.getByText("Nothing made by the models yet.")).toBeVisible();
-  await expect(rowFor(page, "one.png")).toHaveCount(0);
+  // Choosing from the whole project and placing lands clips on the cut.
+  await dialog
+    .locator(".asset-pick-row")
+    .filter({ hasText: "one.png" })
+    .locator("input[type=checkbox]")
+    .check();
+  await expect(dialog.getByTestId("asset-pick-count")).toContainText(
+    "Will be added as 1 clip, from the playhead",
+  );
+  await dialog.getByRole("button", { name: "Place" }).click();
+  await expect(page.getByTestId("asset-picker")).toHaveCount(0);
 
-  // No board holds anything either.
-  await page.getByTestId("clip-project-filter-canvas").click();
-  await expect(
-    page.getByText("No canvas is holding a file yet."),
-  ).toBeVisible();
-  await expect(rowFor(page, "one.png")).toHaveCount(0);
-
-  // Everything brings the brought-in file back.
-  await page.getByTestId("clip-project-filter-all").click();
+  // The file is the cut's material now: out of the tray, in the list.
+  await expect(page.getByTestId("shelf-tray")).toHaveCount(0);
   await expect(rowFor(page, "one.png")).toBeVisible();
 
   forgetHome(home);
@@ -215,15 +214,10 @@ test("a row carries the drag-out contract the timeline will take", async ({
   forgetHome(home);
 });
 
-test("files dropped over the column are imported, and the column turns to Local", async ({
+test("files dropped over the column are imported, and wait in the tray", async ({
   page,
 }) => {
   const home = await clipRoom(page, "Media Drop");
-  // Turned away from Local first: the drop is what should bring it back.
-  await page.getByTestId("clip-face-project").click();
-  await expect(
-    page.getByRole("heading", { name: "Project media" }),
-  ).toBeVisible();
 
   const carried = await page.evaluateHandle((base64) => {
     const Browser = (
@@ -243,11 +237,11 @@ test("files dropped over the column are imported, and the column turns to Local"
   await expect(page.locator(".clip-media-drop")).toHaveText("Drop to import");
   await page.dispatchEvent(".clip-column", "drop", { dataTransfer: carried });
 
-  await expect(page.getByTestId("clip-face-local")).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await expect(rowFor(page, "dropped.png")).toBeVisible({ timeout: 10_000 });
+  // No clip holds it yet, so it waits in the tray above the cut's own list.
+  await expect(page.getByTestId("shelf-tray")).toContainText("dropped.png", {
+    timeout: 10_000,
+  });
+  await expect(rowFor(page, "dropped.png")).toBeVisible();
 
   forgetHome(home);
 });

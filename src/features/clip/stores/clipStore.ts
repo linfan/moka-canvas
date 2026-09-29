@@ -23,8 +23,11 @@ import {
   type TimelineView,
 } from "../timeline/geometry";
 
-/** The five faces the left column turns over between. */
-export type ClipFace = "project" | "local" | "text" | "filters" | "adjust";
+/**
+ * The four faces the left column turns over between: the cut's own material,
+ * and the three tools that work on it.
+ */
+export type ClipFace = "cut" | "text" | "filters" | "adjust";
 
 /**
  * Which timeline a project was last left looking at, kept on this machine
@@ -263,7 +266,7 @@ function remember(key: string, value: string): void {
 interface ClipState {
   /** The timeline being looked at; null = the document has none (or they all went). */
   activeTimelineId: TimelineId | null;
-  /** The face the left column is turned to: sources and tools share one column. */
+  /** The face the left column is turned to: the material and its tools share one column. */
   face: ClipFace;
   /** What is chosen on the timeline, which the inspector reads. */
   selection: ClipSelection;
@@ -421,7 +424,10 @@ export const useClipStore = create<ClipState>()((set, get) => {
 
   return {
     activeTimelineId: null,
-    face: "local",
+    // The cut's own material, which is what a reader came into the room for.
+    // Only the timeline and the look of the room are remembered on this
+    // machine; the face is where the reader is standing, not a choice to keep.
+    face: "cut",
     selection: { clipIds: [], transitionId: null },
     adjustDraft: null,
     textDraft: null,

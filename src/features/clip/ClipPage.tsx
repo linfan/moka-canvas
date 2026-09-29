@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { historyBoundary } from "../editor/commands/execute";
+import { AssetPickerModal } from "../editor/components/AssetPickerModal";
 import { PanelUnfold } from "../editor/components/PanelFold";
 import { PanelResizer } from "../editor/components/PanelResizer";
 import { panelWidthStyle } from "../editor/components/panelWidthVars";
@@ -180,6 +181,9 @@ export function ClipPage() {
       </div>
       {newTimelineOpen && <TimelineDialog />}
       {exportOpen && <ExportDialog />}
+      {/* The project's shelf, reached from the cut's own column: choosing
+          files here lands them on the open cut rather than anywhere else. */}
+      <AssetPickerModal />
       {shortcutsOpen && (
         <ClipShortcutsDialog onClose={() => setShortcutsOpen(false)} />
       )}

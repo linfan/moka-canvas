@@ -77,12 +77,12 @@ describe("the corner menu's guard", () => {
     cleanup();
   });
 
-  it("lists the three rooms with the story room first", () => {
+  it("lists the rooms, the story room first", () => {
     openMenu();
     const rooms = screen
       .getAllByRole("menuitem")
       .map((item) => item.textContent)
       .filter((name) => name !== "Projects");
-    expect(rooms).toEqual(["Story", "Canvas", "Clip"]);
+    expect(rooms).toEqual(["Story", "Canvas", "Clip", "Assets"]);
   });
 });

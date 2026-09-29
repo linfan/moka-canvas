@@ -9,6 +9,7 @@ import {
   type ResourceEntry,
 } from "../../../shared/domain";
 import { addAssetNodes, attachAssetsToNode } from "../interactions/actions";
+import { addAssetsAtPlayhead } from "../../clip/interactions/clipActions";
 import { useClampedMenuPosition } from "../panels/useClampedMenuPosition";
 import {
   OPEN_SHELF_FILTER,
@@ -228,8 +229,12 @@ export function AssetPickerModal() {
     try {
       if (ask.mode === "nodes") {
         await addAssetNodes(chosen, ask.at ?? undefined);
-      } else {
+      } else if (ask.mode === "reference") {
         await attachAssetsToNode(ask.nodeId, chosen);
+      } else {
+        // Placing lands clips on the open cut, one after another from the
+        // playhead; the room says what it did, so the dialog just closes.
+        addAssetsAtPlayhead(chosen);
       }
       close();
     } finally {
@@ -239,16 +244,33 @@ export function AssetPickerModal() {
 
   const count =
     chosen.length === 0
-      ? "Nothing is chosen yet"
+      ? t("editor:picker.nothingChosen")
       : ask.mode === "nodes"
-        ? `Will be inserted as ${chosen.length} node${
-            chosen.length === 1 ? "" : "s"
-          }`
-        : `Will be added as ${chosen.length} reference${
-            chosen.length === 1 ? "" : "s"
-          }`;
+        ? t(
+            chosen.length === 1
+              ? "editor:picker.insertCountOne"
+              : "editor:picker.insertCountMany",
+            { count: chosen.length },
+          )
+        : ask.mode === "reference"
+          ? t(
+              chosen.length === 1
+                ? "editor:picker.addCountOne"
+                : "editor:picker.addCountMany",
+              { count: chosen.length },
+            )
+          : t(
+              chosen.length === 1
+                ? "editor:picker.placeCountOne"
+                : "editor:picker.placeCountMany",
+              { count: chosen.length },
+            );
   const title =
-    ask.mode === "nodes" ? "Insert from the shelf" : "Add from the shelf";
+    ask.mode === "nodes"
+      ? t("editor:picker.insertTitle")
+      : ask.mode === "reference"
+        ? t("editor:picker.addTitle")
+        : t("editor:picker.placeTitle");
 
   return (
     <div className="dialog-backdrop" onClick={close} role="presentation">
@@ -396,7 +418,13 @@ export function AssetPickerModal() {
             onClick={() => void take()}
             type="button"
           >
-            {busy ? "Working…" : ask.mode === "nodes" ? "Insert" : "Add"}
+            {busy
+              ? t("editor:picker.working")
+              : ask.mode === "nodes"
+                ? t("editor:action.insert")
+                : ask.mode === "reference"
+                  ? t("editor:action.add")
+                  : t("editor:action.place")}
           </button>
         </footer>
       </div>

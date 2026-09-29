@@ -1,25 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type {
-  AssetId,
-  MediaNodeData,
-  ResourceEntry,
-  WorkflowNode,
-} from "../../../shared/domain";
-import { createNode } from "../../../shared/domain/factories";
-import {
-  buildShelfMokaFile,
-  goldenNodeIds,
-} from "../../../shared/domain/fixtures";
+import type { AssetId, ResourceEntry } from "../../../shared/domain";
 import {
   MEDIA_FACES,
-  canvasHeldIds,
   faceShelf,
   isMediaFace,
   newestFirst,
-  projectLens,
 } from "./mediaLenses";
 
-/** A row on the shelf, with what the lenses read: an id and a filed time. */
+/** A row on the shelf, with what the lens reads: an id and a filed time. */
 function entry(id: AssetId, updatedAt: string): ResourceEntry {
   return {
     id,
@@ -32,106 +20,43 @@ function entry(id: AssetId, updatedAt: string): ResourceEntry {
   };
 }
 
-/** A card on a board, filled with the file (and poster) it points at. */
-function holding(kind: "image" | "video", data: MediaNodeData): WorkflowNode {
-  return { ...createNode(kind, { x: 0, y: 0 }), data };
-}
+const WHEN = "2026-01-01T00:00:00.000Z";
 
-describe("what the boards are holding", () => {
-  it("gathers what every board points at, posters included", () => {
-    const moka = buildShelfMokaFile();
-    moka.canvas[0].nodes.push(holding("image", { assetId: "image-main" }));
-    moka.canvas[1].nodes.push(
-      holding("video", {
-        assetId: "video-second",
-        posterAssetId: "image-poster",
-      }),
-    );
-
-    const held = canvasHeldIds(moka);
-    expect([...held].sort()).toEqual(
-      [
-        "image-main",
-        "image-poster",
-        "video-second",
-        goldenNodeIds().assetImage,
-      ].sort(),
-    );
-    // A file that no card points at is not held, and neither is anything on a
-    // document with no boards at all.
-    expect(held.has("image-unheld")).toBe(false);
-    expect(canvasHeldIds(buildShelfMokaFile()).has("image-unheld")).toBe(false);
-    expect(canvasHeldIds(null).size).toBe(0);
-  });
-});
-
-describe("what each face asks the shelf", () => {
-  it("stands the local face on what was brought in", () => {
-    expect(faceShelf("local").lens?.where).toBe("brought");
-  });
-
-  it("reads the project face open on origin, so it is a face of its own", () => {
-    expect(faceShelf("project").lens?.where).toBeNull();
-  });
-
-  it("keeps the words out of both source faces", () => {
-    for (const face of MEDIA_FACES) {
-      expect(faceShelf(face).kinds).not.toContain("text");
-    }
-  });
-
-  it("gives every face the cutting room's own way of reading the shelf", () => {
-    for (const face of MEDIA_FACES) {
-      const shelf = faceShelf(face);
-      expect(shelf.order).toBe("newest");
-      expect(shelf.addNodes).toBe(false);
-      expect(shelf.showAddNodes).toBe(false);
-      expect(shelf.acceptFileDrops).toBe(true);
-      expect(shelf.canvasActions).toBe(false);
-      expect(shelf.emptyText.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("knows which faces read the shelf at all", () => {
-    for (const face of MEDIA_FACES) expect(isMediaFace(face)).toBe(true);
+describe("what the cut's face asks the shelf", () => {
+  it("is the one media face, and the shelf's own", () => {
+    expect(MEDIA_FACES).toEqual(["cut"]);
+    expect(isMediaFace("cut")).toBe(true);
     for (const face of ["text", "filters", "adjust"] as const) {
       expect(isMediaFace(face)).toBe(false);
     }
   });
-});
 
-describe("what the project face narrows to", () => {
-  it("stands on what the models made when the face asks for the made", () => {
-    expect(faceShelf("project", { project: "made" }).lens?.where).toBe("made");
+  it("reads only the files the open cut holds", () => {
+    const shelf = faceShelf({ held: new Set(["clip-material"]) });
+    expect(shelf.lens?.narrow?.(entry("clip-material", WHEN))).toBe(true);
+    expect(shelf.lens?.narrow?.(entry("elsewhere", WHEN))).toBe(false);
   });
 
-  it("holds the canvas narrowing to the files the boards are using", () => {
-    const shelf = faceShelf("project", {
-      project: "canvas",
-      held: new Set(["image-held"]),
-    });
-    expect(
-      shelf.lens?.narrow?.(entry("image-held", "2026-01-01T00:00:00.000Z")),
-    ).toBe(true);
-    expect(
-      shelf.lens?.narrow?.(entry("image-loose", "2026-01-01T00:00:00.000Z")),
-    ).toBe(false);
+  it("holds an empty cut to nothing rather than to everything", () => {
+    expect(faceShelf().lens?.narrow?.(entry("anything", WHEN))).toBe(false);
   });
 
-  it("reads open on origin when nothing narrows it", () => {
-    const lens = projectLens("all", new Set());
-    expect(lens.where).toBeNull();
-    expect(lens.narrow).toBeUndefined();
+  it("leaves the origin question to the shelf", () => {
+    // A lens that only narrows has not answered where a file came from, so
+    // the shelf still asks: the cut's material can be narrowed to what was
+    // brought in or made.
+    expect(faceShelf().lens?.where).toBeUndefined();
   });
 
-  it("says its own words when a narrowing of its own holds nothing", () => {
-    expect(faceShelf("project", { project: "made" }).emptyText).toBe(
-      "clip:mediaLenses.made",
-    );
-    expect(faceShelf("project", { project: "canvas" }).emptyText).toBe(
-      "clip:mediaLenses.canvas",
-    );
-    expect(faceShelf("project").emptyText).toBe("clip:mediaLenses.project");
+  it("gives the face the cutting room's own way of reading the shelf", () => {
+    const shelf = faceShelf();
+    expect(shelf.kinds).not.toContain("text");
+    expect(shelf.emptyText).toBe("clip:mediaLenses.cut");
+    expect(shelf.order).toBe("newest");
+    expect(shelf.addNodes).toBe(false);
+    expect(shelf.showAddNodes).toBe(false);
+    expect(shelf.acceptFileDrops).toBe(true);
+    expect(shelf.canvasActions).toBe(false);
   });
 });
 

@@ -25,6 +25,7 @@ import { useClipStore } from "../stores/clipStore";
 import { frameAligned } from "../timeline/timecode";
 import {
   addAssetAtPlayhead,
+  addAssetsAtPlayhead,
   addTrackOfKind,
   alignSelection,
   clickSelection,
@@ -590,6 +591,25 @@ function stackedCut(options: { lockUpper: boolean }): {
 }
 
 describe("adding at the playhead", () => {
+  /** A video file to land, with the length its probe says it runs. */
+  function videoEntry(id: string, durationMs: number): ResourceEntry {
+    return {
+      id,
+      name: `${id}.mp4`,
+      path: `assets/videos/${id}.mp4`,
+      mime: "video/mp4",
+      bytes: 1_000,
+      createdAt: NOW,
+      updatedAt: NOW,
+      probe: {
+        mime: "video/mp4",
+        bytes: 1_000,
+        sha256: "b".repeat(64),
+        durationMs,
+      },
+    };
+  }
+
   it("takes the topmost unlocked row of the file's kind, whatever is chosen", () => {
     const { moka, ids, upperId } = stackedCut({ lockUpper: false });
     open(moka, {
@@ -646,6 +666,85 @@ describe("adding at the playhead", () => {
 
     expect(cut().clips).toHaveLength(1);
     expect(messages()).toEqual(["Text clips are made on the Text page."]);
+  });
+
+  it("lands a batch one after another, the cursor walking along", () => {
+    const { moka, ids } = stackedCut({ lockUpper: false });
+    moka.resources.videos.push(
+      videoEntry("asset-b", 2_000),
+      videoEntry("asset-c", 3_000),
+    );
+    open(moka, { timelineId: ids.timeline, playheadMs: 1_234 });
+
+    addAssetsAtPlayhead([ids.videoAsset, "asset-b", "asset-c"]);
+
+    const start = frameAligned(1_234, 30);
+    const landed = cut()
+      .clips.filter(
+        (clip) =>
+          clip.assetId === "asset-b" ||
+          clip.assetId === "asset-c" ||
+          (clip.assetId === ids.videoAsset && clip.id !== ids.videoClip),
+      )
+      .sort((left, right) => left.startMs - right.startMs);
+    expect(landed.map((clip) => clip.startMs)).toEqual([
+      start,
+      start + 4_000,
+      start + 6_000,
+    ]);
+    // The last of the run is what is left chosen, and one line says the lot.
+    expect(useClipStore.getState().selection.clipIds).toEqual([landed[2].id]);
+    expect(messages()).toEqual(["Added 3 files, one after another."]);
+  });
+
+  it("skips words in a batch and still lands the rest", () => {
+    const { moka, ids } = stackedCut({ lockUpper: false });
+    moka.resources.texts.push({
+      id: "asset-notes",
+      name: "notes.md",
+      path: "assets/texts/notes-00000000.md",
+      mime: "text/markdown",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    open(moka, { timelineId: ids.timeline, playheadMs: 0 });
+
+    addAssetsAtPlayhead(["asset-notes", "asset-score", ids.videoAsset]);
+
+    expect(messages()).toEqual([
+      "Text clips are made on the Text page.",
+      "Added 2 files, one after another.",
+    ]);
+    const audio = cut().clips.find(
+      (clip) => clip.assetId === "asset-score" && clip.id !== "clip-score",
+    )!;
+    expect(audio.startMs).toBe(0);
+    // The video lands after the sound that took its place in the run, not at
+    // the playhead the sound already used: six seconds of score, then the cut.
+    const video = cut().clips.find(
+      (clip) => clip.assetId === ids.videoAsset && clip.id !== ids.videoClip,
+    )!;
+    expect(video.startMs).toBe(6_000);
+  });
+
+  it("refuses a locked kind in a batch and still lands the rest", () => {
+    const { moka, ids, upperId } = stackedCut({ lockUpper: true });
+    const timeline = moka.timelines![0];
+    // Both video rows locked, so only the sound has a row to land on; the
+    // fixture's own sound is cleared away so the landing place is free.
+    timeline.tracks = timeline.tracks.map((track) =>
+      track.id === upperId
+        ? track
+        : { ...track, locked: track.kind === "video" },
+    );
+    timeline.clips = timeline.clips.filter((clip) => clip.id !== "clip-score");
+    open(moka, { timelineId: ids.timeline, playheadMs: 500 });
+
+    addAssetsAtPlayhead([ids.videoAsset, "asset-score"]);
+
+    expect(messages()).toEqual(["That track is locked."]);
+    const late = cut().clips.filter((clip) => clip.startMs >= 500);
+    expect(late.map((clip) => clip.assetId)).toEqual(["asset-score"]);
   });
 });
 

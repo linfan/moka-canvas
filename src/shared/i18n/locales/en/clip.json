@@ -144,38 +144,30 @@
   "rail": {
     "adjust": "Adjust",
     "adjustHint": "Speed, volume and opacity",
+    "cut": "This cut",
+    "cutHint": "The material this cut is made of",
     "filters": "Filters",
     "filtersHint": "The look a clip wears",
     "label": "Clip panels",
-    "local": "Local",
-    "localHint": "Files on this machine",
-    "project": "Project",
-    "projectHint": "Everything the project holds",
     "text": "Text",
     "textHint": "Words on the cut"
   },
   "mediaColumn": {
     "addAria": "Add {{name}} at the playhead",
     "adjust": "Adjust",
-    "filterAll": "All",
-    "filterCanvas": "On canvas",
-    "filterLabel": "Filter the project's material",
-    "filterMade": "Made",
+    "cut": "This cut",
     "filters": "Filters",
-    "local": "Local media",
+    "fromProject": "From the project",
+    "fromProjectHint": "Take files from the whole project",
     "pauseAria": "Pause {{name}}",
     "pausePreview": "Pause the preview",
     "playAria": "Play {{name}}",
     "previewSound": "Preview this sound",
     "previewVideo": "Preview this video",
-    "project": "Project media",
     "text": "Text"
   },
   "mediaLenses": {
-    "canvas": "No canvas is holding a file yet.",
-    "local": "Nothing brought in yet — import files, or drop them here.",
-    "made": "Nothing made by the models yet.",
-    "project": "No media in this project yet."
+    "cut": "This cut holds no material yet — import files, or take them from the project."
   },
   "filters": {
     "cool": "Cool",
@@ -398,7 +390,8 @@
     "textClipsOnTextPage": "Text clips are made on the Text page.",
     "tooShortToSplit": "Too short to split at the playhead.",
     "trackLocked": "That track is locked.",
-    "videoOnVideoTrack": "A video or an image goes on a video track."
+    "videoOnVideoTrack": "A video or an image goes on a video track.",
+    "addedInOrder": "Added {{count}} files, one after another."
   },
   "subtitles": {
     "clipLimit": "The timeline holds at most {{max}} clips — delete {{extra}} first.",

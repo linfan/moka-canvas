@@ -406,34 +406,65 @@ export function firstAcceptingTrack(
  * The first row that takes the kind and will hold an edit, topmost first, is
  * the one it lands on; the words said afterwards are the only answer a reader
  * gets, since the clip may well land out of sight of where they are looking.
+ * A batch of files is the same act repeated, each one taking up where the last
+ * left off — see `addAssetsAtPlayhead`.
  */
 export function addAssetAtPlayhead(assetId: AssetId): void {
-  const timeline = activeTimeline();
-  if (!timeline) return;
-  const entry = findAsset(useProjectStore.getState().moka, assetId);
-  if (!entry) return;
-  const kind = clipKindFor(entry);
-  if (kind === null) {
-    toast("info", i18n.t("clip:actions.textClipsOnTextPage"));
-    return;
+  addAssetsAtPlayhead([assetId]);
+}
+
+/**
+ * Lands the chosen files on the cut, one after another from the playhead.
+ *
+ * A batch reads as a sequence rather than a pile: the first file lands at the
+ * playhead and each one after it at the end of the one before, walking the
+ * cursor along as it goes. What a single file is refused with — words belong
+ * on the text page, a locked row, the wrong kind of row — refuses that file
+ * here too, and the rest still land: a reader picking ten files is not to lose
+ * nine of them to one that had nowhere to go. The document moves once per
+ * file, so each landing is one step of history on its own.
+ */
+export function addAssetsAtPlayhead(assetIds: AssetId[]): void {
+  let cursor: number | null = null;
+  let landed = 0;
+  for (const assetId of assetIds) {
+    const timeline = activeTimeline();
+    if (!timeline) return;
+    const entry = findAsset(useProjectStore.getState().moka, assetId);
+    if (!entry) continue;
+    const kind = clipKindFor(entry);
+    if (kind === null) {
+      toast("info", i18n.t("clip:actions.textClipsOnTextPage"));
+      continue;
+    }
+    const track = firstAcceptingTrack(timeline, kind);
+    if (!track) {
+      const takesKind = timeline.tracks.some((row) => trackAccepts(row, kind));
+      toast(
+        "error",
+        takesKind ? i18n.t("clip:actions.trackLocked") : kindMismatch(kind),
+      );
+      continue;
+    }
+    const startMs =
+      cursor ??
+      frameAligned(useClipStore.getState().playheadMs, timeline.settings.fps);
+    const clip = landOnTrack(timeline, entry, track, startMs);
+    if (!clip) continue;
+    cursor = clip.startMs + clip.durationMs;
+    landed += 1;
+    useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
+    if (assetIds.length === 1) {
+      toast("success", i18n.t("clip:actions.added", { name: entry.name }));
+    }
   }
-  const track = firstAcceptingTrack(timeline, kind);
-  if (!track) {
-    const takesKind = timeline.tracks.some((row) => trackAccepts(row, kind));
-    toast(
-      "error",
-      takesKind ? i18n.t("clip:actions.trackLocked") : kindMismatch(kind),
-    );
-    return;
+  // One word for a batch rather than one a file: what was refused already said
+  // so for itself, and a reader who picked ten files does not need ten lines.
+  // A batch that landed one file is nothing to report beyond that file's own
+  // arrival in the cut, which the timeline already shows.
+  if (landed > 1) {
+    toast("success", i18n.t("clip:actions.addedInOrder", { count: landed }));
   }
-  const startMs = frameAligned(
-    useClipStore.getState().playheadMs,
-    timeline.settings.fps,
-  );
-  const clip = landOnTrack(timeline, entry, track, startMs);
-  if (!clip) return;
-  useClipStore.getState().select({ clipIds: [clip.id], transitionId: null });
-  toast("success", i18n.t("clip:actions.added", { name: entry.name }));
 }
 
 // ---------------------------------------------------------------------------

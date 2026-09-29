@@ -1,20 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { AssetId, ResourceEntry } from "../../../shared/domain";
+import { timelineAssetIds } from "../../../shared/domain";
 import { PanelFold } from "../../editor/components/PanelFold";
 import { AssetShelf } from "../../editor/panels/AssetShelf";
+import { useEditorStore } from "../../editor/stores/editorStore";
 import { useProjectStore } from "../../editor/stores/projectStore";
 import { addAssetAtPlayhead } from "../interactions/clipActions";
 import { useClipStore, type ClipFace } from "../stores/clipStore";
 import { AdjustPanel } from "./AdjustPanel";
 import { FiltersPanel } from "./FiltersPanel";
-import {
-  canvasHeldIds,
-  faceShelf,
-  isMediaFace,
-  PROJECT_NARROWINGS,
-  type ProjectNarrowing,
-} from "./mediaLenses";
+import { faceShelf, isMediaFace } from "./mediaLenses";
 import {
   previewKindOf,
   stopMediaPreview,
@@ -24,17 +20,10 @@ import {
 import { TextPanel } from "./TextPanel";
 
 const TITLES: Record<ClipFace, string> = {
-  project: "clip:mediaColumn.project",
-  local: "clip:mediaColumn.local",
+  cut: "clip:mediaColumn.cut",
   text: "clip:mediaColumn.text",
   filters: "clip:mediaColumn.filters",
   adjust: "clip:mediaColumn.adjust",
-};
-
-const FILTER_LABELS: Record<ProjectNarrowing, string> = {
-  all: "clip:mediaColumn.filterAll",
-  made: "clip:mediaColumn.filterMade",
-  canvas: "clip:mediaColumn.filterCanvas",
 };
 
 /** The row's own small offer on a sound or a picture in motion: hear it, or
@@ -78,7 +67,7 @@ function PreviewAction({ entry }: { entry: ResourceEntry }) {
   );
 }
 
-/** The row's own small offer on every face: the file lands where the playhead is. */
+/** The row's own small offer: the file lands where the playhead is. */
 function AddAtPlayheadAction({ entry }: { entry: ResourceEntry }) {
   const { t } = useTranslation();
   return (
@@ -95,7 +84,7 @@ function AddAtPlayheadAction({ entry }: { entry: ResourceEntry }) {
   );
 }
 
-/** The row actions the media faces add to the shelf's own. */
+/** The row actions the cut's face adds to the shelf's own. */
 function mediaRowExtras(entry: ResourceEntry) {
   return (
     <>
@@ -110,75 +99,42 @@ function chooseMedia(id: AssetId) {
   useClipStore.getState().selectMedia(id);
 }
 
-/** A file that just arrived is a file to use: the column turns to Local. */
-function backToLocal() {
-  useClipStore.getState().setFace("local");
-}
-
-/**
- * The project face's own question, asked above the shelf rather than inside
- * its filter bar: which of the project's material the shelf is read for.
- */
-function ProjectFilter({
-  value,
-  onChange,
-}: {
-  value: ProjectNarrowing;
-  onChange: (next: ProjectNarrowing) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      aria-label={t("clip:mediaColumn.filterLabel")}
-      className="clip-media-filter"
-      role="group"
-    >
-      {PROJECT_NARROWINGS.map((option) => (
-        <button
-          aria-pressed={value === option}
-          className={value === option ? "is-active" : undefined}
-          data-testid={`clip-project-filter-${option}`}
-          key={option}
-          onClick={() => onChange(option)}
-          type="button"
-        >
-          {t(FILTER_LABELS[option])}
-        </button>
-      ))}
-    </div>
-  );
+/** The way to the whole project's shelf: the picker, in its placing mode. */
+function fromTheProject() {
+  useEditorStore.getState().openAssetPicker({ mode: "place" });
 }
 
 /**
  * The column between the rail and the stage.
  *
- * Two of the five faces read the project's shelf — the same shelf the canvas
- * column shows — through a lens apiece (mediaLenses says which), with each row
- * carrying the room's own offers: trying a sound or a video before it is used,
- * and landing the file at the playhead. The project face also asks a question
- * of its own above the shelf: everything the project holds, what the models
- * made, or what the boards are holding. The other three faces are the room's
- * quick tools: the words written on the cut, the looks a clip can wear, and
- * the sliders that grade it, the last two working on whatever the timeline
- * holds chosen.
+ * One face reads the cut's own material — the files the open timeline's clips
+ * hold, through the lens mediaLenses says — with each row carrying the room's
+ * own offers: trying a sound or a video before it is used, and landing the
+ * file at the playhead. Files brought in and placed nowhere wait in the tray
+ * above the list, and what the whole project holds is one press away in the
+ * picker rather than a second question in the column. The other three faces
+ * are the room's quick tools: the words written on the cut, the looks a clip
+ * can wear, and the sliders that grade it, the last two working on whatever
+ * the timeline holds chosen.
  */
 export function MediaColumn() {
   const { t } = useTranslation();
   const face = useClipStore((state) => state.face);
   const mediaSelection = useClipStore((state) => state.mediaSelection);
   const playing = useClipStore((state) => state.playing);
+  const activeTimelineId = useClipStore((state) => state.activeTimelineId);
   const moka = useProjectStore((state) => state.moka);
-  // What the boards are holding is a question about the document, answered
-  // once per document rather than once per row: the canvas narrowing reads
-  // the index.
-  const held = useMemo(() => canvasHeldIds(moka), [moka]);
-  const [projectFilter, setProjectFilter] = useState<ProjectNarrowing>("all");
+  // What this cut is made of, read once per document and timeline rather than
+  // once per row: the lens the shelf narrows through.
+  const held = useMemo(() => {
+    const timeline = moka?.timelines?.find(
+      (item) => item.id === activeTimelineId,
+    );
+    return new Set(timeline ? timelineAssetIds(timeline) : []);
+  }, [moka, activeTimelineId]);
   const shelf = useMemo(
-    () =>
-      isMediaFace(face)
-        ? faceShelf(face, { project: projectFilter, held })
-        : null,
-    [face, projectFilter, held],
+    () => (isMediaFace(face) ? faceShelf({ held }) : null),
+    [face, held],
   );
   const title = t(TITLES[face]);
 
@@ -198,19 +154,33 @@ export function MediaColumn() {
         <>
           <div className="clip-media-head">
             <h2>{title}</h2>
+            <button
+              className="clip-media-project"
+              data-testid="clip-from-project"
+              onClick={fromTheProject}
+              title={t("clip:mediaColumn.fromProjectHint")}
+              type="button"
+            >
+              {t("clip:mediaColumn.fromProject")}
+            </button>
           </div>
-          {face === "project" && (
-            <ProjectFilter onChange={setProjectFilter} value={projectFilter} />
-          )}
           <div className="clip-media-scroll">
             <AssetShelf
               key={face}
               {...shelf}
               emptyText={t(shelf.emptyText)}
-              onImported={backToLocal}
               onSelect={chooseMedia}
               rowExtras={mediaRowExtras}
               selectedId={mediaSelection}
+              unplaced={{
+                titleKey: "assets:shelf.unplaced",
+                action: (entry) => (
+                  <>
+                    <PreviewAction entry={entry} />
+                    <AddAtPlayheadAction entry={entry} />
+                  </>
+                ),
+              }}
             />
           </div>
         </>

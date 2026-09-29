@@ -3,9 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useClipStore, type ClipFace } from "../stores/clipStore";
 import {
   AdjustIcon,
+  CutIcon,
   FiltersIcon,
-  LocalIcon,
-  ProjectIcon,
   TextIcon,
 } from "../components/ClipIcons";
 
@@ -19,21 +18,15 @@ interface RailFace {
 }
 
 /**
- * Where the material comes from. Two places a clip can be found rather than
- * made: the project's own shelf, and this machine.
+ * What the cut is made of. One face: the material this cut holds, which is
+ * where a clip is found rather than made.
  */
 const SOURCES: RailFace[] = [
   {
-    face: "project",
-    label: "clip:rail.project",
-    hint: "clip:rail.projectHint",
-    icon: ProjectIcon,
-  },
-  {
-    face: "local",
-    label: "clip:rail.local",
-    hint: "clip:rail.localHint",
-    icon: LocalIcon,
+    face: "cut",
+    label: "clip:rail.cut",
+    hint: "clip:rail.cutHint",
+    icon: CutIcon,
   },
 ];
 
@@ -65,10 +58,10 @@ const TOOLS: RailFace[] = [
 /**
  * The rail down the left of the cutting room.
  *
- * Five faces of one column rather than five panels: sources above, tools
- * below, and the one being read is marked. The rail says what each face is
- * with its mark and its title, since a rail is a row of drawers and a drawer
- * that only shows a glyph is a drawer to be opened to be known.
+ * Four faces of one column rather than four panels: the material above, the
+ * tools below, and the one being read is marked. The rail says what each face
+ * is with its mark and its title, since a rail is a row of drawers and a
+ * drawer that only shows a glyph is a drawer to be opened to be known.
  */
 export function ClipRail() {
   const { t } = useTranslation();

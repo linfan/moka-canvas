@@ -494,8 +494,8 @@ test("auto subtitles read the sound on the cut, and a missing model is a place t
 
   // A sound laid at the playhead is what the ask is about. The shelf is a
   // face of the same column the text page is, so the file is brought in from
-  // the Local face and the page is turned back to afterwards.
-  await page.getByTestId("clip-face-local").click();
+  // the cut's own face and the page is turned back to afterwards.
+  await page.getByTestId("clip-face-cut").click();
   await page.getByLabel("Import files", { exact: true }).setInputFiles({
     name: "tiny.wav",
     mimeType: "audio/wav",

@@ -48,7 +48,7 @@ beforeEach(() => {
   useProjectStore.getState().close();
   useClipStore.setState({
     activeTimelineId: null,
-    face: "local",
+    face: "cut",
     selection: { clipIds: [], transitionId: null },
     adjustDraft: null,
     mediaSelection: null,
@@ -128,7 +128,7 @@ describe("what the cutting room is looking at", () => {
   });
 
   it("turns the column to the face it was asked for", () => {
-    expect(store().face).toBe("local");
+    expect(store().face).toBe("cut");
     store().setFace("filters");
     expect(store().face).toBe("filters");
   });

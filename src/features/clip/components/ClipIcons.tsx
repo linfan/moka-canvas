@@ -2,8 +2,8 @@
  * The marks the cutting room speaks in.
  *
  * Drawn here rather than taken from a set, one per face of the left column and
- * one per thing the room itself is made of, so a rail of five reads as five
- * different drawers rather than five copies of the same glyph. All of them are
+ * one per thing the room itself is made of, so a rail of four reads as four
+ * different drawers rather than four copies of the same glyph. All of them are
  * the same hand: a 24 box, one and a half strokes, round ends.
  */
 
@@ -11,8 +11,13 @@ interface IconProps {
   size?: number;
 }
 
-/** A folder: the files on this machine. */
-export function LocalIcon({ size = 18 }: IconProps) {
+/**
+ * A frame with a cut through it: the material this cut is made of.
+ *
+ * The seam is drawn broken rather than solid, since a cut is where the pieces
+ * meet — the line the room runs on from end to end.
+ */
+export function CutIcon({ size = 18 }: IconProps) {
   return (
     <svg
       aria-hidden="true"
@@ -25,27 +30,8 @@ export function LocalIcon({ size = 18 }: IconProps) {
       viewBox="0 0 24 24"
       width={size}
     >
-      <path d="M3.5 6.5h5.4l2 2.5h9.6v9.4a1.6 1.6 0 0 1-1.6 1.6H5.1a1.6 1.6 0 0 1-1.6-1.6V6.5Z" />
-    </svg>
-  );
-}
-
-/** A crate: what the project itself holds. */
-export function ProjectIcon({ size = 18 }: IconProps) {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height={size}
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.6"
-      viewBox="0 0 24 24"
-      width={size}
-    >
-      <path d="M4 8.2 12 4l8 4.2v7.6L12 20l-8-4.2V8.2Z" />
-      <path d="M4 8.2 12 12.4l8-4.2M12 12.4V20" />
+      <rect height="12" rx="1.6" width="17" x="3.5" y="6" />
+      <path d="M12 3.6v16.8" strokeDasharray="2.6 2.2" />
     </svg>
   );
 }

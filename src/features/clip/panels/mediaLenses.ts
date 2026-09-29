@@ -1,33 +1,34 @@
-import type { AssetId, AssetKind, MokaFile } from "../../../shared/domain";
+import type { AssetId, AssetKind } from "../../../shared/domain";
 import { ASSET_KINDS } from "../../../shared/domain";
-import { canvasAssetIds } from "../../editor/panels/canvasAssets";
+import { heldLens } from "../../editor/panels/shelfFilter";
 import type { ShelfLens } from "../../editor/panels/shelfFilter";
 import type { ClipFace } from "../stores/clipStore";
 
 /**
- * The two media faces, as lenses on the one shelf.
+ * The cutting room's one media face, as a lens on the shelf.
  *
- * A face is a question, and the shelf answers it: what the project holds, and
- * which files were brought in. Everything that is not the question — the
- * search, the words, the keepers, the paging, the rows with their drag-out —
- * is the shelf's own and is the same on every face.
+ * The column reads the cut's own material rather than the project's: the files
+ * the open timeline's clips hold, and nothing else. Everything the project
+ * holds is the files room's question, and the way to reach it from here is the
+ * picker — a cut is made of what is laid on it, and a shelf of a hundred files
+ * the cut does not touch is a shelf that hides the ones it does.
  *
- * Pure functions only: what a face passes to the shelf is decided here, so it
- * can be read and tested without a browser.
+ * Pure functions only: what the face passes to the shelf is decided here, so
+ * it can be read and tested without a browser.
  */
 
 /** The faces that read the shelf, in the rail's order. */
-export const MEDIA_FACES = ["project", "local"] as const;
+export const MEDIA_FACES = ["cut"] as const;
 
 export type MediaFace = (typeof MEDIA_FACES)[number];
 
-/** Whether a face of the rail is one of the shelf's own. */
+/** Whether a face of the rail is the shelf's own. */
 export function isMediaFace(face: ClipFace): face is MediaFace {
   return (MEDIA_FACES as readonly ClipFace[]).includes(face);
 }
 
 /**
- * The kinds a source face reads: pictures and sound.
+ * The kinds the cut's face reads: pictures and sound.
  *
  * The cutting room cuts what is seen and heard, and words have a page of their
  * own where they are written rather than laid on a track.
@@ -37,55 +38,6 @@ const MEDIA_KINDS: readonly AssetKind[] = ASSET_KINDS.filter(
 );
 
 export { newestFirst } from "../../editor/panels/shelfFilter";
-
-/**
- * What the project face narrows its shelf to: everything the project holds,
- * what the models made, or what the boards are holding.
- */
-export type ProjectNarrowing = "all" | "made" | "canvas";
-
-/** The narrowings in the order the project face offers them. */
-export const PROJECT_NARROWINGS = ["all", "made", "canvas"] as const;
-
-/** Every file the boards are holding, once each. */
-export function canvasHeldIds(moka: MokaFile | null): Set<AssetId> {
-  const held = new Set<AssetId>();
-  for (const canvas of moka?.canvas ?? []) {
-    for (const id of canvasAssetIds(canvas)) held.add(id);
-  }
-  return held;
-}
-
-/** The held set a caller that named none stands on: no board holds anything. */
-const NOTHING_HELD: ReadonlySet<AssetId> = new Set();
-
-/** What the project face reads the shelf through under each narrowing. */
-export function projectLens(
-  narrowing: ProjectNarrowing,
-  held: ReadonlySet<AssetId>,
-): ShelfLens {
-  switch (narrowing) {
-    case "all":
-      return { where: null };
-    case "made":
-      return { where: "made" };
-    case "canvas":
-      return { where: null, narrow: (entry) => held.has(entry.id) };
-  }
-}
-
-/** What a face has the shelf say when the face itself holds nothing. */
-const EMPTY_TEXT: Record<MediaFace, string> = {
-  project: "clip:mediaLenses.project",
-  local: "clip:mediaLenses.local",
-};
-
-/** What the project face says when a narrowing of its own holds nothing. */
-const PROJECT_EMPTY: Record<ProjectNarrowing, string> = {
-  all: EMPTY_TEXT.project,
-  made: "clip:mediaLenses.made",
-  canvas: "clip:mediaLenses.canvas",
-};
 
 /** Everything a face passes to the shelf, apart from its own row actions. */
 export interface FaceShelfProps {
@@ -107,44 +59,28 @@ export interface FaceShelfProps {
   canvasActions: false;
 }
 
-/** What the project face's own filter says, for the face to read the shelf by. */
+/** What the cut's face reads the shelf through. */
 export interface FaceShelfOptions {
-  /** Which narrowing the project face stands on; the local face has no say. */
-  project?: ProjectNarrowing;
-  /** Every file the boards are holding, which the canvas narrowing reads. */
+  /** Every file the open timeline's clips read. */
   held?: ReadonlySet<AssetId>;
 }
 
-/** What one face of the media column asks of the shelf. */
-export function faceShelf(
-  face: MediaFace,
-  options: FaceShelfOptions = {},
-): FaceShelfProps {
-  const common = {
-    emptyText: EMPTY_TEXT[face],
+/** What the cut's own material is: the files the open timeline's clips read. */
+const NOTHING_HELD: ReadonlySet<AssetId> = new Set();
+
+/** What the face of the media column asks of the shelf. */
+export function faceShelf(options: FaceShelfOptions = {}): FaceShelfProps {
+  return {
+    kinds: MEDIA_KINDS,
+    // A lens that only narrows: the face has not answered the origin question,
+    // so the shelf still asks it — a cut's material can be narrowed to what
+    // was made or what was brought in on top of belonging to this cut.
+    lens: heldLens(options.held ?? NOTHING_HELD),
+    emptyText: "clip:mediaLenses.cut",
     order: "newest",
     addNodes: false,
     showAddNodes: false,
     acceptFileDrops: true,
     canvasActions: false,
-  } as const;
-  switch (face) {
-    /*
-      Both faces are the origin question themselves, so the shelf is read
-      through a lens even where that lens narrows nothing: an open lens is
-      what tells the shelf the face has already asked where the files came
-      from, and that the reader should not be asked again on top of it.
-    */
-    case "local":
-      return { ...common, kinds: MEDIA_KINDS, lens: { where: "brought" } };
-    case "project": {
-      const narrowing = options.project ?? "all";
-      return {
-        ...common,
-        kinds: MEDIA_KINDS,
-        emptyText: PROJECT_EMPTY[narrowing],
-        lens: projectLens(narrowing, options.held ?? NOTHING_HELD),
-      };
-    }
-  }
+  };
 }

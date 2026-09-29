@@ -155,8 +155,8 @@ async function importFile(
     .setInputFiles({ name, mimeType, buffer });
   // A shelf opens on pictures, so a sound arriving is waited for under the
   // audio tab of the face it lands on. The tab is pressed right after the
-  // drop rather than before it: the import's own finish turns the column
-  // back to Local, which would undo a face turned over too early.
+  // import rather than before it: what arrived waits in the tray above the
+  // cut's own list, and a tab turned over too early would be left behind.
   if (mimeType.startsWith("audio/")) {
     await page.getByTestId("asset-kind-audio").click();
   }

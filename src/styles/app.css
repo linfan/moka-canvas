@@ -4030,42 +4030,27 @@ button.danger:hover:not(:disabled) {
   overflow-y: auto;
 }
 
-/* A face's own question, asked above the shelf rather than inside its filter
-   bar: the chips change the lens the face reads through, so they are the
-   face's own offer and are marked like the face is turned to them. */
-.clip-media-filter {
-  display: flex;
-  flex: none;
-  gap: 4px;
-}
-
-.clip-media-filter button {
-  background: var(--surface-raised);
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 11px;
-  padding: 3px 10px;
-}
-
-.clip-media-filter button:hover:not(:disabled) {
-  color: var(--ink);
-}
-
-.clip-media-filter button.is-active {
-  border-color: var(--primary);
-  color: var(--ink);
-}
-
 /* A media face's head, and the shelf filling what the head leaves. The shelf
    itself is the canvas column's, styles and all; a face only says which
    question it is reading, and gives the shelf the room the column has. */
 .clip-media-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
   padding-right: 10px;
 }
 
 .clip-media-head h2 {
   margin: 0;
+}
+
+/* The way out of this cut's own material: a file the cut does not hold is
+   taken from the whole project's shelf, which is the picker's question rather
+   than a second list in the column. */
+.clip-media-project {
+  flex: none;
+  font-size: 12px;
 }
 
 .clip-media-scroll {

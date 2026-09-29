@@ -144,38 +144,30 @@
   "rail": {
     "adjust": "调整",
     "adjustHint": "速度、音量与不透明度",
+    "cut": "本剪辑",
+    "cutHint": "本剪辑用到的素材",
     "filters": "滤镜",
     "filtersHint": "片段的观感",
     "label": "剪辑面板",
-    "local": "本地",
-    "localHint": "本机的文件",
-    "project": "项目",
-    "projectHint": "项目中的全部素材",
     "text": "文字",
     "textHint": "剪辑上的文字"
   },
   "mediaColumn": {
     "addAria": "在播放头处添加 {{name}}",
     "adjust": "调整",
-    "filterAll": "全部",
-    "filterCanvas": "画布",
-    "filterLabel": "筛选项目素材",
-    "filterMade": "生成",
+    "cut": "本剪辑",
     "filters": "滤镜",
-    "local": "本地素材",
+    "fromProject": "从项目添加",
+    "fromProjectHint": "从整个项目中挑选文件",
     "pauseAria": "暂停 {{name}}",
     "pausePreview": "暂停预览",
     "playAria": "播放 {{name}}",
     "previewSound": "试听这段声音",
     "previewVideo": "预览这段视频",
-    "project": "项目素材",
     "text": "文字"
   },
   "mediaLenses": {
-    "canvas": "还没有画板使用任何文件。",
-    "local": "还没有导入任何内容——导入文件，或把文件拖到这里。",
-    "made": "模型还没有生成任何内容。",
-    "project": "此项目中还没有素材。"
+    "cut": "此剪辑还没有素材——导入文件，或从项目中添加。"
   },
   "filters": {
     "cool": "冷色",
@@ -398,7 +390,8 @@
     "textClipsOnTextPage": "文字片段在文字页面创建。",
     "tooShortToSplit": "片段太短，无法在播放头处分割。",
     "trackLocked": "该轨道已锁定。",
-    "videoOnVideoTrack": "视频或图片应放在视频轨道上。"
+    "videoOnVideoTrack": "视频或图片应放在视频轨道上。",
+    "addedInOrder": "已依次添加 {{count}} 个文件。"
   },
   "subtitles": {
     "clipLimit": "时间线最多容纳 {{max}} 个片段——请先删除 {{extra}} 个。",

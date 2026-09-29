@@ -25,9 +25,9 @@ import { AssetsInspector } from "./AssetsInspector";
 
 const fetchMock = vi.fn<typeof fetch>();
 
-function json(body: unknown): Response {
+function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   });
 }

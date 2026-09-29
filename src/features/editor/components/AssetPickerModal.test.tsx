@@ -11,13 +11,16 @@ import { undo } from "../commands/execute";
 import type { GenerationSpec, MokaFile } from "../../../shared/domain";
 import {
   buildShelfMokaFile,
+  buildTimelineMokaFile,
   goldenNodeIds,
+  timelineIds,
 } from "../../../shared/domain/fixtures";
 import { AssetPickerModal } from "./AssetPickerModal";
 import { useAppStore } from "../stores/appStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useHistoryStore } from "../stores/historyStore";
 import { useProjectStore } from "../stores/projectStore";
+import { useClipStore } from "../../clip/stores/clipStore";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -253,5 +256,40 @@ describe("the asset picker", () => {
     });
     expect(screen.getByText("opening-lines.md")).toBeTruthy();
     expect(screen.queryByText("lake.png")).toBeNull();
+  });
+
+  it("lands a pick on the open cut, one clip after another", async () => {
+    const ids = timelineIds();
+    openProject(buildTimelineMokaFile());
+    useClipStore.setState({
+      activeTimelineId: ids.timeline,
+      playheadMs: 5_000,
+    });
+    useEditorStore.getState().openAssetPicker({ mode: "place" });
+    render(<AssetPickerModal />);
+
+    expect(screen.getByRole("dialog", { name: "Add to the cut" })).toBeTruthy();
+    fireEvent.click(screen.getByTestId(`asset-pick-${ids.videoAsset}`));
+    fireEvent.click(screen.getByTestId(`asset-pick-${ids.followerAsset}`));
+    expect(screen.getByTestId("asset-pick-count").textContent).toBe(
+      "Will be added as 2 clips, one after another from the playhead",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Place" }));
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().assetPicker).toBeNull();
+    });
+    const timeline = (useProjectStore.getState().moka?.timelines ?? [])[0];
+    const landed = timeline.clips
+      .filter(
+        (clip) =>
+          clip.assetId === ids.followerAsset ||
+          (clip.assetId === ids.videoAsset && clip.id !== ids.videoClip),
+      )
+      .sort((left, right) => left.startMs - right.startMs);
+    expect(landed.map((clip) => clip.startMs)).toEqual([5_000, 9_000]);
+    expect(useAppStore.getState().toasts.at(-1)?.message).toBe(
+      "Added 2 files, one after another.",
+    );
   });
 });
