@@ -2813,20 +2813,31 @@ button.danger:hover:not(:disabled) {
 }
 
 /* In the panel the field takes the room that is left and the words scroll
-   inside it, rather than the field deciding how tall the panel is. */
+   inside it, rather than the field deciding how tall the panel is. It is not
+   squeezed below the box it draws, though: a field given less room than that
+   used to paint its bottom edge over whatever came next, and the controls
+   under it — the model picker, the references — read as controls the prompt
+   box had swallowed. */
 .prompt-panel-prompt .mention-field {
   flex: 1;
   grid-template-rows: minmax(60px, 1fr) auto;
-  min-height: 0;
 }
 
 .prompt-panel-prompt .mention-field-area {
   min-height: 0;
 }
 
+/* The box the words are written in is the room the field was given, taken
+   whole: laid out in the flow it would ask for as much room as its words take,
+   which for a long ask is more than the panel has and pushes the controls
+   under it out of the panel altogether. Filling the room instead, the words
+   scroll inside the box and everything below stays where it was. */
 .prompt-panel-prompt .prompt-panel-input {
-  height: 100%;
-  min-height: 60px;
+  inset: 0;
+  /* The room the box takes is the room the field was given, and the shortest
+     that comes to is the field's own row: nothing here asks for more. */
+  min-height: 0;
+  position: absolute;
   /* Room at the foot of the box for the control standing in its corner, so
      the last line of words is not written under a button. */
   padding-bottom: 30px;
