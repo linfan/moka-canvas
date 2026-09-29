@@ -69,6 +69,7 @@ import type {
   StoryChapter,
   StoryDocument,
   StoryElement,
+  StoryKeyframe,
   StorySlot,
 } from "./types";
 
@@ -634,6 +635,53 @@ describe("mergeActs", () => {
     expect(merged[0].keyframes[0].video.takes).toHaveLength(1);
     expect(merged[0].keyframes[0].content).toBe("新画面");
     expect(merged[0].keyframes[0].dialogue[0].characterId).toBe("element-hero");
+  });
+
+  it("gives a line written over one that stood there a name of its own, and keeps the first one's", () => {
+    const held = createActFor("chapter-1");
+    const frame = createKeyframe(0);
+    frame.dialogue = [
+      { id: "line-first", speaker: "林", text: "走吧" },
+      { id: "line-second", speaker: "周", text: "再等等。" },
+    ];
+    held.keyframes = [frame];
+
+    const merged = mergeActs(
+      [held],
+      [
+        {
+          title: "新标题",
+          summary: "新内容",
+          characters: ["element-hero"],
+          props: [],
+          sound: { music: "", sfx: "" },
+          keyframes: [
+            {
+              shotSize: "close",
+              cameraMove: "static",
+              angle: "low",
+              content: "新画面",
+              durationMs: 1_500,
+              dialogue: [
+                // The same line, rewritten: the name is kept, and the words it
+                // was read in are what will say it is out of date.
+                { speaker: "林", text: "走吧，天亮了。" },
+                // The one that stood second is now third, and the new line in
+                // its place is the one that arrives unnamed: a line is paired
+                // with the one that stood in its place, as a shot is.
+                { speaker: "林", text: "听见了。" },
+                { speaker: "周", text: "再等等。" },
+              ],
+            },
+          ],
+        },
+      ],
+    );
+
+    const lines = merged[0].keyframes[0].dialogue;
+    expect(lines[0]?.id).toBe("line-first");
+    expect(lines[0]?.text).toBe("走吧，天亮了。");
+    expect(new Set(lines.map((line) => line.id)).size).toBe(3);
   });
 
   it("lets an act that is no longer boarded go, with its frames", () => {
@@ -1287,13 +1335,15 @@ describe("the board commands", () => {
       patch: {
         shotSize: "extremeWide",
         durationMs: 1_200,
-        dialogue: [{ speaker: "周", text: "车还会来。" }],
+        dialogue: [{ id: "line-second", speaker: "周", text: "车还会来。" }],
       },
     });
     const frame = storyOfFile(next).chapters[0].acts[0].keyframes[1];
     expect(frame.shotSize).toBe("extremeWide");
     expect(frame.durationMs).toBe(1_200);
-    expect(frame.dialogue).toEqual([{ speaker: "周", text: "车还会来。" }]);
+    expect(frame.dialogue).toEqual([
+      { id: "line-second", speaker: "周", text: "车还会来。" },
+    ]);
     expect(frame.content).toBe("`周`转过身来。");
 
     expect(
@@ -1306,6 +1356,33 @@ describe("the board commands", () => {
           keyframeId: ids.frameSecond,
           patch: { durationMs: 10 },
         }),
+      ),
+    ).toBe("VALIDATION_FAILED");
+  });
+
+  it("refuses a line with no name of its own, or two sharing one", () => {
+    const moka = buildStoryMokaFile();
+    const ids = storyIds();
+    const writing = (dialogue: StoryKeyframe["dialogue"]) => () =>
+      apply(moka, {
+        type: "updateStoryKeyframe",
+        storyId: ids.story,
+        chapterId: ids.chapterFirst,
+        actId: ids.act,
+        keyframeId: ids.frameSecond,
+        patch: { dialogue },
+      });
+    // A line is what the things kept for it are filed under: a patch naming
+    // none, or naming one twice, is refused rather than written.
+    expect(
+      codeOf(writing([{ id: "", speaker: "周", text: "车还会来。" }])),
+    ).toBe("VALIDATION_FAILED");
+    expect(
+      codeOf(
+        writing([
+          { id: "same", speaker: "周", text: "车还会来。" },
+          { id: "same", speaker: "周", text: "车不会来了。" },
+        ]),
       ),
     ).toBe("VALIDATION_FAILED");
   });

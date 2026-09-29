@@ -2740,12 +2740,21 @@ function checkDialogue(lines: StoryKeyframe["dialogue"]) {
       "VALIDATION_FAILED",
       i18n.t("errors:command.storyDialogueTooLong"),
     );
+  const seen = new Set<string>();
   for (const line of lines) {
     if (line.text.trim().length === 0)
       throw new CommandError(
         "VALIDATION_FAILED",
         i18n.t("errors:command.storyDialogueEmpty"),
       );
+    // A line is what the things kept for it are filed under, so two lines
+    // sharing a name would be two lines with one take between them.
+    if (line.id.trim().length === 0 || seen.has(line.id))
+      throw new CommandError(
+        "VALIDATION_FAILED",
+        i18n.t("errors:command.storyDialogueUnnamed"),
+      );
+    seen.add(line.id);
     if (
       line.text.length > MAX_DIALOGUE_LINE_LENGTH ||
       line.speaker.length === 0

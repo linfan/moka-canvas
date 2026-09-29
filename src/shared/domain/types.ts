@@ -677,10 +677,16 @@ export type StoryFilmRole = (typeof STORY_FILM_ROLES)[number];
 /**
  * A line of dialogue.
  *
+ * A line is known by a name of its own because things are kept for one line at
+ * a time: the take a line was read aloud in, whether it is being read just
+ * now, and whether the words have been edited since. Position would not do —
+ * a line inserted above would move every take below it onto the wrong words.
+ *
  * The speaker's name is kept beside the reference, so a line still reads after
  * its character has been taken out of the story.
  */
 export interface StoryDialogueLine {
+  id: string;
   characterId?: string;
   speaker: string;
   text: string;

@@ -213,6 +213,33 @@ describe("moka codec", () => {
     ).toBe(REFERENCE_IMAGES_MAX);
   });
 
+  it("gives a line of a telling written before lines had names one as it is read", () => {
+    const moka = buildStoryMokaFile();
+    const raw = deserialize(
+      Buffer.from(encodeMokaFile(moka)).subarray(4),
+    ) as Record<string, unknown>;
+    const storyDoc = (raw.stories as Record<string, unknown>[])[0];
+    const chapters = storyDoc.chapters as Record<string, unknown>[];
+    const acts = chapters[0].acts as Record<string, unknown>[];
+    const frames = acts[0].keyframes as Record<string, unknown>[];
+    const dialogue = frames[0].dialogue as Record<string, unknown>[];
+    for (const line of dialogue) delete line.id;
+    const bson = serialize(raw);
+    const bytes = new Uint8Array(4 + bson.length);
+    bytes.set(MOKA_MAGIC, 0);
+    bytes.set(bson, 4);
+
+    const read = decodeMokaFile(bytes);
+    const lines = read.stories![0].chapters[0].acts[0].keyframes[0].dialogue;
+    expect(lines[0]?.id).toBeTruthy();
+    // The name is written out with the document, so the read after it — and
+    // every ask made against it — knows the same line by the same name.
+    const again = decodeMokaFile(encodeMokaFile(read));
+    expect(
+      again.stories![0].chapters[0].acts[0].keyframes[0].dialogue[0]?.id,
+    ).toBe(lines[0]?.id);
+  });
+
   it("reads the steps a document settled one place at a time as settled steps", () => {
     // A story written before the room confirmed whole steps said the same
     // thing a piece at a time: this is that document, put back on the wire.

@@ -1074,9 +1074,53 @@ describe("writing an episode's board", () => {
       expect(acts()[0]?.keyframes[0]?.dialogue).toHaveLength(2),
     );
     const lines = acts()[0]?.keyframes[0]?.dialogue ?? [];
+    // Every line arrives with a name of its own, and no two share one: what a
+    // take read aloud is filed under is the line's own name.
+    expect(lines[0]?.id).toBeTruthy();
+    expect(lines[1]?.id).toBeTruthy();
+    expect(lines[0]?.id).not.toBe(lines[1]?.id);
     expect(lines[0]?.speaker).toBe("林");
     expect(lines[0]?.text).toBe("车已经停运了。");
-    expect(lines[1]).toEqual({ speaker: "画外音", text: "末班车，不停了。" });
+    expect(lines[1]?.speaker).toBe("画外音");
+    expect(lines[1]?.text).toBe("末班车，不停了。");
+    expect(lines[1]?.characterId).toBeUndefined();
+  });
+
+  it("gives a line the character it is read by, and reads a typed name against the cast", async () => {
+    openAtBoard(boarded());
+    fireEvent.click(screen.getByTestId("story-kf-dialogue-0"));
+
+    // The line the board wrote for 林 opens with him picked, his name beside it.
+    const pick = screen.getByTestId("story-line-role-0") as HTMLSelectElement;
+    expect(pick.value).toBe(ids.hero);
+    expect(
+      (screen.getByTestId("story-line-speaker-0") as HTMLInputElement).value,
+    ).toBe("林");
+
+    // Picking another character of the act carries his name with him.
+    fireEvent.change(pick, { target: { value: ids.partner } });
+    expect(
+      (screen.getByTestId("story-line-speaker-0") as HTMLInputElement).value,
+    ).toBe("周");
+    fireEvent.click(screen.getByTestId("story-line-done"));
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[0]?.dialogue[0]?.characterId).toBe(
+        ids.partner,
+      ),
+    );
+    expect(acts()[0]?.keyframes[0]?.dialogue[0]?.speaker).toBe("周");
+
+    // A name written by hand that is nobody in the cast is a line off the
+    // cast, and it keeps the name it was written with.
+    fireEvent.click(screen.getByTestId("story-kf-dialogue-0"));
+    fireEvent.change(screen.getByTestId("story-line-speaker-0"), {
+      target: { value: "广播里的声音" },
+    });
+    fireEvent.click(screen.getByTestId("story-line-done"));
+    await waitFor(() =>
+      expect(acts()[0]?.keyframes[0]?.dialogue[0]?.characterId).toBeUndefined(),
+    );
+    expect(acts()[0]?.keyframes[0]?.dialogue[0]?.speaker).toBe("广播里的声音");
   });
 
   it("names every control by the shot and the column it belongs to", () => {

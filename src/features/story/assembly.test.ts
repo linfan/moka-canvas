@@ -54,8 +54,12 @@ function actFor(
     act.keyframes = act.keyframes.map((keyframe, at) => ({
       ...keyframe,
       dialogue: [
-        { speaker: "Keeper", text: `Line ${at * 2 + 1}.` },
-        { speaker: "", text: `Line ${at * 2 + 2}.` },
+        {
+          id: `line-${at * 2 + 1}`,
+          speaker: "Keeper",
+          text: `Line ${at * 2 + 1}.`,
+        },
+        { id: `line-${at * 2 + 2}`, speaker: "", text: `Line ${at * 2 + 2}.` },
       ],
     }));
   }
@@ -286,13 +290,19 @@ describe("the captions of an assembly", () => {
     // Three lines over two shots of one act: the first shot says two of them.
     const act = held.chapters[0]!.acts[0]!;
     act.keyframes[0]!.dialogue = [
-      { speaker: "Keeper", text: "It stopped running years ago." },
-      { speaker: "", text: "The doors stay shut." },
+      {
+        id: "line-a",
+        speaker: "Keeper",
+        text: "It stopped running years ago.",
+      },
+      { id: "line-b", speaker: "", text: "The doors stay shut." },
     ];
-    act.keyframes[1]!.dialogue = [{ speaker: "Keeper", text: "Not tonight." }];
+    act.keyframes[1]!.dialogue = [
+      { id: "line-c", speaker: "Keeper", text: "Not tonight." },
+    ];
     // And one line in the episode that follows, whose clip starts at 5s.
     held.chapters[1]!.acts[0]!.keyframes[0]!.dialogue = [
-      { speaker: "", text: "The carriage is empty." },
+      { id: "line-d", speaker: "", text: "The carriage is empty." },
     ];
     const plan = planAssembly(held, moka);
     const { commands, clipByAct } = assemblyCommands(held, moka, plan, {
@@ -327,7 +337,9 @@ describe("the captions of an assembly", () => {
   it("writes no words at all when the reader asked for none", () => {
     const moka = filmed();
     const act = story(moka).chapters[0]!.acts[0]!;
-    act.keyframes[0]!.dialogue = [{ speaker: "Keeper", text: "Nothing." }];
+    act.keyframes[0]!.dialogue = [
+      { id: "line-a", speaker: "Keeper", text: "Nothing." },
+    ];
     const plan = planAssembly(story(moka), moka);
     const { commands } = assemblyCommands(story(moka), moka, plan, {
       withSubtitles: false,

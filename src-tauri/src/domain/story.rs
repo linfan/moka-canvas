@@ -309,6 +309,12 @@ pub struct StorySlot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryDialogueLine {
+    /// The line's own name, which is what a take of it read aloud is filed
+    /// under. Written before lines had names, so a document may leave it off:
+    /// the client gives such a line one as it reads, and the field is written
+    /// only once there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub character_id: Option<String>,
     pub speaker: String,
@@ -1056,12 +1062,25 @@ fn check_dialogue(lines: &[StoryDialogueLine]) -> Result<(), CommandError> {
             "Dialogue is too long for one shot",
         ));
     }
+    // A patch comes from a client that has read the document, so every line it
+    // carries has a name: two lines sharing one would be two lines with one
+    // take of it read aloud between them.
+    let mut seen: Vec<&str> = Vec::with_capacity(lines.len());
     for line in lines {
         if line.text.trim().is_empty() || line.speaker.is_empty() {
             return Err(CommandError::new(
                 "VALIDATION_FAILED",
                 "A dialogue line has no words in it",
             ));
+        }
+        match line.id.as_deref() {
+            Some(id) if !id.trim().is_empty() && !seen.contains(&id) => seen.push(id),
+            _ => {
+                return Err(CommandError::new(
+                    "VALIDATION_FAILED",
+                    "A dialogue line has no name of its own",
+                ))
+            }
         }
         if line.text.chars().count() > MAX_DIALOGUE_LINE_LENGTH {
             return Err(CommandError::new(

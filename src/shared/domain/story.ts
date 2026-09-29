@@ -16,6 +16,7 @@ import {
   createKeyframe,
   emptyStorySlot,
 } from "./factories";
+import { newId } from "./ids";
 import type {
   AssetId,
   StoryAct,
@@ -676,7 +677,13 @@ function mergeKeyframes(
 ): StoryKeyframe[] {
   return proposed.map((draft, index) => {
     const held = existing[index];
-    const dialogue: StoryDialogueLine[] = draft.dialogue.map((line) => ({
+    // A line is paired with the one that stood in its place, the same way a
+    // shot is: the words may be rewritten without the take that read them
+    // being forgotten, and a line added in the middle is the only one that
+    // arrives unnamed. The recorded words are what says the take is out of
+    // date afterwards, not the name.
+    const dialogue: StoryDialogueLine[] = draft.dialogue.map((line, at) => ({
+      id: held?.dialogue[at]?.id ?? newId(),
       ...(line.characterId !== undefined
         ? { characterId: line.characterId }
         : {}),

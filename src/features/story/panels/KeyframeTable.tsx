@@ -10,9 +10,11 @@ import {
   STORY_CAMERA_MOVES,
   STORY_FILM_ROLES,
   STORY_SHOT_SIZES,
+  actCast,
   createKeyframe,
   currentTake,
   keyframeAt,
+  newId,
   slotWithoutTake,
   slotWithCurrent,
   storyMentions,
@@ -22,6 +24,7 @@ import type {
   StoryAct,
   StoryDialogueLine,
   StoryDocument,
+  StoryElement,
   StoryFilmRole,
   StoryKeyframe,
   StoryKeyframePatch,
@@ -535,6 +538,7 @@ function KeyframeRow({
         <tr className="story-dialogue-row">
           <td colSpan={perShot ? 10 : 9}>
             <DialogueEditor
+              characters={actCast(story, act).characters}
               lines={keyframe.dialogue}
               onDone={(dialogue) => {
                 onDialogue();
@@ -732,15 +736,113 @@ function Cell({
  * closed, so editing four lines of a shot is one step of the history rather
  * than one per keystroke.
  */
+/**
+ * Who says a line: a character of this act, or somebody the cast has not got.
+ *
+ * A line's picture and its voice are both found by the character, so the act's
+ * cast is a list to pick from rather than a name to type — and a name typed
+ * anyway is read against the cast as it is typed, so a line written before its
+ * character had a card still finds one. Choosing the off-screen option keeps
+ * whatever name is written there: a line nobody in the cast says is read in
+ * the telling's own voice.
+ */
+function SpeakerField({
+  characters,
+  index,
+  line,
+  onWrite,
+}: {
+  /** The act's characters, still in the story. */
+  characters: StoryElement[];
+  index: number;
+  line: StoryDialogueLine;
+  onWrite: (patch: Partial<StoryDialogueLine>) => void;
+}) {
+  const { t } = useTranslation();
+  const chosen = characters.find((element) => element.id === line.characterId);
+
+  return (
+    <>
+      <select
+        aria-label={t("story:storyboard.speakerRole")}
+        className="story-line-role"
+        data-testid={`story-line-role-${index}`}
+        onChange={(event) => {
+          const element = characters.find(
+            (held) => held.id === event.target.value,
+          );
+          onWrite(
+            element === undefined
+              ? { characterId: undefined }
+              : { characterId: element.id, speaker: element.name },
+          );
+        }}
+        value={chosen?.id ?? ""}
+      >
+        <option value="">{t("story:storyboard.offScreen")}</option>
+        {characters.map((element) => (
+          <option key={element.id} value={element.id}>
+            {element.name}
+          </option>
+        ))}
+      </select>
+      <input
+        aria-label={t("story:storyboard.speakerName")}
+        data-testid={`story-line-speaker-${index}`}
+        maxLength={40}
+        onChange={(event) => {
+          const name = event.target.value;
+          const matched = characters.find((held) => held.name === name.trim());
+          onWrite({ speaker: name, characterId: matched?.id });
+        }}
+        placeholder={t("story:storyboard.offScreen")}
+        value={line.speaker}
+      />
+    </>
+  );
+}
+
+/**
+ * One line as an edit leaves it.
+ *
+ * A field the edit clears is taken off the line rather than left holding
+ * nothing: a line with no character is a line nobody in the cast says, which
+ * is what the document should say about it.
+ */
+function editedLine(
+  line: StoryDialogueLine,
+  patch: Partial<StoryDialogueLine>,
+): StoryDialogueLine {
+  const next = { ...line, ...patch };
+  return {
+    id: next.id,
+    speaker: next.speaker,
+    text: next.text,
+    ...(next.characterId !== undefined
+      ? { characterId: next.characterId }
+      : {}),
+    ...(next.tone !== undefined ? { tone: next.tone } : {}),
+  };
+}
+
 function DialogueEditor({
   lines,
+  characters,
   onDone,
 }: {
   lines: StoryDialogueLine[];
+  /** The act's characters, still in the story: who a line may be given to. */
+  characters: StoryElement[];
   onDone: (lines: StoryDialogueLine[]) => void;
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState(lines);
+  const write = (at: number, patch: Partial<StoryDialogueLine>) =>
+    setDraft(
+      draft.map((held, index) =>
+        index === at ? editedLine(held, patch) : held,
+      ),
+    );
 
   return (
     <div className="story-dialogue" data-testid="story-dialogue">
@@ -748,47 +850,25 @@ function DialogueEditor({
         <p className="story-hint">{t("story:storyboard.noDialogue")}</p>
       )}
       {draft.map((line, index) => (
-        <div className="story-dialogue-line" key={index}>
-          <input
-            aria-label={t("story:storyboard.speaker")}
-            data-testid={`story-line-speaker-${index}`}
-            maxLength={40}
-            onChange={(event) =>
-              setDraft(
-                draft.map((held, at) =>
-                  at === index
-                    ? { ...held, speaker: event.target.value }
-                    : held,
-                ),
-              )
-            }
-            placeholder={t("story:storyboard.offScreen")}
-            value={line.speaker}
+        <div className="story-dialogue-line" key={line.id}>
+          <SpeakerField
+            characters={characters}
+            index={index}
+            line={line}
+            onWrite={(patch) => write(index, patch)}
           />
           <input
             aria-label={t("story:storyboard.line")}
             data-testid={`story-line-text-${index}`}
             maxLength={500}
-            onChange={(event) =>
-              setDraft(
-                draft.map((held, at) =>
-                  at === index ? { ...held, text: event.target.value } : held,
-                ),
-              )
-            }
+            onChange={(event) => write(index, { text: event.target.value })}
             value={line.text}
           />
           <input
             aria-label={t("story:storyboard.tone")}
             data-testid={`story-line-tone-${index}`}
             maxLength={60}
-            onChange={(event) =>
-              setDraft(
-                draft.map((held, at) =>
-                  at === index ? { ...held, tone: event.target.value } : held,
-                ),
-              )
-            }
+            onChange={(event) => write(index, { tone: event.target.value })}
             value={line.tone ?? ""}
           />
           <button
@@ -806,7 +886,9 @@ function DialogueEditor({
         <button
           className="link"
           data-testid="story-line-add"
-          onClick={() => setDraft([...draft, { speaker: "", text: "" }])}
+          onClick={() =>
+            setDraft([...draft, { id: newId(), speaker: "", text: "" }])
+          }
           type="button"
         >
           {t("story:storyboard.addLine")}

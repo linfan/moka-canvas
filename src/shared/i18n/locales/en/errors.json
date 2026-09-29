@@ -103,6 +103,7 @@
     "storyShotDurationOutOfRange": "Shot duration is out of range",
     "storyDialogueTooLong": "Dialogue is too long for one shot",
     "storyDialogueEmpty": "A dialogue line has no words in it",
+    "storyDialogueUnnamed": "A dialogue line has no name of its own",
     "storySoundInvalid": "Sound must carry its music and effects as text"
   },
   "timeline": {

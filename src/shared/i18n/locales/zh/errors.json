@@ -103,6 +103,7 @@
     "storyShotDurationOutOfRange": "单格时长超出允许范围",
     "storyDialogueTooLong": "台词超出了单格能容纳的长度",
     "storyDialogueEmpty": "有台词没有内容",
+    "storyDialogueUnnamed": "有一句台词没有名字",
     "storySoundInvalid": "音乐音效必须用文本写明"
   },
   "timeline": {

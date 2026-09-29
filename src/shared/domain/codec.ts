@@ -25,6 +25,7 @@ import {
   STORY_SHOT_SIZES,
 } from "./types";
 import { reconcilePorts } from "./factories";
+import { newId } from "./ids";
 import { STORY_STEPS, type StoryStep } from "./story";
 import type {
   AssistantFailure,
@@ -412,6 +413,7 @@ function encodeStorySlot(slot: StorySlot): Record<string, unknown> {
 
 function encodeStoryDialogue(line: StoryDialogueLine): Record<string, unknown> {
   const doc: Record<string, unknown> = {
+    id: line.id,
     speaker: line.speaker,
     text: line.text,
   };
@@ -1249,6 +1251,10 @@ function decodeStorySlot(value: unknown): StorySlot {
 function decodeStoryDialogue(value: unknown): StoryDialogueLine {
   const doc = asRecord(value, "keyframes[].dialogue[]");
   const line: StoryDialogueLine = {
+    // A line written before lines had names is given one as it is read: the
+    // document is saved whole, so the name lands on disk with the next save
+    // and every read after that sees the same one.
+    id: doc.id === undefined ? newId() : asString(doc.id, "dialogue[].id"),
     speaker: asString(doc.speaker, "dialogue[].speaker"),
     text: asString(doc.text, "dialogue[].text"),
   };

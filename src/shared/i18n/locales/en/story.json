@@ -396,6 +396,8 @@
     "lines": "{{count}} lines",
     "noDialogue": "Nothing is said in this shot.",
     "speaker": "Speaker",
+    "speakerRole": "Character",
+    "speakerName": "Speaker name",
     "line": "Line",
     "tone": "Tone",
     "offScreen": "off screen",

@@ -29,6 +29,7 @@ const CHAPTER_SECOND: &str = "chapter-second";
 const ACT: &str = "act-1";
 const FRAME_FIRST: &str = "frame-1";
 const FRAME_SECOND: &str = "frame-2";
+const LINE_FIRST: &str = "line-1";
 const HERO: &str = "element-hero";
 const PARTNER: &str = "element-partner";
 const SCENE: &str = "element-scene";
@@ -223,6 +224,7 @@ fn story_document() -> MokaFile {
         film_role: story::StoryFilmRole::Reference,
         content: "雨中的站台，一个人立在灯下。".into(),
         dialogue: vec![StoryDialogueLine {
+            id: Some(LINE_FIRST.into()),
             character_id: Some(HERO.into()),
             speaker: "林".into(),
             text: "车已经停运了。".into(),
@@ -824,6 +826,7 @@ fn moves_only_the_fields_a_shot_patch_names_and_keeps_a_shot_to_its_length() {
                 shot_size: Some(StoryShotSize::ExtremeWide),
                 duration_ms: Some(1_200),
                 dialogue: Some(vec![StoryDialogueLine {
+                    id: Some("line-second".into()),
                     character_id: None,
                     speaker: "周".into(),
                     text: "车还会来。".into(),
@@ -855,6 +858,67 @@ fn moves_only_the_fields_a_shot_patch_names_and_keeps_a_shot_to_its_length() {
         ),
         "VALIDATION_FAILED"
     );
+}
+
+#[test]
+fn refuses_a_line_of_dialogue_with_no_name_of_its_own_or_two_sharing_one() {
+    let moka = story_document();
+    let patched = |dialogue: Vec<StoryDialogueLine>| DocumentCommand::UpdateStoryKeyframe {
+        story_id: STORY.into(),
+        chapter_id: CHAPTER_FIRST.into(),
+        act_id: ACT.into(),
+        keyframe_id: FRAME_FIRST.into(),
+        patch: StoryKeyframePatch {
+            dialogue: Some(dialogue),
+            ..Default::default()
+        },
+    };
+    let line = |id: Option<&str>, text: &str| StoryDialogueLine {
+        id: id.map(str::to_string),
+        character_id: None,
+        speaker: "周".into(),
+        text: text.into(),
+        tone: None,
+    };
+    assert_eq!(
+        code_of(&moka, patched(vec![line(None, "车还会来。")])),
+        "VALIDATION_FAILED"
+    );
+    assert_eq!(
+        code_of(
+            &moka,
+            patched(vec![
+                line(Some("same"), "车还会来。"),
+                line(Some("same"), "车不会来了。"),
+            ])
+        ),
+        "VALIDATION_FAILED"
+    );
+}
+
+/// A telling written before lines had names is still a telling: the document
+/// is read, and the names it does not carry are left off rather than written
+/// back as something else.
+#[test]
+fn reads_a_document_whose_lines_have_no_names() {
+    let moka = story_document();
+    let mut raw: serde_json::Value = serde_json::to_value(story_of(&moka)).unwrap();
+    for frame in raw["chapters"][0]["acts"][0]["keyframes"]
+        .as_array_mut()
+        .unwrap()
+    {
+        for line in frame["dialogue"].as_array_mut().unwrap() {
+            line.as_object_mut().unwrap().remove("id");
+        }
+    }
+    let story: StoryDocument = serde_json::from_value(raw).unwrap();
+    let lines = &story.chapters[0].acts[0].keyframes[0].dialogue;
+    assert_eq!(lines[0].id, None);
+    assert_eq!(lines[0].speaker, "林");
+    // And a line with no name is not written back holding an empty one.
+    let written =
+        serde_json::to_string(&story.chapters[0].acts[0].keyframes[0].dialogue[0]).unwrap();
+    assert!(!written.contains("\"id\""));
 }
 
 /// A shot's role in filming is a word a document carries only when it says
