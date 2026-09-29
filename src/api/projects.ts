@@ -31,7 +31,8 @@ export interface PackageReport {
 }
 
 export interface ExportOptions {
-  destination?: string;
+  /** Where the package goes: the path a save dialog answered. */
+  destination: string;
   allowIncomplete?: boolean;
   /** Carry this machine's own record of past runs along with the work. */
   includePersonalHistory?: boolean;
@@ -83,7 +84,7 @@ export const projectsApi = {
     });
   },
 
-  exportPackage(options: ExportOptions = {}): Promise<PackageReport> {
+  exportPackage(options: ExportOptions): Promise<PackageReport> {
     return http.request<PackageReport>("/api/v1/projects/current/export", {
       method: "POST",
       body: options,

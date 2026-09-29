@@ -204,11 +204,13 @@ pub struct PreviewInput {
 /// What a package is asked to carry beyond the work itself.
 ///
 /// Both choices are off by default: a package made without saying is a package
-/// of the work, which is the kind that gets handed to somebody else.
-#[derive(Debug, Default, Deserialize)]
+/// of the work, which is the kind that gets handed to somebody else. The
+/// destination is the one thing a request must say, as a render's is: nobody
+/// else can pick where a reader's file goes.
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportRequest {
-    pub destination: Option<String>,
+    pub destination: String,
     #[serde(default)]
     pub allow_incomplete: bool,
     /// The records of the runs this machine made, and the prompts they carried.
