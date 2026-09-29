@@ -82,9 +82,9 @@ export function FilmCard({
       .getState()
       .pushToast("success", i18n.t("story:edit.filmReady"), {
         label: i18n.t("story:edit.openInClip"),
-        go: () => openInCuttingRoom(story),
+        go: () => openInCuttingRoom(story.id),
       });
-  }, [done, story]);
+  }, [done, story.id]);
 
   // Polling while a render is live, and only then.
   useEffect(() => {
@@ -234,7 +234,7 @@ export function FilmCard({
             <button
               className="link"
               data-testid="story-film-watch"
-              onClick={() => openInCuttingRoom(story, true)}
+              onClick={() => openInCuttingRoom(story.id, true)}
               type="button"
             >
               {t("story:edit.watchExport")}
@@ -273,7 +273,7 @@ export function FilmCard({
         {timeline !== undefined && (
           <button
             data-testid="story-film-open"
-            onClick={() => void openInCuttingRoom(story)}
+            onClick={() => void openInCuttingRoom(story.id)}
             type="button"
           >
             {t("story:edit.openInClip")}
@@ -306,11 +306,14 @@ export function FilmCard({
  *
  * The project is flushed first: a film is exported from the timeline the server
  * holds, and one that is still in this window is a timeline it has never heard
- * of. A save that cannot land keeps the reader where they are rather than
- * walking away from work.
+ * of. The telling is read again after that flush, for the same reason and for
+ * the toast that offers this way over: it holds the telling from the moment
+ * the offer was made, which the room may have written to since. A save that
+ * cannot land keeps the reader where they are rather than walking away from
+ * work.
  */
 async function openInCuttingRoom(
-  story: StoryDocument,
+  storyId: string,
   withExportDialog = false,
 ): Promise<void> {
   const project = useProjectStore.getState();
@@ -327,7 +330,8 @@ async function openInCuttingRoom(
       );
     return;
   }
-  if (story.edit.timelineId === undefined) return;
+  const story = (after.moka?.stories ?? []).find((held) => held.id === storyId);
+  if (story?.edit.timelineId === undefined) return;
   useClipStore.getState().setActiveTimeline(story.edit.timelineId);
   useAppStore.getState().setPhase("clip");
   if (withExportDialog) {

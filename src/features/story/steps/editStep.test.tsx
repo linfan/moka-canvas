@@ -104,7 +104,10 @@ function serving(): void {
           return json(task);
         }
       }
-      if (url.includes("/api/v1/projects/current")) {
+      if (
+        url.includes("/api/v1/projects/current") &&
+        !url.includes("/commands")
+      ) {
         return json({
           root: "/tmp/moka-edit-test",
           moka: reloaded ?? useProjectStore.getState().moka,
@@ -459,9 +462,12 @@ describe("the film of a telling", () => {
   });
 });
 
-/** The fixture with a rendered film on the shelf. */
-function withTheFilm(base: MokaFile): MokaFile {
-  const moka = base;
+/**
+ * The fixture after a render landed: the artifact on the shelf, and the story
+ * still without a film of its own — the shape the room reads back, since the
+ * film is written down by the room rather than by the render.
+ */
+function withTheArtifact(base: MokaFile): MokaFile {
   const film = {
     id: "asset-film",
     name: "the film.mp4",
@@ -479,8 +485,16 @@ function withTheFilm(base: MokaFile): MokaFile {
     },
   };
   return {
+    ...base,
+    resources: { ...base.resources, videos: [...base.resources.videos, film] },
+  };
+}
+
+/** The same fixture, with the room's own note of the film written down. */
+function withTheFilm(base: MokaFile): MokaFile {
+  const moka = withTheArtifact(base);
+  return {
     ...moka,
-    resources: { ...moka.resources, videos: [...moka.resources.videos, film] },
     stories: (moka.stories ?? []).map((held) =>
       held.id === ids.story
         ? {
