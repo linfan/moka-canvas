@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import process from "node:process";
 import { expect, type Locator, type Page } from "@playwright/test";
 import {
@@ -302,12 +302,51 @@ export async function askToExport(page: Page): Promise<Locator> {
 }
 
 /**
- * Answer it with both choices left off: the work, and nothing about the
- * machine that made it.
+ * Answer the save dialog the browser draws for itself: take the name it
+ * offers where it opened, or the folder and name a test names first.
+ *
+ * Answers with the absolute path the button said it would take, read off the
+ * dialog rather than guessed at, so a test can look at the file that landed
+ * there.
  */
-export async function exportWorkPackage(page: Page) {
+export async function chooseSavePath(
+  page: Page,
+  options: { folder?: string; name?: string } = {},
+): Promise<string> {
+  const dialog = page.getByTestId("path-browser");
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
+  if (options.folder !== undefined) {
+    await dialog.getByTestId("path-browser-typed").fill(options.folder);
+    await dialog.getByRole("button", { name: "List" }).click();
+    await expect(dialog.getByTestId("path-browser-typed")).toHaveValue(
+      new RegExp(`${basename(options.folder)}$`),
+      { timeout: 10_000 },
+    );
+  }
+  if (options.name !== undefined) {
+    await dialog.getByTestId("path-browser-name").fill(options.name);
+  }
+  const choose = dialog.getByTestId("path-browser-choose");
+  await expect(choose).toBeEnabled({ timeout: 10_000 });
+  const path =
+    (await dialog.getByTestId("path-browser-choice").getAttribute("title")) ??
+    "";
+  await choose.click();
+  await expect(dialog).toBeHidden({ timeout: 10_000 });
+  return path;
+}
+
+/**
+ * Answer it with both choices left off: the work, and nothing about the
+ * machine that made it. Answers with where the package landed.
+ */
+export async function exportWorkPackage(
+  page: Page,
+  options: { folder?: string; name?: string } = {},
+): Promise<string> {
   const asked = await askToExport(page);
   await asked.getByRole("button", { name: "Export package" }).click();
+  return chooseSavePath(page, options);
 }
 
 /**

@@ -43,10 +43,13 @@ test("a machine without a renderer is told so, and the cut is left alone", async
   await expect(capability).toContainText("ffmpeg was not found");
   await expect(capability).toContainText("MOKA_FFMPEG");
 
-  // The one button that would ask for a render is refused with that reason.
+  // The one button that would ask for a render is refused with that reason —
+  // and with it refused, nothing asks where a file would go: the path is a
+  // question only a render that can happen is worth asking.
   const start = page.getByRole("button", { name: "Export video", exact: true });
   await expect(start).toBeDisabled();
   await expect(start).toHaveAttribute("title", /ffmpeg was not found/);
+  await expect(page.getByTestId("path-browser")).toHaveCount(0);
 
   // Closing leaves the room as it was: the refusal was about a machine, not
   // about the cut.

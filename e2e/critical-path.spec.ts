@@ -1,10 +1,11 @@
-import { readdirSync, rmSync } from "node:fs";
+import { readdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   addNode,
   askToExport,
   backToLauncher,
+  chooseSavePath,
   createProject,
   exportWorkPackage,
   forgetProjects,
@@ -77,14 +78,17 @@ test("launcher boots, project persists across reload, and export/import roundtri
     .poll(() => persistedNodeCount(page), { timeout: 10_000 })
     .toBe(2);
 
-  // Export a package.
-  await exportWorkPackage(page);
-  const toast = page.getByText(/Exported \d+ files to /);
-  await expect(toast).toBeVisible({ timeout: 10_000 });
-  const destination = ((await toast.textContent()) ?? "").replace(
-    /^.* to /,
-    "",
+  // Export a package. The save dialog opens at the project's own output
+  // folder, which is where the package goes unless a reader says otherwise.
+  const destination = await exportWorkPackage(page);
+  // The listing answers with the directory resolved, which on a Mac is not the
+  // path a temporary folder was handed out as.
+  expect(destination).toBe(
+    join(realpathSync(join(root, "output")), "E2E Flow.mokapkg.zip"),
   );
+  await expect(page.getByText(/Exported \d+ files to /)).toBeVisible({
+    timeout: 10_000,
+  });
   expect(destination).toMatch(/\.mokapkg\.zip$/);
 
   // Back to the launcher, then import the package into a fresh directory.
@@ -134,7 +138,6 @@ test("missing asset surfaces the self-check dialog and blocks export", async ({
     timeout: 10_000,
   });
   await backToLauncher(page);
-
   // Break the asset on disk, reopen: the self-check dialog must name it.
   const assetsDir = join(root, "assets", "images");
   for (const entry of readdirSync(assetsDir)) {
@@ -164,6 +167,9 @@ test("missing asset surfaces the self-check dialog and blocks export", async ({
     asked.getByRole("checkbox", { name: /Only the assets a node points at/ }),
   ).toBeDisabled();
   await asked.getByRole("button", { name: "Export package" }).click();
+  // The path is answered once, before anything is written — and the refusal
+  // that offers to carry on anyway is the same export, at the same path.
+  await chooseSavePath(page);
   const blocked = page.locator(".dialog");
   await expect(
     blocked.getByRole("heading", { name: "Assets are missing" }),

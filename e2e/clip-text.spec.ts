@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { parseSrt } from "../src/features/clip/subtitles/srt";
 import { frameAligned } from "../src/features/clip/timeline/timecode";
 import {
+  chooseSavePath,
   createProject,
   forgetHome,
   forgetProjects,
@@ -382,12 +383,20 @@ test("Export .srt writes the cues back out, and they read again", async ({
   await importFile(page, "cues.srt", CUES_SRT);
   await expect(cueRows(page)).toHaveCount(2);
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "Export .srt" }).click(),
-  ]);
-  expect(download.suggestedFilename()).toBe("Timeline 1.srt");
-  const written = readFileSync((await download.path())!, "utf8");
+  await page.getByRole("button", { name: "Export .srt" }).click();
+  const dialog = page.getByTestId("path-browser");
+  await expect(dialog.getByTestId("path-browser-name")).toHaveValue(
+    "Timeline 1.srt",
+  );
+  const destination = await chooseSavePath(page);
+  // The write is the server's and lands a moment after the dialog is answered,
+  // so the file is read once the save has said where it went.
+  await expect(page.getByText(`Subtitles saved to ${destination}`)).toBeVisible(
+    {
+      timeout: 10_000,
+    },
+  );
+  const written = readFileSync(destination, "utf8");
   expect(written).toContain("00:00:01,000 --> 00:00:03,000");
   expect(written).toContain("00:00:04,000 --> 00:00:06,500");
   expect(written).toContain("The first words of the cue");
