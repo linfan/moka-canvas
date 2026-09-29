@@ -166,9 +166,9 @@ export function focusEnd(area: HTMLElement): void {
 }
 
 /**
- * A mention drawn: the name of the card it points at, written the way a
- * sentence writes a reference — between ticks, so `` `Plate` `` reads as a
- * card being named rather than as another word in the line.
+ * A mention drawn: the name of the card it points at, standing among the words
+ * as a name does, so the sentence reads as one that references a card rather
+ * than as one more word of prose.
  */
 function chipFor(
   document: Document,
@@ -185,17 +185,8 @@ function chipFor(
   const name = document.createElement("span");
   name.className = "mention-chip-name";
   name.textContent = mentioned?.title ?? nodeId;
-  chip.append(tick(document, "`"), name, tick(document, "`"));
+  chip.append(name);
   return chip;
-}
-
-/** One of the two marks a chip is wrapped in. Decoration, not words. */
-function tick(document: Document, mark: string): HTMLElement {
-  const span = document.createElement("span");
-  span.className = "mention-chip-tick";
-  span.setAttribute("aria-hidden", "true");
-  span.textContent = mark;
-  return span;
 }
 
 /**
@@ -263,8 +254,7 @@ interface OfferRow {
 
 /**
  * The prompt field, which knows that a mention points at another card rather
- * than being prose, and draws one as the name of that card between ticks —
- * the way a sentence written in Markdown refers to something.
+ * than being prose, and draws one as the name of that card.
  *
  * A rich field rather than a textarea with the tokens shown among the words:
  * a token is forty-four characters across and the name it stands for is not,

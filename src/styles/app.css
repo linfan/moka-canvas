@@ -3097,13 +3097,6 @@ button.danger:hover:not(:disabled) {
   font-size: 11px;
 }
 
-/* The ticks a mention is written between, which are how the line reads as a
-   reference rather than as one more word of prose. */
-.mention-chip-tick {
-  color: var(--muted);
-  font-size: 11px;
-}
-
 /* What a chip summons when it is hovered: hung under the chip, at the point
    the field was told the pointer found it. */
 .mention-look {
