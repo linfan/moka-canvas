@@ -85,6 +85,79 @@ test("a model written from the form is stored and kept", async ({ page }) => {
 });
 
 /**
+ * A video model's scenarios, configured as groups and kept that way.
+ *
+ * What a component test cannot show is that the groups travel through the
+ * real metadata document whole: the scenarios the first group answers, and the
+ * group that answers the rest, written from the form and read back after the
+ * page is thrown away.
+ */
+test("a video model's scenario groups are stored and kept", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+
+  await dialog.getByRole("tab", { name: "Video" }).click();
+  await dialog.getByRole("button", { name: "New video model" }).click();
+  await dialog.getByLabel("Display name").fill("Grouper");
+  await dialog.getByLabel("Model name").fill("grouper-t2v");
+  await dialog.getByLabel("Endpoint URL").fill(`${PROVIDER_ORIGIN}/v1/videos`);
+
+  // The first group answers every scenario of the category, and with none
+  // left over the form offers no group to add.
+  await expect(
+    dialog.getByTestId("model-group-0-scene-referenceToVideo"),
+  ).toBeChecked();
+  await expect(dialog.getByTestId("model-group-add")).toHaveCount(0);
+
+  // Two scenarios freed in the first group are what a second group is for,
+  // and a scenario is answered by one group: checking it in one takes it
+  // from the other.
+  await dialog.getByTestId("model-group-0-scene-imageToVideo").uncheck();
+  await dialog.getByTestId("model-group-0-scene-firstLastFrame").uncheck();
+  await dialog.getByTestId("model-group-add").click();
+  await dialog.getByTestId("model-group-1-model").fill("grouper-i2v");
+  await dialog.getByTestId("model-group-1-scene-imageToVideo").check();
+  await dialog.getByTestId("model-group-1-scene-firstLastFrame").check();
+  await expect(dialog.getByTestId("model-group-add")).toHaveCount(0);
+  await dialog.getByTestId("model-group-1-scene-textToVideo").check();
+  await expect(
+    dialog.getByTestId("model-group-0-scene-textToVideo"),
+  ).not.toBeChecked();
+  await dialog.getByTestId("model-group-0-scene-textToVideo").check();
+  await expect(
+    dialog.getByTestId("model-group-1-scene-textToVideo"),
+  ).not.toBeChecked();
+
+  await dialog.getByRole("button", { name: "Save model" }).click();
+  await expect(
+    dialog.locator("strong", { hasText: /^Grouper$/ }),
+  ).toBeVisible();
+
+  // What was written survives the page being thrown away.
+  await page.reload();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await dialog.getByRole("tab", { name: "Video" }).click();
+  const kept = page.locator("li.model-card").filter({
+    has: page.locator("strong", { hasText: /^Grouper$/ }),
+  });
+  await kept.getByRole("button", { name: "Edit" }).click();
+  await expect(dialog.getByLabel("Model name 2")).toHaveValue("grouper-i2v");
+  await expect(
+    dialog.getByTestId("model-group-1-scene-imageToVideo"),
+  ).toBeChecked();
+  await expect(
+    dialog.getByTestId("model-group-0-scene-imageToVideo"),
+  ).not.toBeChecked();
+  await expect(
+    dialog.getByTestId("model-group-0-scene-referenceToVideo"),
+  ).toBeChecked();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+});
+
+/**
  * The window keeps its place while its tabs are turned over.
  *
  * A dialog that grows to whatever the tab holds moves under the pointer with

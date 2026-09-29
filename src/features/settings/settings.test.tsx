@@ -501,7 +501,7 @@ describe("model settings", () => {
     expect(screen.queryByLabelText("Longest clip (seconds)")).toBeNull();
   });
 
-  it("routes a video model's scenarios through its sub-models", async () => {
+  it("routes a video model's scenarios through its groups", async () => {
     await openSettings();
     fireEvent.click(await screen.findByRole("tab", { name: "Video" }));
     fireEvent.click(
@@ -515,33 +515,45 @@ describe("model settings", () => {
       target: { value: "happy-1.1-t2v" },
     });
 
-    // One row per scenario group: a name, an address of its own or none, and
-    // the scenarios it answers for.
-    fireEvent.click(screen.getByTestId("model-sub-add"));
-    fireEvent.change(screen.getByTestId("model-sub-0-model"), {
-      target: { value: "happy-1.1-t2v" },
-    });
-    fireEvent.change(screen.getByTestId("model-sub-0-url"), {
-      target: { value: "https://api.openai.com/v1/videos/t2v" },
-    });
-    fireEvent.click(screen.getByTestId("model-sub-0-scene-textToVideo"));
-    fireEvent.click(screen.getByTestId("model-sub-0-scene-imageToVideo"));
+    // A new model's first group answers every scenario of its category, and
+    // with none left over there is no group to add.
+    const sceneAt = (at: number, scene: string) =>
+      screen.getByTestId(
+        `model-group-${at}-scene-${scene}`,
+      ) as HTMLInputElement;
+    for (const scene of [
+      "textToVideo",
+      "imageToVideo",
+      "firstLastFrame",
+      "referenceToVideo",
+    ]) {
+      expect(sceneAt(0, scene).checked).toBe(true);
+    }
+    expect(screen.queryByTestId("model-group-add")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("model-sub-add"));
-    fireEvent.change(screen.getByTestId("model-sub-1-model"), {
+    // A scenario freed in the first group is what a second group is for: the
+    // form offers one, and the checks move to the group that took them.
+    fireEvent.click(sceneAt(0, "imageToVideo"));
+    fireEvent.click(sceneAt(0, "firstLastFrame"));
+    fireEvent.click(sceneAt(0, "referenceToVideo"));
+    expect(screen.getByTestId("model-uncovered").textContent).toContain(
+      "Image to video",
+    );
+    fireEvent.click(screen.getByTestId("model-group-add"));
+    fireEvent.change(screen.getByTestId("model-group-1-model"), {
       target: { value: "happy-1.1-i2v" },
     });
-    fireEvent.click(screen.getByTestId("model-sub-1-scene-imageToVideo"));
-    fireEvent.click(screen.getByTestId("model-sub-1-scene-firstLastFrame"));
+    fireEvent.click(sceneAt(1, "imageToVideo"));
+    fireEvent.click(sceneAt(1, "firstLastFrame"));
 
-    // A scenario is answered by one row, so checking it takes it from the row
-    // that held it.
-    expect(
-      (screen.getByTestId("model-sub-0-scene-imageToVideo") as HTMLInputElement)
-        .checked,
-    ).toBe(false);
-    // What no row answers for is said before the save, not left to a failure.
-    expect(screen.getByTestId("model-sub-uncovered").textContent).toContain(
+    // A scenario is answered by one group, so checking it somewhere takes it
+    // from the group that held it — and giving it back takes it the other way.
+    fireEvent.click(sceneAt(1, "textToVideo"));
+    expect(sceneAt(0, "textToVideo").checked).toBe(false);
+    fireEvent.click(sceneAt(0, "textToVideo"));
+    expect(sceneAt(1, "textToVideo").checked).toBe(false);
+    // What no group answers for is said before the save, not left to a failure.
+    expect(screen.getByTestId("model-uncovered").textContent).toContain(
       "Reference pictures to video",
     );
 
@@ -552,12 +564,9 @@ describe("model settings", () => {
     expect(write.body).toMatchObject({
       id: expect.stringMatching(/^routed-[a-z0-9]{6}$/),
       category: "video",
+      model: "happy-1.1-t2v",
+      scenes: ["textToVideo"],
       subModels: [
-        {
-          model: "happy-1.1-t2v",
-          url: "https://api.openai.com/v1/videos/t2v",
-          scenes: ["textToVideo"],
-        },
         {
           model: "happy-1.1-i2v",
           scenes: ["imageToVideo", "firstLastFrame"],
@@ -565,24 +574,20 @@ describe("model settings", () => {
       ],
     });
 
-    // The rows come back when the configuration is opened again.
+    // The groups come back when the configuration is opened again.
     fireEvent.click(
       within(cardOf("Routed")).getByRole("button", { name: "Edit" }),
     );
     const name = (await screen.findByTestId(
-      "model-sub-0-model",
+      "model-group-1-model",
     )) as HTMLInputElement;
-    expect(name.value).toBe("happy-1.1-t2v");
-    expect(
-      (
-        screen.getByTestId(
-          "model-sub-1-scene-firstLastFrame",
-        ) as HTMLInputElement
-      ).checked,
-    ).toBe(true);
+    expect(name.value).toBe("happy-1.1-i2v");
+    expect(sceneAt(1, "imageToVideo").checked).toBe(true);
+    expect(sceneAt(0, "textToVideo").checked).toBe(true);
+    expect(sceneAt(0, "referenceToVideo").checked).toBe(false);
   });
 
-  it("refuses to save a scenario row without a name or a scene", async () => {
+  it("refuses to save a group without a name or a scenario", async () => {
     await openSettings();
     fireEvent.click(await screen.findByRole("tab", { name: "Video" }));
     fireEvent.click(
@@ -595,39 +600,76 @@ describe("model settings", () => {
     fireEvent.change(screen.getByLabelText("Model name"), {
       target: { value: "half-1" },
     });
-    fireEvent.click(screen.getByTestId("model-sub-add"));
+    // A scenario has to be free before a second group is on offer at all.
+    fireEvent.click(screen.getByTestId("model-group-0-scene-imageToVideo"));
+    fireEvent.click(screen.getByTestId("model-group-add"));
 
     const save = () =>
       screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement;
     expect(save().disabled).toBe(true);
-    expect(screen.getByText("A sub-model needs a name.")).toBeTruthy();
+    expect(screen.getByText("A group needs a model name.")).toBeTruthy();
 
-    fireEvent.change(screen.getByTestId("model-sub-0-model"), {
+    fireEvent.change(screen.getByTestId("model-group-1-model"), {
       target: { value: "half-i2v" },
     });
     expect(screen.getByText("Check at least one scenario.")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("model-sub-0-scene-imageToVideo"));
+    fireEvent.click(screen.getByTestId("model-group-1-scene-imageToVideo"));
     expect(save().disabled).toBe(false);
 
     // An address that is not one is refused where it is typed, the way the
-    // main address is.
-    fireEvent.change(screen.getByTestId("model-sub-0-url"), {
+    // first group's is.
+    fireEvent.change(screen.getByTestId("model-group-1-url"), {
       target: { value: "api.example.com/video" },
     });
     expect(
-      screen.getByText(
-        "A sub-model URL has to start with http:// or https://.",
-      ),
+      screen.getByText("A group URL has to start with http:// or https://."),
     ).toBeTruthy();
     expect(save().disabled).toBe(true);
   });
 
-  it("offers no scenario rows to a kind with one shape", async () => {
+  it("offers no scenario groups to a kind with one shape", async () => {
     await openSettings();
     fireEvent.click(
       await screen.findByRole("button", { name: "New text model" }),
     );
-    expect(screen.queryByTestId("model-sub-add")).toBeNull();
+
+    // One fold, holding the fields, and no way to add or remove one.
+    const group = screen.getByTestId("model-group-0") as HTMLDetailsElement;
+    expect(group.tagName).toBe("DETAILS");
+    expect(group.open).toBe(true);
+    expect(group.querySelector("summary")?.textContent).toBe("Configuration");
+    expect(screen.queryByTestId("model-group-add")).toBeNull();
+    expect(screen.queryByTestId("model-group-1")).toBeNull();
+    expect(screen.queryByTestId("model-group-0-remove")).toBeNull();
+
+    // A fold folds: the fields are the browser's own details to put away.
+    fireEvent.click(group.querySelector("summary") as HTMLElement);
+    expect(group.open).toBe(false);
+  });
+
+  it("says a group's scenarios on its fold while they are put away", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("tab", { name: "Image" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New image model" }),
+    );
+
+    // A new image model's one group answers both of the category's scenarios,
+    // and the fold says which while the fields are away.
+    const group = screen.getByTestId("model-group-0") as HTMLElement;
+    expect(group.querySelector("summary")?.textContent).toBe(
+      "Text to image / Image edit",
+    );
+    // Unchecking both leaves a form with nothing to answer: it is said, and
+    // the save is withheld rather than stored as a model that claims nothing.
+    fireEvent.click(screen.getByTestId("model-group-0-scene-textToImage"));
+    fireEvent.click(screen.getByTestId("model-group-0-scene-imageEdit"));
+    expect(group.querySelector("summary")?.textContent).toBe("No scenario yet");
+    expect(
+      (screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(screen.getByTestId("model-unclaimed")).toBeTruthy();
   });
 
   it("names a new model without asking for an identifier", async () => {
