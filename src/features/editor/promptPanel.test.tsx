@@ -393,7 +393,10 @@ describe("the generation panel", () => {
     // Where the words are written is where the control that sends them is, so
     // the hand does not have to travel to the far corner of the panel.
     const corner = panel().querySelector(".mention-field-corner");
-    expect(corner?.querySelector("button")).toHaveProperty("textContent", "Run");
+    expect(corner?.querySelector("button")).toHaveProperty(
+      "textContent",
+      "Run",
+    );
 
     // A page holding no field keeps the control in the head, since a button
     // the reader cannot reach from where they are is one they must look for.
