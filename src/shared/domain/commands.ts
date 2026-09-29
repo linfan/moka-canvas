@@ -108,7 +108,7 @@ import {
   transitionsOfSeams,
 } from "./timeline";
 import { emptyStorySlot } from "./factories";
-import { STORY_STEPS } from "./story";
+import { STORY_STEPS, storyVoiceTake, voiceTakeOf } from "./story";
 import { findNode, validateBounds, validateEdgeCandidate } from "./validate";
 import { i18n } from "../i18n";
 
@@ -2445,14 +2445,31 @@ function applyOne(
       const story = storyOf(moka, command.storyId);
       const previous = slotOf(story, command.target);
       const slot = checkStorySlot(command.slot);
+      if (command.read !== undefined) checkVoiceRead(command.read);
+      // What the entry said before this write, so that the undo of replacing
+      // one reading with another brings the old words and their tone back.
+      const before =
+        command.target.kind === "lineVoice"
+          ? storyVoiceTake(story, command.target)
+          : undefined;
+      const read =
+        command.target.kind === "lineVoice"
+          ? (command.read ?? {
+              text: before?.text ?? "",
+              voice: before?.voice ?? "",
+            })
+          : undefined;
       return {
-        next: replaceStory(moka, withSlot(story, command.target, slot)),
+        next: replaceStory(moka, withSlot(story, command.target, slot, read)),
         inverse: [
           {
             type: "setStorySlot",
             storyId: command.storyId,
             target: command.target,
             slot: previous,
+            ...(before === undefined
+              ? {}
+              : { read: { text: before.text, voice: before.voice } }),
           },
         ],
       };
@@ -2601,6 +2618,13 @@ function slotOf(story: StoryDocument, target: StorySlotTarget): StorySlot {
         actOf(chapterOf(story, target.chapterId), target.actId),
         target.keyframeId,
       ).art;
+    case "lineVoice": {
+      const keyframe = keyframeOf(
+        actOf(chapterOf(story, target.chapterId), target.actId),
+        target.keyframeId,
+      );
+      return voiceTakeOf(keyframe, target.lineId)?.slot ?? emptyStorySlot();
+    }
     case "keyframeVideo":
       return keyframeOf(
         actOf(chapterOf(story, target.chapterId), target.actId),
@@ -2628,6 +2652,7 @@ function withSlot(
   story: StoryDocument,
   target: StorySlotTarget,
   slot: StorySlot,
+  read?: { text: string; voice: string },
 ): StoryDocument {
   const write = (chapters: StoryChapter[]): StoryDocument => ({
     ...story,
@@ -2720,7 +2745,73 @@ function withSlot(
           };
         }),
       );
+    case "lineVoice":
+      return write(
+        story.chapters.map((chapter) => {
+          if (chapter.id !== target.chapterId) return chapter;
+          return {
+            ...chapter,
+            acts: chapter.acts.map((act) => {
+              if (act.id !== target.actId) return act;
+              return {
+                ...act,
+                keyframes: act.keyframes.map((keyframe) =>
+                  keyframe.id === target.keyframeId
+                    ? withVoiceTake(keyframe, target.lineId, slot, read)
+                    : keyframe,
+                ),
+              };
+            }),
+          };
+        }),
+      );
   }
+}
+
+/**
+ * One line's take kept on its shot, whole.
+ *
+ * A slot that has come to hold nothing takes the whole entry with it: the two
+ * would say different things about a line nobody has read yet, and the undo of
+ * the first reading has to put the document back the way it was — without the
+ * entry, not with an empty one. What the line was read as is kept beside the
+ * takes, so the card can say the words the recording holds even after the
+ * line beside them was rewritten.
+ */
+function withVoiceTake(
+  keyframe: StoryKeyframe,
+  lineId: string,
+  slot: StorySlot,
+  read?: { text: string; voice: string },
+): StoryKeyframe {
+  const held = keyframe.voices ?? [];
+  const before = voiceTakeOf(keyframe, lineId);
+  const rest = held.filter((take) => take.lineId !== lineId);
+  if (slot.takes.length === 0) {
+    if (before === undefined) return keyframe;
+    const without: StoryKeyframe = { ...keyframe };
+    if (rest.length === 0) delete without.voices;
+    else without.voices = rest;
+    return without;
+  }
+  // The takes stand in the order their lines do on the board, so two rooms
+  // holding the same reading write the same document; a take whose line has
+  // left the shot is not on the board to be ordered by, and comes last.
+  const order = new Map(keyframe.dialogue.map((line, at) => [line.id, at]));
+  const voices = [
+    ...rest,
+    {
+      lineId,
+      text: read?.text ?? before?.text ?? "",
+      voice: read?.voice ?? before?.voice ?? "",
+      slot,
+    },
+  ].sort(
+    (one, other) =>
+      (order.get(one.lineId) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(other.lineId) ?? Number.MAX_SAFE_INTEGER),
+  );
+  return { ...keyframe, voices };
 }
 
 /**
@@ -2822,6 +2913,24 @@ function checkVoiceProfile(voice: StoryVoiceProfile) {
     throw new CommandError(
       "VALIDATION_FAILED",
       i18n.t("errors:command.storyVoicePitch"),
+    );
+}
+
+/**
+ * What a line was read as, held to the bounds the line itself is: the words a
+ * recording holds are as long as the words a shot may be written with, and the
+ * tone is a name like any other.
+ */
+function checkVoiceRead(read: { text: string; voice: string }) {
+  if (read.text.length > MAX_DIALOGUE_LINE_LENGTH)
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyDialogueTooLong"),
+    );
+  if (read.voice.length > VOICE_NAME_MAX)
+    throw new CommandError(
+      "VALIDATION_FAILED",
+      i18n.t("errors:command.storyVoiceTooLong"),
     );
 }
 

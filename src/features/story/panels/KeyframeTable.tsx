@@ -18,6 +18,7 @@ import {
   slotWithoutTake,
   slotWithCurrent,
   storyMentions,
+  voiceTakeOf,
   type StoryGuess,
 } from "../../../shared/domain";
 import type {
@@ -26,9 +27,11 @@ import type {
   StoryDocument,
   StoryElement,
   StoryFilmRole,
+  MokaFile,
   StoryKeyframe,
   StoryKeyframePatch,
   StorySlot,
+  StoryVoiceTake,
 } from "../../../shared/domain/types";
 import { assetUrl } from "../../../api/assets";
 import { i18n } from "../../../shared/i18n";
@@ -42,7 +45,10 @@ import {
   planKeyframeVideos,
   settledRoleFrames,
 } from "../jobs/plan";
-import { useStoryRun } from "../stores/storyJobStore";
+import { useProjectStore } from "../../editor/stores/projectStore";
+import { planLineVoiceAsks } from "../jobs/plan";
+import { useStoryRun, useStoryWavesRun } from "../stores/storyJobStore";
+import { secondsOf } from "./takes";
 import { KeyframeContentField, type MentionKind } from "./KeyframeContentField";
 import { frameRatio } from "./ratios";
 import { liveStory, removeOldTake, type TakeDrop } from "./removeOldTake";
@@ -75,6 +81,7 @@ export function KeyframeTable({
   guesses,
   busyKeyframes,
   busyClips,
+  busyLines,
 }: {
   story: StoryDocument;
   chapterId: string;
@@ -85,6 +92,8 @@ export function KeyframeTable({
   busyKeyframes: Set<string>;
   /** The shots being filmed just now, by the place's own name. */
   busyClips: Set<string>;
+  /** The lines being read just now, by the line's own name. */
+  busyLines: Set<string>;
 }) {
   const { t } = useTranslation();
   const [dialogueAt, setDialogueAt] = useState<string | null>(null);
@@ -125,6 +134,7 @@ export function KeyframeTable({
             <KeyframeRow
               act={act}
               busy={busyKeyframes.has(keyframe.id)}
+              busyLines={busyLines}
               clipBusy={busyClips.has(keyframe.id)}
               chapterId={chapterId}
               dialogueOpen={dialogueAt === keyframe.id}
@@ -233,6 +243,7 @@ function KeyframeRow({
   roleLocked,
   rolePairable,
   busy,
+  busyLines,
   clipBusy,
   dialogueOpen,
   onDialogue,
@@ -249,6 +260,8 @@ function KeyframeRow({
   /** Whether pairing with the frame after it is still on offer. */
   rolePairable: boolean;
   busy: boolean;
+  /** The lines of this act being read just now, by the line's own name. */
+  busyLines: Set<string>;
   /** Whether this shot's own clip is being made just now. */
   clipBusy: boolean;
   dialogueOpen: boolean;
@@ -538,12 +551,17 @@ function KeyframeRow({
         <tr className="story-dialogue-row">
           <td colSpan={perShot ? 10 : 9}>
             <DialogueEditor
+              act={act}
+              busyLines={busyLines}
+              chapterId={chapterId}
               characters={actCast(story, act).characters}
+              keyframe={keyframe}
               lines={keyframe.dialogue}
               onDone={(dialogue) => {
                 onDialogue();
                 write({ dialogue });
               }}
+              story={story}
             />
           </td>
         </tr>
@@ -803,6 +821,84 @@ function SpeakerField({
 }
 
 /**
+ * What has become of one line's reading, and the way to make another.
+ *
+ * A line read before it was rewritten says so rather than passing the older
+ * words off as the ones standing here, and a line with a take is playable
+ * where it lies: what was said is worth hearing before asking again. The ask
+ * is the line's own, and the button is held while the editor's words are
+ * unwritten — a reading is planned from the document, and a draft is not one.
+ */
+function LineVoiceRow({
+  index,
+  take,
+  sentence,
+  busy,
+  dirty,
+  moka,
+  onAsk,
+}: {
+  index: number;
+  take: StoryVoiceTake | undefined;
+  /** The line as the document holds it, which the take is read against. */
+  sentence: StoryDialogueLine;
+  busy: boolean;
+  /** Whether the editor's words are not the document's yet. */
+  dirty: boolean;
+  moka: MokaFile | null;
+  onAsk: () => void;
+}) {
+  const { t } = useTranslation();
+  const assetId = take?.slot.takes.at(-1)?.assetIds[0];
+  const stale = take !== undefined && take.text !== sentence.text.trim();
+  return (
+    <div className="story-line-voice" data-testid={`story-line-voice-${index}`}>
+      <span
+        className="story-hint"
+        data-testid={`story-line-voice-state-${index}`}
+      >
+        {take === undefined
+          ? t("story:voice.unspent")
+          : stale
+            ? t("story:voice.stale")
+            : take.voice === ""
+              ? t("story:voice.spent", {
+                  seconds:
+                    assetId === undefined ? "—" : secondsOf(moka, assetId),
+                })
+              : t("story:voice.spentIn", {
+                  seconds:
+                    assetId === undefined ? "—" : secondsOf(moka, assetId),
+                  voice: take.voice,
+                })}
+      </span>
+      {assetId !== undefined && (
+        <audio
+          controls
+          data-testid={`story-line-voice-take-${index}`}
+          preload="metadata"
+          src={assetUrl(assetId)}
+        />
+      )}
+      <button
+        className="link"
+        data-testid={`story-line-voice-go-${index}`}
+        disabled={busy || dirty}
+        onClick={onAsk}
+        title={dirty ? t("story:voice.saveFirst") : undefined}
+        type="button"
+      >
+        {busy
+          ? t("story:panels.drawing")
+          : take === undefined
+            ? t("story:voice.lineAsk")
+            : t("story:voice.again")}
+      </button>
+    </div>
+  );
+}
+
+/**
  * One line as an edit leaves it.
  *
  * A field the edit clears is taken off the line rather than left holding
@@ -826,16 +922,29 @@ function editedLine(
 }
 
 function DialogueEditor({
+  story,
+  chapterId,
+  act,
+  keyframe,
+  busyLines,
   lines,
   characters,
   onDone,
 }: {
+  story: StoryDocument;
+  chapterId: string;
+  act: StoryAct;
+  keyframe: StoryKeyframe;
+  /** The lines of this act being read just now, by the line's own name. */
+  busyLines: Set<string>;
   lines: StoryDialogueLine[];
   /** The act's characters, still in the story: who a line may be given to. */
   characters: StoryElement[];
   onDone: (lines: StoryDialogueLine[]) => void;
 }) {
   const { t } = useTranslation();
+  const runWaves = useStoryWavesRun();
+  const moka = useProjectStore((state) => state.moka);
   const [draft, setDraft] = useState(lines);
   const write = (at: number, patch: Partial<StoryDialogueLine>) =>
     setDraft(
@@ -843,45 +952,73 @@ function DialogueEditor({
         index === at ? editedLine(held, patch) : held,
       ),
     );
+  /** Reads one line on its own, in the voice its speaker is given. */
+  const ask = (lineId: string) =>
+    void runWaves(
+      story.id,
+      "voice",
+      planLineVoiceAsks(story, chapterId, act.id, [lineId]),
+    );
 
   return (
     <div className="story-dialogue" data-testid="story-dialogue">
       {draft.length === 0 && (
         <p className="story-hint">{t("story:storyboard.noDialogue")}</p>
       )}
-      {draft.map((line, index) => (
-        <div className="story-dialogue-line" key={line.id}>
-          <SpeakerField
-            characters={characters}
-            index={index}
-            line={line}
-            onWrite={(patch) => write(index, patch)}
-          />
-          <input
-            aria-label={t("story:storyboard.line")}
-            data-testid={`story-line-text-${index}`}
-            maxLength={500}
-            onChange={(event) => write(index, { text: event.target.value })}
-            value={line.text}
-          />
-          <input
-            aria-label={t("story:storyboard.tone")}
-            data-testid={`story-line-tone-${index}`}
-            maxLength={60}
-            onChange={(event) => write(index, { tone: event.target.value })}
-            value={line.tone ?? ""}
-          />
-          <button
-            aria-label={t("story:storyboard.removeLine")}
-            className="link"
-            data-testid={`story-line-remove-${index}`}
-            onClick={() => setDraft(draft.filter((_held, at) => at !== index))}
-            type="button"
-          >
-            ✕
-          </button>
-        </div>
-      ))}
+      {draft.map((line, index) => {
+        // What the document holds of this line, which is what a take belongs
+        // to: a line added in the open editor is not in the story yet, and has
+        // nothing read for it to show.
+        const saved = keyframe.dialogue.find((held) => held.id === line.id);
+        return (
+          <div className="story-dialogue-line" key={line.id}>
+            <div className="story-dialogue-fields">
+              <SpeakerField
+                characters={characters}
+                index={index}
+                line={line}
+                onWrite={(patch) => write(index, patch)}
+              />
+              <input
+                aria-label={t("story:storyboard.line")}
+                data-testid={`story-line-text-${index}`}
+                maxLength={500}
+                onChange={(event) => write(index, { text: event.target.value })}
+                value={line.text}
+              />
+              <input
+                aria-label={t("story:storyboard.tone")}
+                data-testid={`story-line-tone-${index}`}
+                maxLength={60}
+                onChange={(event) => write(index, { tone: event.target.value })}
+                value={line.tone ?? ""}
+              />
+              <button
+                aria-label={t("story:storyboard.removeLine")}
+                className="link"
+                data-testid={`story-line-remove-${index}`}
+                onClick={() =>
+                  setDraft(draft.filter((_held, at) => at !== index))
+                }
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+            {saved !== undefined && (
+              <LineVoiceRow
+                busy={busyLines.has(line.id)}
+                dirty={line.text.trim() !== saved.text.trim()}
+                index={index}
+                moka={moka}
+                onAsk={() => ask(line.id)}
+                sentence={saved}
+                take={voiceTakeOf(keyframe, line.id)}
+              />
+            )}
+          </div>
+        );
+      })}
       <div className="story-step-actions">
         <button
           className="link"

@@ -35,6 +35,7 @@ import type {
   StoryShotSize,
   StoryTake,
   StoryVoiceProfile,
+  StoryVoiceTake,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -866,6 +867,39 @@ export function lineCountFor(story: StoryDocument, elementId: string): number {
   return count;
 }
 
+/** The take a shot keeps of one line read aloud, by the line's own name. */
+export function voiceTakeOf(
+  keyframe: StoryKeyframe,
+  lineId: string,
+): StoryVoiceTake | undefined {
+  return keyframe.voices?.find((take) => take.lineId === lineId);
+}
+
+/**
+ * Whether the board holds a reading of this line, of the words it has now.
+ *
+ * A line read before it was rewritten is not read as it stands: what the take
+ * holds is the older words, and saying so is what lets a reader notice rather
+ * than wonder why the voice does not match the line.
+ */
+export function voiceHoldsLine(
+  keyframe: StoryKeyframe,
+  line: StoryDialogueLine,
+): boolean {
+  const take = voiceTakeOf(keyframe, line.id);
+  return take !== undefined && take.text === line.text.trim();
+}
+
+/** The take a line-voice target names, if the story still holds the shot. */
+export function storyVoiceTake(
+  story: StoryDocument,
+  target: Extract<StorySlotTarget, { kind: "lineVoice" }>,
+): StoryVoiceTake | undefined {
+  const keyframe = keyframeAt(story, target);
+  if (keyframe === undefined) return undefined;
+  return voiceTakeOf(keyframe, target.lineId);
+}
+
 /** The first line of the telling a character is given, words and all. */
 export function firstLineOf(
   story: StoryDocument,
@@ -973,6 +1007,8 @@ export function targetKey(target: StorySlotTarget): string {
       return `actVideo:${target.chapterId}:${target.actId}`;
     case "actVoice":
       return `actVoice:${target.chapterId}:${target.actId}`;
+    case "lineVoice":
+      return `lineVoice:${target.chapterId}:${target.actId}:${target.keyframeId}:${target.lineId}`;
     case "actMusic":
       return `actMusic:${target.chapterId}:${target.actId}`;
     case "keyframeVideo":
@@ -1027,6 +1063,14 @@ export function slotAt(
       const act = actAt(story, target.chapterId, target.actId);
       if (act === undefined) return undefined;
       return act.voice ?? emptyStorySlot();
+    }
+    case "lineVoice": {
+      // The line's take is read off the shot, not off the line: a line edited
+      // or taken out of the board leaves its take where it was, so that what
+      // was said is not lost by what was said afterwards.
+      const keyframe = keyframeAt(story, target);
+      if (keyframe === undefined) return undefined;
+      return voiceTakeOf(keyframe, target.lineId)?.slot ?? emptyStorySlot();
     }
     case "actMusic": {
       const act = actAt(story, target.chapterId, target.actId);
@@ -1156,6 +1200,7 @@ export function storyDeleteCost(story: StoryDocument): {
   acts: number;
   pictures: number;
   videos: number;
+  voices: number;
 } {
   let acts = 0;
   let pictures = story.elements.reduce(
@@ -1164,17 +1209,22 @@ export function storyDeleteCost(story: StoryDocument): {
     0,
   );
   let videos = 0;
+  let voices = 0;
   for (const chapter of story.chapters) {
     for (const act of chapter.acts) {
       acts += 1;
       videos += act.video.takes.length;
+      voices += act.voice?.takes.length ?? 0;
       for (const keyframe of act.keyframes) {
         pictures += keyframe.art.takes.length;
         videos += keyframe.video.takes.length;
+        for (const take of keyframe.voices ?? []) {
+          voices += take.slot.takes.length;
+        }
       }
     }
   }
-  return { chapters: story.chapters.length, acts, pictures, videos };
+  return { chapters: story.chapters.length, acts, pictures, videos, voices };
 }
 
 /**

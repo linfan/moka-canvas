@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use story::{
     StoryActPatch, StoryBriefPatch, StoryDocument, StoryEditPatch, StoryElementPatch,
-    StoryKeyframePatch, StoryShotGranularity, StorySlot, StorySlotTarget,
+    StoryKeyframePatch, StoryShotGranularity, StorySlot, StorySlotTarget, StoryVoiceRead,
 };
 
 pub type ProjectId = String;
@@ -1568,11 +1568,16 @@ pub enum DocumentCommand {
     ///
     /// Whole rather than one take added at a time, because keeping an older
     /// take and dropping the newest is as ordinary as the reverse.
+    ///
+    /// `read` is what a line of dialogue was read as, for a `lineVoice`
+    /// target: the words the board holds for it, and the tone it was read in.
     #[serde(rename_all = "camelCase")]
     SetStorySlot {
         story_id: String,
         target: StorySlotTarget,
         slot: StorySlot,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read: Option<StoryVoiceRead>,
     },
     /// A step of the telling settled, or taken back. The reader's own word
     /// about a step rather than a reading of the content: what a step still

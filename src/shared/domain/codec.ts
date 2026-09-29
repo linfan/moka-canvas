@@ -55,6 +55,7 @@ import type {
   StorySlot,
   StoryTake,
   StoryVoiceProfile,
+  StoryVoiceTake,
   TextClipStyle,
   TimelineClip,
   TimelineDocument,
@@ -440,6 +441,14 @@ function encodeStoryKeyframe(keyframe: StoryKeyframe): Record<string, unknown> {
   // board whose frames are all references keeps the shape it came in with.
   if (keyframe.filmRole !== undefined && keyframe.filmRole !== "reference") {
     doc.filmRole = keyframe.filmRole;
+  }
+  if (keyframe.voices !== undefined && keyframe.voices.length > 0) {
+    doc.voices = keyframe.voices.map((take) => ({
+      lineId: take.lineId,
+      text: take.text,
+      voice: take.voice,
+      slot: encodeStorySlot(take.slot),
+    }));
   }
   return doc;
 }
@@ -1321,7 +1330,34 @@ function decodeStoryKeyframe(value: unknown): StoryKeyframe {
       "reference",
     );
   }
+  const voices = decodeStoryVoices(doc.voices);
+  if (voices !== undefined) keyframe.voices = voices;
   return keyframe;
+}
+
+/**
+ * The lines of a shot read aloud, as a document carries them.
+ *
+ * A line's take is kept by the line's own name, so a telling written before
+ * lines had names has no takes to read: one that names nothing would be a
+ * take no line could ever be told apart by.
+ */
+function decodeStoryVoices(value: unknown): StoryVoiceTake[] | undefined {
+  if (value === undefined) return undefined;
+  const takes = asArray(value, "keyframes[].voices").flatMap((entry) => {
+    const doc = asRecord(entry, "keyframes[].voices[]");
+    const lineId = optionalString(doc.lineId);
+    if (lineId === undefined || lineId === "") return [];
+    return [
+      {
+        lineId,
+        text: asString(doc.text, "voices[].text"),
+        voice: optionalString(doc.voice) ?? "",
+        slot: decodeStorySlot(doc.slot),
+      },
+    ];
+  });
+  return takes.length === 0 ? undefined : takes;
 }
 
 function decodeStoryAct(value: unknown): StoryAct {

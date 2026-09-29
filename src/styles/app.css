@@ -7324,6 +7324,11 @@ button > .story-spin {
 }
 
 .story-dialogue-line {
+  display: grid;
+  gap: 4px;
+}
+
+.story-dialogue-fields {
   align-items: center;
   display: grid;
   gap: 6px;
@@ -7345,6 +7350,21 @@ button > .story-spin {
 
 .story-dialogue-line button:hover:not(:disabled) {
   color: var(--coral);
+}
+
+/* What has become of one line's reading, under the line it reads. */
+
+.story-line-voice {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 126px;
+}
+
+.story-line-voice audio {
+  height: 26px;
+  max-width: 200px;
 }
 
 .story-kf-clip {

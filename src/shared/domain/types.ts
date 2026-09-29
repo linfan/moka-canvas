@@ -711,6 +711,13 @@ export interface StoryKeyframe {
   art: StorySlot;
   /** This shot's own clip, when the story is boarded a shot at a time. */
   video: StorySlot;
+  /**
+   * The lines of this shot read aloud, each in its own speaker's voice. A
+   * line that was read then edited keeps its take — it is what was said, and
+   * the card says so — and a line taken out of the shot leaves its take an
+   * orphan, which the assembly no longer lays down.
+   */
+  voices?: StoryVoiceTake[];
 }
 
 /** What an act sounds like. */
@@ -872,8 +879,34 @@ export type StorySlotTarget =
     }
   /** The act's lines read aloud — one clip for the whole act, not one a shot. */
   | { kind: "actVoice"; chapterId: string; actId: string }
+  /** One line of dialogue read on its own, in the voice its speaker has. */
+  | {
+      kind: "lineVoice";
+      chapterId: string;
+      actId: string;
+      keyframeId: string;
+      lineId: string;
+    }
   /** The music and sound under an act, asked for as one piece. */
   | { kind: "actMusic"; chapterId: string; actId: string };
+
+/**
+ * One line of dialogue read aloud, and what it says.
+ *
+ * Kept per line rather than per act because every character speaks in their
+ * own voice: the words as they were read — which is how a line edited since
+ * is told from one that has not been — and the tone it was read in, so the
+ * card can say whose voice it is without reading the voice chain again.
+ */
+export interface StoryVoiceTake {
+  /** The line it reads, by the line's own name. */
+  lineId: string;
+  /** The words the ask carried, which the line's current words are read against. */
+  text: string;
+  /** The tone it was read in; empty is the model's own default. */
+  voice: string;
+  slot: StorySlot;
+}
 
 /**
  * Something pointing at a file, told apart by what letting the file go would
@@ -1359,6 +1392,12 @@ export type DocumentCommand =
       storyId: string;
       target: StorySlotTarget;
       slot: StorySlot;
+      /**
+       * What a line was read as, for a `lineVoice` target: the words the ask
+       * carried, and the tone it was read in. Left off for every other place,
+       * which keeps a drawing — no words of its own to keep.
+       */
+      read?: { text: string; voice: string };
     }
   /** What the story was assembled into, whole. */
   | { type: "setStoryEdit"; storyId: string; patch: StoryEditPatch };

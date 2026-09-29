@@ -332,6 +332,34 @@ pub struct StoryDialogueLine {
     pub tone: Option<String>,
 }
 
+/// One line of dialogue read aloud, and what it says.
+///
+/// Kept per line rather than per act because every character speaks in their
+/// own voice: the words as they were read — which is how a line edited since
+/// is told from one that has not been — and the tone it was read in, so the
+/// card can say whose voice it is without reading the voice chain again.
+/// What a line of dialogue was read as, for the card that shows it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryVoiceRead {
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub voice: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryVoiceTake {
+    #[serde(default)]
+    pub line_id: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub voice: String,
+    pub slot: StorySlot,
+}
+
 /// The voice a character or a narrator speaks in: which model reads it, in
 /// which tone, and how. Every field left empty falls through to the next layer
 /// of the chain the client resolves — the story's narrator, the machine's own
@@ -377,6 +405,9 @@ pub struct StoryKeyframe {
     pub duration_ms: i64,
     pub art: StorySlot,
     pub video: StorySlot,
+    /// The lines of this shot read aloud, each in its own speaker's voice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voices: Option<Vec<StoryVoiceTake>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -527,6 +558,13 @@ pub enum StorySlotTarget {
     #[serde(rename_all = "camelCase")]
     ActVoice { chapter_id: String, act_id: String },
     #[serde(rename_all = "camelCase")]
+    LineVoice {
+        chapter_id: String,
+        act_id: String,
+        keyframe_id: String,
+        line_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
     ActMusic { chapter_id: String, act_id: String },
 }
 
@@ -665,6 +703,9 @@ impl StoryDocument {
                 for keyframe in &act.keyframes {
                     slot(&keyframe.art);
                     slot(&keyframe.video);
+                    for take in keyframe.voices.iter().flatten() {
+                        slot(&take.slot);
+                    }
                 }
             }
         }
@@ -730,7 +771,46 @@ impl StoryDocument {
                 .act(chapter_id, act_id)
                 .map(|act| act.music.clone().unwrap_or_default())
                 .ok_or_else(story_target_invalid),
+            // The line's take is read off the shot, not off the line: a line
+            // edited or taken out of the board leaves its take where it was,
+            // so that what was said is not lost by what was said afterwards.
+            StorySlotTarget::LineVoice {
+                chapter_id,
+                act_id,
+                keyframe_id,
+                line_id,
+            } => self
+                .keyframe(chapter_id, act_id, keyframe_id)
+                .map(|keyframe| {
+                    keyframe
+                        .voices
+                        .iter()
+                        .flatten()
+                        .find(|take| &take.line_id == line_id)
+                        .map(|take| take.slot.clone())
+                        .unwrap_or_default()
+                })
+                .ok_or_else(story_target_invalid),
         }
+    }
+
+    /// The take a line-voice target names, with the words it was read as.
+    fn voice_take(&self, target: &StorySlotTarget) -> Option<StoryVoiceTake> {
+        let StorySlotTarget::LineVoice {
+            chapter_id,
+            act_id,
+            keyframe_id,
+            line_id,
+        } = target
+        else {
+            return None;
+        };
+        self.keyframe(chapter_id, act_id, keyframe_id)?
+            .voices
+            .iter()
+            .flatten()
+            .find(|take| &take.line_id == line_id)
+            .cloned()
     }
 
     fn keyframe(
@@ -746,7 +826,12 @@ impl StoryDocument {
     }
 
     /// This story with a slot written where the target names it.
-    fn with_slot(&self, target: &StorySlotTarget, slot: StorySlot) -> StoryDocument {
+    fn with_slot(
+        &self,
+        target: &StorySlotTarget,
+        slot: StorySlot,
+        read: Option<StoryVoiceRead>,
+    ) -> StoryDocument {
         let mut next = self.clone();
         match target {
             StorySlotTarget::Element { element_id, view } => {
@@ -838,6 +923,28 @@ impl StoryDocument {
                     }
                 }
             }
+            StorySlotTarget::LineVoice {
+                chapter_id,
+                act_id,
+                keyframe_id,
+                line_id,
+            } => {
+                for chapter in next.chapters.iter_mut() {
+                    if &chapter.id != chapter_id {
+                        continue;
+                    }
+                    for act in chapter.acts.iter_mut() {
+                        if &act.id != act_id {
+                            continue;
+                        }
+                        for keyframe in act.keyframes.iter_mut() {
+                            if &keyframe.id == keyframe_id {
+                                with_voice_take(keyframe, line_id, slot.clone(), read.clone());
+                            }
+                        }
+                    }
+                }
+            }
         }
         next
     }
@@ -853,6 +960,65 @@ fn story_target_invalid() -> CommandError {
 /// about a place a reader has not asked about yet, and the undo of the first
 /// take ever made for an act has to put the document back the way it was —
 /// which is without the slot, not with an empty one.
+/// One line's take kept on its shot, whole.
+///
+/// A slot that has come to hold nothing takes the whole entry with it: the two
+/// would say different things about a line nobody has read yet, and the undo of
+/// the first reading has to put the document back the way it was — without the
+/// entry, not with an empty one. What the line was read as is kept beside the
+/// takes, so the card can say the words the recording holds even after the line
+/// beside them was rewritten. The entries stand in the order their lines do on
+/// the board, so that two rooms holding the same reading write the same
+/// document; a take whose line has left the shot is not on the board to be
+/// ordered by, and comes last.
+fn with_voice_take(
+    keyframe: &mut StoryKeyframe,
+    line_id: &str,
+    slot: StorySlot,
+    read: Option<StoryVoiceRead>,
+) {
+    let order: BTreeMap<&str, usize> = keyframe
+        .dialogue
+        .iter()
+        .enumerate()
+        .map(|(at, line)| (line.id.as_deref().unwrap_or(""), at))
+        .collect();
+    let held = keyframe.voices.take().unwrap_or_default();
+    let before = held.iter().find(|take| take.line_id == line_id).cloned();
+    let rest: Vec<StoryVoiceTake> = held
+        .into_iter()
+        .filter(|take| take.line_id != line_id)
+        .collect();
+    if slot.takes.is_empty() {
+        keyframe.voices = if rest.is_empty() { None } else { Some(rest) };
+        return;
+    }
+    let text = read
+        .as_ref()
+        .map(|read| read.text.clone())
+        .or_else(|| before.as_ref().map(|take| take.text.clone()))
+        .unwrap_or_default();
+    let voice = read
+        .as_ref()
+        .map(|read| read.voice.clone())
+        .or_else(|| before.as_ref().map(|take| take.voice.clone()))
+        .unwrap_or_default();
+    let mut voices = rest;
+    voices.push(StoryVoiceTake {
+        line_id: line_id.to_string(),
+        text,
+        voice,
+        slot,
+    });
+    voices.sort_by_key(|take| {
+        order
+            .get(take.line_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    keyframe.voices = Some(voices);
+}
+
 fn kept_sound_slot(slot: StorySlot) -> Option<StorySlot> {
     if slot.takes.is_empty() {
         None
@@ -1130,6 +1296,25 @@ fn check_voice(voice: &StoryVoiceProfile) -> Result<(), CommandError> {
                 "The voice's pitch is out of range",
             ));
         }
+    }
+    Ok(())
+}
+
+/// What a line was read as, held to the bounds the line itself is: the words a
+/// recording holds are as long as the words a shot may be written with, and the
+/// tone is a name like any other.
+fn check_voice_read(read: &StoryVoiceRead) -> Result<(), CommandError> {
+    if read.text.chars().count() > MAX_DIALOGUE_LINE_LENGTH {
+        return Err(CommandError::new(
+            "VALIDATION_FAILED",
+            "Dialogue is too long for one shot",
+        ));
+    }
+    if read.voice.chars().count() > VOICE_NAME_MAX {
+        return Err(CommandError::new(
+            "VALIDATION_FAILED",
+            "The voice's model, tone, or manner is too long",
+        ));
     }
     Ok(())
 }
@@ -1751,16 +1936,34 @@ pub fn apply_story_command(
             story_id,
             target,
             slot,
+            read,
         } => {
             let story = story_of(moka, story_id)?;
             let previous = story.slot(target)?;
-            let next = story.with_slot(target, check_slot(slot.clone()));
+            if let Some(read) = read {
+                check_voice_read(read)?;
+            }
+            // What the entry said before this write, so that the undo of
+            // replacing one reading with another brings the old words and
+            // their tone back.
+            let before = story.voice_take(target);
+            let said = read.clone().or_else(|| {
+                before.as_ref().map(|take| StoryVoiceRead {
+                    text: take.text.clone(),
+                    voice: take.voice.clone(),
+                })
+            });
+            let next = story.with_slot(target, check_slot(slot.clone()), said);
             Ok((
                 replace_story(moka, next),
                 vec![DocumentCommand::SetStorySlot {
                     story_id: story_id.clone(),
                     target: target.clone(),
                     slot: previous,
+                    read: before.map(|take| StoryVoiceRead {
+                        text: take.text,
+                        voice: take.voice,
+                    }),
                 }],
             ))
         }

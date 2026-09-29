@@ -20,6 +20,7 @@ import type {
   StoryTarget,
 } from "../../../api/story";
 import {
+  MAX_ITEMS_PER_STORY_JOB,
   MAX_VIDEO_SECONDS,
   STORY_READ_CHARS_DEFAULT,
   STORY_SPLIT_CHARS_DEFAULT,
@@ -32,6 +33,7 @@ import {
 import {
   actAt,
   actPlannedMs,
+  chunkWaves,
   currentTake,
   elementOf,
   keyframeAt,
@@ -57,6 +59,7 @@ import {
   storyActVideoPrompt,
   storyActVoicePrompt,
   storyElementMainPrompt,
+  storyLineVoicePrompt,
   storyElementTurnaroundPrompt,
   storyElementsPrompt,
   storyKeyframePrompt,
@@ -124,6 +127,14 @@ export function jobKey(target: StoryTarget): string {
         kind: "actVoice",
         chapterId: target.chapterId,
         actId: target.actId,
+      });
+    case "lineVoice":
+      return targetKey({
+        kind: "lineVoice",
+        chapterId: target.chapterId,
+        actId: target.actId,
+        keyframeId: target.keyframeId,
+        lineId: target.lineId,
       });
     case "music":
       return targetKey({
@@ -813,12 +824,100 @@ export function planKeyframeVideos(
 // The sound of an act
 // -----------------------------------------------------------------------------
 
+/** One wave of line asks: the pieces asked of one model, in board order. */
+export interface LineVoiceWave {
+  /** The model every piece in this wave is asked of; null is the deployment's. */
+  model: string | null;
+  items: StoryJobItemDraft[];
+}
+
+/**
+ * Every line of an act read aloud, in the voice its speaker is given.
+ *
+ * One ask a line, because a telling's characters do not share a voice: each
+ * line resolves through the voice chain and is asked of the model that came
+ * out of it, so a batch carries one model and the lines of different models
+ * travel as different waves, one after another. A line with no words in it is
+ * not read, and telling the same model twice in a wave is telling it once.
+ */
+export function planLineVoiceAsks(
+  story: StoryDocument,
+  chapterId: string,
+  actId: string,
+  only?: string[],
+): LineVoiceWave[] {
+  const act = actAt(story, chapterId, actId);
+  if (act === undefined) return [];
+  // Keyed by the model the line is read of; the empty string stands for the
+  // deployment's own default, which is what the batch is started without.
+  const waves = new Map<string, StoryJobItemDraft[]>();
+  for (const keyframe of act.keyframes) {
+    for (const line of keyframe.dialogue) {
+      const text = line.text.trim();
+      if (text === "") continue;
+      if (only !== undefined && !only.includes(line.id)) continue;
+      const target: StoryTarget = {
+        kind: "lineVoice",
+        chapterId,
+        actId,
+        keyframeId: keyframe.id,
+        lineId: line.id,
+      };
+      const voice = resolveVoice(story, line.characterId);
+      const tone = (line.tone ?? "").trim();
+      const held = waves.get(voice.model) ?? [];
+      held.push({
+        id: jobKey(target),
+        target,
+        capability: "speech",
+        prompt: storyLineVoicePrompt({
+          ...lookOf(story),
+          genre: story.brief.genre,
+          act: act.title,
+          text,
+          ...(tone === "" ? {} : { tone }),
+        }),
+        inputs: [],
+        params: voiceParamsFor(story, voice, {
+          act: act.summary,
+          ...(tone === "" ? {} : { tone }),
+        }),
+      });
+      waves.set(voice.model, held);
+    }
+  }
+  // One wave keeps a batch under the pieces a batch may carry: a telling may
+  // hold more lines than that, and asking for them all at once is asking for
+  // a batch the server would refuse whole.
+  return [...waves].flatMap(([model, items]) =>
+    chunkWaves(items, MAX_ITEMS_PER_STORY_JOB).map((wave) => ({
+      model: model === "" ? null : model,
+      items: wave,
+    })),
+  );
+}
+
+/** The same, flat: every line of the act, whoever it ends up being asked of. */
+export function planLineVoices(
+  story: StoryDocument,
+  chapterId: string,
+  actId: string,
+  only?: string[],
+): StoryJobItemDraft[] {
+  return planLineVoiceAsks(story, chapterId, actId, only).flatMap(
+    (wave) => wave.items,
+  );
+}
+
 /**
  * An act's lines read aloud, as one piece in one voice.
  *
  * One ask for the whole act rather than one a line, because a voice that
  * changed halfway through an act is not a voice: the lines of every shot are
- * flattened in board order, and a line with no words in it is not read.
+ * flattened in board order, and a line with no words in it is not read. Kept
+ * for the tellings voiced before each character had a voice: a take already
+ * filed under the old ask is replayed and retried through it, and nothing new
+ * is asked for that way.
  */
 export function planActVoice(
   story: StoryDocument,
@@ -1032,6 +1131,10 @@ export function itemsForTargets(
         ]);
       case "voice":
         return planActVoice(story, target.chapterId, target.actId);
+      case "lineVoice":
+        return planLineVoices(story, target.chapterId, target.actId, [
+          target.lineId,
+        ]);
       case "music":
         return planActMusic(story, target.chapterId, target.actId);
     }

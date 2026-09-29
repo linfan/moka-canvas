@@ -45,7 +45,7 @@
   },
   "remove": {
     "title": "删除「{{name}}」？",
-    "body": "{{chapters}} 章 · {{acts}} 幕 · {{pictures}} 张图 · {{videos}} 段视频将不再被这个故事引用。",
+    "body": "{{chapters}} 章 · {{acts}} 幕 · {{pictures}} 张图 · {{videos}} 段视频 · {{voices}} 段配音将不再被这个故事引用。",
     "keeps": "素材库里的文件会留下；装配出来的时间线也会留下，可以在剪辑室继续用。",
     "confirm": "删除",
     "cancel": "取消"
@@ -485,7 +485,8 @@
     "clipFrameLine": "第 {{chapter}} 集 · 幕 {{act}} · 第 {{shot}} 格",
     "notFilmed": "未生成",
     "line": "{{speaker}}：{{text}}",
-    "ownSoundNote": "片段本身也带声音，两处会同时响；到剪辑室里把其中一处的音量调低即可。"
+    "ownSoundNote": "片段本身也带声音，两处会同时响；到剪辑室里把其中一处的音量调低即可。",
+    "lineVoice": "第 {{number}} 句"
   },
   "import": {
     "name": "名字",
@@ -523,6 +524,15 @@
     "take": "{{seconds}}",
     "again": "换一段",
     "instructions": "按{{genre}}的演法、{{style}}的调子念——平稳、不赶，也不要比台词本身更用力。",
-    "sample": "这是一句试听的话，听一听这个声音合不合适。"
+    "sample": "这是一句试听的话，听一听这个声音合不合适。",
+    "unspent": "未念",
+    "spent": "已念 {{seconds}}",
+    "spentIn": "已念 {{seconds}} · {{voice}}",
+    "stale": "词句改过了，录音还是旧的",
+    "lineAsk": "念这一句",
+    "saveFirst": "先把改动写下来再念",
+    "allRead": "{{count}} 句都念过了",
+    "legacyNote": "整幕一次念的旧版",
+    "audioFallback": "这里的音频模型是没给自己的模型的角色、以及旁白的兜底；每个角色的声音在第三步「剧情元素」里定。"
   }
 }

@@ -131,6 +131,7 @@ fn frame(index: usize) -> StoryKeyframe {
         duration_ms: 1_000,
         art: empty_slot(),
         video: empty_slot(),
+        voices: None,
     }
 }
 
@@ -242,6 +243,7 @@ fn story_document() -> MokaFile {
             }],
         },
         video: empty_slot(),
+        voices: None,
     };
     let second = StoryKeyframe {
         id: FRAME_SECOND.into(),
@@ -255,6 +257,7 @@ fn story_document() -> MokaFile {
         duration_ms: 3_000,
         art: empty_slot(),
         video: empty_slot(),
+        voices: None,
     };
 
     moka.stories = Some(vec![StoryDocument {
@@ -1143,6 +1146,7 @@ fn files_a_drawing_at_the_place_a_target_names() {
                 keyframe_id: FRAME_SECOND.into(),
             },
             slot: slot.clone(),
+            read: None,
         }],
     );
     assert_eq!(story_of(&next).chapters[0].acts[0].keyframes[1].art, slot);
@@ -1168,6 +1172,7 @@ fn files_a_voice_and_a_score_where_an_act_keeps_them() {
             slot: StorySlot {
                 takes: vec![take("asset-act-voice")],
             },
+            read: None,
         }],
     );
     let act = &story_of(&next).chapters[0].acts[0];
@@ -1189,6 +1194,7 @@ fn files_a_voice_and_a_score_where_an_act_keeps_them() {
             slot: StorySlot {
                 takes: vec![take("asset-act-music")],
             },
+            read: None,
         }],
     );
     let act = &story_of(&scored).chapters[0].acts[0];
@@ -1215,6 +1221,7 @@ fn trims_a_slot_to_what_a_place_keeps_oldest_first_and_drops_two_of_one_drawing(
                 view: StoryElementView::Main,
             },
             slot: StorySlot { takes },
+            read: None,
         }],
     )
     .0;
@@ -1240,6 +1247,7 @@ fn refuses_a_place_the_story_no_longer_holds() {
                     view: StoryElementView::Main,
                 },
                 slot: empty_slot(),
+                read: None,
             }
         ),
         "STORY_TARGET_INVALID"
@@ -1254,6 +1262,7 @@ fn refuses_a_place_the_story_no_longer_holds() {
                     view: StoryElementView::Turnaround,
                 },
                 slot: empty_slot(),
+                read: None,
             }
         ),
         "STORY_TARGET_INVALID"

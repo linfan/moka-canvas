@@ -45,7 +45,7 @@
   },
   "remove": {
     "title": "Delete “{{name}}”?",
-    "body": "{{chapters}} chapters, {{acts}} acts, {{pictures}} pictures, and {{videos}} clips will no longer be referred to by this story.",
+    "body": "{{chapters}} chapters, {{acts}} acts, {{pictures}} pictures, {{videos}} clips, and {{voices}} voices will no longer be referred to by this story.",
     "keeps": "The files stay in the shelf, and the timeline it assembled stays in the cutting room.",
     "confirm": "Delete",
     "cancel": "Cancel"
@@ -485,7 +485,8 @@
     "clipFrameLine": "Episode {{chapter}} · Act {{act}} · Shot {{shot}}",
     "notFilmed": "not filmed",
     "line": "{{speaker}}: {{text}}",
-    "ownSoundNote": "The clips carry their own sound too, so two things may be heard at once; turn one of them down in the cutting room."
+    "ownSoundNote": "The clips carry their own sound too, so two things may be heard at once; turn one of them down in the cutting room.",
+    "lineVoice": "Line {{number}}"
   },
   "import": {
     "name": "Name",
@@ -523,6 +524,15 @@
     "take": "{{seconds}}",
     "again": "Ask for another",
     "instructions": "Read it as a {{genre}} told in a {{style}} register — steady and unhurried, and no more dramatic than the lines are.",
-    "sample": "This is a line read aloud, to hear whether the voice fits."
+    "sample": "This is a line read aloud, to hear whether the voice fits.",
+    "unspent": "Not read yet",
+    "spent": "Read, {{seconds}}",
+    "spentIn": "Read, {{seconds}} · {{voice}}",
+    "stale": "The words changed since this was read",
+    "lineAsk": "Read this line",
+    "saveFirst": "Write the change down before reading it",
+    "allRead": "Every line is read ({{count}})",
+    "legacyNote": "an older reading of the whole act",
+    "audioFallback": "The audio model here is what characters without a model of their own — and the narrator — fall back to. Each character's voice is set on the third step."
   }
 }

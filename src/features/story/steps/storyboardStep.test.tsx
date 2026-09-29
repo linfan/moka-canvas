@@ -22,7 +22,6 @@ import {
   storyIds,
 } from "../../../shared/domain/fixtures";
 import { createAct, createKeyframe } from "../../../shared/domain/factories";
-import { currentTake } from "../../../shared/domain/story";
 import { clampSeconds } from "../jobs/plan";
 import { undo } from "../../editor/commands/execute";
 import { useHistoryStore } from "../../editor/stores/historyStore";
@@ -320,9 +319,17 @@ function acts() {
   return (chapter ?? held.chapters[0])?.acts ?? [];
 }
 
-/** The voice-over of the act under test, as the take it holds. */
-function voice(): string | undefined {
-  return currentTake(acts()[0]?.voice ?? { takes: [] })?.assetIds[0];
+/** The line under test, as the document holds it. */
+function storyLine() {
+  return acts()[0]?.keyframes[0]?.dialogue[0];
+}
+
+/** That line's latest reading, as the file it holds. */
+function lineVoice(): string | undefined {
+  const take = acts()[0]?.keyframes[0]?.voices?.find(
+    (held) => held.lineId === ids.lineFirst,
+  );
+  return take?.slot.takes.at(-1)?.assetIds[0];
 }
 
 function card(index: number): HTMLElement {
@@ -1283,7 +1290,7 @@ describe("writing an episode's board", () => {
     expect(acts()[0]?.keyframes).toHaveLength(3);
   });
 
-  it("reads an act's lines aloud as one ask, and shows the take that comes back", async () => {
+  it("reads a line aloud on its own, and shows the take that comes back", async () => {
     openAtBoard(boarded());
     // The first act says one line; the room counts it out on the button.
     const speak = screen.getByTestId("story-act-voice-go-0");
@@ -1292,19 +1299,79 @@ describe("writing an episode's board", () => {
 
     await waitFor(() => expect(starts).toHaveLength(1));
     expect(starts[0]!.kind).toBe("voice");
-    expect(starts[0]!.items[0]?.id).toBe(
-      `actVoice:${ids.chapterFirst}:${ids.act}`,
-    );
-    expect(starts[0]!.items[0]?.prompt).toContain("车已经停运了。");
+    // One ask a line, named by the line it reads.
+    expect(starts[0]!.items.map((item) => item.id)).toEqual([
+      `lineVoice:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}:${ids.lineFirst}`,
+    ]);
+    expect(starts[0]!.items[0]!.prompt).toContain("车已经停运了。");
+    // The words travel as the line's own, without the speaker or the tone
+    // being read out: the tone rides in the instructions.
+    expect(starts[0]!.items[0]!.prompt).not.toContain("林：");
+    expect(String(starts[0]!.items[0]!.params?.instructions)).toContain("平静");
 
     await comesBack();
-    const taken = `asset-actVoice-${ids.chapterFirst}-${ids.act}`;
-    await waitFor(() => expect(voice()).toBe(taken));
+    const taken = `asset-lineVoice-${ids.chapterFirst}-${ids.act}-${ids.frameFirst}-${ids.lineFirst}`;
+    await waitFor(() => expect(lineVoice()).toBe(taken));
     // A take that came back is played where it lies, and can be replaced.
+    fireEvent.click(screen.getByTestId("story-kf-dialogue-0"));
     expect(
-      screen.getByTestId("story-act-voice-0").getAttribute("src"),
+      screen.getByTestId("story-line-voice-take-0").getAttribute("src"),
     ).toContain(taken);
-    expect(screen.getByTestId("story-act-voice-again-0")).toBeDefined();
+    expect(
+      screen.getByTestId("story-line-voice-state-0").textContent,
+    ).toContain("Read");
+    // And the act's own button has nothing left to count.
+    expect(screen.queryByTestId("story-act-voice-go-0")).toBeNull();
+    expect(screen.getByTestId("story-act-voice-count-0").textContent).toContain(
+      "1",
+    );
+  });
+
+  it("counts a line whose words changed, and asks for it again alone", async () => {
+    openAtBoard(boarded());
+    fireEvent.click(screen.getByTestId("story-act-voice-go-0"));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    await comesBack();
+    await waitFor(() => expect(lineVoice()).toBeDefined());
+
+    // The line as it stands has its reading, so the button is gone.
+    expect(screen.queryByTestId("story-act-voice-go-0")).toBeNull();
+    fireEvent.click(screen.getByTestId("story-kf-dialogue-0"));
+    expect(
+      screen.getByTestId("story-line-voice-state-0").textContent,
+    ).toContain("Read");
+
+    // Rewritten, it is short of a reading again — and says why.
+    fireEvent.change(screen.getByTestId("story-line-text-0"), {
+      target: { value: "车不会来了。" },
+    });
+    fireEvent.click(screen.getByTestId("story-line-done"));
+    await waitFor(() => expect(storyLine()?.text).toBe("车不会来了。"));
+    fireEvent.click(screen.getByTestId("story-kf-dialogue-0"));
+    expect(
+      screen.getByTestId("story-line-voice-state-0").textContent,
+    ).toContain("The words changed");
+    // The act counts it again, and the old take is still there to hear.
+    const speak = screen.getByTestId("story-act-voice-go-0");
+    expect(speak.textContent).toContain("1");
+    expect(
+      screen.getByTestId("story-line-voice-take-0").getAttribute("src"),
+    ).toContain("asset-lineVoice");
+
+    // Asking again is another take for the line, not a replacement of what was
+    // said before: the room waits out this batch, so the answer has to be ready
+    // before the ask goes out.
+    landed[
+      `lineVoice:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}:${ids.lineFirst}`
+    ] = ["asset-lineVoice-reread"];
+    fireEvent.click(screen.getByTestId("story-line-voice-go-0"));
+    await waitFor(() => expect(starts).toHaveLength(2));
+    expect(starts[1]!.items.map((item) => item.id)).toEqual([
+      `lineVoice:${ids.chapterFirst}:${ids.act}:${ids.frameFirst}:${ids.lineFirst}`,
+    ]);
+    await comesBack();
+    await waitFor(() => expect(lineVoice()).toBe("asset-lineVoice-reread"));
+    expect(acts()[0]!.keyframes[0]!.voices?.[0]?.slot.takes).toHaveLength(2);
   });
 
   it("asks for the score once the board says what the act sounds like", async () => {
@@ -1345,6 +1412,14 @@ describe("writing an episode's board", () => {
     expect(screen.getByTestId("story-board-sound").textContent).toContain(
       "goes on the timeline",
     );
+    // A reading of the whole act, made before its lines had voices of their
+    // own, is kept and playable where it was — and named for what it is.
+    expect(
+      screen.getByTestId("story-act-voice-0").getAttribute("src"),
+    ).toContain("asset-act-voice");
+    expect(
+      screen.getByTestId("story-act-voice-0").parentElement?.textContent,
+    ).toContain("whole act");
   });
 });
 
@@ -1419,8 +1494,10 @@ describe("the clock each act keeps", () => {
 
   it("keeps one bar per batch when one act has two things out at once", async () => {
     openAtBoard(withUndrawnFrames());
+    // Nothing comes home while the test watches, so both waits stand.
+    landed["never-asked"] = ["asset-unused"];
     const first = card(0);
-    // Two asks of the same act: its two shots drawn, and its lines read aloud.
+    // Two asks of the same act: its two shots drawn, and its line read aloud.
     // Neither is the newer word on the other — they are two waits.
     fireEvent.click(within(first).getByTestId("story-act-draw-0"));
     await waitFor(() => expect(barsIn(0)).toHaveLength(1));
@@ -1435,7 +1512,7 @@ describe("the clock each act keeps", () => {
       expect(said.some((text) => /01:0\d/.test(text))).toBe(true);
     });
 
-    // The batch of two pictures counts its pieces; a one-voice ask has no
+    // The batch of two pictures counts its pieces; a one-line ask has no
     // count to give.
     expect(barsIn(0).some((bar) => bar.textContent?.includes("0/2…"))).toBe(
       true,
