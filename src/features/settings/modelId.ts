@@ -58,22 +58,24 @@ export function suggestedModelId(displayName: string): string {
 }
 
 /**
- * A suggested identifier that no stored model is using yet.
+ * A suggested identifier that no stored model is using yet, or null where
+ * every draw was taken.
  *
  * A collision needs the same name and the same six characters, so one draw is
- * what happens in practice; the retries are here so that the rare case ends in
- * an identifier rather than in a form that refuses to save. Giving up returns
- * the last candidate, which the duplicate warning then reports — inventing a
- * second scheme for an event that has not happened would only hide it.
+ * what happens in practice; the retries are here because what a taken name
+ * would cost is not a warning but a write: an identifier a stored
+ * configuration holds names that configuration, and the server replaces what
+ * an identifier names. Null is therefore the answer to a name every draw
+ * lands on — the caller says so rather than saves over somebody.
  */
 export function uniqueModelId(
   displayName: string,
   taken: (id: string) => boolean,
   attempts = 8,
-): string {
-  let candidate = suggestedModelId(displayName);
-  for (let attempt = 1; attempt < attempts && taken(candidate); attempt += 1) {
-    candidate = suggestedModelId(displayName);
+): string | null {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const candidate = suggestedModelId(displayName);
+    if (!taken(candidate)) return candidate;
   }
-  return candidate;
+  return null;
 }
