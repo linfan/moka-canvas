@@ -117,6 +117,10 @@ function inspector(): HTMLElement {
 }
 
 beforeEach(() => {
+  // Which boards were left open is kept on the machine rather than in the
+  // project, so a test that turned to another board must not open the next
+  // test onto it.
+  localStorage.clear();
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   useProjectStore.getState().close();
@@ -209,7 +213,7 @@ describe("the file the shelf was asked about", () => {
     expect(rowOf(ids.assetImage).className).not.toContain("is-inspected");
   });
 
-  it("offers the cards using it only where this board holds one", async () => {
+  it("offers the cards using it where this board holds one, and drops the row where it does not", async () => {
     const ids = goldenNodeIds();
     await openShelf();
 
@@ -230,20 +234,18 @@ describe("the file the shelf was asked about", () => {
       "Selected 1 card on this canvas using this asset",
     );
 
-    // A board that holds no card for the file does not offer to go to one: an
-    // offer that could only answer "nothing here" is better left unsaid, and
-    // the row still says how many cards in the project use it.
+    // A board that holds no card for a file does not list the file at all: the
+    // column reads one board, so there is no row here to offer "nothing" from
+    // — the project's own shelf is the files room's question.
     fireEvent.click(screen.getByTestId("left-tab-project"));
     fireEvent.click(screen.getByRole("button", { name: "Canvas 2" }));
     await screen.findByTestId("canvas-tab-Canvas 2");
     fireEvent.click(screen.getByTestId("left-tab-assets"));
-    const onSecond = within(rowOf(ids.assetImage)).getByRole("button", {
-      name: /Focus the cards on this canvas/,
-    });
-    expect(onSecond).toHaveProperty("disabled", true);
-    expect(onSecond.getAttribute("title")).toBe(
-      "No card on this canvas uses it",
-    );
+    expect(
+      document.querySelector(
+        `.resource-row[data-asset-id="${ids.assetImage}"]`,
+      ),
+    ).toBeNull();
   });
 
   it("stands the column back up to answer where it was folded away", async () => {

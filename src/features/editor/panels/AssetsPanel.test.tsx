@@ -9,6 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { MokaFile, ResourceEntry } from "../../../shared/domain";
+import { createNode } from "../../../shared/domain/factories";
 import {
   buildShelfMokaFile,
   goldenNodeIds,
@@ -49,13 +50,23 @@ function showKind(kind: "text" | "image" | "audio" | "video") {
   fireEvent.click(screen.getByTestId(`asset-kind-${kind}`));
 }
 
+/** Every row a reader can see, the tray's own included. */
 function rowsShown(): string[] {
   return [...document.querySelectorAll(".resource-main strong")].map(
     (name) => name.textContent ?? "",
   );
 }
 
-/** A second picture, so a word chosen on the shelf has something to narrow. */
+/** The board's own list, with the waiting tray left out of it. */
+function listed(): string[] {
+  return [
+    ...document.querySelectorAll(
+      ".side-resource-group:not(.side-resource-tray) .resource-main strong",
+    ),
+  ].map((name) => name.textContent ?? "");
+}
+
+/** A second picture, waiting for a place rather than on the board. */
 function withSecondPicture(moka: MokaFile): MokaFile {
   moka.resources.images.push({
     id: "image-dawn",
@@ -68,6 +79,26 @@ function withSecondPicture(moka: MokaFile): MokaFile {
     tags: ["dusk"],
     origin: "brought",
   });
+  return moka;
+}
+
+/** A picture the board's own cards hold, so a list can be longer than a page. */
+function withPictures(moka: MokaFile, count: number): MokaFile {
+  const canvas = moka.canvas[0];
+  for (let index = 0; index < count; index += 1) {
+    const id = `image-look-${index}`;
+    moka.resources.images.push({
+      id,
+      name: `look-${index}.png`,
+      path: `assets/images/look-${index}.png`,
+      mime: "image/png",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const node = createNode("image", { x: index * 40, y: 0 });
+    node.data = { assetId: id };
+    canvas.nodes.push(node);
+  }
   return moka;
 }
 
@@ -84,6 +115,7 @@ beforeEach(() => {
     leftPanelTab: "project",
     assetKind: "image",
     focusedAssetId: null,
+    assetPicker: null,
   });
 });
 
@@ -92,16 +124,120 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("the shelf, one kind at a time", () => {
-  it("lists each kind under its own tab and counts what it holds", () => {
+describe("the board's shelf, one kind at a time", () => {
+  it("lists what this board holds, and keeps the rest out of the way", () => {
     openShelf(buildShelfMokaFile());
-    expect(rowsShown()).toEqual(["lake.png"]);
+    expect(listed()).toEqual(["lake.png"]);
+
+    // A file no card holds is not this board's material: the text waits in the
+    // tray for a place rather than standing in the list.
     showKind("text");
-    expect(rowsShown()).toEqual(["opening-lines.md"]);
+    expect(listed()).toEqual([]);
+    expect(screen.getByTestId("shelf-tray").textContent).toContain(
+      "opening-lines.md",
+    );
+
     showKind("audio");
+    expect(listed()).toEqual([]);
     expect(rowsShown()).toEqual([]);
     expect(screen.queryByTestId("shelf-no-match")).toBeNull();
-    expect(screen.getByText(/No audio assets yet/)).toBeTruthy();
+    expect(screen.getByText(/This board uses no audio files yet/)).toBeTruthy();
+  });
+
+  it("switches its list with the board being looked at", () => {
+    openShelf(buildShelfMokaFile());
+    expect(listed()).toEqual(["lake.png"]);
+
+    // The second board holds nothing, so nothing is listed on it — and the
+    // file the first board holds is not "waiting" either: it has a place.
+    act(() => {
+      useProjectStore.getState().switchCanvas(goldenNodeIds().canvasSecond);
+    });
+    expect(rowsShown()).toEqual([]);
+    expect(listed()).toEqual([]);
+  });
+
+  it("puts a waiting file on this board from the tray", async () => {
+    const moka = withSecondPicture(buildShelfMokaFile());
+    openShelf(moka);
+    const tray = screen.getByTestId("shelf-tray");
+    expect(tray.textContent).toContain("dawn.png");
+    expect(listed()).toEqual(["lake.png"]);
+
+    fireEvent.click(tray.querySelector('[data-testid="shelf-add-to-canvas"]')!);
+    await waitFor(() => {
+      const canvas = useProjectStore.getState().moka?.canvas[0];
+      expect(
+        canvas?.nodes.some(
+          (node) =>
+            (node.data as { assetId?: string }).assetId === "image-dawn",
+        ),
+      ).toBe(true);
+    });
+    // It is the board's material now: out of the tray, in the list.
+    expect(screen.queryByTestId("shelf-tray")).toBeNull();
+    expect(listed()).toEqual(["lake.png", "dawn.png"]);
+  });
+
+  it("reaches the whole project through the picker", () => {
+    openShelf(buildShelfMokaFile());
+
+    fireEvent.click(screen.getByTestId("shelf-from-project"));
+
+    expect(useEditorStore.getState().assetPicker).toEqual({
+      mode: "nodes",
+      at: null,
+    });
+  });
+
+  it("follows a file to the board that holds it", () => {
+    openShelf(buildShelfMokaFile());
+    act(() => {
+      useProjectStore.getState().switchCanvas(goldenNodeIds().canvasSecond);
+    });
+    fireEvent.click(screen.getByTestId("left-tab-project"));
+
+    act(() => {
+      useEditorStore
+        .getState()
+        .showAssetOnShelf(
+          goldenNodeIds().assetImage,
+          "image",
+          goldenNodeIds().canvasMain,
+        );
+    });
+
+    // The column reads one board, so the file's board is the one opened: the
+    // row is marked where it can be seen rather than where it is not.
+    expect(useProjectStore.getState().activeCanvasId).toBe(
+      goldenNodeIds().canvasMain,
+    );
+    expect(
+      screen.getByTestId("left-tab-assets").getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(listed()).toEqual(["lake.png"]);
+    const marked = document.querySelector(".resource-row.is-focused");
+    expect(marked?.getAttribute("data-asset-id")).toBe(
+      goldenNodeIds().assetImage,
+    );
+  });
+
+  it("leaves the board alone when no board is named", () => {
+    openShelf(buildShelfMokaFile());
+    act(() => {
+      useProjectStore.getState().switchCanvas(goldenNodeIds().canvasSecond);
+    });
+
+    act(() => {
+      useEditorStore
+        .getState()
+        .showAssetOnShelf(goldenNodeIds().assetImage, "image");
+    });
+
+    expect(useProjectStore.getState().activeCanvasId).toBe(
+      goldenNodeIds().canvasSecond,
+    );
+    expect(screen.getByTestId("left-tab-assets")).toBeTruthy();
   });
 
   it("shows what a reader said about each file", () => {
@@ -121,13 +257,13 @@ describe("the shelf, one kind at a time", () => {
     fireEvent.change(screen.getByTestId("shelf-asked"), {
       target: { value: "lantern" },
     });
-    expect(rowsShown()).toEqual(["lake.png"]);
+    expect(listed()).toEqual(["lake.png"]);
     fireEvent.change(screen.getByTestId("shelf-asked"), {
       target: { value: "opening" },
     });
     // The note is searched too, and this one says "Kept for the opening shot",
     // so the picture is still the one found.
-    expect(rowsShown()).toEqual(["lake.png"]);
+    expect(listed()).toEqual(["lake.png"]);
     fireEvent.change(screen.getByTestId("shelf-asked"), {
       target: { value: "opening-lines" },
     });
@@ -139,11 +275,12 @@ describe("the shelf, one kind at a time", () => {
   it("asks for every word chosen on the shelf", () => {
     openShelf(withSecondPicture(buildShelfMokaFile()));
     fireEvent.click(screen.getByTestId("shelf-tag-dusk"));
-    expect(rowsShown()).toEqual(["lake.png", "dawn.png"]);
+    // The waiting file answers the word as the list does — and waits above it.
+    expect(rowsShown()).toEqual(["dawn.png", "lake.png"]);
     fireEvent.click(screen.getByTestId("shelf-tag-lake"));
     expect(rowsShown()).toEqual(["lake.png"]);
     fireEvent.click(screen.getByTestId("shelf-clear"));
-    expect(rowsShown()).toEqual(["lake.png", "dawn.png"]);
+    expect(rowsShown()).toEqual(["dawn.png", "lake.png"]);
   });
 
   it("keeps only the files marked to hand", () => {
@@ -161,7 +298,7 @@ describe("the shelf, one kind at a time", () => {
     fireEvent.change(screen.getByTestId("shelf-where"), {
       target: { value: "brought" },
     });
-    expect(rowsShown()).toEqual(["lake.png"]);
+    expect(listed()).toEqual(["lake.png"]);
   });
 
   it("tells two shelves of one kind apart, and asks nothing of a kind with one", () => {
@@ -188,23 +325,11 @@ describe("the shelf, one kind at a time", () => {
   });
 
   it("carries on a shelf longer than one page", () => {
-    const moka = buildShelfMokaFile();
-    moka.resources.texts.push(
-      ...Array.from({ length: 60 }, (_, index) => ({
-        id: `text-${index}`,
-        name: `note-${index}.md`,
-        path: `assets/texts/note-${index}.md`,
-        mime: "text/markdown",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      })),
-    );
-    openShelf(moka);
-    showKind("text");
+    openShelf(withPictures(buildShelfMokaFile(), 60));
     expect(screen.getByTestId("shelf-shown").textContent).toBe("60 of 61");
     fireEvent.click(screen.getByRole("button", { name: "Show 1 more" }));
     expect(screen.queryByTestId("shelf-shown")).toBeNull();
-    expect(rowsShown()).toHaveLength(61);
+    expect(listed()).toHaveLength(61);
   });
 
   it("writes a keeper mark onto the shelf and keeps the list in step", async () => {
@@ -277,26 +402,5 @@ describe("the shelf, one kind at a time", () => {
       "openers",
       "dusk",
     ]);
-  });
-
-  it("turns the column over to the file the tree asked for", () => {
-    openShelf(buildShelfMokaFile());
-    showKind("text");
-    // Following a file from the tree: the column turns over, the kind it is
-    // filed under is the one shown, and that row is the one marked.
-    fireEvent.click(screen.getByTestId("left-tab-project"));
-    act(() => {
-      useEditorStore
-        .getState()
-        .showAssetOnShelf(goldenNodeIds().assetImage, "image");
-    });
-    expect(
-      screen.getByTestId("left-tab-assets").getAttribute("aria-selected"),
-    ).toBe("true");
-    expect(rowsShown()).toEqual(["lake.png"]);
-    const marked = document.querySelector(".resource-row.is-focused");
-    expect(marked?.getAttribute("data-asset-id")).toBe(
-      goldenNodeIds().assetImage,
-    );
   });
 });

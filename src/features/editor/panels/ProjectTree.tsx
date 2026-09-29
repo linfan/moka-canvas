@@ -908,8 +908,12 @@ export function ProjectTree() {
         {
           title: t("editor:tree.thisFile"),
           label: t("editor:action.showInAssets"),
+          // The column reads one board, so the file is followed to the board
+          // this row was read under rather than marked where it is not.
           action: () =>
-            useEditorStore.getState().showAssetOnShelf(id, capability),
+            useEditorStore
+              .getState()
+              .showAssetOnShelf(id, capability, canvasId),
         },
         {
           label: t("editor:tree.selectCardsUsingIt"),

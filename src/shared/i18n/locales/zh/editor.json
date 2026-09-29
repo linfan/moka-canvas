@@ -214,6 +214,8 @@
     "confirmDeleteFolderMany": "删除“{{name}}”，并把其中的 {{count}} 个画布上移到同层？"
   },
   "shelf": {
+    "fromProject": "从项目添加",
+    "fromProjectHint": "从整个项目中挑选文件",
     "selectedMaker": "已选中生成此素材的节点",
     "tagsFor": "{{name}} 的归档标签",
     "tagsPlaceholder": "标签，用逗号分隔",
@@ -253,6 +255,7 @@
     "empty": "还没有{{kind}}素材——导入文件，或把它们拖到画布上。",
     "dropToImport": "松开以导入",
     "addToCanvas": "添加到画布",
+    "addToCanvasAria": "把 {{name}} 加到画布",
     "assetKind": "素材类型"
   },
   "picker": {

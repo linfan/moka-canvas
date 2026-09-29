@@ -13,6 +13,7 @@
   },
   "shelf": {
     "empty": "The project holds no {{kind}} files yet.",
+    "emptyBoard": "This board uses no {{kind}} files yet. Add from the project, or import one.",
     "emptyUnused": "Nothing is unused — every file is placed somewhere.",
     "unplaced": "Imported, not placed"
   },

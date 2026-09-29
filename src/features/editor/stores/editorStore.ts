@@ -3,12 +3,15 @@ import type {
   AssetDrawing,
   AssetId,
   AssetKind,
+  CanvasId,
   EdgeId,
   NodeId,
   Point,
   Viewport,
 } from "../../../shared/domain";
+import { openCanvas } from "../interactions/canvasTree";
 import { usePanelFolds } from "./panelFolds";
+import { useProjectStore } from "./projectStore";
 import type { BarEntry } from "./toolPrefs";
 
 export type EditorTool = "select" | "pan";
@@ -234,8 +237,17 @@ interface EditorState {
    * Opens the assets column on the kind an asset is filed under, with that one
    * marked. The kind travels with the ask rather than being worked out here,
    * since what asked is a row of the tree that was already grouping by it.
+   *
+   * The column reads one board — the one being looked at — so a file a tree
+   * row names is followed to the board that holds it: marking it where the
+   * reader is standing would mark a row that is not there. The board may be
+   * left out, and then the column is turned over where the reader already is.
    */
-  showAssetOnShelf: (assetId: AssetId, kind: AssetKind) => void;
+  showAssetOnShelf: (
+    assetId: AssetId,
+    kind: AssetKind,
+    canvasId?: CanvasId,
+  ) => void;
   clearAssetFocus: () => void;
   /**
    * Turns the column beside the canvas to its inspector and gives it a file to
@@ -337,12 +349,17 @@ export const useEditorStore = create<EditorState>()((set) => ({
   setPointerWorld: (point) => set({ pointerWorld: point }),
   setLeftPanelTab: (tab) => set({ leftPanelTab: tab }),
   setAssetKind: (kind) => set({ assetKind: kind }),
-  showAssetOnShelf: (assetId, kind) =>
+  showAssetOnShelf: (assetId, kind, canvasId) => {
+    const project = useProjectStore.getState();
+    if (canvasId !== undefined && canvasId !== project.activeCanvasId) {
+      openCanvas(canvasId);
+    }
     set({
       leftPanelTab: "assets",
       assetKind: kind,
       focusedAssetId: assetId,
-    }),
+    });
+  },
   clearAssetFocus: () => set({ focusedAssetId: null }),
   inspectAsset: (assetId) => {
     // A column folded away cannot answer, and a click that goes nowhere reads

@@ -1149,10 +1149,11 @@ function generationRun(overrides: Partial<RunRecord> = {}): RunRecord {
  */
 function buildGeneratedMokaFile(): MokaFile {
   const moka = buildGenerationMokaFile();
-  const asked = (
-    moka.canvas[0]?.nodes.find((node) => node.id === generated.image)?.data as
-      { generation?: GenerationSpec } | undefined
-  )?.generation;
+  const card = moka.canvas[0]?.nodes.find(
+    (node) => node.id === generated.image,
+  );
+  const asked = (card?.data as { generation?: GenerationSpec } | undefined)
+    ?.generation;
   moka.resources.images = [
     {
       id: PLATE_ID,
@@ -1185,6 +1186,9 @@ function buildGeneratedMokaFile(): MokaFile {
       },
     },
   ];
+  // The answer landed on the card that asked for it, which is what a finished
+  // run does — and what makes the file the board's own material on the shelf.
+  if (card) card.data = { ...card.data, assetId: POSTER_ID };
   return moka;
 }
 

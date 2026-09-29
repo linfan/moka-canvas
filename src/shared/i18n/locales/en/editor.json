@@ -214,6 +214,8 @@
     "confirmDeleteFolderMany": "Delete “{{name}}” and move the {{count}} canvases it holds up beside it?"
   },
   "shelf": {
+    "fromProject": "From the project",
+    "fromProjectHint": "Take files from the whole project",
     "selectedMaker": "Selected the node that made this asset",
     "tagsFor": "Words to file {{name}} under",
     "tagsPlaceholder": "Words, comma separated",
@@ -253,6 +255,7 @@
     "empty": "No {{kind}} assets yet — import files or drop them on the canvas.",
     "dropToImport": "Drop to import",
     "addToCanvas": "Add to canvas",
+    "addToCanvasAria": "Add {{name}} to the canvas",
     "assetKind": "Asset kind"
   },
   "picker": {

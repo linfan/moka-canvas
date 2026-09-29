@@ -354,6 +354,34 @@ describe("the canvas tree", () => {
     ).toBe(ids.assetImage);
   });
 
+  it("follows a file to the board that holds it, not the one being looked at", () => {
+    const ids = goldenNodeIds();
+    openTree(buildShelfMokaFile());
+    // Canvas 1 is read in the tree while Canvas 2 is the board on screen, so
+    // its rows are about a board the reader is not standing on.
+    fireEvent.click(screen.getByRole("button", { name: "Open Canvas 1" }));
+    fireEvent.click(rowNamed("Image"));
+    fireEvent.click(rowNamed("Canvas 2"));
+    expect(useProjectStore.getState().activeCanvasId).toBe(ids.canvasSecond);
+
+    const menu = menuOn("lake.png");
+    fireEvent.click(
+      within(menu).getByRole("menuitem", { name: "Show in assets" }),
+    );
+
+    // The column reads one board, so the file is followed to the board that
+    // holds it: the board switches back and the row is marked where it shows.
+    expect(useProjectStore.getState().activeCanvasId).toBe(ids.canvasMain);
+    expect(useEditorStore.getState().leftPanelTab).toBe("assets");
+    expect(useEditorStore.getState().assetKind).toBe("image");
+    expect(useEditorStore.getState().focusedAssetId).toBe(ids.assetImage);
+    expect(
+      document
+        .querySelector(".resource-row.is-focused")
+        ?.getAttribute("data-asset-id"),
+    ).toBe(ids.assetImage);
+  });
+
   it("selects the cards a file is on, from the tree that listed it", () => {
     openTree(buildShelfMokaFile());
     fireEvent.click(screen.getByRole("button", { name: "Open Canvas 1" }));

@@ -1116,6 +1116,33 @@ body.is-dragging-panel {
   overflow-y: auto;
 }
 
+/* The assets face with the way to the whole project above the shelf: the face
+   stands in the same room as the shelf alone did, so the shelf keeps its
+   scrolling region and the button keeps its height. */
+.side-assets {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.side-assets > .side-resources {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.side-assets-actions {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  padding: 8px 12px 0;
+}
+
+.side-assets-actions button {
+  font-size: 12px;
+}
+
 /* The left column's two faces, and the canvas tree that is one of them. The
    tabs stand on a hairline with the chosen one marked by an indicator on the
    line, the same dress the settings and the shelf tabs wear. */
