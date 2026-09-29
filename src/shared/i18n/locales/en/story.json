@@ -99,8 +99,7 @@
     "gapFrames": "{{count}} shots have no frame drawn yet.",
     "gapActClips": "{{count}} acts have no clip yet.",
     "gapShotClips": "{{count}} shots have no clip yet.",
-    "gapNoTimeline": "The clips have not been assembled onto a timeline yet.",
-    "gapNoFilm": "The film has not been rendered yet."
+    "gapNoTimeline": "The clips have not been assembled onto a timeline yet."
   },
   "state": {
     "empty": "not started",
@@ -450,7 +449,6 @@
     "rebuildBody": "Assembling again leaves them alone, but the clips this story laid down are rearranged.",
     "rebuildConfirm": "Assemble again",
     "film": "The film",
-    "noFilm": "There is no film yet.",
     "export": "Export the film",
     "exportAgain": "Export again",
     "saveTitle": "Save the film",
@@ -461,11 +459,7 @@
     "nothingToRender": "There is nothing on the timeline yet.",
     "busy": "A render is already running.",
     "watchExport": "Go and watch it",
-    "filmReady": "The film is ready.",
-    "showFilm": "Show it on the shelf",
     "openInClip": "Open in the cutting room",
-    "reveal": "Show it in the file manager",
-    "filmLine": "{{name}} · the film · {{duration}} · {{size}}",
     "clips": "Clips ({{count}})",
     "clipLine": "Episode {{chapter}} · Act {{act}}",
     "clipFrameLine": "Episode {{chapter}} · Act {{act}} · Shot {{shot}}",

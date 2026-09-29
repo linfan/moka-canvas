@@ -417,8 +417,6 @@ pub struct StoryEdit {
     pub timeline_id: Option<TimelineId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip_by_act: Option<Vec<StoryEditClip>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub film: Option<StoryTake>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -580,17 +578,11 @@ pub struct StoryEditPatch {
         deserialize_with = "super::deserialize_double_option"
     )]
     pub clip_by_act: Option<Option<Vec<StoryEditClip>>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "super::deserialize_double_option"
-    )]
-    pub film: Option<Option<StoryTake>>,
 }
 
 impl StoryDocument {
-    /// Every asset this telling points at: its manuscript, its drawings, the
-    /// clips it made, and the film it was rendered into.
+    /// Every asset this telling points at: its manuscript, its drawings, and
+    /// the clips it made.
     pub fn asset_references(&self) -> Vec<AssetId> {
         let mut found: Vec<AssetId> = Vec::new();
         let mut add = |asset_id: &Option<AssetId>| {
@@ -599,9 +591,6 @@ impl StoryDocument {
             }
         };
         add(&self.brief.source_asset_id);
-        if let Some(film) = &self.edit.film {
-            found.extend(film.asset_ids.iter().cloned());
-        }
         let mut slot = |held: &StorySlot| {
             for take in &held.takes {
                 found.extend(take.asset_ids.iter().cloned());
@@ -1698,7 +1687,6 @@ pub fn apply_story_command(
                     .clip_by_act
                     .as_ref()
                     .map(|_| story.edit.clip_by_act.clone()),
-                film: patch.film.as_ref().map(|_| story.edit.film.clone()),
             };
             let mut edit = story.edit.clone();
             if let Some(timeline_id) = &patch.timeline_id {
@@ -1706,9 +1694,6 @@ pub fn apply_story_command(
             }
             if let Some(clips) = &patch.clip_by_act {
                 edit.clip_by_act = clips.clone();
-            }
-            if let Some(film) = &patch.film {
-                edit.film = film.clone();
             }
             let mut next = story.clone();
             next.edit = edit;

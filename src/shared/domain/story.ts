@@ -237,12 +237,10 @@ export function storyProgress(
     },
     edit: {
       step: "edit",
-      state: stepState(
-        story.edit.timelineId === undefined && story.edit.film === undefined,
-        story.edit.film !== undefined,
-        settled("edit"),
-      ),
-      done: story.edit.film ? 1 : 0,
+      // The fifth step is the assembly itself: a timeline laid down is the
+      // whole of what it makes, and there is nothing left to confirm.
+      state: story.edit.timelineId === undefined ? "empty" : "ready",
+      done: story.edit.timelineId === undefined ? 0 : 1,
       total: 1,
     },
   };
@@ -272,8 +270,7 @@ export type StoryStepGap =
   | { kind: "actsWithoutShots"; count: number }
   | { kind: "framesMissing"; count: number }
   | { kind: "clipsMissing"; count: number }
-  | { kind: "noTimeline" }
-  | { kind: "noFilm" };
+  | { kind: "noTimeline" };
 
 /**
  * What a step would still need before it could be settled.
@@ -344,7 +341,7 @@ export function stepGaps(
     }
     case "edit": {
       if (story.edit.timelineId === undefined) return [{ kind: "noTimeline" }];
-      return story.edit.film === undefined ? [{ kind: "noFilm" }] : [];
+      return [];
     }
   }
 }
@@ -1090,7 +1087,6 @@ export function storyDeleteCost(story: StoryDocument): {
       }
     }
   }
-  if (story.edit.film) videos += 1;
   return { chapters: story.chapters.length, acts, pictures, videos };
 }
 

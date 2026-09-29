@@ -16,7 +16,6 @@ import {
   buildShelfMokaFile,
   buildStoryMokaFile,
   buildTreeMokaFile,
-  storyIds,
 } from "./fixtures";
 import { decodeMokaFile, encodeMokaFile, MokaCodecError } from "./codec";
 import { derivePorts } from "./factories";
@@ -241,11 +240,6 @@ describe("moka codec", () => {
         Record<string, unknown> | undefined;
       if (turnaround !== undefined) turnaround.confirmed = true;
     }
-    // The fifth step was settled by the film being filed.
-    (story.edit as Record<string, unknown>).film = {
-      assetIds: [storyIds().actVideo],
-      createdAt: "2026-01-01T00:00:00.000Z",
-    };
     const bson = serialize(raw);
     const bytes = new Uint8Array(4 + bson.length);
     bytes.set(MOKA_MAGIC, 0);
@@ -257,7 +251,6 @@ describe("moka codec", () => {
       "outline",
       "elements",
       "storyboard",
-      "edit",
     ]);
     // And the answers themselves are not carried on: what a step keeps is
     // whether it was settled, not how many pieces it was settled in.

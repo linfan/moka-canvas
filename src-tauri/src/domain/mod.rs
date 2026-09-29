@@ -1086,9 +1086,9 @@ impl MokaFile {
             }
         }
         // A story's pictures are its own: the frames drawn for a shot, the
-        // clip made of an act, the manuscript a premise was lifted from, and
-        // the film the whole was rendered into are all in use, however little
-        // of a canvas or a timeline they appear on.
+        // clip made of an act, and the manuscript a premise was lifted from
+        // are all in use, however little of a canvas or a timeline they
+        // appear on.
         for story in self.stories.iter().flatten() {
             for asset_id in story.asset_references() {
                 refs.entry(asset_id).or_default().push(story.id.clone());

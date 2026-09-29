@@ -706,8 +706,7 @@
     "aPlace": "故事的某一处",
     "drawingInUse": "它是{{place}}正在用的图",
     "clip": "时间线「{{timeline}}」的片段「{{clip}}」在用它",
-    "manuscript": "它是《{{story}}》的剧本",
-    "film": "它是《{{story}}》的成片"
+    "manuscript": "它是《{{story}}》的剧本"
   },
   "interactions": {
     "nothingSelected": "未选中任何内容",

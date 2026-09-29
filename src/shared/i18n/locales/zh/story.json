@@ -99,8 +99,7 @@
     "gapFrames": "还有 {{count}} 格没有出图。",
     "gapActClips": "还有 {{count}} 幕没有出片。",
     "gapShotClips": "还有 {{count}} 格没有出片。",
-    "gapNoTimeline": "还没有装配成时间线：先装配成片。",
-    "gapNoFilm": "还没有导出成片：先渲染成片。"
+    "gapNoTimeline": "还没有装配成时间线：先装配成片。"
   },
   "state": {
     "empty": "尚未开始",
@@ -450,7 +449,6 @@
     "rebuildBody": "重新装配不会动它们，但这个故事自己拼上去的片段会重排。",
     "rebuildConfirm": "重新装配",
     "film": "成片",
-    "noFilm": "还没有成片。",
     "export": "导出成片",
     "exportAgain": "重新导出",
     "saveTitle": "保存成片",
@@ -461,11 +459,7 @@
     "nothingToRender": "时间线上还没有片段。",
     "busy": "已经有一次导出在跑了。",
     "watchExport": "去看那条",
-    "filmReady": "成片好了。",
-    "showFilm": "在素材里看",
     "openInClip": "在剪辑室打开",
-    "reveal": "在文件管理器中显示",
-    "filmLine": "{{name}} · 成片 · {{duration}} · {{size}}",
     "clips": "片段（{{count}}）",
     "clipLine": "第 {{chapter}} 集 · 幕 {{act}}",
     "clipFrameLine": "第 {{chapter}} 集 · 幕 {{act}} · 第 {{shot}} 格",

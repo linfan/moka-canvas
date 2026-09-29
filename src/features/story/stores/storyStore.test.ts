@@ -142,7 +142,6 @@ describe("where the room is standing", () => {
     open(moka);
     store().adopt(moka);
     store().toggleExpanded("element-hero");
-    store().openExport();
     store().setNewStoryOpen(true);
 
     store().forget();
@@ -150,7 +149,6 @@ describe("where the room is standing", () => {
     expect(store().step).toBe("idea");
     expect(store().openChapterId).toBeNull();
     expect(store().expanded).toEqual([]);
-    expect(store().exportOpen).toBe(false);
     expect(store().newStoryOpen).toBe(false);
   });
 });
@@ -174,15 +172,15 @@ describe("what the room is showing of a story", () => {
     expect(store().expanded).toEqual([]);
   });
 
-  it("lays the day's work out when the film is asked for", () => {
+  it("walks to a step without asking the document for anything", () => {
     const moka = project("p1");
     open(moka);
     store().adopt(moka);
     store().goStep("idea");
 
-    store().openExport();
-    expect(store().exportOpen).toBe(true);
-    // Asking for the film is also saying which step it is looked for on.
+    // The way the top bar's "export the film" goes: the film is made on the
+    // fifth step, so that is the step the reader is put on.
+    store().goStep("edit");
     expect(store().step).toBe("edit");
   });
 });

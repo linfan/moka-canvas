@@ -706,8 +706,7 @@
     "aPlace": "a place in the story",
     "drawingInUse": "it is the drawing {{place}} is using",
     "clip": "clip “{{clip}}” on the timeline “{{timeline}}” is using it",
-    "manuscript": "it is {{story}}'s manuscript",
-    "film": "it is {{story}}'s finished film"
+    "manuscript": "it is {{story}}'s manuscript"
   },
   "interactions": {
     "nothingSelected": "Nothing selected",

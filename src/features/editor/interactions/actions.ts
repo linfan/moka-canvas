@@ -1198,12 +1198,9 @@ function holderText(holder: BlockingHolder): string {
         clip: holder.clipLabel,
       });
     case "storyFile":
-      return i18n.t(
-        holder.what === "manuscript"
-          ? "editor:holders.manuscript"
-          : "editor:holders.film",
-        { story: holder.storyName },
-      );
+      return i18n.t("editor:holders.manuscript", {
+        story: holder.storyName,
+      });
   }
 }
 
