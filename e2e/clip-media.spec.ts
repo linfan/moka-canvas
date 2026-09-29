@@ -6,6 +6,7 @@ import {
   createProject,
   forgetHome,
   forgetProjects,
+  newTimeline,
   openClipRoom,
   projectHome,
 } from "./helpers";
@@ -67,6 +68,13 @@ async function clipRoom(page: Page, name: string): Promise<string> {
   return home;
 }
 
+/** The same, with a cut to place material on: what a test that lands something needs. */
+async function cutRoom(page: Page, name: string): Promise<string> {
+  const home = await clipRoom(page, name);
+  await newTimeline(page, "Timeline 1");
+  return home;
+}
+
 /** The row of a file, found by the name the row leads with. */
 function rowFor(page: Page, name: string) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -103,7 +111,7 @@ async function filedId(page: Page, name: string): Promise<string> {
 }
 
 test("the cut's face reads the cut's own material", async ({ page }) => {
-  const home = await clipRoom(page, "Media Faces");
+  const home = await cutRoom(page, "Media Faces");
 
   // A file brought in is held by no clip yet, so it waits in the tray above
   // the cut's own list rather than being the cut's material already.
@@ -119,6 +127,10 @@ test("the cut's face reads the cut's own material", async ({ page }) => {
     .getByRole("button", { name: "Add one.png at the playhead" })
     .click();
   await expect(page.getByTestId("shelf-tray")).toHaveCount(0);
+  await expect(page.locator(".clip-timeline")).toHaveAttribute(
+    "data-clip-count",
+    "1",
+  );
   await expect(rowFor(page, "one.png")).toBeVisible();
 
   forgetHome(home);
@@ -127,7 +139,7 @@ test("the cut's face reads the cut's own material", async ({ page }) => {
 test("the whole project is reached from the cut through the picker", async ({
   page,
 }) => {
-  const home = await clipRoom(page, "Media From Project");
+  const home = await cutRoom(page, "Media From Project");
   await importFile(page, "one.png", "image/png", TINY_PNG);
 
   // The cut's column holds this cut's material; everything the project holds
@@ -150,6 +162,10 @@ test("the whole project is reached from the cut through the picker", async ({
 
   // The file is the cut's material now: out of the tray, in the list.
   await expect(page.getByTestId("shelf-tray")).toHaveCount(0);
+  await expect(page.locator(".clip-timeline")).toHaveAttribute(
+    "data-clip-count",
+    "1",
+  );
   await expect(rowFor(page, "one.png")).toBeVisible();
 
   forgetHome(home);
@@ -158,8 +174,14 @@ test("the whole project is reached from the cut through the picker", async ({
 test("the search narrows the face and says so when nothing says it", async ({
   page,
 }) => {
-  const home = await clipRoom(page, "Media Search");
+  const home = await cutRoom(page, "Media Search");
   await importFile(page, "one.png", "image/png", TINY_PNG);
+  // Landed rather than left waiting: what the search narrows is the cut's own
+  // material, and a file still in the tray is not the face's question yet.
+  await page
+    .getByRole("button", { name: "Add one.png at the playhead" })
+    .click();
+  await expect(rowFor(page, "one.png")).toBeVisible();
 
   const asked = page.getByTestId("shelf-asked");
   await asked.fill("one");

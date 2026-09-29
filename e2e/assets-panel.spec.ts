@@ -36,7 +36,10 @@ async function bottomOf(what: Locator): Promise<number> {
  * left to itself shares leftover room out between its rows instead of leaving
  * it blank below the last of them — which read as a panel where the head, the
  * kind tabs, the search and every file were each padded out to twice their
- * height, with the padding growing the emptier the shelf was.
+ * height, with the padding growing the emptier the shelf was. The shelf here
+ * is the board's own material, so the files are taken in the way the column
+ * takes them in by default — the checkbox on — which both cards them on the
+ * board and keeps their rows on the shelf they were imported to.
  */
 test("the shelf leaves its leftover room blank below the last file", async ({
   page,
@@ -60,17 +63,22 @@ test("the shelf leaves its leftover room blank below the last file", async ({
       page.getByRole("button", { name: new RegExp(`^${name} `) }),
     ).toBeVisible({ timeout: 10_000 });
   }
+  // Each file landed as a row and as a card, which is what keeps the rows on a
+  // shelf that lists what the board holds.
+  await expect(
+    page.getByTestId("canvas-host").locator(".editor-canvas-hint"),
+  ).toHaveText("3 nodes · 0 edges");
 
   const rows = page.locator(".side-resource-list li");
   await expect(rows).toHaveCount(3);
 
   // Three small files are read without scrolling, and what the column has left
-  // over stays at the bottom of it rather than being shared into the rows.
-  const tall = await heightOf(shelf);
+  // over stays at the bottom of it rather than being shared into the rows: the
+  // blank below the last file is room for another one.
   const leftOver =
     (await bottomOf(shelf)) -
     (await bottomOf(page.locator(".side-resource-group").last()));
-  expect(leftOver).toBeGreaterThan(tall * 0.2);
+  expect(leftOver).toBeGreaterThan(await heightOf(rows.last()));
 
   // Each part of the panel keeps the height its own content asks for: the head
   // is one row of small buttons, the kinds are one row of tabs, and a file is a
