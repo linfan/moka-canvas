@@ -234,6 +234,7 @@ function upsert(draft: ModelDraft) {
     displayName: draft.displayName,
     enabled: draft.enabled,
     apiKey: key,
+    ...(draft.scenes ? { scenes: draft.scenes } : {}),
     ...(draft.subModels ? { subModels: draft.subModels } : {}),
   };
   view = {
