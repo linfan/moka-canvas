@@ -289,6 +289,7 @@ export function MentionField({
   onDismiss,
   onOffer,
   under,
+  corner,
 }: {
   canvas: CanvasDocument;
   /**
@@ -327,6 +328,13 @@ export function MentionField({
    * column after it, because the field is the thing that grows with the panel.
    */
   under?: React.ReactNode;
+  /**
+   * What stands in the field's own corner, in the box the words are written
+   * in: the button that sends them where the field has one. Held there rather
+   * than laid out after the field so the words and the thing they are written
+   * for stay together however tall the field grows.
+   */
+  corner?: React.ReactNode;
   /**
    * The candidate list opened or closed.
    *
@@ -668,6 +676,7 @@ export function MentionField({
             title={t("editor:mention.fieldGrip")}
           />
         )}
+        {corner && <div className="mention-field-corner">{corner}</div>}
       </div>
 
       {under}

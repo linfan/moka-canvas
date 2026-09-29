@@ -2827,6 +2827,28 @@ button.danger:hover:not(:disabled) {
 .prompt-panel-prompt .prompt-panel-input {
   height: 100%;
   min-height: 60px;
+  /* Room at the foot of the box for the control standing in its corner, so
+     the last line of words is not written under a button. */
+  padding-bottom: 30px;
+}
+
+/* The control that sends the ask, standing in the field's own corner: it is
+   what the words are written for, so it stays where the words are. */
+.mention-field-corner {
+  bottom: 5px;
+  position: absolute;
+  right: 5px;
+  z-index: 1;
+}
+
+.mention-field-corner button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  border-radius: 6px;
+  color: var(--on-primary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
 }
 
 /* The field and the corner it is dragged by, which is the panel's own width

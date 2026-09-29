@@ -675,6 +675,36 @@ export function PromptPanel() {
     height: size?.height ?? PANEL_DEFAULT_HEIGHT,
   };
 
+  /**
+   * The control that sends the ask, or the one that stops it once it is going.
+   *
+   * On the prompt page it stands in the field's own corner, where the words
+   * are written and where the hand already is; on the pages that hold no
+   * field it stays in the head, since a control the reader cannot reach from
+   * where they are is a control they have to go looking for.
+   */
+  const sendButton = going ? (
+    <button
+      className="primary"
+      disabled={stopping}
+      onClick={stop}
+      title={stopping ? t("editor:run.stoppingHint") : t("editor:run.stopHint")}
+      type="button"
+    >
+      {stopping ? t("editor:run.stopping") : t("editor:action.stop")}
+    </button>
+  ) : (
+    <button
+      className="primary"
+      disabled={busy || refusal !== null}
+      onClick={() => void ask()}
+      title={refusal ?? undefined}
+      type="button"
+    >
+      {busy ? t("editor:promptPanel.starting") : t("editor:action.run")}
+    </button>
+  );
+
   return (
     <div
       aria-label={t("editor:promptPanel.aria", { name: node.title })}
@@ -720,29 +750,7 @@ export function PromptPanel() {
             {t("editor:promptPanel.preview")}
           </button>
         </div>
-        {going ? (
-          <button
-            className="primary"
-            disabled={stopping}
-            onClick={stop}
-            title={
-              stopping ? t("editor:run.stoppingHint") : t("editor:run.stopHint")
-            }
-            type="button"
-          >
-            {stopping ? t("editor:run.stopping") : t("editor:action.stop")}
-          </button>
-        ) : (
-          <button
-            className="primary"
-            disabled={busy || refusal !== null}
-            onClick={() => void ask()}
-            title={refusal ?? undefined}
-            type="button"
-          >
-            {busy ? t("editor:promptPanel.starting") : t("editor:action.run")}
-          </button>
-        )}
+        {tab !== "prompt" && sendButton}
         <button
           aria-label={t("editor:promptPanel.close")}
           className="prompt-panel-close"
@@ -759,6 +767,7 @@ export function PromptPanel() {
             <MentionField
               canvas={canvas}
               choices={choices}
+              corner={sendButton}
               inputRef={areaRef}
               issues={issues}
               key={`prompt-${node.id}`}

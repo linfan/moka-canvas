@@ -386,6 +386,25 @@ describe("the generation panel", () => {
     expect(screen.queryByTestId("prompt-panel")).toBeNull();
   });
 
+  it("puts the control that sends the ask in the field's own corner", async () => {
+    await openEditor();
+    selectNode(ids.image);
+    await settle();
+    // Where the words are written is where the control that sends them is, so
+    // the hand does not have to travel to the far corner of the panel.
+    const corner = panel().querySelector(".mention-field-corner");
+    expect(corner?.querySelector("button")).toHaveProperty("textContent", "Run");
+
+    // A page holding no field keeps the control in the head, since a button
+    // the reader cannot reach from where they are is one they must look for.
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Parameter" }));
+    await settle();
+    expect(panel().querySelector(".mention-field-corner")).toBeNull();
+    expect(
+      panel().querySelector(".prompt-panel-head button.primary"),
+    ).toHaveProperty("textContent", "Run");
+  });
+
   it("opens from Enter with the keyboard in the prompt", async () => {
     await openEditor();
     selectNode(ids.image);
