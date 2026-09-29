@@ -2813,14 +2813,15 @@ button.danger:hover:not(:disabled) {
 }
 
 /* In the panel the field takes the room that is left and the words scroll
-   inside it, rather than the field deciding how tall the panel is. It is not
-   squeezed below the box it draws, though: a field given less room than that
-   used to paint its bottom edge over whatever came next, and the controls
-   under it — the model picker, the references — read as controls the prompt
-   box had swallowed. */
+   inside it, rather than the field deciding how tall the panel is. The room it
+   is left with has a floor worth reading in — a few lines of the ask rather
+   than a peep at one — and it is not squeezed below the box it draws: a field
+   given less room than that used to paint its bottom edge over whatever came
+   next, and the controls under it — the model picker, the references — read as
+   controls the prompt box had swallowed. */
 .prompt-panel-prompt .mention-field {
   flex: 1;
-  grid-template-rows: minmax(60px, 1fr) auto;
+  grid-template-rows: minmax(120px, 1fr) auto;
 }
 
 .prompt-panel-prompt .mention-field-area {

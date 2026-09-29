@@ -60,8 +60,14 @@ const PANEL_MIN_WIDTH = 300;
 const PANEL_MAX_WIDTH = 720;
 /** How much wider than its node the panel comes up, so words have room. */
 const PANEL_WIDTH_FACTOR = 1.3;
-/** How tall the panel comes up before the reader drags its corner. */
-const PANEL_DEFAULT_HEIGHT = 320;
+/**
+ * How tall the panel comes up before the reader drags its corner.
+ *
+ * Sized around the field rather than around the panel: the words are what the
+ * panel is for, and everything else in it is a row or two, so the room a box
+ * of words gets is close to this less a fixed hundred-odd.
+ */
+const PANEL_DEFAULT_HEIGHT = 460;
 /** The shortest the panel may be dragged to and still be a panel. */
 const PANEL_MIN_HEIGHT = 140;
 
@@ -168,12 +174,14 @@ function refusalFor(asked: {
  * A DOM panel under the node rather than part of its card, because a card drawn
  * on a canvas has no room for a form and a child element in it would break the
  * canvas's own hit testing. Anchored in world coordinates so it travels with the
- * node — and deliberately not kept inside the view: its top-left corner sits on
- * its node's bottom-left corner wherever that is, so a node dragged to the edge
- * of the canvas takes the panel off screen with it rather than leaving it behind
+ * node — and deliberately not kept inside the view: its top edge sits on its
+ * node's bottom edge wherever that is, so a node dragged to the edge of the
+ * canvas takes the panel off screen with it rather than leaving it behind
  * floating over the middle of the view like a dialog that belongs to nothing.
- * The corner it is dragged by is its bottom-right one, so growing it never moves
- * the corner its node put it at.
+ * It reaches past its node by the same distance on both sides, so the card
+ * stands centred in the panel it is asked from. The corner it is dragged by is
+ * its bottom-right one, so growing it never moves the corner its node put it
+ * at.
  *
  * What is typed is held here until it is asked for, so a keystroke is not an
  * undo entry and a save; the discrete controls write straight through, because
@@ -648,6 +656,21 @@ export function PromptPanel() {
   // re-renders the panel as the view moves, since worldToClient answers from the
   // live camera without telling anyone it changed.
   const zoom = camera?.zoom ?? canvas.viewport.zoom ?? 1;
+  const nodeWidth = node.bounds.width * zoom;
+  // As wide as the node it belongs to asks for, times a little for the words:
+  // a panel narrower than its own node reads as belonging to something else.
+  // A corner dragged by hand decides instead, since a size taken by hand is a
+  // size to keep.
+  const naturalWidth = Math.min(
+    PANEL_MAX_WIDTH,
+    Math.max(PANEL_MIN_WIDTH, Math.round(nodeWidth * PANEL_WIDTH_FACTOR)),
+  );
+  // How far the panel reaches past its node on the right. The same distance on
+  // the left, so the card stands centred in the panel it is asked from: a
+  // panel hanging off one corner reads as belonging to the card beside it, and
+  // the words are given the room its own node denies them.
+  const overhang = Math.max(0, naturalWidth - Math.round(nodeWidth));
+  const width = size?.width ?? naturalWidth + overhang;
   // The node's bottom-left corner, which is where the panel's top-left corner
   // sits — in the world rather than in the view, so the two stay together
   // through a pan, a zoom, and a node dragged to the edge of the canvas.
@@ -655,21 +678,8 @@ export function PromptPanel() {
     x: node.bounds.x,
     y: node.bounds.y + node.bounds.height,
   });
-  // As wide as the node it belongs to asks for, times a little for the words:
-  // a panel narrower than its own node reads as belonging to something else.
-  // A corner dragged by hand decides instead, since a size taken by hand is a
-  // size to keep.
-  const width =
-    size?.width ??
-    Math.min(
-      PANEL_MAX_WIDTH,
-      Math.max(
-        PANEL_MIN_WIDTH,
-        Math.round(node.bounds.width * PANEL_WIDTH_FACTOR * zoom),
-      ),
-    );
   const style: React.CSSProperties = {
-    left: origin?.x ?? 0,
+    left: (origin?.x ?? 0) - overhang,
     top: origin?.y ?? 0,
     width,
     height: size?.height ?? PANEL_DEFAULT_HEIGHT,
